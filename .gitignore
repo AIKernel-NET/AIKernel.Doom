@@ -44,6 +44,32 @@ ScaffoldingReadMe.txt
 *~
 CodeCoverage/
 
+# AIKernel.Doom native/WASM generated assets
+*.wasm
+*.wasm.map
+*.wad
+*.WAD
+*.iwad
+*.IWAD
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+Bonsai-1.7B-*
+DOOM1.WAD
+models/
+samples/*.wasm
+samples/*.wasm.map
+samples/*.wad
+samples/*.WAD
+src/DoomWeb/wwwroot/models/
+src/DoomWeb/wwwroot/demo/doom/*.wasm
+src/DoomWeb/wwwroot/demo/doom/*.wad
+src/DoomWeb/wwwroot/demo/doom/*.WAD
+src/DoomWasm.Native/third_party/doomgeneric/
+
 # MSBuild Binary and Structured Log
 *.binlog
 

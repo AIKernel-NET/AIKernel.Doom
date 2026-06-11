@@ -1,0 +1,5 @@
+{
+  "name": "doom",
+  "entry": "doom.wasm",
+  "capabilities": ["doom.start", "doom.stop", "doom.status"]
+}

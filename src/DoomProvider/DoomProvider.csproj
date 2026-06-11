@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>AIKernel.Doom.Provider</Title>
+    <Description>DOOM WASM process provider for AIKernel.Doom.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DoomWasm\DoomWasm.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AIKernel.Core" Version="[$(AIKernelCorePackageVersion)]" />
+    <PackageReference Include="$(AIKernelProvidersPackageId)" Version="[$(AIKernelProvidersPackageVersion)]" />
+    <PackageReference Include="AIKernel.Wasm.Runtime" Version="[$(AIKernelWasmRuntimePackageVersion)]" />
+    <PackageReference Include="AIKernel.Wasm.WebGpuComputeProvider" Version="[$(AIKernelWasmWebGpuComputeProviderPackageVersion)]" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Public Web runtime assets for the AIKernel.Doom WASM demo. Does not include WAD, model, or generated WASM binaries.</Description>
+    <IsPackable>false</IsPackable>
+    <IncludeBuildOutput>true</IncludeBuildOutput>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="wwwroot\**\*"
+             CopyToOutputDirectory="PreserveNewest" />
+    <None Include="README.md" />
+  </ItemGroup>
+</Project>

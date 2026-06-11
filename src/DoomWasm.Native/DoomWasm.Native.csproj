@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+    <Title>AIKernel.Doom.Wasm.Native</Title>
+    <Description>MSBuild utility project for building the DOOM WASM native overlay with Emscripten.</Description>
+    <BuildDoomWasm Condition="'$(BuildDoomWasm)' == '' and '$(AIKERNEL_BUILD_DOOM_WASM)' != ''">$(AIKERNEL_BUILD_DOOM_WASM)</BuildDoomWasm>
+    <BuildDoomWasm Condition="'$(BuildDoomWasm)' == ''">false</BuildDoomWasm>
+    <DoomWasmOutput Condition="'$(DoomWasmOutput)' == ''">$(MSBuildProjectDirectory)\..\..\samples\doom.wasm</DoomWasmOutput>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" />
+    <None Include="Makefile" />
+    <None Include="build.ps1" />
+    <None Include="build.sh" />
+    <None Include="verify-wasm.ps1" />
+    <None Include="verify-wasm.sh" />
+    <None Include="include\*.h" />
+    <None Include="src\*.c" />
+    <None Include="patches\*.patch" />
+    <None Include="third_party\README.md" />
+    <None Include="tools\*.ps1" />
+    <None Include="tools\*.sh" />
+  </ItemGroup>
+
+  <Target Name="BuildNativeDoomWasm" BeforeTargets="Build" Condition="'$(BuildDoomWasm)' == 'true'">
+    <Message Importance="high" Text="Building DOOM WASM with Emscripten into $(DoomWasmOutput)" />
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\build.ps1&quot; -Output &quot;$(DoomWasmOutput)&quot;" />
+  </Target>
+
+  <Target Name="SkipNativeDoomWasm" BeforeTargets="Build" Condition="'$(BuildDoomWasm)' != 'true'">
+    <Message Importance="high" Text="Skipping DOOM WASM native build. Set BuildDoomWasm=true or AIKERNEL_BUILD_DOOM_WASM=true to run Emscripten." />
+  </Target>
+</Project>

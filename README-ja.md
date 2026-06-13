@@ -20,6 +20,13 @@ docs/README-ja.md
 docs/README.md
 ```
 
+リリースノート:
+
+```text
+RELEASE_NOTES-ja.md
+RELEASE_NOTES.md
+```
+
 推奨の読み順:
 
 - `docs/architecture-ja.md` - ガイドライン準拠の Provider / Observer / Operator 対応。

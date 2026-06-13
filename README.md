@@ -20,6 +20,13 @@ Japanese developer documentation starts at:
 docs/README-ja.md
 ```
 
+Release notes:
+
+```text
+RELEASE_NOTES.md
+RELEASE_NOTES-ja.md
+```
+
 Recommended path:
 
 - `docs/architecture.md` - guideline-aligned Provider/Observer/Operator mapping.

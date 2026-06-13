@@ -2,6 +2,11 @@
 
 AIKernel.Doom is a lightweight official demo repository that models DOOM as a WASM process on the AIKernel Semantic OS.
 
+It is also a guideline-aligned technical sample. The code and documentation are
+organized to show how AIKernel's Interface-Led Architecture,
+Provider-Observer-Operator model, DAG-style execution, and fail-closed consent
+boundaries can be applied to a real-time browser/WASM workload.
+
 The demo intentionally separates contracts, adapters, and execution flow:
 
 - `DoomWasm` owns ROM metadata and asset resolution.
@@ -13,3 +18,8 @@ The demo intentionally separates contracts, adapters, and execution flow:
 Runtime asset acquisition is gated by explicit user consent. The CLI starts suspended with `hintWord=yes`; standard `aik help`, `aik status`, provider, and capability listing commands remain available before approval.
 
 `DoomWeb` does not include hosted third-party binaries such as `DOOM1.WAD`, Bonsai model weights, or generated `doom.wasm` artifacts. Public deployments must mirror those files outside the source repository and publish the corresponding manifests, checksums, consent text, and license notices.
+
+For a developer-oriented reading path, start with [Documentation](README.md),
+then continue through [Architecture](architecture.md), [Web Runtime](web-runtime.md),
+[Vision Perception Engine](vision-perception-engine.md), and
+[Autoplay Control Pipeline](autoplay-control-pipeline.md).

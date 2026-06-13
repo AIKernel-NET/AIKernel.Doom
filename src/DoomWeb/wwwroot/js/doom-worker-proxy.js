@@ -23,7 +23,7 @@
       };
       this.requests = new Map();
       this.nextId = 1;
-      this.worker = new Worker("/demo/doom/js/doom-worker.js?v=20260612-doomweb4", { name: "AIKernel.Doom" });
+      this.worker = new Worker("/demo/doom/js/doom-worker.js?v=20260613-doomweb86", { name: "AIKernel.Doom" });
       this.ready = new Promise((resolve, reject) => {
         this.resolveReady = resolve;
         this.rejectReady = reject;
@@ -46,7 +46,8 @@
         type: "init",
         canvas: offscreen,
         moduleUrl: options.moduleUrl,
-        modelManifestUrl: options.modelManifestUrl
+        modelManifestUrl: options.modelManifestUrl,
+        autoplayProfileUrl: options.autoplayProfileUrl
       }, [offscreen]);
     }
 
@@ -150,6 +151,14 @@
       return this.call("setAutoplay", [enabled]);
     }
 
+    setAutoplayManualMove(enabled) {
+      return this.call("setAutoplayManualMove", [enabled]);
+    }
+
+    setAutoplaySenseOnly(enabled) {
+      return this.call("setAutoplaySenseOnly", [enabled]);
+    }
+
     status() {
       return this.statusCache;
     }
@@ -160,6 +169,15 @@
       }
 
       this.worker.postMessage({ type: "input", keycode, pressed });
+      return true;
+    }
+
+    queueManualInput(keycode, pressed, holdMs = 0) {
+      if (!this.worker || this.statusCache.state !== "running") {
+        return false;
+      }
+
+      this.worker.postMessage({ type: "manual-input", keycode, pressed, holdMs });
       return true;
     }
   }

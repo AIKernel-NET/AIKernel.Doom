@@ -2,6 +2,28 @@
 
 AIKernel.Doom is a .NET 10 WASM demo for AIKernel Semantic OS. It displays an AIKernel-style boot prompt, suspends on explicit consent, prepares a Bonsai-1.7B supervisor, and exposes DOOM as a WASM process through `doom.start`, `doom.stop`, and `doom.status`.
 
+This repository is a demo/sample program, not a DOOM package. The implementation is maintained as an AIKernel Development Guidelines aligned example of Interface-Led Architecture, Provider-Observer-Operator separation, fail-closed runtime consent, WASM process isolation, WebGPU framebuffer handling, and Observer-driven AutoPlay optimization.
+
+## Documentation
+
+Developer documentation starts at:
+
+```text
+docs/README.md
+```
+
+Recommended path:
+
+- `docs/architecture.md` - guideline-aligned Provider/Observer/Operator mapping.
+- `docs/wasm-runtime.md` - Emscripten/WASI ABI and memory-backed WAD mount.
+- `docs/web-runtime.md` - browser worker, WebGPU, prompt, and consent runtime.
+- `docs/vision-perception-engine.md` - JavaScript 3x3 vision, HUD, motion, and overlay engine.
+- `docs/autoplay-control-pipeline.md` - phase-routed AutoPlay Operator design.
+- `docs/debugging-and-telemetry.md` - Sense Only, Phase + Logs, overlay, and copied evidence.
+- `docs/development-methodology.md` - human-in-the-loop AI development workflow.
+- `docs/autoplay-optimizer.md` - profile optimization and Observer ROM runner.
+- `docs/asset-and-release-operations.md` - source-only release and asset boundaries.
+
 ## Run
 
 ```powershell

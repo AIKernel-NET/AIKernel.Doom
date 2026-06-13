@@ -2,6 +2,10 @@
 
 DOOM is loaded from `samples/doom.rom`, whose entry is `doom.wasm`.
 
+This runtime surface is the AIKernel Operator boundary for the legacy native
+engine. It keeps the C engine behind a small ABI, avoids browser file I/O, and
+lets Providers mount runtime assets explicitly after consent.
+
 Resolution order:
 
 1. configured `DoomWasmPath`
@@ -34,7 +38,14 @@ uint8_t* doom_render(void);
 void doom_input(int keycode, int pressed);
 ```
 
+These exports are the stable contract. Higher-level provider and web code must
+not depend on doomgeneric internals when the ABI can express the same behavior.
+
 It also exports `doom_mount_wad` and `doom_wad_status` so AIKernel can pass a user-provided or shareware WAD through WASM linear memory. The overlay validates `IWAD`/`PWAD` headers and returns explicit error codes for missing or invalid WAD data.
+
+This memory-backed WAD mount is the key fail-closed design choice: the native
+runtime does not reach into host files, does not auto-download data, and does
+not invent placeholder WAD content.
 
 `doom_render()` returns an 8-bit paletted framebuffer in WASM memory. The build fixes the resolution at 320x200 with `-DDOOMGENERIC_RESX=320`, `-DDOOMGENERIC_RESY=200`, and `-DCMAP256=1`.
 

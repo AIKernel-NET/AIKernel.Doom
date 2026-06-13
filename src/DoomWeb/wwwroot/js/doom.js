@@ -22,9 +22,11 @@
     right: 0xae,
     fire: 0xa3,
     strafe: 0xb8,
-    use: 32,
+    use: 0xa2,
     run: 0xb6
   };
+  const AUTOPLAY_USE_TAP_FRAMES = 2;
+  const AUTOPLAY_USE_TAP_SPACING_FRAMES = 6;
   const IS_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
 
   ensureBrowserWebGpuComputeProvider();
@@ -34,6 +36,7 @@
       this.canvas = options.canvas;
       this.moduleUrl = options.moduleUrl || "/demo/doom/module.json";
       this.modelManifestUrl = options.modelManifestUrl || "/models/bonsai1.7b/manifest.json";
+      this.autoplayProfileUrl = options.autoplayProfileUrl || "/demo/doom/autoplay-profile.json";
       this.log = options.log || (() => {});
       this.onStatusChange = options.onStatusChange || (() => {});
       this.state = "ready";
@@ -62,6 +65,8 @@
       this.stableLogged = false;
       this.moduleConfig = null;
       this.modelManifest = null;
+      this.autoplayProfile = null;
+      this.wadMapHints = null;
       this.instance = null;
       this.exports = null;
       this.wadBytes = null;
@@ -73,6 +78,8 @@
       this.pendingInputEvents = [];
       this.inputState = new Map();
       this.manualInputUntil = new Map();
+      this.autoplayUsePulseFrames = 0;
+      this.autoplayUsePulseSpacingFrames = 0;
       this.palette = defaultPalette();
       this.paletteCache = buildPaletteCache(this.palette);
       this.frameImage = null;
@@ -87,6 +94,8 @@
         ? new self.AIKernelBonsaiSupervisor({ log: this.log })
         : null;
       this.autoplayEnabled = false;
+      this.autoplayManualMove = false;
+      this.autoplaySenseOnly = false;
       this.autoplayPending = false;
       this.autoplayMode = "disabled";
       this.autoplayPredictions = 0;
@@ -110,6 +119,15 @@
       this.autoplayRegionQuantizedFrameChange = 255;
       this.autoplayStatusBarQuantizedFrameChange = 255;
       this.autoplayRegionSignature = "000000";
+      this.autoplayRegion9Signature = "000000000";
+      this.autoplayMotion9Signature = "000000000";
+      this.autoplayMotion9Delta = 255;
+      this.autoplayMotionForwardProgress = 0;
+      this.autoplayMotionObstacleScore = 0;
+      this.autoplayMotionTurnScore = 0;
+      this.autoplayMotionEntranceScore = 0;
+      this.autoplayMotionStallScore = 0;
+      this.autoplayMotionIntent = "idle";
       this.autoplayDepthSignature = "0000";
       this.autoplayDepthEstimate = 1;
       this.autoplayDepthSignatureDistance = 255;
@@ -130,14 +148,22 @@
       this.autoplayWallSurveyFrames = 0;
       this.autoplayWallSurveyTurn = "left";
       this.autoplayWallSurveyDecisionFrames = 0;
+      this.autoplayMapRushCorrectionFrames = 0;
+      this.autoplayMapRushCorrectionTurn = "left";
       this.autoplayEnemyConfidence = 0;
       this.autoplayEnemyTurn = "none";
       this.autoplayEnemyDistance = 1;
       this.autoplayEnemyCluster = "none";
       this.autoplayEnemyFireReady = false;
+      this.autoplayEnemyAllRegionPeak = 0;
+      this.autoplayEnemyLateralBias = 0;
       this.autoplayStrategyName = "SensorFusionStrafeProbeV3";
       this.autoplayStrategyContext = "unknown";
       this.autoplayStrategyPriority = 0;
+      this.autoplayControlPipeline = "Idle";
+      this.autoplayObjective = "disabled";
+      this.autoplayActiveDetections = ["objective", "hud"];
+      this.autoplaySemanticMemory = null;
       this.autoplayLastAction = self.AIKernelBonsai?.neutralAction?.() || {
         move: "none",
         turn: "none",
@@ -173,6 +199,8 @@
         actionInputReady: typeof this.exports?.doom_input_action === "function",
         autoplay: {
           enabled: this.autoplayEnabled,
+          manualMove: this.autoplayManualMove,
+          senseOnly: this.autoplaySenseOnly,
           mode: this.autoplayMode,
           predictions: this.autoplayPredictions,
           reused: this.autoplayReused,
@@ -184,6 +212,8 @@
           recoveryFrames: this.autoplayRecoveryFrames,
           loopEscapeFrames: this.autoplayLoopEscapeFrames,
           useCooldown: this.bonsaiSupervisor?.status?.().useCooldown || 0,
+          firstDoorUseLatchFrames: this.bonsaiSupervisor?.status?.().firstDoorUseLatchFrames || 0,
+          firstDoorUsePulsed: Boolean(this.bonsaiSupervisor?.status?.().firstDoorUsePulsed),
           mobilityMode: this.autoplayMobilityMode,
           wallHugSide: this.autoplayWallHugSide,
           targetConfidence: this.autoplayTargetConfidence,
@@ -195,6 +225,15 @@
           regionQuantizedFrameChange: this.autoplayRegionQuantizedFrameChange,
           statusBarQuantizedFrameChange: this.autoplayStatusBarQuantizedFrameChange,
           regionSignature: this.autoplayRegionSignature,
+          region9Signature: this.autoplayRegion9Signature,
+          motion9Signature: this.autoplayMotion9Signature,
+          motion9Delta: this.autoplayMotion9Delta,
+          motionForwardProgress: this.autoplayMotionForwardProgress,
+          motionObstacleScore: this.autoplayMotionObstacleScore,
+          motionTurnScore: this.autoplayMotionTurnScore,
+          motionEntranceScore: this.autoplayMotionEntranceScore,
+          motionStallScore: this.autoplayMotionStallScore,
+          motionIntent: this.autoplayMotionIntent,
           depthSignature: this.autoplayDepthSignature,
           depthEstimate: this.autoplayDepthEstimate,
           faceSignature: this.autoplayFaceSignature,
@@ -215,18 +254,56 @@
           wallSurveyFrames: this.autoplayWallSurveyFrames,
           wallSurveyTurn: this.autoplayWallSurveyTurn,
           wallSurveyDecisionFrames: this.autoplayWallSurveyDecisionFrames,
+          mapRushCorrectionFrames: this.autoplayMapRushCorrectionFrames,
+          mapRushCorrectionBackFrames: this.autoplayMapRushCorrectionBackFrames,
+          mapRushCorrectionTurn: this.autoplayMapRushCorrectionTurn,
+          mapRushCorrectionReversals: this.autoplayMapRushCorrectionReversals,
+          mapDoorSweepFrames: this.autoplayMapDoorSweepFrames,
+          mapDoorSweepTurn: this.autoplayMapDoorSweepTurn,
           enemyConfidence: this.autoplayEnemyConfidence,
           enemyTurn: this.autoplayEnemyTurn,
           enemyDistance: this.autoplayEnemyDistance,
           enemyCluster: this.autoplayEnemyCluster,
           enemyFireReady: this.autoplayEnemyFireReady,
+          enemyAllRegionPeak: this.autoplayEnemyAllRegionPeak,
+          enemyLateralBias: this.autoplayEnemyLateralBias,
+          ammoSignature: this.bonsaiSupervisor?.status?.().ammoSignature || "",
+          ammoLikelyEmpty: Boolean(this.bonsaiSupervisor?.status?.().ammoLikelyEmpty),
+          healthSignature: this.bonsaiSupervisor?.status?.().healthSignature || "",
+          healthLikelyDead: Boolean(this.bonsaiSupervisor?.status?.().healthLikelyDead),
+          healthZeroScore: this.bonsaiSupervisor?.status?.().healthZeroScore || 0,
+          healthActiveColumns: this.bonsaiSupervisor?.status?.().healthActiveColumns || 0,
+          healthActiveCells: this.bonsaiSupervisor?.status?.().healthActiveCells || 0,
+          milestones: this.bonsaiSupervisor?.status?.().milestones || {
+            doorOpened: 0,
+            enemyDefeated: 0,
+            combatFireFrames: 0,
+            enemyConfidencePeak: 0,
+            enemyDropFrames: 0
+          },
           strategyName: this.autoplayStrategyName,
           strategyContext: this.autoplayStrategyContext,
           strategyPriority: this.autoplayStrategyPriority,
+          controlPipeline: this.autoplayControlPipeline,
+          objective: this.autoplayObjective,
+          activeDetections: this.autoplayActiveDetections,
+          semanticMemory: this.autoplaySemanticMemory,
           action: this.autoplayLastAction,
           lastError: this.autoplayLastError
         },
         gpuDelegate: resolveGpuDelegateName(),
+        mapHints: this.wadMapHints ? {
+          map: this.wadMapHints.map,
+          doorLines: this.wadMapHints.doorLines,
+          switchLines: this.wadMapHints.switchLines,
+          exitLines: this.wadMapHints.exitLines,
+          textureRoles: this.wadMapHints.textureRoles?.length || 0,
+          firstDoor: this.wadMapHints.firstDoor || null,
+          darkSectors: this.wadMapHints.darkSectors || [],
+          enemyThings: this.wadMapHints.enemyThings || [],
+          doorTextures: this.wadMapHints.doorTextures || [],
+          switchTextures: this.wadMapHints.switchTextures || []
+        } : null,
         framebuffer: `${WIDTH}x${HEIGHT} paletted-8bit`,
         lastError: this.lastError
       };
@@ -360,6 +437,10 @@
       });
       this.palette = parsePlaypal(this.wadBytes) || this.palette;
       this.paletteCache = buildPaletteCache(this.palette);
+      this.wadMapHints = parseWadMapHints(this.wadBytes, "E1M1");
+      if (this.wadMapHints) {
+        this.log("[  WAD ]", "log-ok", `E1M1 map hints loaded: doors=${this.wadMapHints.doorLines || 0}; switches=${this.wadMapHints.switchLines || 0}; textures=${this.wadMapHints.textureRoles?.length || 0}.`);
+      }
 
       const imports = this.createImports();
       const result = await WebAssembly.instantiate(wasmBytes, imports);
@@ -376,6 +457,10 @@
       }
 
       this.modelManifest = await fetchJson(this.modelManifestUrl);
+      this.autoplayProfile = await fetchJson(this.autoplayProfileUrl).catch(error => {
+        this.log("[AUTOPLAY]", "log-warn", `autoplay profile unavailable: ${error instanceof Error ? error.message : String(error)}; using built-in defaults.`);
+        return null;
+      });
       await initializeWebGpuProvider();
       await fetchBinary(this.modelManifest.hostedFile, {
         label: this.modelManifest.name || this.modelManifest.upstreamFilename || "Bonsai-1.7B model",
@@ -383,7 +468,7 @@
         sha256: this.modelManifest.sha256
       });
       this.modelLoaded = true;
-      this.bonsaiSupervisor?.configure(this.modelManifest);
+      this.bonsaiSupervisor?.configure(this.modelManifest, this.autoplayProfile);
       this.log("[MODEL]", "log-ok", `${this.modelManifest.name || "Bonsai-1.7B"} downloaded and validated.`);
       this.log("[ GPU ]", "log-ok", `Bonsai supervisor GPU delegate active: ${resolveGpuDelegateName()}.`);
       this.emitStatus("model-ready");
@@ -423,9 +508,14 @@
       }
 
       this.autoplayEnabled = requested;
+      if (!requested) {
+        this.autoplayManualMove = false;
+        this.autoplaySenseOnly = false;
+      }
       this.autoplayPending = false;
       this.autoplayMode = requested ? "idle" : "disabled";
       this.bonsaiSupervisor?.setEnabled(requested);
+      this.syncAutoplaySupervisorStatus();
 
       if (requested) {
         this.log("[AUTOPLAY]", "log-ok", "Bonsai active: predicting next move...");
@@ -463,15 +553,47 @@
         this.autoplayWallSurveyFrames = 0;
         this.autoplayWallSurveyTurn = "left";
         this.autoplayWallSurveyDecisionFrames = 0;
+        this.autoplayMapRushCorrectionFrames = 0;
+        this.autoplayMapRushCorrectionTurn = "left";
         this.autoplayEnemyConfidence = 0;
         this.autoplayEnemyTurn = "none";
         this.autoplayEnemyDistance = 1;
         this.autoplayEnemyCluster = "none";
         this.autoplayEnemyFireReady = false;
+        this.autoplayEnemyAllRegionPeak = 0;
+        this.autoplayEnemyLateralBias = 0;
+        this.autoplayControlPipeline = "Idle";
+        this.autoplayObjective = "disabled";
+        this.autoplayActiveDetections = ["objective", "hud"];
+        this.autoplaySemanticMemory = null;
         this.log("[AUTOPLAY]", "log-info", "Bonsai idle: manual control restored.");
       }
 
       this.emitStatus(requested ? "autoplay-on" : "autoplay-off");
+      return this.status();
+    }
+
+    setAutoplayManualMove(enabled) {
+      this.autoplayManualMove = Boolean(enabled);
+      if (this.autoplayManualMove) {
+        this.releaseAutoplayMoveInputs();
+        this.log("[AUTOPLAY]", "log-info", "manual-move debug enabled: AI sensing, Use, and Fire remain active; movement/turning are manual.");
+      } else {
+        this.log("[AUTOPLAY]", "log-info", "manual-move debug disabled: AI movement control restored.");
+      }
+      this.emitStatus(this.autoplayManualMove ? "autoplay-manual-move-on" : "autoplay-manual-move-off");
+      return this.status();
+    }
+
+    setAutoplaySenseOnly(enabled) {
+      this.autoplaySenseOnly = Boolean(enabled);
+      if (this.autoplaySenseOnly) {
+        this.releaseAutoplayInputs();
+        this.log("[AUTOPLAY]", "log-info", "sense-only validation enabled: AI sensing and phase detection remain active; all AI inputs are suppressed.");
+      } else {
+        this.log("[AUTOPLAY]", "log-info", "sense-only validation disabled: AI input output restored.");
+      }
+      this.emitStatus(this.autoplaySenseOnly ? "autoplay-sense-only-on" : "autoplay-sense-only-off");
       return this.status();
     }
 
@@ -741,9 +863,8 @@
         : (gpuVision?.kind ? `${gpuVision.kind}:cpu-frame-sample` : "cpu-frame-sample");
       this.autoplayVisionZeroCopy = useGpuVision;
       this.logAutoplayVisionPath();
-      const indices = useGpuVision ? null : frameIndices;
       if (!this.autoplayPending) {
-        const state = this.createAutoplayState(indices, useGpuVision ? gpuVision : null);
+        const state = this.createAutoplayState(frameIndices, useGpuVision ? gpuVision : null);
         this.autoplayPending = true;
         this.autoplayMode = "predicting";
         this.bonsaiSupervisor.predict(state).then(action => {
@@ -767,6 +888,15 @@
           this.autoplayRegionQuantizedFrameChange = status.regionQuantizedFrameChange ?? 255;
           this.autoplayStatusBarQuantizedFrameChange = status.statusBarQuantizedFrameChange ?? 255;
           this.autoplayRegionSignature = status.regionSignature || "000000";
+          this.autoplayRegion9Signature = status.region9Signature || "000000000";
+          this.autoplayMotion9Signature = status.motion9Signature || "000000000";
+          this.autoplayMotion9Delta = status.motion9Delta ?? 255;
+          this.autoplayMotionForwardProgress = status.motionForwardProgress || 0;
+          this.autoplayMotionObstacleScore = status.motionObstacleScore || 0;
+          this.autoplayMotionTurnScore = status.motionTurnScore || 0;
+          this.autoplayMotionEntranceScore = status.motionEntranceScore || 0;
+          this.autoplayMotionStallScore = status.motionStallScore || 0;
+          this.autoplayMotionIntent = status.motionIntent || "idle";
           this.autoplayDepthSignature = status.depthSignature || "0000";
           this.autoplayDepthEstimate = status.depthEstimate ?? 1;
           this.autoplayFaceSignature = status.faceSignature || "0000000000000000";
@@ -787,14 +917,26 @@
           this.autoplayWallSurveyFrames = status.wallSurveyFrames || 0;
           this.autoplayWallSurveyTurn = status.wallSurveyTurn || "left";
           this.autoplayWallSurveyDecisionFrames = status.wallSurveyDecisionFrames || 0;
+          this.autoplayMapRushCorrectionFrames = status.mapRushCorrectionFrames || 0;
+          this.autoplayMapRushCorrectionBackFrames = status.mapRushCorrectionBackFrames || 0;
+          this.autoplayMapRushCorrectionTurn = status.mapRushCorrectionTurn || "left";
+          this.autoplayMapRushCorrectionReversals = status.mapRushCorrectionReversals || 0;
+          this.autoplayMapDoorSweepFrames = status.mapDoorSweepFrames || 0;
+          this.autoplayMapDoorSweepTurn = status.mapDoorSweepTurn || "left";
           this.autoplayEnemyConfidence = status.enemyConfidence || 0;
           this.autoplayEnemyTurn = status.enemyTurn || "none";
           this.autoplayEnemyDistance = status.enemyDistance ?? 1;
           this.autoplayEnemyCluster = status.enemyCluster || "none";
           this.autoplayEnemyFireReady = Boolean(status.enemyFireReady);
+          this.autoplayEnemyAllRegionPeak = status.enemyAllRegionPeak || 0;
+          this.autoplayEnemyLateralBias = status.enemyLateralBias || 0;
           this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
           this.autoplayStrategyContext = status.strategyContext || "unknown";
           this.autoplayStrategyPriority = status.strategyPriority || 0;
+          this.autoplayControlPipeline = status.controlPipeline || "Idle";
+          this.autoplayObjective = status.objective || "disabled";
+          this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
+          this.autoplaySemanticMemory = status.semanticMemory || null;
           this.autoplayMode = "idle";
           this.autoplayPending = false;
           this.emitStatus("autoplay-predicted");
@@ -810,6 +952,21 @@
       }
 
       this.applyAutoplayAction(this.autoplayLastAction);
+    }
+
+    syncAutoplaySupervisorStatus() {
+      const status = this.bonsaiSupervisor?.status?.();
+      if (!status) {
+        return;
+      }
+
+      this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
+      this.autoplayStrategyContext = status.strategyContext || this.autoplayStrategyContext;
+      this.autoplayStrategyPriority = status.strategyPriority || this.autoplayStrategyPriority;
+      this.autoplayControlPipeline = status.controlPipeline || this.autoplayControlPipeline;
+      this.autoplayObjective = status.objective || this.autoplayObjective;
+      this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
+      this.autoplaySemanticMemory = status.semanticMemory || this.autoplaySemanticMemory;
     }
 
     updateWebGpuFrameState(indices) {
@@ -834,23 +991,24 @@
     }
 
     createAutoplayState(indices, gpuVision) {
+      const summary = self.AIKernelBonsai?.summarizeFramebuffer?.(indices, this.paletteCache?.rgbaBytes) || {
+        width: WIDTH,
+        height: HEIGHT,
+        format: "paletted-8bit",
+        zeroCopy: false
+      };
+
       return {
         frame: this.frameCount,
         fps: this.fps,
-        framebuffer: gpuVision
-          ? {
-            width: WIDTH,
-            height: HEIGHT,
-            format: "webgpu-texture",
-            zeroCopy: this.autoplayVisionZeroCopy,
-            source: gpuVision
-          }
-          : (self.AIKernelBonsai?.summarizeFramebuffer?.(indices, this.paletteCache?.rgbaBytes) || {
-            width: WIDTH,
-            height: HEIGHT,
-            format: "paletted-8bit",
-            zeroCopy: false
-          }),
+        framebuffer: Object.assign({}, summary, gpuVision ? {
+          renderFormat: "webgpu-texture",
+          zeroCopy: this.autoplayVisionZeroCopy,
+          source: gpuVision
+        } : {
+          zeroCopy: false
+        }),
+        mapHints: this.wadMapHints,
         player: {
           health: null,
           ammo: null,
@@ -867,20 +1025,27 @@
 
     applyAutoplayAction(action) {
       const normalized = self.AIKernelBonsai?.normalizeAction?.(action, this.autoplayLastAction) || action || {};
+      if (this.autoplaySenseOnly) {
+        this.releaseAutoplayInputs();
+        return;
+      }
+
       const move = normalized.move === "forward" ? 1 : (normalized.move === "back" ? -1 : 0);
       const turn = normalized.turn === "right" ? 1 : (normalized.turn === "left" ? -1 : 0);
+      const aiMoveAllowed = !this.autoplayManualMove;
+      const usePressed = this.resolveAutoplayUsePulse(Boolean(normalized.use));
       const desired = {
-        forward: normalized.move === "forward",
-        back: normalized.move === "back",
-        left: normalized.turn === "left",
-        right: normalized.turn === "right",
+        forward: aiMoveAllowed && normalized.move === "forward",
+        back: aiMoveAllowed && normalized.move === "back",
+        left: aiMoveAllowed && normalized.turn === "left",
+        right: aiMoveAllowed && normalized.turn === "right",
         fire: Boolean(normalized.fire),
-        strafe: Boolean(normalized.strafe),
-        use: Boolean(normalized.use),
+        strafe: aiMoveAllowed && Boolean(normalized.strafe),
+        use: usePressed,
         run: Boolean(normalized.run)
       };
 
-      if (typeof this.exports?.doom_input_action === "function") {
+      if (typeof this.exports?.doom_input_action === "function" && aiMoveAllowed) {
         const result = this.exports.doom_input_action(move, turn, normalized.fire ? 1 : 0, normalized.strafe ? 1 : 0);
         if (result === OK) {
           if (!this.isManualInputActive(AUTOPLAY_KEYS.use)) {
@@ -894,10 +1059,45 @@
       }
 
       for (const [name, keycode] of Object.entries(AUTOPLAY_KEYS)) {
+        if (this.autoplayManualMove && (name === "forward" || name === "back" || name === "left" || name === "right" || name === "strafe")) {
+          continue;
+        }
         if (this.isManualInputActive(keycode)) {
           continue;
         }
         this.queueInput(keycode, desired[name]);
+      }
+    }
+
+    resolveAutoplayUsePulse(wantsUse) {
+      if (!wantsUse) {
+        this.autoplayUsePulseFrames = 0;
+        this.autoplayUsePulseSpacingFrames = 0;
+        return false;
+      }
+
+      if (this.autoplayUsePulseFrames > 0) {
+        this.autoplayUsePulseFrames -= 1;
+        return true;
+      }
+
+      if (this.autoplayUsePulseSpacingFrames > 0) {
+        this.autoplayUsePulseSpacingFrames -= 1;
+        return false;
+      }
+
+      this.autoplayUsePulseFrames = AUTOPLAY_USE_TAP_FRAMES - 1;
+      this.autoplayUsePulseSpacingFrames = AUTOPLAY_USE_TAP_SPACING_FRAMES;
+      return true;
+    }
+
+    releaseAutoplayMoveInputs() {
+      if (typeof this.exports?.doom_input_action === "function") {
+        this.exports.doom_input_action(0, 0, 0, 0);
+      }
+
+      for (const name of ["forward", "back", "left", "right", "strafe"]) {
+        this.queueInput(AUTOPLAY_KEYS[name], false);
       }
     }
 
@@ -906,6 +1106,8 @@
         this.exports.doom_input_action(0, 0, 0, 0);
       }
 
+      this.autoplayUsePulseFrames = 0;
+      this.autoplayUsePulseSpacingFrames = 0;
       for (const keycode of Object.values(AUTOPLAY_KEYS)) {
         this.queueInput(keycode, false);
       }
@@ -1188,6 +1390,373 @@
 
     const digest = await window.crypto.subtle.digest("SHA-256", bytes);
     return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  function parseWadMapHints(wadBytes, mapName) {
+    const directory = readWadDirectory(wadBytes);
+    if (!directory?.length) {
+      return null;
+    }
+
+    const mapIndex = directory.findIndex(entry => entry.name === mapName);
+    if (mapIndex < 0) {
+      return null;
+    }
+
+    const lumps = new Map();
+    for (let index = mapIndex + 1; index < directory.length; index += 1) {
+      const entry = directory[index];
+      if (/^E\dM\d$/.test(entry.name) || /^MAP\d\d$/.test(entry.name)) {
+        break;
+      }
+
+      lumps.set(entry.name, entry);
+    }
+
+    const linedefs = parseLinedefs(wadBytes, lumps.get("LINEDEFS"));
+    const vertexes = parseVertexes(wadBytes, lumps.get("VERTEXES"));
+    const sidedefs = parseSidedefs(wadBytes, lumps.get("SIDEDEFS"));
+    const sectors = parseSectors(wadBytes, lumps.get("SECTORS"));
+    const things = parseThings(wadBytes, lumps.get("THINGS"));
+    const textureRoles = buildTextureRoles(linedefs, sidedefs, sectors);
+    const doorLines = linedefs.filter(line => isDoorSpecial(line.special));
+    const switchLines = linedefs.filter(line => isSwitchSpecial(line.special));
+    const exitLines = linedefs.filter(line => isExitSpecial(line.special));
+
+    return {
+      map: mapName,
+      source: "DOOM1.WAD static lump analysis",
+      lumps: Array.from(lumps.keys()),
+      counts: {
+        things: things.length,
+        linedefs: linedefs.length,
+        vertexes: vertexes.length,
+        sidedefs: sidedefs.length,
+        sectors: sectors.length
+      },
+      playerStart: summarizePlayerStart(things),
+      firstDoor: summarizeNearestDoor(doorLines, sidedefs, vertexes, summarizePlayerStart(things)),
+      darkSectors: summarizeDarkSectors(sectors),
+      enemyThings: summarizeEnemyThings(things),
+      doorLines: doorLines.length,
+      switchLines: switchLines.length,
+      exitLines: exitLines.length,
+      doorSpecials: summarizeSpecials(doorLines),
+      switchSpecials: summarizeSpecials(switchLines),
+      exitSpecials: summarizeSpecials(exitLines),
+      thingTypes: summarizeThings(things),
+      textureRoles,
+      doorTextures: textureRoles.filter(role => role.role === "door").map(role => role.texture),
+      switchTextures: textureRoles.filter(role => role.role === "switch").map(role => role.texture),
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  function readWadDirectory(wadBytes) {
+    if (wadBytes.length < 12) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset, wadBytes.byteLength);
+    const lumpCount = view.getInt32(4, true);
+    const directoryOffset = view.getInt32(8, true);
+    if (lumpCount <= 0 || directoryOffset <= 0 || directoryOffset + lumpCount * 16 > wadBytes.length) {
+      return [];
+    }
+
+    const directory = [];
+    for (let index = 0; index < lumpCount; index += 1) {
+      const entry = directoryOffset + index * 16;
+      directory.push({
+        name: readWadName(wadBytes, entry + 8),
+        offset: view.getInt32(entry, true),
+        size: view.getInt32(entry + 4, true)
+      });
+    }
+
+    return directory;
+  }
+
+  function parseLinedefs(wadBytes, lump) {
+    if (!isValidLump(wadBytes, lump, 14)) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
+    const lines = [];
+    for (let offset = 0; offset + 14 <= lump.size; offset += 14) {
+      lines.push({
+        startVertex: view.getInt16(offset, true),
+        endVertex: view.getInt16(offset + 2, true),
+        flags: view.getInt16(offset + 4, true),
+        special: view.getInt16(offset + 6, true),
+        tag: view.getInt16(offset + 8, true),
+        rightSidedef: view.getInt16(offset + 10, true),
+        leftSidedef: view.getInt16(offset + 12, true)
+      });
+    }
+
+    return lines;
+  }
+
+  function parseVertexes(wadBytes, lump) {
+    if (!isValidLump(wadBytes, lump, 4)) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
+    const vertexes = [];
+    for (let offset = 0; offset + 4 <= lump.size; offset += 4) {
+      vertexes.push({
+        x: view.getInt16(offset, true),
+        y: view.getInt16(offset + 2, true)
+      });
+    }
+
+    return vertexes;
+  }
+
+  function parseSidedefs(wadBytes, lump) {
+    if (!isValidLump(wadBytes, lump, 30)) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
+    const sides = [];
+    for (let offset = 0; offset + 30 <= lump.size; offset += 30) {
+      sides.push({
+        xOffset: view.getInt16(offset, true),
+        yOffset: view.getInt16(offset + 2, true),
+        upper: readWadName(wadBytes, lump.offset + offset + 4),
+        lower: readWadName(wadBytes, lump.offset + offset + 12),
+        middle: readWadName(wadBytes, lump.offset + offset + 20),
+        sector: view.getInt16(offset + 28, true)
+      });
+    }
+
+    return sides;
+  }
+
+  function parseSectors(wadBytes, lump) {
+    if (!isValidLump(wadBytes, lump, 26)) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
+    const sectors = [];
+    for (let offset = 0; offset + 26 <= lump.size; offset += 26) {
+      sectors.push({
+        floorHeight: view.getInt16(offset, true),
+        ceilingHeight: view.getInt16(offset + 2, true),
+        floorTexture: readWadName(wadBytes, lump.offset + offset + 4),
+        ceilingTexture: readWadName(wadBytes, lump.offset + offset + 12),
+        lightLevel: view.getInt16(offset + 20, true),
+        special: view.getInt16(offset + 22, true),
+        tag: view.getInt16(offset + 24, true)
+      });
+    }
+
+    return sectors;
+  }
+
+  function parseThings(wadBytes, lump) {
+    if (!isValidLump(wadBytes, lump, 10)) {
+      return [];
+    }
+
+    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
+    const things = [];
+    for (let offset = 0; offset + 10 <= lump.size; offset += 10) {
+      things.push({
+        x: view.getInt16(offset, true),
+        y: view.getInt16(offset + 2, true),
+        angle: view.getInt16(offset + 4, true),
+        type: view.getInt16(offset + 6, true),
+        flags: view.getInt16(offset + 8, true)
+      });
+    }
+
+    return things;
+  }
+
+  function buildTextureRoles(linedefs, sidedefs, sectors) {
+    const roleByTexture = new Map();
+    const remember = (texture, role, weight) => {
+      if (!texture || texture === "-") {
+        return;
+      }
+
+      const current = roleByTexture.get(texture) || { texture, role, door: 0, switch: 0, exit: 0, wall: 0, sector: 0 };
+      current[role] += weight;
+      if (current.door >= current.switch && current.door >= current.exit && current.door >= current.wall) {
+        current.role = "door";
+      } else if (current.switch >= current.exit && current.switch >= current.wall) {
+        current.role = "switch";
+      } else if (current.exit >= current.wall) {
+        current.role = "exit";
+      } else {
+        current.role = "wall";
+      }
+      roleByTexture.set(texture, current);
+    };
+
+    for (const line of linedefs) {
+      const role = isDoorSpecial(line.special)
+        ? "door"
+        : (isSwitchSpecial(line.special) ? "switch" : (isExitSpecial(line.special) ? "exit" : "wall"));
+      const weight = role === "wall" ? 1 : 8;
+      for (const sideIndex of [line.rightSidedef, line.leftSidedef]) {
+        if (sideIndex < 0 || sideIndex >= sidedefs.length) {
+          continue;
+        }
+
+        const side = sidedefs[sideIndex];
+        remember(side.upper, role, weight);
+        remember(side.lower, role, weight);
+        remember(side.middle, role, weight);
+      }
+    }
+
+    for (const sector of sectors) {
+      remember(sector.floorTexture, "sector", 1);
+      remember(sector.ceilingTexture, "sector", 1);
+    }
+
+    return Array.from(roleByTexture.values())
+      .sort((left, right) => roleRank(left.role) - roleRank(right.role) || right.door + right.switch + right.exit - (left.door + left.switch + left.exit))
+      .slice(0, 96);
+  }
+
+  function isValidLump(wadBytes, lump, recordSize) {
+    return Boolean(lump)
+      && lump.size >= recordSize
+      && lump.offset >= 0
+      && lump.offset + lump.size <= wadBytes.length;
+  }
+
+  function isDoorSpecial(special) {
+    return new Set([1, 26, 27, 28, 31, 32, 33, 34, 46, 61, 63, 86, 90, 103, 106, 108, 109, 117, 118]).has(Number(special));
+  }
+
+  function isSwitchSpecial(special) {
+    return new Set([7, 9, 11, 14, 15, 18, 20, 21, 23, 29, 41, 42, 43, 45, 49, 50, 51, 55, 71, 101, 102, 103, 111, 112, 113, 114, 115, 116, 122, 123]).has(Number(special));
+  }
+
+  function isExitSpecial(special) {
+    return new Set([11, 51, 52, 124]).has(Number(special));
+  }
+
+  function summarizeSpecials(lines) {
+    const counts = new Map();
+    for (const line of lines) {
+      counts.set(line.special, (counts.get(line.special) || 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .sort((left, right) => Number(left[0]) - Number(right[0]))
+      .map(([special, count]) => ({ special: Number(special), count }));
+  }
+
+  function summarizeThings(things) {
+    const counts = new Map();
+    for (const thing of things) {
+      counts.set(thing.type, (counts.get(thing.type) || 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .sort((left, right) => Number(left[0]) - Number(right[0]))
+      .map(([type, count]) => ({ type: Number(type), count }));
+  }
+
+  function summarizeDarkSectors(sectors) {
+    return sectors
+      .map((sector, index) => ({
+        id: index,
+        lightLevel: sector.lightLevel,
+        floorTexture: sector.floorTexture,
+        ceilingTexture: sector.ceilingTexture
+      }))
+      .filter(sector => sector.lightLevel <= 128)
+      .sort((left, right) => left.lightLevel - right.lightLevel)
+      .slice(0, 16);
+  }
+
+  function summarizeEnemyThings(things) {
+    return things
+      .filter(thing => isEnemyThingType(thing.type))
+      .map(thing => ({
+        x: thing.x,
+        y: thing.y,
+        angle: thing.angle,
+        type: thing.type,
+        flags: thing.flags
+      }))
+      .slice(0, 64);
+  }
+
+  function isEnemyThingType(type) {
+    return new Set([9, 16, 58, 3001, 3002, 3003, 3004, 3005, 3006]).has(Number(type));
+  }
+
+  function summarizePlayerStart(things) {
+    const start = things.find(thing => thing.type === 1);
+    return start ? {
+      x: start.x,
+      y: start.y,
+      angle: start.angle
+    } : null;
+  }
+
+  function summarizeNearestDoor(doorLines, sidedefs, vertexes, playerStart) {
+    if (!playerStart || !doorLines.length || !vertexes.length) {
+      return null;
+    }
+
+    let best = null;
+    for (const line of doorLines) {
+      const start = vertexes[line.startVertex];
+      const end = vertexes[line.endVertex];
+      if (!start || !end) {
+        continue;
+      }
+
+      const centerX = (start.x + end.x) / 2;
+      const centerY = (start.y + end.y) / 2;
+      const distance = Math.hypot(centerX - playerStart.x, centerY - playerStart.y);
+      const angle = normalizeDegrees(Math.atan2(centerY - playerStart.y, centerX - playerStart.x) * 180 / Math.PI);
+      const relativeAngle = normalizeSignedDegrees(angle - Number(playerStart.angle || 0));
+      const side = sidedefs[line.rightSidedef] || null;
+      const candidate = {
+        distance: round2(distance),
+        angle: round2(angle),
+        relativeAngle: round2(relativeAngle),
+        special: line.special,
+        tag: line.tag,
+        texture: side?.middle || "",
+        center: { x: round2(centerX), y: round2(centerY) }
+      };
+      if (!best || candidate.distance < best.distance) {
+        best = candidate;
+      }
+    }
+
+    return best;
+  }
+
+  function normalizeDegrees(value) {
+    return ((Number(value || 0) % 360) + 360) % 360;
+  }
+
+  function normalizeSignedDegrees(value) {
+    return ((Number(value || 0) + 540) % 360) - 180;
+  }
+
+  function round2(value) {
+    return Math.round(Number(value || 0) * 100) / 100;
+  }
+
+  function roleRank(role) {
+    return role === "door" ? 0 : (role === "switch" ? 1 : (role === "exit" ? 2 : 3));
   }
 
   function parsePlaypal(wadBytes) {

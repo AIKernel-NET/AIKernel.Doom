@@ -12,9 +12,9 @@
   };
 
   importScripts(
-    "/demo/doom/js/webgpu-provider.js?v=20260612-doomweb4",
-    "/demo/doom/js/bonsai.js?v=20260612-doomweb4",
-    "/demo/doom/js/doom.js?v=20260612-doomweb4"
+    "/demo/doom/js/webgpu-provider.js?v=20260613-doomweb86",
+    "/demo/doom/js/bonsai.js?v=20260613-doomweb86",
+    "/demo/doom/js/doom.js?v=20260613-doomweb86"
   );
 
   let runtime = null;
@@ -60,6 +60,7 @@
           canvas: message.canvas,
           moduleUrl: message.moduleUrl,
           modelManifestUrl: message.modelManifestUrl,
+          autoplayProfileUrl: message.autoplayProfileUrl,
           log: function (tag, className, text) {
             post("log", { tag, className, text });
           },
@@ -81,6 +82,14 @@
 
     if (message.type === "input" && runtime) {
       runtime.queueInput(message.keycode, message.pressed);
+    }
+
+    if (message.type === "manual-input" && runtime) {
+      if (typeof runtime.queueManualInput === "function") {
+        runtime.queueManualInput(message.keycode, message.pressed, message.holdMs || 0);
+      } else {
+        runtime.queueInput(message.keycode, message.pressed);
+      }
     }
   };
 

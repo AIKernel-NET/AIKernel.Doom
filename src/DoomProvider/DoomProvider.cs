@@ -45,7 +45,9 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
 
     public string Name => "AIKernel DOOM WASM Provider";
 
-    public string Version => "0.1.0";
+    public string Version => ThisAssemblyVersion;
+
+    private const string ThisAssemblyVersion = "0.1.1-dev1";
 
     public DoomProviderState State { get; private set; } = DoomProviderState.NotInitialized;
 

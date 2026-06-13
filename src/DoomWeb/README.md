@@ -1,5 +1,7 @@
 # DoomWeb
 
+[日本語](README-ja.md)
+
 `DoomWeb` contains the public Web runtime layer for the AIKernel.Doom browser demo.
 It is intentionally source-only:
 

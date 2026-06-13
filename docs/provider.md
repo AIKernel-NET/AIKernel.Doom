@@ -1,5 +1,7 @@
 # Doom Provider
 
+[日本語](provider-ja.md)
+
 `DoomProvider` implements the real AIKernel interfaces available in this workspace:
 
 - `AIKernel.Abstractions.Providers.IProvider`

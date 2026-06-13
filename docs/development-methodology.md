@@ -1,5 +1,7 @@
 # Development Methodology
 
+[日本語](development-methodology-ja.md)
+
 AIKernel.Doom was developed as a human-in-the-loop AI control experiment. The
 important lesson is not only the final code, but the workflow used to make a
 visual control system less brittle.

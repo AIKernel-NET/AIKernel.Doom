@@ -1,5 +1,7 @@
 # Asset and Release Operations
 
+[日本語](asset-and-release-operations-ja.md)
+
 AIKernel.Doom is published as a source demo. It is not a package and it does
 not vendor third-party runtime assets.
 

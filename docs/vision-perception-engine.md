@@ -1,5 +1,7 @@
 # Vision Perception Engine
 
+[日本語](vision-perception-engine-ja.md)
+
 The browser AutoPlay supervisor implements a compact perception system in
 JavaScript. It is designed as a reusable example of how a visual runtime can
 extract actionable state from a low-resolution game framebuffer without a full

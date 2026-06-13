@@ -1,5 +1,7 @@
 # Web Runtime
 
+[日本語](web-runtime-ja.md)
+
 `src/DoomWeb` contains the public browser runtime source assets used by the
 AIKernel.Doom web prompt. It is intentionally source-only and excludes hosted
 runtime binaries.

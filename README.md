@@ -1,5 +1,7 @@
 # AIKernel.Doom
 
+[日本語 README](README-ja.md)
+
 AIKernel.Doom is a .NET 10 WASM demo for AIKernel Semantic OS. It displays an AIKernel-style boot prompt, suspends on explicit consent, prepares a Bonsai-1.7B supervisor, and exposes DOOM as a WASM process through `doom.start`, `doom.stop`, and `doom.status`.
 
 This repository is a demo/sample program, not a DOOM package. The implementation is maintained as an AIKernel Development Guidelines aligned example of Interface-Led Architecture, Provider-Observer-Operator separation, fail-closed runtime consent, WASM process isolation, WebGPU framebuffer handling, and Observer-driven AutoPlay optimization.
@@ -10,6 +12,12 @@ Developer documentation starts at:
 
 ```text
 docs/README.md
+```
+
+Japanese developer documentation starts at:
+
+```text
+docs/README-ja.md
 ```
 
 Recommended path:

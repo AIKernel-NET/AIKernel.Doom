@@ -1,5 +1,7 @@
 # CLI
 
+[日本語](cli-ja.md)
+
 Run:
 
 ```powershell

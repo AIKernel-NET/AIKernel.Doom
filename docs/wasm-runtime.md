@@ -1,5 +1,7 @@
 # WASM Runtime
 
+[日本語](wasm-runtime-ja.md)
+
 DOOM is loaded from `samples/doom.rom`, whose entry is `doom.wasm`.
 
 This runtime surface is the AIKernel Operator boundary for the legacy native

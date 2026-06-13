@@ -1,5 +1,7 @@
 # AIKernel.Doom Overview
 
+[日本語](overview-ja.md)
+
 AIKernel.Doom is a lightweight official demo repository that models DOOM as a WASM process on the AIKernel Semantic OS.
 
 It is also a guideline-aligned technical sample. The code and documentation are

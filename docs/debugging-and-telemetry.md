@@ -1,5 +1,7 @@
 # Debugging and Telemetry
 
+[日本語](debugging-and-telemetry-ja.md)
+
 AIKernel.Doom includes a browser-side debugging surface because most controller
 bugs only appear while the game is moving. The tooling is designed to collect
 evidence quickly without forcing the developer to type commands during combat.

@@ -1,5 +1,7 @@
 # AIKernel.Doom Documentation
 
+[日本語](README-ja.md)
+
 AIKernel.Doom is a source-only demonstration repository for running a DOOM
 WASM process under an AIKernel-style runtime, then supervising it with a
 browser-side perception and autoplay control loop.

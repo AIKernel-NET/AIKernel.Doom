@@ -1,5 +1,7 @@
 # Architecture
 
+[日本語](architecture-ja.md)
+
 AIKernel.Doom is organized as a demo-grade AIKernel application rather than as a
 game engine package. The goal is to show how a WASM process, WebGPU rendering,
 runtime consent, telemetry, and an AI control loop can be wired together while

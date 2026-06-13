@@ -1,5 +1,7 @@
 # Autoplay Control Pipeline
 
+[日本語](autoplay-control-pipeline-ja.md)
+
 The AutoPlay controller is a phase-routed decision system. It exists because a
 single global rule set caused unstable behavior: combat logic fired before
 enemies existed, door logic ran before the corridor was found, and wall recovery

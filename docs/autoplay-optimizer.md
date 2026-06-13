@@ -1,5 +1,7 @@
 # Autoplay Optimizer
 
+[日本語](autoplay-optimizer-ja.md)
+
 `DoomOptimizer` is the source-side profile optimizer for the AIKernel.Doom autoplay demo.
 
 It is the repository's Observer ROM implementation. It preserves telemetry and

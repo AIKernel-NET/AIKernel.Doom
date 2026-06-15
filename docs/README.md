@@ -17,20 +17,31 @@ the implementation techniques. The repository is a demo sample, not a packaged
 DOOM distribution. It does not commit third-party runtime artifacts such as
 `DOOM1.WAD`, Bonsai GGUF model files, or generated `doom.wasm` binaries.
 
+## Cross-Repository Alignment
+
+Shared repository boundaries, 0.1.1.1 local NuGet versioning, and the
+NuGet-only / no-PyPI rule for this update line are defined by
+[AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1.md).
+
+Doom owns scenario-specific visual, audio, HUD, and input mappings for this
+sample. It must not define shared contracts, generic WASM semantics, or
+Core/Control gate logic.
+
 ## Reading Path
 
 Start here:
 
 1. [Overview](overview.md)
 2. [Architecture](architecture.md)
-3. [WASM Runtime and ABI](wasm-runtime.md)
-4. [Web Runtime](web-runtime.md)
-5. [Vision Perception Engine](vision-perception-engine.md)
-6. [Autoplay Control Pipeline](autoplay-control-pipeline.md)
-7. [Debugging and Telemetry](debugging-and-telemetry.md)
-8. [Autoplay Optimizer](autoplay-optimizer.md)
-9. [Development Methodology](development-methodology.md)
-10. [Asset and Release Operations](asset-and-release-operations.md)
+3. [Concept Elevation Notes / 概念昇格ノート](concept-elevation.md)
+4. [WASM Runtime and ABI](wasm-runtime.md)
+5. [Web Runtime](web-runtime.md)
+6. [Vision Perception Engine](vision-perception-engine.md)
+7. [Autoplay Control Pipeline](autoplay-control-pipeline.md)
+8. [Debugging and Telemetry](debugging-and-telemetry.md)
+9. [Autoplay Optimizer](autoplay-optimizer.md)
+10. [Development Methodology](development-methodology.md)
+11. [Asset and Release Operations](asset-and-release-operations.md)
 
 Reference surfaces:
 

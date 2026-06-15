@@ -13,6 +13,8 @@ Web runtime には次のデバッグ操作があります。
 - `Overlay`: 検知 overlay の表示切り替え。
 - `Manual Move`: AutoPlay を維持しつつ、移動だけ手動化。
 - `Sense Only`: 検知だけ実行し、入力を出さない。
+- `Audio Off` / `Audio On`: debug audio playback の mute を切り替えます。
+  既定は mute で、利用可能な場合のみ外部 WASM audio bridge を使います。
 - `DET:` buttons: `Motion`、`Objective`、`Door`、`Wall`、`Enemy`、`Computer`、`Foot`、`HUD` の ON / OFF。
 
 検知ボタンは overlay の枠線色に合わせた色を持ち、OFF のときはグレーになります。これにより、現在の phase でどの detector が使われているかを視覚的に確認できます。
@@ -31,8 +33,22 @@ Overlay はデフォルト ON です。開発者は、AI がどの領域を見�
 - phase
 - wall / corner / foot obstacle
 - HUD health / ammo
+- L/R auditory energy
+- spatial event icon
 
 高優先度の検知は濃く表示し、低優先度の補助情報は薄く表示します。これにより、action arbiter がどの判断を優先しているかを把握できます。
+
+## Auditory / Spatial HUD
+
+debug HUD は stereo auditory evidence を表示しますが、制御判断は持ちません。
+
+- L/R gauge は left / right channel energy を可視化します。
+- event icon は WASM spatial kernel が提供する `spatialSnapshot.hudX` /
+  `spatialSnapshot.hudY` を使って配置します。
+- `doom-prompt.js` は gauge と icon を描画するだけで、spatial direction は計算しません。
+- `doom.js` は `auditorySnapshot`、`spatialSnapshot`、`ctgCarrier` を runtime
+  status へコピーするだけです。
+- CTG / Gate result は DoomWeb の外側に置きます。
 
 ## Runtime Status
 

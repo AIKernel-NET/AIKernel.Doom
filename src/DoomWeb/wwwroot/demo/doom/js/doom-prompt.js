@@ -78,6 +78,12 @@
     const doomManualMoveToggle = document.getElementById("doom-manual-move-toggle");
     const doomSenseOnlyToggle = document.getElementById("doom-sense-only-toggle");
     const doomDetectionToggles = Array.from(document.querySelectorAll("[data-detection-toggle]"));
+    let doomSpatialHud = null;
+    let doomAudioLeftFill = null;
+    let doomAudioRightFill = null;
+    let doomAudioReadout = null;
+    let doomSpatialEventIcon = null;
+    let doomAudioPlaybackToggle = null;
     const commandHistory = [];
     let commandHistoryIndex = 0;
     let wasmApprovalPending = true;
@@ -92,7 +98,8 @@
       ["enemy", true],
       ["computer", true],
       ["foot", true],
-      ["hud", true]
+      ["hud", true],
+      ["audio", true]
     ]);
     const DOOM_PULSE_INPUT_MS = 140;
     const activeDoomInputs = new Set();
@@ -214,6 +221,9 @@
       syncSenseOnlyToggle(status);
       syncOverlayToggle();
       syncDetectionToggleButtons(status);
+      ensureDoomSpatialHud();
+      updateDoomSpatialHud(status);
+      syncAudioPlaybackToggle(status);
       renderDoomDebugOverlay(status);
 
       lastObjectiveStatus = objectiveText;
@@ -426,6 +436,100 @@
       doomDebugOverlay.replaceChildren(fragment);
     }
 
+    function ensureDoomSpatialHud() {
+      if (doomSpatialHud || !doomScreen) {
+        return;
+      }
+
+      const host = doomScreen.parentElement || doomScreenPanel;
+      if (!host) {
+        return;
+      }
+
+      if (!host.style.position) {
+        host.style.position = "relative";
+      }
+
+      doomSpatialHud = document.createElement("div");
+      doomSpatialHud.className = "doom-spatial-hud";
+      doomSpatialHud.style.cssText = "position:absolute;left:10px;top:10px;z-index:8;display:flex;align-items:flex-end;gap:6px;padding:6px 8px;border:1px solid rgba(80,255,160,.45);background:rgba(0,0,0,.62);color:#b9ffd4;font:11px ui-monospace,Consolas,monospace;pointer-events:none;";
+
+      const leftGauge = document.createElement("div");
+      leftGauge.style.cssText = "width:10px;height:46px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.55);";
+      doomAudioLeftFill = document.createElement("div");
+      doomAudioLeftFill.style.cssText = "width:100%;height:100%;background:#6bff9b;transform:scaleY(0);transform-origin:bottom;";
+      leftGauge.appendChild(doomAudioLeftFill);
+
+      const rightGauge = document.createElement("div");
+      rightGauge.style.cssText = "width:10px;height:46px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.55);";
+      doomAudioRightFill = document.createElement("div");
+      doomAudioRightFill.style.cssText = "width:100%;height:100%;background:#7ab7ff;transform:scaleY(0);transform-origin:bottom;";
+      rightGauge.appendChild(doomAudioRightFill);
+
+      doomAudioReadout = document.createElement("div");
+      doomAudioReadout.style.cssText = "min-width:98px;line-height:1.35;text-shadow:0 1px 2px #000;";
+      doomAudioReadout.textContent = "L 0.00 R 0.00";
+
+      doomSpatialHud.appendChild(leftGauge);
+      doomSpatialHud.appendChild(rightGauge);
+      doomSpatialHud.appendChild(doomAudioReadout);
+      host.appendChild(doomSpatialHud);
+
+      doomSpatialEventIcon = document.createElement("div");
+      doomSpatialEventIcon.className = "doom-spatial-event";
+      doomSpatialEventIcon.style.cssText = "position:absolute;z-index:9;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,240,120,.95);background:rgba(255,80,40,.78);box-shadow:0 0 14px rgba(255,120,40,.8);transform:translate(-50%,-50%);pointer-events:none;";
+      doomSpatialEventIcon.hidden = true;
+      host.appendChild(doomSpatialEventIcon);
+
+      if (doomDebugBar && !doomAudioPlaybackToggle) {
+        doomAudioPlaybackToggle = document.createElement("button");
+        doomAudioPlaybackToggle.type = "button";
+        doomAudioPlaybackToggle.dataset.command = "doom.audio toggle";
+        doomAudioPlaybackToggle.className = "debug-toggle";
+        doomAudioPlaybackToggle.textContent = "Audio Off";
+        doomDebugBar.appendChild(doomAudioPlaybackToggle);
+      }
+    }
+
+    function updateDoomSpatialHud(status) {
+      if (!doomSpatialHud) {
+        return;
+      }
+
+      const autoplay = status?.autoplay || {};
+      const audio = autoplay.auditorySnapshot || status?.audio || {};
+      const spatial = autoplay.spatialSnapshot || {};
+      const left = clampHud01(Number(audio.leftEnergy || 0));
+      const right = clampHud01(Number(audio.rightEnergy || 0));
+      const balance = Math.max(-1, Math.min(1, Number(audio.balance || 0)));
+      if (doomAudioLeftFill) {
+        doomAudioLeftFill.style.transform = `scaleY(${left.toFixed(3)})`;
+      }
+      if (doomAudioRightFill) {
+        doomAudioRightFill.style.transform = `scaleY(${right.toFixed(3)})`;
+      }
+      if (doomAudioReadout) {
+        doomAudioReadout.textContent = `L ${left.toFixed(2)} R ${right.toFixed(2)} B ${balance.toFixed(2)}`;
+      }
+
+      const eventActive = doomDetectionVisibility.get("audio") !== false
+        && Boolean(spatial.eventDetected || audio.eventDetected);
+      if (!doomSpatialEventIcon) {
+        return;
+      }
+
+      doomSpatialEventIcon.hidden = !eventActive;
+      if (!eventActive) {
+        return;
+      }
+
+      const x = clampHud01(Number(spatial.hudX ?? 0.5));
+      const y = clampHud01(Number(spatial.hudY ?? 0.45));
+      doomSpatialEventIcon.style.left = `${(x * 100).toFixed(2)}%`;
+      doomSpatialEventIcon.style.top = `${(y * 100).toFixed(2)}%`;
+      doomSpatialEventIcon.title = `${audio.eventType || spatial.eventType || "spatial-event"} ${Number(spatial.confidence || 0).toFixed(2)}`;
+    }
+
     function syncDetectionToggleButtons(status = doomRuntime?.status?.() || {}) {
       const activeDetections = new Set(Array.isArray(status?.autoplay?.activeDetections) ? status.autoplay.activeDetections : []);
       const phaseDetectionReady = activeDetections.size > 0;
@@ -446,6 +550,29 @@
       });
     }
 
+    function syncAudioPlaybackToggle(status = doomRuntime?.status?.() || {}) {
+      if (!doomAudioPlaybackToggle) {
+        return;
+      }
+
+      const muted = status?.audio?.muted !== false;
+      doomAudioPlaybackToggle.textContent = muted ? "Audio Off" : "Audio On";
+      doomAudioPlaybackToggle.classList.toggle("is-off", muted);
+      doomAudioPlaybackToggle.setAttribute("aria-pressed", muted ? "false" : "true");
+      doomAudioPlaybackToggle.title = muted
+        ? "Debug audio playback is muted."
+        : "Debug audio playback is enabled through the WASM audio bridge when available.";
+    }
+
+    function clampHud01(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(1, number));
+    }
+
     async function runWasmCommand(rawCommand) {
       const command = rawCommand.trim();
       const normalized = command.toLowerCase();
@@ -459,7 +586,7 @@
       appendConsoleLine("aik>", "log-ok", command);
 
       const responses = {
-        "help": "commands: yes, doom.status, doom.phase.check, doom.start, doom.stop, doom.restart-play, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
+        "help": "commands: yes, doom.status, doom.phase.check, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio status, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
         "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. hintWord=yes",
         "doom.stop": "ok: no active public runtime process is running.",
         "wasm.exports": "main, doom_init, doom_tick, doom_render, doom_input, doom_input_action, doom_mount_wad, doom_wad_status, malloc, free",
@@ -532,6 +659,33 @@
         updateRuntimeStatus(status, "status");
         const autoplay = status.autoplay || {};
         appendConsoleLine("[ RESP ]", "log-info", `${status.modelLoaded ? "ready" : "loading"}: Bonsai-1.7B_Q1_0 GGUF hostedFile=/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf; loaded=${status.modelLoaded}; execution surface=WebGpuComputeProvider; autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}`);
+        return;
+      }
+
+      if (!wasmApprovalPending && normalized === "doom.audio toggle") {
+        const muted = doomRuntime?.status?.().audio?.muted !== false;
+        await runWasmCommand(muted ? "doom.audio on" : "doom.audio off");
+        return;
+      }
+
+      if (!wasmApprovalPending && (normalized === "doom.audio on" || normalized === "doom.audio off")) {
+        if (!doomRuntime?.setAudioPlayback) {
+          appendConsoleLine("[ AUDIO]", "log-warn", "debug audio playback control is unavailable in this runtime.");
+          return;
+        }
+
+        const enabled = normalized === "doom.audio on";
+        const status = doomRuntime.setAudioPlayback(enabled);
+        updateRuntimeStatus(status, enabled ? "audio-on" : "audio-off");
+        appendConsoleLine("[ AUDIO]", enabled ? "log-ok" : "log-info", `debug audio playback ${enabled ? "enabled" : "muted"}.`);
+        return;
+      }
+
+      if (!wasmApprovalPending && normalized === "doom.audio status") {
+        const status = doomRuntime?.status?.() || {};
+        updateRuntimeStatus(status, "audio-status");
+        const audio = status.audio || {};
+        appendConsoleLine("[ AUDIO]", audio.muted === false ? "log-ok" : "log-info", `muted=${audio.muted !== false}; left=${Number(audio.leftEnergy || 0).toFixed(2)}; right=${Number(audio.rightEnergy || 0).toFixed(2)}; balance=${Number(audio.balance || 0).toFixed(2)}; event=${audio.eventType || "none"}`);
         return;
       }
 

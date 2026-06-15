@@ -16,6 +16,9 @@ Controls:
 - `Phase + Logs`: run `doom.phase.check`, then immediately run `copy.logs`.
 - `Manual Move`: manual movement/turning, AI sensing remains active.
 - `Sense Only`: AI sensing and phase routing only; all AI input suppressed.
+- `Audio Off` / `Audio On`: toggles muted debug audio playback. Playback is
+  muted by default and only uses an external WASM audio bridge when one is
+  available.
 - `Detection Overlay`: show or hide detector overlays.
 - `DET:*`: toggle detector categories.
 
@@ -34,6 +37,8 @@ doom.autoplay on
 doom.autoplay off
 doom.autoplay manual-move toggle
 doom.autoplay sense-only toggle
+doom.audio toggle
+doom.audio status
 doom.restart-play
 doom.use-test
 idfa
@@ -113,6 +118,19 @@ Use it to answer:
 Overlay labels intentionally include detector values so the developer can point
 at a screen region and report the mismatch without decoding the full status
 string.
+
+## Auditory and Spatial HUD
+
+The debug HUD shows stereo auditory evidence without making control decisions:
+
+- L/R gauges visualize left and right channel energy.
+- The event icon uses `spatialSnapshot.hudX` / `spatialSnapshot.hudY` supplied
+  by the WASM spatial kernel.
+- `doom-prompt.js` only renders the gauges and icon; it does not calculate
+  spatial direction.
+- `doom.js` copies `auditorySnapshot`, `spatialSnapshot`, and `ctgCarrier` into
+  runtime status.
+- CTG and Gate results remain outside DoomWeb.
 
 ## Common Failure Modes
 

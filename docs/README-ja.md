@@ -17,20 +17,32 @@ fail-closed な実行時ゲート、Observer ROM による証拠駆動の開発�
 DOOM の配布パッケージではありません。`DOOM1.WAD`、Bonsai GGUF モデル、
 生成済み `doom.wasm` などの第三者ランタイム成果物はコミットしません。
 
+## リポジトリ横断整合
+
+共有の repository boundary、0.1.1.1 local NuGet versioning、この更新ラインでの
+NuGet-only / no-PyPI rule は
+[AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1-ja.md)
+で定義します。
+
+Doom はこの sample の scenario-specific な visual、audio、HUD、input mapping を
+所有します。Shared contract、generic WASM semantics、Core/Control gate logic は
+定義しません。
+
 ## 読む順番
 
 まず以下から読むことを推奨します。
 
 1. [概要](overview-ja.md)
 2. [アーキテクチャ](architecture-ja.md)
-3. [WASM Runtime と ABI](wasm-runtime-ja.md)
-4. [Web Runtime](web-runtime-ja.md)
-5. [視野認知エンジン](vision-perception-engine-ja.md)
-6. [AutoPlay Control Pipeline](autoplay-control-pipeline-ja.md)
-7. [デバッグとテレメトリ](debugging-and-telemetry-ja.md)
-8. [AutoPlay Optimizer](autoplay-optimizer-ja.md)
-9. [開発方法論](development-methodology-ja.md)
-10. [アセットとリリース運用](asset-and-release-operations-ja.md)
+3. [Concept Elevation Notes / 概念昇格ノート](concept-elevation.md)
+4. [WASM Runtime と ABI](wasm-runtime-ja.md)
+5. [Web Runtime](web-runtime-ja.md)
+6. [視野認知エンジン](vision-perception-engine-ja.md)
+7. [AutoPlay Control Pipeline](autoplay-control-pipeline-ja.md)
+8. [デバッグとテレメトリ](debugging-and-telemetry-ja.md)
+9. [AutoPlay Optimizer](autoplay-optimizer-ja.md)
+10. [開発方法論](development-methodology-ja.md)
+11. [アセットとリリース運用](asset-and-release-operations-ja.md)
 
 参照資料:
 

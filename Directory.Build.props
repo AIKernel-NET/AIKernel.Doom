@@ -7,15 +7,21 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
-    <Version>0.1.1-dev1</Version>
-    <PackageVersion>0.1.1-dev1</PackageVersion>
-    <AssemblyVersion>0.1.1.0</AssemblyVersion>
-    <FileVersion>0.1.1.0</FileVersion>
-    <InformationalVersion>0.1.1-dev1</InformationalVersion>
-    <AIKernelCorePackageVersion>0.1.1</AIKernelCorePackageVersion>
-    <AIKernelProvidersPackageVersion>0.1.1</AIKernelProvidersPackageVersion>
-    <AIKernelWasmRuntimePackageVersion>0.1.1</AIKernelWasmRuntimePackageVersion>
-    <AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.1</AIKernelWasmWebGpuComputeProviderPackageVersion>
+    <StablePackageVersion>0.1.1.1</StablePackageVersion>
+    <LocalPackageVersionPrefix>0.1.1.1</LocalPackageVersionPrefix>
+    <LocalPackageBuildNumber Condition="'$(LocalPackageBuildNumber)' == ''">0</LocalPackageBuildNumber>
+    <UseLocalPackageVersion Condition="'$(UseLocalPackageVersion)' == ''">false</UseLocalPackageVersion>
+    <Version Condition="'$(UseLocalPackageVersion)' == 'true'">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</Version>
+    <Version Condition="'$(UseLocalPackageVersion)' != 'true'">$(StablePackageVersion)</Version>
+    <PackageVersion>$(Version)</PackageVersion>
+    <AssemblyVersion>$(StablePackageVersion)</AssemblyVersion>
+    <FileVersion>$(StablePackageVersion)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <AIKernelPackageVersion>[0.1.1.1]</AIKernelPackageVersion>
+    <AIKernelCorePackageVersion>0.1.1.1-dev1</AIKernelCorePackageVersion>
+    <AIKernelProvidersPackageVersion>0.1.1.1-dev2</AIKernelProvidersPackageVersion>
+    <AIKernelWasmRuntimePackageVersion>0.1.1.1-dev0</AIKernelWasmRuntimePackageVersion>
+    <AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.1.1-dev0</AIKernelWasmWebGpuComputeProviderPackageVersion>
     <AIKernelProvidersPackageId>AIKernel.Providers.Standard</AIKernelProvidersPackageId>
   </PropertyGroup>
 </Project>

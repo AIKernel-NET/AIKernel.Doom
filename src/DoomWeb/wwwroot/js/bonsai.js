@@ -266,6 +266,9 @@
     { name: "gray", r: 142, g: 142, b: 132 },
     { name: "pink", r: 184, g: 92, b: 92 }
   ];
+  const CTG_ROM_CANON_ID = "Canon.CTG.Monolith";
+  const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.1";
+  const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
   class AIKernelBonsaiSupervisor {
     constructor(options) {
@@ -326,6 +329,9 @@
       this.wallHugSide = "left";
       this.targetConfidence = 0;
       this.soundCueActive = false;
+      this.auditorySnapshot = createAuditorySnapshot();
+      this.spatialSnapshot = createSpatialSnapshot();
+      this.ctgCarrier = createCtgCarrier();
       this.repeatActionSignature = "";
       this.repeatActionFrames = 0;
       this.repeatTurnFrames = 0;
@@ -502,6 +508,9 @@
         this.wallHugSide = "left";
         this.targetConfidence = 0;
         this.soundCueActive = false;
+        this.auditorySnapshot = createAuditorySnapshot();
+        this.spatialSnapshot = createSpatialSnapshot();
+        this.ctgCarrier = createCtgCarrier();
         this.repeatActionSignature = "";
         this.repeatActionFrames = 0;
         this.repeatTurnFrames = 0;
@@ -636,6 +645,9 @@
         wallHugSide: this.wallHugSide,
         targetConfidence: this.targetConfidence,
         soundCueActive: this.soundCueActive,
+        auditorySnapshot: this.auditorySnapshot,
+        spatialSnapshot: this.spatialSnapshot,
+        ctgCarrier: this.ctgCarrier,
         repeatActionFrames: this.repeatActionFrames,
         repeatTurnFrames: this.repeatTurnFrames,
         openAdvanceStallFrames: this.openAdvanceStallFrames,
@@ -938,6 +950,7 @@
       const cornered = looksLikeCorner(frame, Math.min(frameChange, visualStallDelta)) || cornerTrap || knownCorner;
       const looped = this.updateBreadcrumbTrail(state, frame);
       const soundCue = resolveSoundCue(state);
+      const auditorySnapshot = buildAuditorySnapshot(state);
       const staticMapDoorBias = Boolean(mapHints?.doorLines || mapHints?.switchLines);
       const staticGateCandidate = !soundCue
         && !openView
@@ -1597,6 +1610,16 @@
         this.lastUseWasBlocked = wallLike || knownWall || urgentCorner || this.wallUseProbeStage > 0 || depthEstimate <= Math.max(DOOR_USE_DEPTH_THRESHOLD, profileNumber(this.profile, "doorUseDepth", DOOR_USE_DEPTH_THRESHOLD)) + 0.08;
         this.lastUseProbeStage = this.wallUseProbeStage;
       }
+
+      this.auditorySnapshot = auditorySnapshot;
+      this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+      this.ctgCarrier = createCtgCarrier({
+        phase: this.semanticMemory?.phase || this.controlPipeline,
+        pipeline: this.controlPipeline,
+        lastDecision: this.enabled ? "policy-carried" : "disabled",
+        confidence: this.spatialSnapshot.confidence,
+        timestamp: this.spatialSnapshot.timestamp
+      });
 
       const frameSnapshot = frame.sample?.length ? {
         sample: frame.sample.slice(0),
@@ -4822,17 +4845,110 @@
       return null;
     }
 
-    const direction = cue.direction === "right" ? "right" : (cue.direction === "left" ? "left" : null);
-    if (direction) {
-      return { direction };
+    if (cue.eventDetected === false || cue.active === false) {
+      return null;
     }
 
-    const dx = Number(cue.x ?? cue.dx ?? cue.sourceX);
-    if (Number.isFinite(dx) && Math.abs(dx) > 0.1) {
-      return { direction: dx > 0 ? "right" : "left" };
+    const direction = cue.direction === "right" ? "right" : (cue.direction === "left" ? "left" : null);
+    if (direction) {
+      return {
+        direction,
+        leftEnergy: clamp01(Number(cue.leftEnergy ?? cue.leftLevel ?? cue.left ?? 0)),
+        rightEnergy: clamp01(Number(cue.rightEnergy ?? cue.rightLevel ?? cue.right ?? 0)),
+        balance: Math.max(-1, Math.min(1, Number(cue.balance ?? 0) || 0)),
+        dominantFreq: Number(cue.dominantFreq ?? cue.frequency ?? 0),
+        eventType: normalizeAuditoryEventType(cue.eventType)
+      };
     }
 
     return null;
+  }
+
+  function createAuditorySnapshot(overrides = {}) {
+    const leftEnergy = clamp01(Number(overrides.leftEnergy ?? 0));
+    const rightEnergy = clamp01(Number(overrides.rightEnergy ?? 0));
+    const balance = Math.max(-1, Math.min(1, Number(overrides.balance ?? 0) || 0));
+    return {
+      leftEnergy: round2(leftEnergy),
+      rightEnergy: round2(rightEnergy),
+      balance: round2(balance),
+      dominantFreq: round2(Number(overrides.dominantFreq ?? 0)),
+      eventDetected: Boolean(overrides.eventDetected),
+      eventType: normalizeAuditoryEventType(overrides.eventType),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function buildAuditorySnapshot(state) {
+    const source = state?.auditorySnapshot || state?.audio || {};
+    const leftEnergy = clamp01(Number(source.leftEnergy ?? source.leftLevel ?? source.left ?? 0));
+    const rightEnergy = clamp01(Number(source.rightEnergy ?? source.rightLevel ?? source.right ?? 0));
+    const balance = Math.max(-1, Math.min(1, Number(source.balance ?? 0) || 0));
+    const dominantFreq = Number(source.dominantFreq ?? source.frequency ?? source.dominantFrequency ?? 0);
+    const eventDetected = Boolean(source.eventDetected ?? source.active);
+    return createAuditorySnapshot({
+      leftEnergy,
+      rightEnergy,
+      balance,
+      dominantFreq,
+      eventDetected,
+      eventType: eventDetected ? normalizeAuditoryEventType(source.eventType) : "none",
+      timestamp: source.timestamp || state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    });
+  }
+
+  function createSpatialSnapshot(overrides = {}) {
+    const visualDirection = Number(overrides.visualDirection ?? 0);
+    const auditoryCorrection = Number(overrides.auditoryCorrection ?? 0);
+    const fusedDirection = Number(overrides.fusedDirection ?? 0);
+    return {
+      visualDirection: round2(visualDirection),
+      auditoryCorrection: round2(auditoryCorrection),
+      fusedDirection: round2(fusedDirection),
+      hudX: round2(clamp01(Number(overrides.hudX ?? 0.5))),
+      hudY: round2(clamp01(Number(overrides.hudY ?? 0.45))),
+      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
+      eventDetected: Boolean(overrides.eventDetected),
+      eventType: normalizeAuditoryEventType(overrides.eventType),
+      gain: Number(overrides.gain ?? 0)
+    };
+  }
+
+  function buildSpatialSnapshot(state, auditory) {
+    const source = state?.spatialSnapshot || {};
+    return createSpatialSnapshot({
+      visualDirection: Number(source.visualDirection ?? 0),
+      auditoryCorrection: Number(source.auditoryCorrection ?? 0),
+      fusedDirection: Number(source.fusedDirection ?? source.visualDirection ?? 0),
+      confidence: Number(source.confidence ?? 0),
+      timestamp: source.timestamp || auditory?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
+      eventDetected: Boolean(source.eventDetected ?? auditory?.eventDetected),
+      eventType: source.eventType || auditory?.eventType || "none",
+      hudX: Number(source.hudX ?? 0.5),
+      hudY: Number(source.hudY ?? 0.45)
+    });
+  }
+
+  function createCtgCarrier(overrides = {}) {
+    return {
+      canonId: CTG_ROM_CANON_ID,
+      policyId: CTG_ROM_POLICY_ID,
+      phase: overrides.phase || "Idle",
+      pipeline: overrides.pipeline || "Idle",
+      lastDecision: overrides.lastDecision || "none",
+      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function normalizeAuditoryEventType(value) {
+    const text = String(value || "spatial-event").toLowerCase();
+    if (text === "motion" || text === "contact" || text === "attention" || text === "spatial-event") {
+      return text;
+    }
+
+    return text === "none" ? "none" : "spatial-event";
   }
 
   function breadcrumbPoint(state, frame) {
@@ -5086,35 +5202,42 @@
 
   function activeDetectionsForPipeline(controller) {
     const phase = inferControlPipeline(controller);
+    const withAuditory = (detections) => {
+      if (controller?.auditorySnapshot?.eventDetected || controller?.spatialSnapshot?.eventDetected) {
+        return Array.from(new Set([...detections, "audio"]));
+      }
+
+      return detections;
+    };
     if (!controller || !controller.enabled) {
-      return ["objective", "hud"];
+      return withAuditory(["objective", "hud"]);
     }
 
     if (phase === "OpeningHome") {
-      return ["objective", "motion", "wall", "foot", "hud"];
+      return withAuditory(["objective", "motion", "wall", "foot", "hud"]);
     }
 
     if (phase === "FirstDoor") {
-      return ["objective", "motion", "door", "wall", "foot", "hud"];
+      return withAuditory(["objective", "motion", "door", "wall", "foot", "hud"]);
     }
 
     if (phase === "ComputerRoom") {
-      return ["objective", "motion", "computer", "enemy", "wall", "foot", "hud"];
+      return withAuditory(["objective", "motion", "computer", "enemy", "wall", "foot", "hud"]);
     }
 
     if (phase === "Bridge") {
-      return ["objective", "motion", "wall", "foot", "hud"];
+      return withAuditory(["objective", "motion", "wall", "foot", "hud"]);
     }
 
     if (phase === "SecondDoor") {
-      return ["objective", "motion", "door", "enemy", "wall", "foot", "hud"];
+      return withAuditory(["objective", "motion", "door", "enemy", "wall", "foot", "hud"]);
     }
 
     if (phase === "ExitRoom") {
-      return ["objective", "motion", "door", "hud"];
+      return withAuditory(["objective", "motion", "door", "hud"]);
     }
 
-    return ["objective", "hud"];
+    return withAuditory(["objective", "hud"]);
   }
 
   function createE1M1SemanticMemory() {

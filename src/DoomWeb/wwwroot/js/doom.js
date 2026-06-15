@@ -28,6 +28,7 @@
   const AUTOPLAY_USE_TAP_FRAMES = 2;
   const AUTOPLAY_USE_TAP_SPACING_FRAMES = 6;
   const IS_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
+  const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
   ensureBrowserWebGpuComputeProvider();
 
@@ -112,6 +113,11 @@
       this.autoplayWallHugSide = "left";
       this.autoplayTargetConfidence = 0;
       this.autoplaySoundCueActive = false;
+      this.audioPlaybackMuted = true;
+      this.lastDebugAudioAt = 0;
+      this.autoplayAuditorySnapshot = null;
+      this.autoplaySpatialSnapshot = null;
+      this.autoplayCtgCarrier = null;
       this.autoplayRepeatActionFrames = 0;
       this.autoplayRepeatTurnFrames = 0;
       this.autoplayQuantizedStallFrames = 0;
@@ -218,6 +224,13 @@
           wallHugSide: this.autoplayWallHugSide,
           targetConfidence: this.autoplayTargetConfidence,
           soundCueActive: this.autoplaySoundCueActive,
+          auditorySnapshot: this.autoplayAuditorySnapshot,
+          spatialSnapshot: this.autoplaySpatialSnapshot,
+          ctgCarrier: this.autoplayCtgCarrier,
+          audioPlayback: {
+            muted: this.audioPlaybackMuted,
+            enabled: !this.audioPlaybackMuted
+          },
           repeatActionFrames: this.autoplayRepeatActionFrames,
           repeatTurnFrames: this.autoplayRepeatTurnFrames,
           quantizedStallFrames: this.autoplayQuantizedStallFrames,
@@ -290,6 +303,15 @@
           semanticMemory: this.autoplaySemanticMemory,
           action: this.autoplayLastAction,
           lastError: this.autoplayLastError
+        },
+        audio: {
+          muted: this.audioPlaybackMuted,
+          playbackEnabled: !this.audioPlaybackMuted,
+          leftEnergy: Number(this.autoplayAuditorySnapshot?.leftEnergy || 0),
+          rightEnergy: Number(this.autoplayAuditorySnapshot?.rightEnergy || 0),
+          balance: Number(this.autoplayAuditorySnapshot?.balance || 0),
+          eventDetected: Boolean(this.autoplayAuditorySnapshot?.eventDetected),
+          eventType: this.autoplayAuditorySnapshot?.eventType || "none"
         },
         gpuDelegate: resolveGpuDelegateName(),
         mapHints: this.wadMapHints ? {
@@ -526,6 +548,9 @@
         this.autoplayLoopEscapeFrames = 0;
         this.autoplayTargetConfidence = 0;
         this.autoplaySoundCueActive = false;
+        this.autoplayAuditorySnapshot = null;
+        this.autoplaySpatialSnapshot = null;
+        this.autoplayCtgCarrier = null;
         this.autoplayRepeatActionFrames = 0;
         this.autoplayRepeatTurnFrames = 0;
         this.autoplayQuantizedStallFrames = 0;
@@ -595,6 +620,16 @@
       }
       this.emitStatus(this.autoplaySenseOnly ? "autoplay-sense-only-on" : "autoplay-sense-only-off");
       return this.status();
+    }
+
+    setAudioPlayback(enabled) {
+      this.audioPlaybackMuted = !Boolean(enabled);
+      this.emitStatus(this.audioPlaybackMuted ? "audio-muted" : "audio-enabled");
+      return this.status();
+    }
+
+    setAudioMuted(muted) {
+      return this.setAudioPlayback(!Boolean(muted));
     }
 
     queueInput(keycode, pressed) {
@@ -881,6 +916,9 @@
           this.autoplayWallHugSide = status.wallHugSide || "left";
           this.autoplayTargetConfidence = status.targetConfidence || 0;
           this.autoplaySoundCueActive = Boolean(status.soundCueActive);
+          this.autoplayAuditorySnapshot = status.auditorySnapshot || null;
+          this.autoplaySpatialSnapshot = status.spatialSnapshot || null;
+          this.autoplayCtgCarrier = status.ctgCarrier || null;
           this.autoplayRepeatActionFrames = status.repeatActionFrames || 0;
           this.autoplayRepeatTurnFrames = status.repeatTurnFrames || 0;
           this.autoplayQuantizedStallFrames = status.quantizedStallFrames || 0;
@@ -937,6 +975,7 @@
           this.autoplayObjective = status.objective || "disabled";
           this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
           this.autoplaySemanticMemory = status.semanticMemory || null;
+          this.handleDebugAudioPlayback();
           this.autoplayMode = "idle";
           this.autoplayPending = false;
           this.emitStatus("autoplay-predicted");
@@ -967,6 +1006,9 @@
       this.autoplayObjective = status.objective || this.autoplayObjective;
       this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
       this.autoplaySemanticMemory = status.semanticMemory || this.autoplaySemanticMemory;
+      this.autoplayAuditorySnapshot = status.auditorySnapshot || this.autoplayAuditorySnapshot;
+      this.autoplaySpatialSnapshot = status.spatialSnapshot || this.autoplaySpatialSnapshot;
+      this.autoplayCtgCarrier = status.ctgCarrier || this.autoplayCtgCarrier;
     }
 
     updateWebGpuFrameState(indices) {
@@ -998,6 +1040,8 @@
         zeroCopy: false
       };
 
+      const audio = this.createAuditoryRuntimeSnapshot();
+      audio.source = this.attachAudioRuntimeSource(audio);
       return {
         frame: this.frameCount,
         fps: this.fps,
@@ -1008,6 +1052,7 @@
         } : {
           zeroCopy: false
         }),
+        audio,
         mapHints: this.wadMapHints,
         player: {
           health: null,
@@ -1020,6 +1065,33 @@
           gpuDelegate: resolveGpuDelegateName(),
           targetFps: this.targetFps
         }
+      };
+    }
+
+    createAuditoryRuntimeSnapshot() {
+      const snapshot = this.autoplayAuditorySnapshot || {};
+      return {
+        active: Boolean(snapshot.eventDetected),
+        leftEnergy: Number(snapshot.leftEnergy || 0),
+        rightEnergy: Number(snapshot.rightEnergy || 0),
+        balance: Number(snapshot.balance || 0),
+        dominantFreq: Number(snapshot.dominantFreq || 0),
+        eventDetected: Boolean(snapshot.eventDetected),
+        eventType: snapshot.eventType || "none",
+        timestamp: snapshot.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+      };
+    }
+
+    attachAudioRuntimeSource(audio) {
+      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
+      if (typeof bridge?.uploadGpuAudioSnapshot === "function") {
+        return bridge.uploadGpuAudioSnapshot("doom.audio", audio);
+      }
+
+      return {
+        kind: "audio-state-buffer",
+        zeroCopy: false,
+        backend: "runtime-status"
       };
     }
 
@@ -1054,6 +1126,7 @@
           if (!this.isManualInputActive(AUTOPLAY_KEYS.run)) {
             this.queueInput(AUTOPLAY_KEYS.run, desired.run);
           }
+          this.handleDebugAudioPlayback();
           return;
         }
       }
@@ -1066,6 +1139,29 @@
           continue;
         }
         this.queueInput(keycode, desired[name]);
+      }
+      this.handleDebugAudioPlayback();
+    }
+
+    handleDebugAudioPlayback() {
+      if (this.audioPlaybackMuted) {
+        return;
+      }
+
+      const snapshot = this.autoplayAuditorySnapshot;
+      if (!snapshot?.eventDetected || Math.max(Number(snapshot.leftEnergy || 0), Number(snapshot.rightEnergy || 0)) < 0.08) {
+        return;
+      }
+
+      const now = self.performance?.now?.() || Date.now();
+      if (this.lastDebugAudioAt && now - this.lastDebugAudioAt < 160) {
+        return;
+      }
+
+      this.lastDebugAudioAt = now;
+      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
+      if (typeof bridge?.playSpatialCue === "function") {
+        bridge.playSpatialCue(snapshot);
       }
     }
 

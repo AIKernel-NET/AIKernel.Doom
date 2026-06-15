@@ -30,6 +30,7 @@ RELEASE_NOTES-ja.md
 Recommended path:
 
 - `docs/architecture.md` - guideline-aligned Provider/Observer/Operator mapping.
+- `docs/concept-elevation.md` - concept vocabulary placement and naming guardrails.
 - `docs/wasm-runtime.md` - Emscripten/WASI ABI and memory-backed WAD mount.
 - `docs/web-runtime.md` - browser worker, WebGPU, prompt, and consent runtime.
 - `docs/vision-perception-engine.md` - JavaScript 3x3 vision, HUD, motion, and overlay engine.

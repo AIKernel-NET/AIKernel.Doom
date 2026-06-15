@@ -8,4 +8,7 @@
     <Project Path="src/DoomWasm.Native/DoomWasm.Native.csproj" />
     <Project Path="src/DoomWasm/DoomWasm.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AIKernel.Doom.Architecture.Tests/AIKernel.Doom.Architecture.Tests.csproj" />
+  </Folder>
 </Solution>

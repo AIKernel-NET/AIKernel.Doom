@@ -159,6 +159,14 @@
       return this.call("setAutoplaySenseOnly", [enabled]);
     }
 
+    setAudioPlayback(enabled) {
+      return this.call("setAudioPlayback", [enabled]);
+    }
+
+    setAudioMuted(muted) {
+      return this.call("setAudioMuted", [muted]);
+    }
+
     status() {
       return this.statusCache;
     }

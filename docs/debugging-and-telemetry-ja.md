@@ -17,6 +17,15 @@ Web runtime には次のデバッグ操作があります。
   既定は mute で、利用可能な場合のみ外部 WASM audio bridge を使います。
 - `DET:` buttons: `Motion`、`Objective`、`Door`、`Wall`、`Enemy`、`Computer`、`Foot`、`HUD` の ON / OFF。
 
+toolbar は 2 行構成です。
+
+- 上段は操作行で、log capture、manual movement、sense-only mode、debug
+  audio playback などを置きます。
+- 下段は sensor 行で、`sensorInputs` map と同期する汎用
+  `data-sensor-toggle` button を列挙します。現在の既定は
+  `Aisthesis Visual`、`Aisthesis Audio`、`Kinesis Motor`、`Kinesis Movement`、`Phantasia Compass`、
+  `Phantasia Spatial`、`Aisthesis Health` です。
+
 検知ボタンは overlay の枠線色に合わせた色を持ち、OFF のときはグレーになります。これにより、現在の phase でどの detector が使われているかを視覚的に確認できます。
 
 ## Overlay
@@ -48,6 +57,9 @@ debug HUD は stereo auditory evidence を表示しますが、制御判断は�
 - `doom-prompt.js` は gauge と icon を描画するだけで、spatial direction は計算しません。
 - `doom.js` は `auditorySnapshot`、`spatialSnapshot`、`ctgCarrier` を runtime
   status へコピーするだけです。
+- `health-death` retry intent は `retry=active|idle/cooldown/reason` として
+  表示します。この retry bridge は DoomWeb runtime dispatch の責務であり、
+  CTG / Gate rule を複製しません。
 - CTG / Gate result は DoomWeb の外側に置きます。
 
 ## Runtime Status

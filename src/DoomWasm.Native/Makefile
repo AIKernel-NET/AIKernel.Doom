@@ -10,6 +10,7 @@ OVERLAY_SOURCES := \
 	src/aik_doom_time.c \
 	src/aik_doom_log.c \
 	src/aik_doom_wad_file.c \
+	src/aik_doom_sound.c \
 	src/doomgeneric_aikernel.c
 
 UPSTREAM_SOURCES := $(wildcard $(DOOMGENERIC_DIR)/*.c)
@@ -32,8 +33,8 @@ EXCLUDED_UPSTREAM_SOURCES := \
 
 DOOMGENERIC_SOURCES := $(filter-out $(EXCLUDED_UPSTREAM_SOURCES),$(UPSTREAM_SOURCES))
 
-EXPORTS := '["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_malloc","_free"]'
-EMCC_FLAGS := -O3 -sWASM=1 -sSTANDALONE_WASM=1 -sFILESYSTEM=0 -sEXPORTED_FUNCTIONS=$(EXPORTS) -sALLOW_MEMORY_GROWTH=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -DCMAP256=1 -DAIKERNEL_DOOM_WASM=1 -Iinclude -I$(DOOMGENERIC_DIR)
+EXPORTS := '["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_doom_audio_status","_doom_audio_sample_rate","_doom_audio_channels","_doom_audio_buffer","_doom_audio_capacity_frames","_doom_audio_read_offset_frames","_doom_audio_available_frames","_doom_audio_consume_frames","_doom_audio_event_count","_malloc","_free"]'
+EMCC_FLAGS := -O3 -sWASM=1 -sSTANDALONE_WASM=1 -sFILESYSTEM=0 -sEXPORTED_FUNCTIONS=$(EXPORTS) -sALLOW_MEMORY_GROWTH=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -DCMAP256=1 -DAIKERNEL_DOOM_WASM=1 -DFEATURE_SOUND=1 -Iinclude -I$(DOOMGENERIC_DIR)
 
 .PHONY: all check clean
 

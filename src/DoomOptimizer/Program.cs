@@ -208,6 +208,10 @@ static object ProfileParameters(AutoplayOptimizationProfile profile)
 
 internal sealed class ObserverRomOptimizer
 {
+    /// <summary>
+    /// EN: Executes Optimize.
+    /// EN: Documentation for public API. JA: Optimize を実行します。
+    /// </summary>
     public OptimizationResult Optimize(AutoplayOptimizationProfile seed)
     {
         OptimizationResult? best = null;
@@ -276,6 +280,10 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
     private int _stuckCount;
     private int _useAttempts;
     private int _attackBursts;
+    /// <summary>
+    /// EN: Executes RunDoorScenario.
+    /// EN: Documentation for public API. JA: RunDoorScenario を実行します。
+    /// </summary>
 
     public void RunDoorScenario(IAutoplayStrategy strategy)
     {
@@ -308,6 +316,10 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
             Track(frame, "door", sensor, action);
         }
     }
+    /// <summary>
+    /// EN: Executes RunCombatScenario.
+    /// EN: Documentation for public API. JA: RunCombatScenario を実行します。
+    /// </summary>
 
     public void RunCombatScenario(IAutoplayStrategy strategy)
     {
@@ -338,6 +350,10 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
             Track(frame, "combat", sensor, action);
         }
     }
+    /// <summary>
+    /// EN: Executes ToResult.
+    /// EN: Documentation for public API. JA: ToResult を実行します。
+    /// </summary>
 
     public OptimizationResult ToResult()
     {
@@ -397,6 +413,10 @@ internal sealed record ObserverFrame(
 
 internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPath)
 {
+    /// <summary>
+    /// EN: Executes RunRestartOnCurrentPageAsync.
+    /// EN: Documentation for public API. JA: RunRestartOnCurrentPageAsync を実行します。
+    /// </summary>
     public async Task<WebRestartResult> RunRestartOnCurrentPageAsync()
     {
         await using var client = await CdpClient.ConnectAsync(cdpEndpoint).ConfigureAwait(false);
@@ -435,6 +455,10 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
 
         return new WebRestartResult(beforePath, afterPath, before.Clone(), after.Clone());
     }
+    /// <summary>
+    /// EN: Executes RunUseTestOnCurrentPageAsync.
+    /// EN: Documentation for public API. JA: RunUseTestOnCurrentPageAsync を実行します。
+    /// </summary>
 
     public async Task<WebUseTestResult> RunUseTestOnCurrentPageAsync()
     {
@@ -458,6 +482,10 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
 
         return new WebUseTestResult(beforePath, afterPath, before.Clone(), after.Clone());
     }
+    /// <summary>
+    /// EN: Executes RunUseTestAsync.
+    /// EN: Documentation for public API. JA: RunUseTestAsync を実行します。
+    /// </summary>
 
     public async Task<WebUseTestResult> RunUseTestAsync()
     {
@@ -491,6 +519,10 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
 
         return new WebUseTestResult(beforePath, afterPath, before.Clone(), after.Clone());
     }
+    /// <summary>
+    /// EN: Executes RunUntilDoorAsync.
+    /// EN: Documentation for public API. JA: RunUntilDoorAsync を実行します。
+    /// </summary>
 
     public async Task<WebRunnerResult> RunUntilDoorAsync(TimeSpan timeout)
     {
@@ -563,6 +595,10 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
         await client.CaptureScreenshotAsync(screenshotPath).ConfigureAwait(false);
         return WebRunnerResult.FromStatus(false, DateTimeOffset.UtcNow - startedAt, last, samples, evidenceScreenshots);
     }
+    /// <summary>
+    /// EN: Executes RunUntilGoalAsync.
+    /// EN: Documentation for public API. JA: RunUntilGoalAsync を実行します。
+    /// </summary>
 
     public async Task<WebRunnerResult> RunUntilGoalAsync(TimeSpan timeout, int targetEnemies, string goal)
     {
@@ -750,6 +786,10 @@ internal sealed class CdpClient : IAsyncDisposable
     private CdpClient()
     {
     }
+    /// <summary>
+    /// EN: Executes ConnectAsync.
+    /// EN: Documentation for public API. JA: ConnectAsync を実行します。
+    /// </summary>
 
     public static async Task<CdpClient> ConnectAsync(Uri cdpEndpoint)
     {
@@ -774,6 +814,10 @@ internal sealed class CdpClient : IAsyncDisposable
         await client._socket.ConnectAsync(new Uri(ws), CancellationToken.None).ConfigureAwait(false);
         return client;
     }
+    /// <summary>
+    /// EN: Executes SendAsync.
+    /// EN: Documentation for public API. JA: SendAsync を実行します。
+    /// </summary>
 
     public async Task<JsonElement> SendAsync(string method, object? parameters)
     {
@@ -803,12 +847,20 @@ internal sealed class CdpClient : IAsyncDisposable
             return response.GetProperty("result").Clone();
         }
     }
+    /// <summary>
+    /// EN: Executes EvaluateAsync&lt;T&gt;.
+    /// EN: Documentation for public API. JA: EvaluateAsync&lt;T&gt; を実行します。
+    /// </summary>
 
     public async Task<T> EvaluateAsync<T>(string expression)
     {
         var value = await EvaluateJsonAsync(expression).ConfigureAwait(false);
         return value.Deserialize<T>(OptimizerJson.Options)!;
     }
+    /// <summary>
+    /// EN: Executes EvaluateJsonAsync.
+    /// EN: Documentation for public API. JA: EvaluateJsonAsync を実行します。
+    /// </summary>
 
     public async Task<JsonElement> EvaluateJsonAsync(string expression)
     {
@@ -832,6 +884,10 @@ internal sealed class CdpClient : IAsyncDisposable
 
         return default;
     }
+    /// <summary>
+    /// EN: Executes CaptureScreenshotAsync.
+    /// EN: Documentation for public API. JA: CaptureScreenshotAsync を実行します。
+    /// </summary>
 
     public async Task CaptureScreenshotAsync(string path)
     {
@@ -872,6 +928,10 @@ internal sealed class CdpClient : IAsyncDisposable
 
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
+    /// <summary>
+    /// EN: Executes DisposeAsync.
+    /// EN: Documentation for public API. JA: DisposeAsync を実行します。
+    /// </summary>
 
     public async ValueTask DisposeAsync()
     {
@@ -899,8 +959,16 @@ internal sealed record WebRunnerResult(
     IReadOnlyList<string> EvidenceScreenshots,
     IReadOnlyList<JsonElement> Samples)
 {
+    /// <summary>
+    /// EN: Executes Failed.
+    /// EN: Documentation for public API. JA: Failed を実行します。
+    /// </summary>
     public static WebRunnerResult Failed(string error)
         => new(false, false, false, 0, 0, 0, 0, 0, "none", "none", error, [], []);
+    /// <summary>
+    /// EN: Gets FromStatus.
+    /// EN: Documentation for public API. JA: FromStatus を取得します。
+    /// </summary>
 
     public static WebRunnerResult FromStatus(
         bool success,
@@ -932,6 +1000,10 @@ internal sealed record WebRunnerResult(
 
 internal static class JsonElementExtensions
 {
+    /// <summary>
+    /// EN: Executes GetPropertyOrDefault.
+    /// EN: Documentation for public API. JA: GetPropertyOrDefault を実行します。
+    /// </summary>
     public static JsonElement GetPropertyOrDefault(this JsonElement element, string name)
     {
         if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value))
@@ -941,12 +1013,20 @@ internal static class JsonElementExtensions
 
         return default;
     }
+    /// <summary>
+    /// EN: Executes GetStringOrDefault.
+    /// EN: Documentation for public API. JA: GetStringOrDefault を実行します。
+    /// </summary>
 
     public static string GetStringOrDefault(this JsonElement element, string name)
     {
         var value = element.GetPropertyOrDefault(name);
         return value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     }
+    /// <summary>
+    /// EN: Executes GetInt32OrDefault.
+    /// EN: Documentation for public API. JA: GetInt32OrDefault を実行します。
+    /// </summary>
 
     public static int GetInt32OrDefault(this JsonElement element, string name)
     {
@@ -958,6 +1038,10 @@ internal static class JsonElementExtensions
 
         return 0;
     }
+    /// <summary>
+    /// EN: Executes GetDoubleOrDefault.
+    /// EN: Documentation for public API. JA: GetDoubleOrDefault を実行します。
+    /// </summary>
 
     public static double GetDoubleOrDefault(this JsonElement element, string name)
     {
@@ -969,6 +1053,10 @@ internal static class JsonElementExtensions
 
         return 0;
     }
+    /// <summary>
+    /// EN: Executes GetBoolOrDefault.
+    /// EN: Documentation for public API. JA: GetBoolOrDefault を実行します。
+    /// </summary>
 
     public static bool GetBoolOrDefault(this JsonElement element, string name)
     {
@@ -980,6 +1068,10 @@ internal static class JsonElementExtensions
 
 internal static class OptimizerJson
 {
+    /// <summary>
+    /// EN: Executes Options.
+    /// EN: Documentation for public API. JA: Options を実行します。
+    /// </summary>
     public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,

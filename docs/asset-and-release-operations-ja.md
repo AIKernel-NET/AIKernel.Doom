@@ -6,7 +6,7 @@ AIKernel.Doom は source-only のサンプルとして公開します。第三�
 
 ## バージョン
 
-このデモの公開準備バージョンは `0.1.1-dev1` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。
+このデモの公開準備バージョンは `0.1.1.1-dev1` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。次の公式 canonical package line は v0.1.2 です。
 
 ## コミットするもの
 
@@ -59,6 +59,24 @@ AIKernel.Doom は source-only のサンプルとして公開します。第三�
 - Bonsai-1.7B model の Apache-2.0 license、NOTICE、upstream repository。
 - 商用 WAD を同梱しないこと。
 
+## `doom.wasm` の GPL 対応ソース
+
+`doom.wasm` は GPL 対象の doomgeneric source に由来します。公開デプロイで
+この compiled artifact をホストする場合、同じ release surface から以下の
+対応ソースに到達できる必要があります。
+
+- ビルドに使用した pinned doomgeneric checkout。
+- `src/DoomWasm.Native/src` 配下の AIKernel overlay files。native SFX audio bridge
+  である `aik_doom_sound.c` を含みます。
+- `src/DoomWasm.Native/build.ps1`、`build.sh`、`Makefile`。
+- `src/DoomWasm.Native/patches/doomgeneric-aikernel.patch`。
+- `src/DoomWasm.Native/patches/doomgeneric-upstream.patch`。
+- upstream copyright notices と GPL license text。
+
+`/demo/doom/module.json` の deployment manifest には、doomgeneric commit、
+source location、patch file、overlay files、生成済み wasm の size/checksum を
+記録してください。
+
 ## リリース前チェックリスト
 
 1. `dotnet build AIKernel.Doom.slnx` が成功する。
@@ -66,4 +84,4 @@ AIKernel.Doom は source-only のサンプルとして公開します。第三�
 3. Source-only policy に反する大きな第三者 asset が含まれていない。
 4. `docs/README.md` と `docs/README-ja.md` から開発者向け文書へ到達できる。
 5. Web runtime の consent、license、checksum 表示が最新である。
-6. `0.1.1-dev1` の位置づけが README とドキュメントに反映されている。
+6. `0.1.1.1-dev1` の位置づけが README とドキュメントに反映されている。

@@ -3,6 +3,10 @@ namespace AIKernel.Doom.Provider;
 using System.Buffers.Binary;
 using AIKernel.Common.Results;
 using AIKernel.Wasm.Comput;
+/// <summary>
+/// EN: Represents BonsaiGpuExecutionSurface.
+/// EN: Documentation for public API. JA: BonsaiGpuExecutionSurface を表します。
+/// </summary>
 
 public sealed class BonsaiGpuExecutionSurface
 {
@@ -10,6 +14,10 @@ public sealed class BonsaiGpuExecutionSurface
 
     private readonly WebGpuComputeProvider _provider;
     private bool _initialized;
+    /// <summary>
+    /// EN: Executes BonsaiGpuExecutionSurface.
+    /// EN: Documentation for public API. JA: BonsaiGpuExecutionSurface を実行します。
+    /// </summary>
 
     public BonsaiGpuExecutionSurface(DoomProviderOptions options)
     {
@@ -22,12 +30,24 @@ public sealed class BonsaiGpuExecutionSurface
             ForceCpuFallback = !options.PreferWebGpu
         });
     }
+    /// <summary>
+    /// EN: Gets BackendKind.
+    /// EN: Documentation for public API. JA: BackendKind を取得します。
+    /// </summary>
 
     public DoomBackendKind BackendKind
         => _provider.UsingCpuFallback ? DoomBackendKind.WebGpuComputeCpuFallback : DoomBackendKind.WebGpuComputeProvider;
+    /// <summary>
+    /// EN: Gets BackendName.
+    /// EN: Documentation for public API. JA: BackendName を取得します。
+    /// </summary>
 
     public string BackendName
         => _provider.UsingCpuFallback ? "WebGpuComputeProvider(cpu-fallback)" : "WebGpuComputeProvider(webgpu)";
+    /// <summary>
+    /// EN: Executes InitializeAsync.
+    /// EN: Documentation for public API. JA: InitializeAsync を実行します。
+    /// </summary>
 
     public async Task InitializeAsync()
     {
@@ -39,6 +59,10 @@ public sealed class BonsaiGpuExecutionSurface
         await _provider.InitializeAsync().ConfigureAwait(false);
         _initialized = true;
     }
+    /// <summary>
+    /// EN: Gets EvaluateAsync.
+    /// EN: Documentation for public API. JA: EvaluateAsync を取得します。
+    /// </summary>
 
     public async Task<Result<string>> EvaluateAsync(
         DoomGameState state,
@@ -55,6 +79,10 @@ public sealed class BonsaiGpuExecutionSurface
 
             return BackendName;
         }).ConfigureAwait(false);
+    /// <summary>
+    /// EN: Executes ShutdownAsync.
+    /// EN: Documentation for public API. JA: ShutdownAsync を実行します。
+    /// </summary>
 
     public async Task ShutdownAsync()
     {

@@ -14,11 +14,12 @@ must remain auditable without embedding large or third-party binary payloads.
 Current demo version:
 
 ```text
-0.1.1-dev1
+0.1.1.1-dev1
 ```
 
-The version is aligned with the AIKernel 0.1.1 canonical series while keeping a
-development suffix because this is a demo program and active research surface.
+The version is aligned with the AIKernel 0.1.1.1 local validation line while
+keeping a development suffix because this is a demo program and active research
+surface. The next official canonical package line is v0.1.2.
 
 ## Source Assets
 
@@ -84,6 +85,24 @@ Any change to hosted files should update:
 - notice path,
 - consent size estimate,
 - terms and license page.
+
+## GPL Corresponding Source for doom.wasm
+
+`doom.wasm` is derived from GPL-covered doomgeneric source. When a public
+deployment hosts this compiled artifact, the corresponding source must remain
+available with the same release surface:
+
+- the pinned doomgeneric checkout used for the build;
+- AIKernel overlay files in `src/DoomWasm.Native/src`, including
+  `aik_doom_sound.c` for the native SFX audio bridge;
+- `src/DoomWasm.Native/build.ps1`, `build.sh`, and `Makefile`;
+- `src/DoomWasm.Native/patches/doomgeneric-aikernel.patch`;
+- `src/DoomWasm.Native/patches/doomgeneric-upstream.patch`;
+- upstream copyright notices and GPL license text.
+
+The deployment manifest at `/demo/doom/module.json` should identify the
+doomgeneric commit, source location, patch file, overlay files, generated wasm
+size, and generated wasm checksum.
 
 Consent is a runtime governance boundary. Treat it as part of the Provider
 contract, not as page copy.

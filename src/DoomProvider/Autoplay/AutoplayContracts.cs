@@ -1,4 +1,8 @@
 namespace AIKernel.Core.Sdk.Runtime;
+/// <summary>
+/// EN: Represents SensorFusion.
+/// EN: Documentation for public API. JA: SensorFusion を表します。
+/// </summary>
 
 public sealed record SensorFusion(
     float[] Screen6Regions,
@@ -9,6 +13,10 @@ public sealed record SensorFusion(
     bool SoundEvent,
     int StuckTicks,
     int QDelta);
+/// <summary>
+/// EN: Represents ActionCommand.
+/// EN: Documentation for public API. JA: ActionCommand を表します。
+/// </summary>
 
 public sealed record ActionCommand(
     bool MoveForward,
@@ -18,6 +26,10 @@ public sealed record ActionCommand(
     int TurnYaw,
     bool UseKey,
     bool AttackKey);
+/// <summary>
+/// EN: Defines the IAutoplayStrategy contract.
+/// EN: Documentation for public API. JA: IAutoplayStrategy contract を定義します。
+/// </summary>
 
 public interface IAutoplayStrategy
 {

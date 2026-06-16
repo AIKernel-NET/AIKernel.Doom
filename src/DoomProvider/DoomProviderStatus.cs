@@ -1,4 +1,8 @@
 namespace AIKernel.Doom.Provider;
+/// <summary>
+/// EN: Represents DoomProviderStatus.
+/// EN: Documentation for public API. JA: DoomProviderStatus を表します。
+/// </summary>
 
 public sealed record DoomProviderStatus(
     DoomProviderState State,

@@ -19,9 +19,12 @@ DOOM distribution. It does not commit third-party runtime artifacts such as
 
 ## Cross-Repository Alignment
 
-Shared repository boundaries, 0.1.1.1 local NuGet versioning, and the
-NuGet-only / no-PyPI rule for this update line are defined by
+Shared repository boundaries, 0.1.1.1 local NuGet versioning, the
+NuGet-only / no-PyPI rule for this validation line, and the v0.1.2
+NuGet + PyPI release assumption are defined by
 [AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1.md).
+When a change crosses repositories, start with the
+[Cross-Repository Developer Guide v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/cross-repository-developer-guide-v0.1.1.1.md).
 
 Doom owns scenario-specific visual, audio, HUD, and input mappings for this
 sample. It must not define shared contracts, generic WASM semantics, or
@@ -38,10 +41,11 @@ Start here:
 5. [Web Runtime](web-runtime.md)
 6. [Vision Perception Engine](vision-perception-engine.md)
 7. [Autoplay Control Pipeline](autoplay-control-pipeline.md)
-8. [Debugging and Telemetry](debugging-and-telemetry.md)
-9. [Autoplay Optimizer](autoplay-optimizer.md)
-10. [Development Methodology](development-methodology.md)
-11. [Asset and Release Operations](asset-and-release-operations.md)
+8. [Perception Mapping](perception-mapping.md)
+9. [Debugging and Telemetry](debugging-and-telemetry.md)
+10. [Autoplay Optimizer](autoplay-optimizer.md)
+11. [Development Methodology](development-methodology.md)
+12. [Asset and Release Operations](asset-and-release-operations.md)
 
 Reference surfaces:
 

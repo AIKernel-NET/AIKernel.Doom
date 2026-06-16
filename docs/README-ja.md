@@ -19,10 +19,13 @@ DOOM の配布パッケージではありません。`DOOM1.WAD`、Bonsai GGUF �
 
 ## リポジトリ横断整合
 
-共有の repository boundary、0.1.1.1 local NuGet versioning、この更新ラインでの
-NuGet-only / no-PyPI rule は
+共有の repository boundary、0.1.1.1 local NuGet versioning、この検証ラインでの
+NuGet-only / no-PyPI rule、v0.1.2 の NuGet + PyPI release assumption は
 [AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1-ja.md)
 で定義します。
+複数 repository をまたぐ変更を行う場合は、まず
+[リポジトリ横断開発者ガイド v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/cross-repository-developer-guide-v0.1.1.1-ja.md)
+を読んでください。
 
 Doom はこの sample の scenario-specific な visual、audio、HUD、input mapping を
 所有します。Shared contract、generic WASM semantics、Core/Control gate logic は
@@ -39,10 +42,11 @@ Doom はこの sample の scenario-specific な visual、audio、HUD、input map
 5. [Web Runtime](web-runtime-ja.md)
 6. [視野認知エンジン](vision-perception-engine-ja.md)
 7. [AutoPlay Control Pipeline](autoplay-control-pipeline-ja.md)
-8. [デバッグとテレメトリ](debugging-and-telemetry-ja.md)
-9. [AutoPlay Optimizer](autoplay-optimizer-ja.md)
-10. [開発方法論](development-methodology-ja.md)
-11. [アセットとリリース運用](asset-and-release-operations-ja.md)
+8. [Perception Mapping](perception-mapping.md)
+9. [デバッグとテレメトリ](debugging-and-telemetry-ja.md)
+10. [AutoPlay Optimizer](autoplay-optimizer-ja.md)
+11. [開発方法論](development-methodology-ja.md)
+12. [アセットとリリース運用](asset-and-release-operations-ja.md)
 
 参照資料:
 

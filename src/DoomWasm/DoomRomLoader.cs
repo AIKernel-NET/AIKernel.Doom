@@ -2,10 +2,18 @@ namespace AIKernel.Doom.Wasm;
 
 using System.Text.Json;
 using AIKernel.Common.Results;
+/// <summary>
+/// EN: Represents DoomRomLoader.
+/// EN: Documentation for public API. JA: DoomRomLoader を表します。
+/// </summary>
 
 public static class DoomRomLoader
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    /// <summary>
+    /// EN: Gets LoadAsync.
+    /// EN: Documentation for public API. JA: LoadAsync を取得します。
+    /// </summary>
 
     public static async Task<Result<DoomRomManifest>> LoadAsync(
         string path,
@@ -35,6 +43,10 @@ public static class DoomRomLoader
             Result<DoomRomManifest>.Fail,
             manifest => Validate(manifest));
     }
+    /// <summary>
+    /// EN: Executes Validate.
+    /// EN: Documentation for public API. JA: Validate を実行します。
+    /// </summary>
 
     public static Result<DoomRomManifest> Validate(DoomRomManifest? manifest)
     {

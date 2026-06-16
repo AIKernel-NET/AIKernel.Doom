@@ -1,21 +1,41 @@
 namespace AIKernel.Doom.Provider;
 
 using AIKernel.Common.Results;
+/// <summary>
+/// EN: Represents DoomGameState.
+/// EN: Documentation for public API. JA: DoomGameState を表します。
+/// </summary>
 
 public sealed record DoomGameState(int Health, int Ammo, bool IsRunning);
+/// <summary>
+/// EN: Represents DoomCheatCommand.
+/// EN: Documentation for public API. JA: DoomCheatCommand を表します。
+/// </summary>
 
 public sealed record DoomCheatCommand(string Name, string Reason);
+/// <summary>
+/// EN: Represents BonsaiSupervisorStatus.
+/// EN: Documentation for public API. JA: BonsaiSupervisorStatus を表します。
+/// </summary>
 
 public sealed record BonsaiSupervisorStatus(
     bool ModelReady,
     string Mode,
     string Backend,
     IReadOnlyList<DoomCheatCommand> IssuedCommands);
+/// <summary>
+/// EN: Defines the IDoomStateReader contract.
+/// EN: Documentation for public API. JA: IDoomStateReader contract を定義します。
+/// </summary>
 
 public interface IDoomStateReader
 {
     Result<DoomGameState> Read();
 }
+/// <summary>
+/// EN: Defines the IDoomCheatCommandPort contract.
+/// EN: Documentation for public API. JA: IDoomCheatCommandPort contract を定義します。
+/// </summary>
 
 public interface IDoomCheatCommandPort
 {
@@ -23,14 +43,26 @@ public interface IDoomCheatCommandPort
 
     IReadOnlyList<DoomCheatCommand> IssuedCommands { get; }
 }
+/// <summary>
+/// EN: Defines the IBonsaiDoomSupervisor contract.
+/// EN: Documentation for public API. JA: IBonsaiDoomSupervisor contract を定義します。
+/// </summary>
 
 public interface IBonsaiDoomSupervisor
 {
     Task<Result<BonsaiSupervisorStatus>> SuperviseAsync(CancellationToken cancellationToken = default);
 }
+/// <summary>
+/// EN: Represents DeterministicBonsaiPolicy.
+/// EN: Documentation for public API. JA: DeterministicBonsaiPolicy を表します。
+/// </summary>
 
 public sealed class DeterministicBonsaiPolicy
 {
+    /// <summary>
+    /// EN: Executes Evaluate.
+    /// EN: Documentation for public API. JA: Evaluate を実行します。
+    /// </summary>
     public IReadOnlyList<DoomCheatCommand> Evaluate(DoomGameState state)
     {
         if (!state.IsRunning)
@@ -53,6 +85,10 @@ public sealed class DeterministicBonsaiPolicy
         return commands;
     }
 }
+/// <summary>
+/// EN: Represents BonsaiDoomSupervisor.
+/// EN: Documentation for public API. JA: BonsaiDoomSupervisor を表します。
+/// </summary>
 
 public sealed class BonsaiDoomSupervisor : IBonsaiDoomSupervisor
 {
@@ -61,6 +97,10 @@ public sealed class BonsaiDoomSupervisor : IBonsaiDoomSupervisor
     private readonly DeterministicBonsaiPolicy _policy;
     private readonly BonsaiGpuExecutionSurface _executionSurface;
     private readonly Func<bool> _modelReady;
+    /// <summary>
+    /// EN: Gets BonsaiDoomSupervisor.
+    /// EN: Documentation for public API. JA: BonsaiDoomSupervisor を取得します。
+    /// </summary>
 
     public BonsaiDoomSupervisor(
         IDoomStateReader stateReader,
@@ -75,6 +115,10 @@ public sealed class BonsaiDoomSupervisor : IBonsaiDoomSupervisor
         _executionSurface = executionSurface;
         _modelReady = modelReady;
     }
+    /// <summary>
+    /// EN: Executes SuperviseAsync.
+    /// EN: Documentation for public API. JA: SuperviseAsync を実行します。
+    /// </summary>
 
     public Task<Result<BonsaiSupervisorStatus>> SuperviseAsync(CancellationToken cancellationToken = default)
     {
@@ -117,6 +161,10 @@ public sealed class BonsaiDoomSupervisor : IBonsaiDoomSupervisor
 
 internal sealed class DoomRuntimeStateReader(Func<DoomProviderStatus> statusFactory) : IDoomStateReader
 {
+    /// <summary>
+    /// EN: Executes Read.
+    /// EN: Documentation for public API. JA: Read を実行します。
+    /// </summary>
     public Result<DoomGameState> Read()
     {
         var status = statusFactory();
@@ -129,6 +177,10 @@ internal sealed class DoomRuntimeStateReader(Func<DoomProviderStatus> statusFact
 internal sealed class InMemoryDoomCheatCommandPort : IDoomCheatCommandPort
 {
     private readonly List<DoomCheatCommand> _commands = [];
+    /// <summary>
+    /// EN: Executes Issue.
+    /// EN: Documentation for public API. JA: Issue を実行します。
+    /// </summary>
 
     public Result<bool> Issue(DoomCheatCommand command)
     {
@@ -140,6 +192,10 @@ internal sealed class InMemoryDoomCheatCommandPort : IDoomCheatCommandPort
         _commands.Add(command);
         return Result<bool>.Success(true);
     }
+    /// <summary>
+    /// EN: Executes IssuedCommands.
+    /// EN: Documentation for public API. JA: IssuedCommands を実行します。
+    /// </summary>
 
     public IReadOnlyList<DoomCheatCommand> IssuedCommands => _commands.ToArray();
 }

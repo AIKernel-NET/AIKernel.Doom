@@ -22,6 +22,15 @@ Controls:
 - `Detection Overlay`: show or hide detector overlays.
 - `DET:*`: toggle detector categories.
 
+The toolbar is split into two rows:
+
+- The operation row contains commands such as log capture, manual movement,
+  sense-only mode, and debug audio playback.
+- The sensor row contains generic `data-sensor-toggle` buttons backed by the
+  `sensorInputs` map. The current default set is `Aisthesis Visual`,
+  `Aisthesis Audio`, `Kinesis Motor`, `Kinesis Movement`, `Phantasia Compass`,
+  `Phantasia Spatial`, and `Aisthesis Health`.
+
 `Phase + Logs` is the preferred button during combat or door timing. It avoids
 the time loss of typing `doom.phase.check` and `copy.logs` manually.
 
@@ -130,6 +139,9 @@ The debug HUD shows stereo auditory evidence without making control decisions:
   spatial direction.
 - `doom.js` copies `auditorySnapshot`, `spatialSnapshot`, and `ctgCarrier` into
   runtime status.
+- `health-death` retry intent is shown as `retry=active|idle/cooldown/reason`.
+  The retry bridge is owned by DoomWeb runtime dispatch and does not duplicate
+  CTG or Gate rules.
 - CTG and Gate results remain outside DoomWeb.
 
 ## Common Failure Modes

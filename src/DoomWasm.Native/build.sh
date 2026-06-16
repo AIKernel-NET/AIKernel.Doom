@@ -18,7 +18,7 @@ fi
 
 mkdir -p "$(dirname "$OUTPUT")"
 
-EXPORTS='["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_malloc","_free"]'
+EXPORTS='["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_doom_audio_status","_doom_audio_sample_rate","_doom_audio_channels","_doom_audio_buffer","_doom_audio_capacity_frames","_doom_audio_read_offset_frames","_doom_audio_available_frames","_doom_audio_consume_frames","_doom_audio_event_count","_malloc","_free"]'
 
 "$EMCC" \
   -O3 \
@@ -32,6 +32,7 @@ EXPORTS='["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_
   -DDOOMGENERIC_RESY=200 \
   -DCMAP256=1 \
   -DAIKERNEL_DOOM_WASM=1 \
+  -DFEATURE_SOUND=1 \
   -I"$PROJECT_DIR/include" \
   -I"$DOOMGENERIC_DIR" \
   "$PROJECT_DIR/src/aik_doom_abi.c" \
@@ -40,6 +41,7 @@ EXPORTS='["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_
   "$PROJECT_DIR/src/aik_doom_time.c" \
   "$PROJECT_DIR/src/aik_doom_log.c" \
   "$PROJECT_DIR/src/aik_doom_wad_file.c" \
+  "$PROJECT_DIR/src/aik_doom_sound.c" \
   "$PROJECT_DIR/src/doomgeneric_aikernel.c" \
   $(find "$DOOMGENERIC_DIR" -maxdepth 1 -name '*.c' \
     ! -name 'doomgeneric_allegro.c' \

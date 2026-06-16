@@ -62,13 +62,11 @@ static char *g_doom_argv[] = {
     (char *)"-iwad",
     (char *)"doom1.wad",
     (char *)"-nogui",
-    (char *)"-nosound",
-    (char *)"-nosfx",
     (char *)"-nomusic",
     0
 };
 
-static int g_doom_argc = 7;
+static int g_doom_argc = 5;
 
 int main(int argc, char **argv)
 {

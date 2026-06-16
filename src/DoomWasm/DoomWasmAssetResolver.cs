@@ -2,16 +2,28 @@ namespace AIKernel.Doom.Wasm;
 
 using System.Security.Cryptography;
 using AIKernel.Common.Results;
+/// <summary>
+/// EN: Represents DoomWasmAssetResolver.
+/// EN: Documentation for public API. JA: DoomWasmAssetResolver を表します。
+/// </summary>
 
 public sealed class DoomWasmAssetResolver : IDoomWasmAssetResolver
 {
     private static readonly byte[] SimulatedWasmModule = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     private readonly DoomWasmOptions _options;
+    /// <summary>
+    /// EN: Executes DoomWasmAssetResolver.
+    /// EN: Documentation for public API. JA: DoomWasmAssetResolver を実行します。
+    /// </summary>
 
     public DoomWasmAssetResolver(DoomWasmOptions options)
     {
         _options = options;
     }
+    /// <summary>
+    /// EN: Gets ResolveAsync.
+    /// EN: Documentation for public API. JA: ResolveAsync を取得します。
+    /// </summary>
 
     public async Task<Result<DoomWasmAsset>> ResolveAsync(
         DoomRomManifest manifest,

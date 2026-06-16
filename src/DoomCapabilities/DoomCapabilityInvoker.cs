@@ -7,6 +7,10 @@ using AIKernel.Abstractions.Capabilities;
 using AIKernel.Common.Results;
 using AIKernel.Doom.Provider;
 using AIKernel.Dtos.Capabilities;
+/// <summary>
+/// EN: Represents DoomCapabilityInvoker.
+/// EN: Documentation for public API. JA: DoomCapabilityInvoker を表します。
+/// </summary>
 
 public sealed class DoomCapabilityInvoker : ICapabilityModuleInvoker
 {
@@ -16,11 +20,19 @@ public sealed class DoomCapabilityInvoker : ICapabilityModuleInvoker
     };
 
     private readonly DoomProvider _provider;
+    /// <summary>
+    /// EN: Executes DoomCapabilityInvoker.
+    /// EN: Documentation for public API. JA: DoomCapabilityInvoker を実行します。
+    /// </summary>
 
     public DoomCapabilityInvoker(DoomProvider provider)
     {
         _provider = provider;
     }
+    /// <summary>
+    /// EN: Gets InvokeAsync.
+    /// EN: Documentation for public API. JA: InvokeAsync を取得します。
+    /// </summary>
 
     public async ValueTask<CapabilityInvocationResult> InvokeAsync(
         CapabilityInvocationRequest request,

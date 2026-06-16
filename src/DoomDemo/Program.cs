@@ -431,22 +431,58 @@ internal sealed class DoomCliApprovalRequest
         LegalUrl = legalUrl;
         HintWord = hintWord;
     }
+    /// <summary>
+    /// EN: Gets Reason.
+    /// EN: Documentation for public API. JA: Reason を取得します。
+    /// </summary>
 
     public string Reason { get; }
+    /// <summary>
+    /// EN: Gets Terms.
+    /// EN: Documentation for public API. JA: Terms を取得します。
+    /// </summary>
 
     public string Terms { get; }
+    /// <summary>
+    /// EN: Gets DownloadDescription.
+    /// EN: Documentation for public API. JA: DownloadDescription を取得します。
+    /// </summary>
 
     public string DownloadDescription { get; }
+    /// <summary>
+    /// EN: Gets LegalUrl.
+    /// EN: Documentation for public API. JA: LegalUrl を取得します。
+    /// </summary>
 
     public string LegalUrl { get; }
+    /// <summary>
+    /// EN: Gets HintWord.
+    /// EN: Documentation for public API. JA: HintWord を取得します。
+    /// </summary>
 
     public string HintWord { get; }
+    /// <summary>
+    /// EN: Gets IsPending.
+    /// EN: Documentation for public API. JA: IsPending を取得します。
+    /// </summary>
 
     public bool IsPending { get; private set; } = true;
+    /// <summary>
+    /// EN: Gets Decision.
+    /// EN: Documentation for public API. JA: Decision を取得します。
+    /// </summary>
 
     public string? Decision { get; private set; }
+    /// <summary>
+    /// EN: Gets Failure.
+    /// EN: Documentation for public API. JA: Failure を取得します。
+    /// </summary>
 
     public string? Failure { get; private set; }
+    /// <summary>
+    /// EN: Executes ForRuntimeData.
+    /// EN: Documentation for public API. JA: ForRuntimeData を実行します。
+    /// </summary>
 
     public static DoomCliApprovalRequest ForRuntimeData()
         => new(
@@ -455,6 +491,10 @@ internal sealed class DoomCliApprovalRequest
             "Allow this deployment to download, cache, load, and use hosted DOOM1.WAD, Bonsai-1.7B-Q1_0.gguf, doom.wasm, manifests, and demo metadata after consent. Current estimate is about 270MB and under 300MB.",
             "/demo/doom/terms-and-licenses.html",
             "yes");
+    /// <summary>
+    /// EN: Executes TryParse.
+    /// EN: Documentation for public API. JA: TryParse を実行します。
+    /// </summary>
 
     public bool TryParse(string command, out bool approved)
     {
@@ -480,6 +520,10 @@ internal sealed class DoomCliApprovalRequest
 
         return false;
     }
+    /// <summary>
+    /// EN: Executes ToConsentGrant.
+    /// EN: Documentation for public API. JA: ToConsentGrant を実行します。
+    /// </summary>
 
     public DoomConsentGrant ToConsentGrant()
         => new(
@@ -487,6 +531,10 @@ internal sealed class DoomCliApprovalRequest
             AllowDataDownload: true,
             AllowBonsaiModelDownload: true,
             AllowDoomWasmLoad: true);
+    /// <summary>
+    /// EN: Executes Approve.
+    /// EN: Documentation for public API. JA: Approve を実行します。
+    /// </summary>
 
     public void Approve()
     {
@@ -494,6 +542,10 @@ internal sealed class DoomCliApprovalRequest
         Decision = "approved";
         Failure = null;
     }
+    /// <summary>
+    /// EN: Executes Reject.
+    /// EN: Documentation for public API. JA: Reject を実行します。
+    /// </summary>
 
     public void Reject(string reason)
     {

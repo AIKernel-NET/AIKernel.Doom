@@ -14,6 +14,8 @@ index 0000000..aik0001
 +#     AIKernel.Doom/src/DoomWasm.Native/src/aik_doom_wad_file.c
 +# - add AIKernel platform implementation:
 +#     AIKernel.Doom/src/DoomWasm.Native/src/doomgeneric_aikernel.c
++# - add AIKernel native sound bridge:
++#     AIKernel.Doom/src/DoomWasm.Native/src/aik_doom_sound.c
 +# - compile with:
 +#     -DDOOMGENERIC_RESX=320
 +#     -DDOOMGENERIC_RESY=200
@@ -27,6 +29,8 @@ index 0000000..aik0001
 +#   before W_OpenFile() is reached.
 +# - d_main.c: AIKernel drives ticks cooperatively, so startup tick and synchronous
 +#   wipe loops are skipped for AIKERNEL_DOOM_WASM builds.
++# - i_sound.c: AIKernel WASM sound uses the overlay DG_sound_module and must not
++#   include SDL_mixer when FEATURE_SOUND is enabled.
 diff --git a/doomgeneric/doomgeneric_aikernel.c b/doomgeneric/doomgeneric_aikernel.c
 new file mode 100644
 index 0000000..aik0002
@@ -91,3 +95,12 @@ index upstream..aik0005 100644
 +#ifndef AIKERNEL_DOOM_WASM
 +    doomgeneric_Tick();
 +#endif
+diff --git a/doomgeneric/i_sound.c b/doomgeneric/i_sound.c
+index upstream..aik0006 100644
+--- a/doomgeneric/i_sound.c
++++ b/doomgeneric/i_sound.c
+@@
+-#if defined(FEATURE_SOUND) && !defined(__DJGPP__)
++#if defined(FEATURE_SOUND) && !defined(__DJGPP__) && !defined(AIKERNEL_DOOM_WASM)
+ #include <SDL_mixer.h>
+ #endif

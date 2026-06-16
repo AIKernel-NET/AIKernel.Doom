@@ -11,6 +11,17 @@
   const REGION_ROWS = 2;
   const REGION9_COLUMNS = 3;
   const REGION9_ROWS = 3;
+  const VISION_GRID_COLUMNS = 9;
+  const VISION_GRID_ROWS = 9;
+  const SPATIAL_HISTORY_LIMIT = 12;
+  const CHRONOS_WINDOW_LIMIT = 32;
+  const ITEM_MEMORY_LIMIT = 12;
+  const LOOMING_DELTA_THRESHOLD = 0.18;
+  const DAMAGE_AUDIO_BALANCE_THRESHOLD = 0.18;
+  const TRAP_AUDIO_ENERGY_THRESHOLD = 0.54;
+  const SPATIAL_ENTROPY_REPEAT_THRESHOLD = 5;
+  const RESIDENT_MASK_THRESHOLD = 0.16;
+  const HIGH_AUDIO_BAND_THRESHOLD = 0.42;
   const DEPTH_BANDS = 4;
   const FACE_X = 144;
   const FACE_Y = 168;
@@ -54,6 +65,9 @@
   const WALL_SURVEY_FRAMES = 16;
   const WALL_SURVEY_BACK_FRAMES = 5;
   const WALL_SURVEY_DECISION_FRAMES = 24;
+  const WALL_FOLLOW_FRAMES = 72;
+  const CONTEXT_RESET_SURVEY_FRAMES = 54;
+  const CONTEXT_RESET_COOLDOWN_FRAMES = 90;
   const CORNER_EXIT_COMMIT_FRAMES = 36;
   const TARGET_LOCK_CONFIDENCE = 0.56;
   const COMBAT_CONFIDENCE_THRESHOLD = 0.42;
@@ -90,6 +104,9 @@
   const FIRST_DOOR_APPROACH_DEPTH = 0.94;
   const FIRST_DOOR_SETTLE_FRAMES = 6;
   const FIRST_DOOR_NO_TURN_USE_FRAMES = 22;
+  const FIRST_DOOR_USE_ALIGNMENT_SCORE = 0.58;
+  const FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE = 0.38;
+  const FIRST_DOOR_RED_ACCENT_THRESHOLD = 0.065;
   const COMPUTER_ROOM_ADVANCE_FRAMES = 220;
   const EXIT_SWITCH_USE_FRAMES = 140;
   const LATE_DOOR_USE_FRAMES = 120;
@@ -137,6 +154,8 @@
   const COURTYARD_RESCUE_TURN_FRAMES = 18;
   const FIRST_DOOR_DEAD_END_TURN_FRAMES = 30;
   const FIRST_DOOR_DEAD_END_DEPTH = 0.5;
+  const SPAWN_SECRET_DOOR_THRESHOLD = 0.26;
+  const SPAWN_WEST_STAIR_THRESHOLD = 0.2;
   const SPAWN_CORRIDOR_GAP_THRESHOLD = 0.42;
   const SPAWN_CORRIDOR_GAP_FRAMES = 74;
   const SPAWN_CORRIDOR_GAP_ALIGN_FRAMES = 10;
@@ -211,6 +230,9 @@
     firstDoorUseHoldFrames: FIRST_DOOR_USE_HOLD_FRAMES,
     firstDoorRetryUseFrames: FIRST_DOOR_RETRY_USE_FRAMES,
     firstDoorUseLatchFrames: FIRST_DOOR_USE_LATCH_FRAMES,
+    firstDoorReprobeFrames: 36,
+    firstDoorReprobeBackFrames: 8,
+    firstDoorReprobeTurnFrames: 16,
     firstDoorRetrySignatureTolerance: FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE,
     computerRoomAdvanceFrames: COMPUTER_ROOM_ADVANCE_FRAMES,
     exitSwitchUseFrames: EXIT_SWITCH_USE_FRAMES,
@@ -222,6 +244,8 @@
     courtyardRescueTurnFrames: COURTYARD_RESCUE_TURN_FRAMES,
     firstDoorDeadEndTurnFrames: FIRST_DOOR_DEAD_END_TURN_FRAMES,
     firstDoorDeadEndDepth: FIRST_DOOR_DEAD_END_DEPTH,
+    spawnSecretDoorThreshold: SPAWN_SECRET_DOOR_THRESHOLD,
+    spawnWestStairThreshold: SPAWN_WEST_STAIR_THRESHOLD,
     spawnCorridorGapThreshold: SPAWN_CORRIDOR_GAP_THRESHOLD,
     spawnCorridorGapFrames: SPAWN_CORRIDOR_GAP_FRAMES,
     spawnCorridorGapAlignFrames: SPAWN_CORRIDOR_GAP_ALIGN_FRAMES,
@@ -315,6 +339,10 @@
       this.courtyardRescueMode = "center-left";
       this.courtyardScore = 0;
       this.courtyardTurn = "none";
+      this.spawnSecretDoorScore = 0;
+      this.spawnSecretDoorTurn = "none";
+      this.spawnWestStairScore = 0;
+      this.spawnWestStairTurn = "none";
       this.firstDoorDeadEndTurnFrames = 0;
       this.spawnCorridorGapScore = 0;
       this.spawnCorridorGapTurn = "none";
@@ -331,7 +359,24 @@
       this.soundCueActive = false;
       this.auditorySnapshot = createAuditorySnapshot();
       this.spatialSnapshot = createSpatialSnapshot();
+      this.visionSensorSnapshot = createVisionSensorSnapshot();
+      this.motorSensorSnapshot = createMotorSensorSnapshot();
+      this.movementSensorSnapshot = createMovementSensorSnapshot();
+      this.compassSensorSnapshot = createCompassSensorSnapshot();
+      this.spatialSensorSnapshot = createSpatialSensorSnapshot();
+      this.healthSensorSnapshot = createHealthSensorSnapshot();
       this.ctgCarrier = createCtgCarrier();
+      this.ctgObservedScores = createCtgObservedScores();
+      this.toposDecisionCarrier = createToposDecisionCarrier();
+      this.toposEthosObjective = "find-and-open-first-door";
+      this.toposEthosFrames = 0;
+      this.nousCarrier = createNousCarrier();
+      this.sensorDetections = [];
+      this.spatialHistory = [];
+      this.chronosWindow = createChronosWindow();
+      this.phantasiaSnapshot = createPhantasiaSnapshot();
+      this.nousDetectorResult = createNousDetectorResult();
+      this.itemMemory = [];
       this.repeatActionSignature = "";
       this.repeatActionFrames = 0;
       this.repeatTurnFrames = 0;
@@ -342,6 +387,7 @@
       this.statusBarQuantizedFrameChange = 255;
       this.regionSignature = "000000";
       this.region9Signature = "000000000";
+      this.vision9x9Signature = "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS);
       this.motion9Signature = "000000000";
       this.motion9Delta = 255;
       this.motionForwardProgress = 0;
@@ -349,7 +395,11 @@
       this.motionTurnScore = 0;
       this.motionEntranceScore = 0;
       this.motionStallScore = 0;
+      this.footObstacleScore = 0;
       this.priorFootObstacleScore = 0;
+      this.footObstacleFlickerScore = 0;
+      this.footObstacleBandDelta = 0;
+      this.footObstacleBounceFrames = 0;
       this.inputStallFrames = 0;
       this.motionIntent = "idle";
       this.depthSignature = "0000";
@@ -385,10 +435,22 @@
       this.firstDoorCorridorSignature = 0;
       this.firstDoorUseAttempted = false;
       this.firstDoorUseSignature = 0;
+      this.firstDoorVision9x9Score = 0;
+      this.firstDoorVision9x9Box = null;
+      this.firstDoorVision9x9Heatmap = [];
+      this.firstDoorVision9x9RedScore = 0;
+      this.firstDoorUse3x3Score = 0;
+      this.firstDoorUse3x3Turn = "none";
+      this.firstDoorUse3x3Reason = "none";
       this.firstDoorUseFrame = 0;
       this.firstDoorTransitionFrames = 0;
       this.firstDoorUseLatchFrames = 0;
       this.firstDoorUsePulsed = false;
+      this.firstDoorLockedUseCycles = 0;
+      this.firstDoorReprobeFrames = 0;
+      this.firstDoorReprobeTurn = "right";
+      this.firstDoorCorridorSuppressFrames = 0;
+      this.firstDoorWallOnlyCandidateFrames = 0;
       this.computerRoomAdvanceFrames = 0;
       this.computerRoomFrames = 0;
       this.computerRoomEntered = false;
@@ -411,6 +473,15 @@
       this.wallSurveyFrames = 0;
       this.wallSurveyTurn = "left";
       this.wallSurveyDecisionFrames = 0;
+      this.wallFollowFrames = 0;
+      this.wallFollowSide = "right";
+      this.semanticContextResetFrames = 0;
+      this.semanticContextResetCooldownFrames = 0;
+      this.contextResetReason = "none";
+      this.combatSurveyFrames = 0;
+      this.combatSurveyTurn = "right";
+      this.combatContextActive = false;
+      this.topologicalTransitionBlocked = false;
       this.enemyConfidence = 0;
       this.enemyTurn = "none";
       this.enemyDistance = 1;
@@ -494,6 +565,10 @@
         this.courtyardRescueMode = "center-left";
         this.courtyardScore = 0;
         this.courtyardTurn = "none";
+        this.spawnSecretDoorScore = 0;
+        this.spawnSecretDoorTurn = "none";
+        this.spawnWestStairScore = 0;
+        this.spawnWestStairTurn = "none";
         this.firstDoorDeadEndTurnFrames = 0;
         this.spawnCorridorGapScore = 0;
         this.spawnCorridorGapTurn = "none";
@@ -510,7 +585,24 @@
         this.soundCueActive = false;
         this.auditorySnapshot = createAuditorySnapshot();
         this.spatialSnapshot = createSpatialSnapshot();
+        this.visionSensorSnapshot = createVisionSensorSnapshot();
+        this.motorSensorSnapshot = createMotorSensorSnapshot();
+        this.movementSensorSnapshot = createMovementSensorSnapshot();
+        this.compassSensorSnapshot = createCompassSensorSnapshot();
+        this.spatialSensorSnapshot = createSpatialSensorSnapshot();
+        this.healthSensorSnapshot = createHealthSensorSnapshot();
         this.ctgCarrier = createCtgCarrier();
+        this.ctgObservedScores = createCtgObservedScores();
+        this.toposDecisionCarrier = createToposDecisionCarrier();
+        this.toposEthosObjective = "find-and-open-first-door";
+        this.toposEthosFrames = 0;
+        this.nousCarrier = createNousCarrier();
+        this.sensorDetections = [];
+        this.spatialHistory = [];
+        this.chronosWindow = createChronosWindow();
+        this.phantasiaSnapshot = createPhantasiaSnapshot();
+        this.nousDetectorResult = createNousDetectorResult();
+        this.itemMemory = [];
         this.repeatActionSignature = "";
         this.repeatActionFrames = 0;
         this.repeatTurnFrames = 0;
@@ -521,6 +613,7 @@
         this.statusBarQuantizedFrameChange = 255;
         this.regionSignature = "000000";
         this.region9Signature = "000000000";
+        this.vision9x9Signature = "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS);
         this.motion9Signature = "000000000";
         this.motion9Delta = 255;
         this.motionForwardProgress = 0;
@@ -528,7 +621,11 @@
         this.motionTurnScore = 0;
         this.motionEntranceScore = 0;
         this.motionStallScore = 0;
+        this.footObstacleScore = 0;
         this.priorFootObstacleScore = 0;
+        this.footObstacleFlickerScore = 0;
+        this.footObstacleBandDelta = 0;
+        this.footObstacleBounceFrames = 0;
         this.inputStallFrames = 0;
         this.motionIntent = "idle";
         this.depthSignature = "0000";
@@ -564,10 +661,22 @@
         this.firstDoorCorridorSignature = 0;
         this.firstDoorUseAttempted = false;
         this.firstDoorUseSignature = 0;
+        this.firstDoorVision9x9Score = 0;
+        this.firstDoorVision9x9Box = null;
+        this.firstDoorVision9x9Heatmap = [];
+        this.firstDoorVision9x9RedScore = 0;
+        this.firstDoorUse3x3Score = 0;
+        this.firstDoorUse3x3Turn = "none";
+        this.firstDoorUse3x3Reason = "none";
         this.firstDoorUseFrame = 0;
         this.firstDoorTransitionFrames = 0;
         this.firstDoorUseLatchFrames = 0;
         this.firstDoorUsePulsed = false;
+        this.firstDoorLockedUseCycles = 0;
+        this.firstDoorReprobeFrames = 0;
+        this.firstDoorReprobeTurn = "right";
+        this.firstDoorCorridorSuppressFrames = 0;
+        this.firstDoorWallOnlyCandidateFrames = 0;
         this.computerRoomAdvanceFrames = 0;
         this.computerRoomFrames = 0;
         this.computerRoomEntered = false;
@@ -590,6 +699,15 @@
         this.wallSurveyFrames = 0;
         this.wallSurveyTurn = "left";
         this.wallSurveyDecisionFrames = 0;
+        this.wallFollowFrames = 0;
+        this.wallFollowSide = "right";
+        this.semanticContextResetFrames = 0;
+        this.semanticContextResetCooldownFrames = 0;
+        this.contextResetReason = "none";
+        this.combatSurveyFrames = 0;
+        this.combatSurveyTurn = "right";
+        this.combatContextActive = false;
+        this.topologicalTransitionBlocked = false;
         this.enemyConfidence = 0;
         this.enemyTurn = "none";
         this.enemyDistance = 1;
@@ -647,7 +765,19 @@
         soundCueActive: this.soundCueActive,
         auditorySnapshot: this.auditorySnapshot,
         spatialSnapshot: this.spatialSnapshot,
+        visionSensor: this.visionSensorSnapshot,
+        motorSensor: this.motorSensorSnapshot,
+        movementSensor: this.movementSensorSnapshot,
+        compassSensor: this.compassSensorSnapshot,
+        spatialSensor: this.spatialSensorSnapshot,
+        healthSensor: this.healthSensorSnapshot,
         ctgCarrier: this.ctgCarrier,
+        ctgObservedScores: this.ctgObservedScores,
+        toposDecisionCarrier: this.toposDecisionCarrier,
+        nousCarrier: this.nousCarrier,
+        nousDetectorResult: this.nousDetectorResult,
+        phantasiaSnapshot: this.phantasiaSnapshot,
+        sensorDetections: this.sensorDetections,
         repeatActionFrames: this.repeatActionFrames,
         repeatTurnFrames: this.repeatTurnFrames,
         openAdvanceStallFrames: this.openAdvanceStallFrames,
@@ -681,6 +811,7 @@
         statusBarQuantizedFrameChange: this.statusBarQuantizedFrameChange,
         regionSignature: this.regionSignature,
         region9Signature: this.region9Signature,
+        vision9x9Signature: this.vision9x9Signature,
         motion9Signature: this.motion9Signature,
         motion9Delta: this.motion9Delta,
         motionForwardProgress: this.motionForwardProgress,
@@ -688,6 +819,10 @@
         motionTurnScore: this.motionTurnScore,
         motionEntranceScore: this.motionEntranceScore,
         motionStallScore: this.motionStallScore,
+        footObstacleScore: round2(this.footObstacleScore),
+        footObstacleFlickerScore: round2(this.footObstacleFlickerScore),
+        footObstacleBandDelta: round2(this.footObstacleBandDelta),
+        footObstacleBounceFrames: this.footObstacleBounceFrames,
         inputStallFrames: this.inputStallFrames,
         priorFootObstacleScore: round2(this.priorFootObstacleScore),
         motionIntent: this.motionIntent,
@@ -711,12 +846,25 @@
         lastUseProbeStage: this.lastUseProbeStage,
         firstDoorUseLatchFrames: this.firstDoorUseLatchFrames,
         firstDoorUsePulsed: this.firstDoorUsePulsed,
+        firstDoorLockedUseCycles: this.firstDoorLockedUseCycles,
+        firstDoorReprobeFrames: this.firstDoorReprobeFrames,
+        firstDoorReprobeTurn: this.firstDoorReprobeTurn,
+        firstDoorCorridorSuppressFrames: this.firstDoorCorridorSuppressFrames,
         cornerSuppressFrames: this.cornerSuppressFrames,
         wallDetachFrames: this.wallDetachFrames,
         wallDetachTurn: this.wallDetachTurn,
         wallSurveyFrames: this.wallSurveyFrames,
         wallSurveyTurn: this.wallSurveyTurn,
         wallSurveyDecisionFrames: this.wallSurveyDecisionFrames,
+        wallFollowFrames: this.wallFollowFrames,
+        wallFollowSide: this.wallFollowSide,
+        semanticContextResetFrames: this.semanticContextResetFrames,
+        semanticContextResetCooldownFrames: this.semanticContextResetCooldownFrames,
+        contextResetReason: this.contextResetReason,
+        combatSurveyFrames: this.combatSurveyFrames,
+        combatSurveyTurn: this.combatSurveyTurn,
+        combatContextActive: this.combatContextActive,
+        topologicalTransitionBlocked: this.topologicalTransitionBlocked,
         enemyConfidence: this.enemyConfidence,
         enemyTurn: this.enemyTurn,
         enemyDistance: this.enemyDistance,
@@ -744,6 +892,10 @@
           courtyardScore: round2(this.courtyardScore),
           courtyardTurn: this.courtyardTurn,
           courtyardRescueFrames: this.courtyardRescueFrames,
+          spawnSecretDoorScore: round2(this.spawnSecretDoorScore),
+          spawnSecretDoorTurn: this.spawnSecretDoorTurn,
+          spawnWestStairScore: round2(this.spawnWestStairScore),
+          spawnWestStairTurn: this.spawnWestStairTurn,
           spawnCorridorGapScore: round2(this.spawnCorridorGapScore),
           spawnCorridorGapTurn: this.spawnCorridorGapTurn,
           spawnCorridorGapFrames: this.spawnCorridorGapFrames,
@@ -765,6 +917,13 @@
           firstDoorUseSignature: round2(this.firstDoorUseSignature),
           firstDoorUseFrame: this.firstDoorUseFrame,
           firstDoorTransitionFrames: this.firstDoorTransitionFrames,
+          firstDoorVision9x9Score: round2(this.firstDoorVision9x9Score || 0),
+          firstDoorVision9x9Box: this.firstDoorVision9x9Box || null,
+          firstDoorVision9x9Heatmap: Array.isArray(this.firstDoorVision9x9Heatmap) ? this.firstDoorVision9x9Heatmap : [],
+          firstDoorVision9x9RedScore: round2(this.firstDoorVision9x9RedScore || 0),
+          firstDoorUse3x3Score: round2(this.firstDoorUse3x3Score || 0),
+          firstDoorUse3x3Turn: this.firstDoorUse3x3Turn || "none",
+          firstDoorUse3x3Reason: this.firstDoorUse3x3Reason || "none",
           computerRoomAdvanceFrames: this.computerRoomAdvanceFrames,
           computerRoomEntered: this.computerRoomEntered,
           computerRoomFrames: this.computerRoomFrames,
@@ -801,6 +960,7 @@
         },
         strategyContext: this.strategyContext,
         strategyPriority: this.strategyPriority,
+        currentAction: normalizeAction(this.lastAction),
         controlPipeline: this.controlPipeline,
         objective: this.objective,
         activeDetections: activeDetectionsForPipeline(this),
@@ -843,6 +1003,10 @@
       memory.spawn.blueFloorScore = round2(this.blueFloorScore);
       memory.spawn.courtyardScore = round2(this.courtyardScore);
       memory.spawn.courtyardTurn = this.courtyardTurn;
+      memory.spawn.secretDoorScore = round2(this.spawnSecretDoorScore);
+      memory.spawn.secretDoorTurn = this.spawnSecretDoorTurn;
+      memory.spawn.westStairScore = round2(this.spawnWestStairScore);
+      memory.spawn.westStairTurn = this.spawnWestStairTurn;
       memory.firstDoor.corridorConfidence = round2(corridorConfidence);
       memory.firstDoor.corridorBearing = this.spawnCorridorGapTurn !== "none" ? this.spawnCorridorGapTurn : "right";
       memory.firstDoor.doorConfidence = round2(firstDoorConfidence);
@@ -895,6 +1059,7 @@
       const quantizedSample = quantizeFrameSample(frame.sample);
       const quantizedRegions = quantizeFrameSample(frame.regionSample);
       const quantizedRegion9 = quantizeFrameSample(frame.region9Sample);
+      const quantizedVision9x9 = quantizeFrameSample(frame.vision9x9Sample);
       const previous = selectBobFilteredPreviousFrame(this.frameHistory, quantizedRegion9) || this.previousFrame;
       const frameChange = previous ? averageSampleDelta(previous.sample, frame.sample) : 255;
       const quantizedFrameChange = previous?.quantizedSample ? averageSampleDelta(previous.quantizedSample, quantizedSample) : 255;
@@ -911,9 +1076,15 @@
       const quantizedAmmo = quantizeFrameSample(frame.ammoSample);
       const ammoState = estimateAmmoState(frame.ammoSample, quantizedAmmo);
       const quantizedHealth = quantizeFrameSample(frame.healthSample);
-      const healthState = estimateHealthState(frame.healthSample, quantizedHealth);
-      const faceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
+      const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
+      const rawHealthState = estimateHealthState(frame.healthSample, quantizedHealth);
+      const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
+      const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
       const visualStallDelta = Math.min(quantizedFrameChange, regionQuantizedFrameChange, region9QuantizedFrameChange);
+      const faceDeathScore = healthSensorEnabled ? estimateFaceDeathScore(quantizedFace) : 0;
+      const healthState = healthSensorEnabled
+        ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
+        : createDisabledHealthState(rawHealthState.signature);
       const wallPressure = Math.abs((frame.left || 0) - (frame.right || 0)) + Math.max(0, (frame.lowerCenter || 0) - (frame.topCenter || 0));
       const preDoorPhase = this.doorOpenedCount <= 0;
       const targetConfidence = preDoorPhase ? 0 : estimateTargetConfidence(frame);
@@ -950,7 +1121,13 @@
       const cornered = looksLikeCorner(frame, Math.min(frameChange, visualStallDelta)) || cornerTrap || knownCorner;
       const looped = this.updateBreadcrumbTrail(state, frame);
       const soundCue = resolveSoundCue(state);
-      const auditorySnapshot = buildAuditorySnapshot(state);
+      let auditorySnapshot = buildAuditorySnapshot(state);
+      auditorySnapshot = classifyUseAuditoryResponse(this, auditorySnapshot, {
+        quantizedFrameChange,
+        regionQuantizedFrameChange,
+        visualStallDelta,
+        depthEstimate
+      });
       const staticMapDoorBias = Boolean(mapHints?.doorLines || mapHints?.switchLines);
       const staticGateCandidate = !soundCue
         && !openView
@@ -993,6 +1170,7 @@
       this.statusBarQuantizedFrameChange = statusBarQuantizedFrameChange;
       this.regionSignature = regionSignature(quantizedRegions);
       this.region9Signature = regionSignature(quantizedRegion9);
+      this.vision9x9Signature = regionSignature(quantizedVision9x9).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
       this.motion9Signature = motion.signature;
       this.motion9Delta = motion.delta;
       this.motionForwardProgress = motion.forwardProgress;
@@ -1001,12 +1179,28 @@
       this.motionEntranceScore = motion.entranceScore;
       this.motionStallScore = motion.stallScore;
       const footObstacleScore = clamp01(Number(frame.footObstacleScore || 0));
+      this.footObstacleScore = footObstacleScore;
+      const footObstacleBandDelta = previous?.footObstacleBandSample
+        ? averageSampleDelta(previous.footObstacleBandSample, frame.footObstacleBandSample || [])
+        : 0;
+      this.footObstacleBandDelta = footObstacleBandDelta;
       const footObstacleMemory = Math.max(footObstacleScore, this.priorFootObstacleScore * 0.82);
       this.priorFootObstacleScore = footObstacleMemory;
       const lastForwardIntent = this.lastAction?.move === "forward" || this.lastAction?.moveForward === true;
+      const footObstacleFlicker = clamp01((footObstacleBandDelta / 7.5) * 0.7 + footObstacleMemory * 0.35);
+      const footBounceStallEvidence = lastForwardIntent
+        && footObstacleFlicker >= 0.42
+        && this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.9;
+      this.footObstacleFlickerScore = footObstacleFlicker;
+      if (footBounceStallEvidence) {
+        this.footObstacleBounceFrames = Math.min(MAX_STUCK_COUNTER, Number(this.footObstacleBounceFrames || 0) + 1);
+      } else {
+        this.footObstacleBounceFrames = Math.max(0, Number(this.footObstacleBounceFrames || 0) - 1);
+      }
       if (lastForwardIntent
-        && this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.55
-        && this.regionQuantizedFrameChange <= QUANTIZED_STALL_THRESHOLD + 0.08) {
+        && ((this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.55
+          && this.regionQuantizedFrameChange <= QUANTIZED_STALL_THRESHOLD + 0.08)
+          || this.footObstacleBounceFrames >= 2)) {
         this.inputStallFrames = Math.min(MAX_STUCK_COUNTER, this.inputStallFrames + 1);
       } else {
         this.inputStallFrames = Math.max(0, this.inputStallFrames - 1);
@@ -1033,6 +1227,10 @@
       this.blueFloorScore = clamp01(Number(frame.blueFloorScore || 0));
       this.courtyardScore = clamp01(Number(frame.courtyardScore || 0));
       this.courtyardTurn = frame.courtyardTurn === "left" || frame.courtyardTurn === "right" ? frame.courtyardTurn : "none";
+      this.spawnSecretDoorScore = clamp01(Number(frame.spawnSecretDoorScore || 0));
+      this.spawnSecretDoorTurn = frame.spawnSecretDoorTurn === "left" || frame.spawnSecretDoorTurn === "right" ? frame.spawnSecretDoorTurn : "none";
+      this.spawnWestStairScore = clamp01(Number(frame.spawnWestStairScore || 0));
+      this.spawnWestStairTurn = frame.spawnWestStairTurn === "left" || frame.spawnWestStairTurn === "right" ? frame.spawnWestStairTurn : "none";
       this.spawnCorridorGapScore = clamp01(Number(frame.spawnCorridorGapScore || 0));
       this.spawnCorridorGapTurn = frame.spawnCorridorGapTurn === "left" || frame.spawnCorridorGapTurn === "right" ? frame.spawnCorridorGapTurn : "none";
       this.bridgeBrownScore = clamp01(Number(frame.bridgeBrownScore || 0));
@@ -1041,16 +1239,20 @@
       this.bridgeGreenRight = clamp01(Number(frame.bridgeGreenRight || 0));
       this.bridgeLaneTurn = frame.bridgeLaneTurn === "left" || frame.bridgeLaneTurn === "right" ? frame.bridgeLaneTurn : "none";
       this.bridgeDoorScore = clamp01(Number(frame.bridgeDoorScore || 0));
-      this.computerBlueScore = preDoorPhase ? 0 : clamp01(Number(frame.computerBlueScore || 0));
-      this.computerRedLightScore = preDoorPhase ? 0 : clamp01(Number(frame.computerRedLightScore || 0));
-      this.computerDarkPanelScore = preDoorPhase ? 0 : clamp01(Number(frame.computerDarkPanelScore || 0));
-      this.computerPanelScore = preDoorPhase ? 0 : clamp01(Number(frame.computerPanelScore || 0));
-      this.computerRoomScore = preDoorPhase ? 0 : clamp01(Number(frame.computerRoomScore || 0));
+      this.computerBlueScore = clamp01(Number(frame.computerBlueScore || 0));
+      this.computerRedLightScore = clamp01(Number(frame.computerRedLightScore || 0));
+      this.computerDarkPanelScore = clamp01(Number(frame.computerDarkPanelScore || 0));
+      this.computerPanelScore = clamp01(Number(frame.computerPanelScore || 0));
+      this.computerRoomScore = clamp01(Number(frame.computerRoomScore || 0));
       if (this.doorOpenedCount > 0 && !ammoState.likelyEmpty) {
         const alertConfidence = Math.max(enemy.confidence, effectiveTargetConfidence);
         const alertPeakThreshold = profileNumber(this.profile, "combatAlertPeakConfidence", COMBAT_ALERT_PEAK_CONFIDENCE);
         const alertFrames = profileNumber(this.profile, "combatAlertFrames", COMBAT_ALERT_FRAMES);
-        if ((enemy.cluster !== "green" && (alertConfidence >= 0.46 || this.enemyConfidencePeak >= alertPeakThreshold)) || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA) {
+        const trustedEnemyAlert = isTrustedEnemyCluster(enemy.cluster, enemy.distance)
+          && isTrustedEnemyDepth(enemy.cluster, enemy.distance, alertConfidence, enemy.centerCellConfidence);
+        if (trustedEnemyAlert
+          && ((alertConfidence >= 0.46 || this.enemyConfidencePeak >= alertPeakThreshold)
+            || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA)) {
           const previousAlertActive = this.enemyAlertFrames > 0;
           this.enemyAlertFrames = alertFrames;
           this.enemyAlertTurn = enemy.turn !== "none" ? enemy.turn : (decodeFaceDirection(frame.faceSample, faceQuantizedFrameChange) < 0 ? "left" : "right");
@@ -1075,8 +1277,50 @@
       this.healthZeroScore = healthState.zeroScore || 0;
       this.healthActiveColumns = healthState.activeColumns || 0;
       this.healthActiveCells = healthState.activeCells || 0;
+      this.healthSensorSnapshot = createHealthSensorSnapshot({
+        active: healthSensorEnabled,
+        likelyDead: this.healthLikelyDead,
+        zeroScore: this.healthZeroScore,
+        activeColumns: this.healthActiveColumns,
+        activeCells: this.healthActiveCells,
+        signature: this.healthSignature,
+        faceSignature: this.faceSignature,
+        faceDeathScore,
+        faceQuantizedFrameChange,
+        freezeScore: healthState.freezeScore,
+        retryReason: healthState.retryReason,
+        timestamp: state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+      });
+      this.auditorySnapshot = auditorySnapshot;
+      this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+      refreshSensorCognition(this, state, frame, {
+        quantizedVision9x9,
+        motion,
+        auditorySnapshot,
+        action: normalized
+      });
       if (this.doorTransitionArmedFrames > 0) {
         this.doorTransitionArmedFrames -= 1;
+      }
+      if (this.semanticContextResetCooldownFrames > 0) {
+        this.semanticContextResetCooldownFrames -= 1;
+      }
+      if (this.semanticContextResetFrames > 0) {
+        this.semanticContextResetFrames -= 1;
+        if (this.semanticContextResetFrames <= 0) {
+          this.contextResetReason = "none";
+        }
+      }
+      if (this.combatSurveyFrames > 0) {
+        this.combatSurveyFrames -= 1;
+      }
+      const contextResetReason = this.detectContextDiscontinuity(frame, state, quantizedFrameChange, regionQuantizedFrameChange, depthSignatureDistance, enemy);
+      if (contextResetReason && this.semanticContextResetCooldownFrames <= 0) {
+        if (contextResetReason === "combat-visual-discontinuity") {
+          this.startCombatLocalRelocalization(contextResetReason, frame);
+        } else {
+          this.startSemanticContextReset(contextResetReason, frame);
+        }
       }
 
       const darkZoneScoreThreshold = profileNumber(this.profile, "darkZoneScoreThreshold", DARK_ZONE_SCORE_THRESHOLD);
@@ -1088,7 +1332,21 @@
       const firstDoorSpawnScanFrames = profileNumber(this.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES);
       const blueFloorHomeThreshold = profileNumber(this.profile, "blueFloorHomeThreshold", BLUE_FLOOR_HOME_THRESHOLD);
       const spawnCorridorGapThreshold = profileNumber(this.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
-      this.firstDoorCorridorSignature = scoreFirstDoorCorridorSignature(frame, depthEstimate, this.blueFloorScore, this.spawnCorridorGapScore);
+      this.firstDoorVision9x9Score = clamp01(Number(frame.firstDoorVision9x9Score || 0));
+      this.firstDoorVision9x9Box = frame.firstDoorVision9x9Box || null;
+      this.firstDoorVision9x9Heatmap = Array.isArray(frame.firstDoorVision9x9Heatmap) ? frame.firstDoorVision9x9Heatmap : [];
+      this.firstDoorVision9x9RedScore = clamp01(Number(frame.firstDoorVision9x9RedScore || 0));
+      const firstDoorUse3x3 = scoreFirstDoorUseAlignment3x3(frame, this.spawnCorridorGapScore, this.spawnCorridorGapTurn);
+      this.firstDoorUse3x3Score = firstDoorUse3x3.score;
+      this.firstDoorUse3x3Turn = firstDoorUse3x3.turn;
+      this.firstDoorUse3x3Reason = firstDoorUse3x3.reason;
+      if (this.firstDoorCorridorSuppressFrames > 0) {
+        this.firstDoorCorridorSuppressFrames -= 1;
+      }
+      const baseFirstDoorCorridorSignature = scoreFirstDoorCorridorSignature(frame, depthEstimate, this.blueFloorScore, this.spawnCorridorGapScore);
+      this.firstDoorCorridorSignature = clamp01(
+        (baseFirstDoorCorridorSignature * 0.84)
+        + (this.firstDoorVision9x9Score * 0.24));
       const darkZoneCandidate = this.gameplayLuma > 0
         && this.gameplayLuma <= darkZoneLumaThreshold
         && (this.darkAreaScore >= darkZoneScoreThreshold || this.gameplayLuma <= 56);
@@ -1097,6 +1355,8 @@
         || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA
         || this.enemyAlertFrames > 0
         || this.enemyConfidencePeak >= 0.62;
+      const combatContextActive = this.resolveCombatContext(enemy, effectiveTargetConfidence, hostileZoneSignal);
+      this.combatContextActive = combatContextActive;
       const staticDoorKnown = Boolean(mapHints?.firstDoor || mapHints?.doorLines || mapHints?.switchLines);
       const staticDarkKnown = Boolean(mapHints?.darkSectors?.length);
       const staticEnemyZoneKnown = Boolean(mapHints?.enemyThings?.length || mapHints?.thingTypes?.some?.(thing => isEnemyThingType(thing.type)));
@@ -1114,19 +1374,47 @@
         && this.blueFloorScore < blueFloorHomeThreshold
         && depthEstimate >= 0.7
         && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.08;
+      const lateCorridorRecoveryGate = this.predictions >= 420
+        && this.firstDoorCorridorSuppressFrames <= 0
+        && this.blueFloorScore < blueFloorHomeThreshold + 0.08
+        && depthEstimate >= 0.65
+        && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.04
+        && this.spawnCorridorGapScore >= Math.max(0.20, spawnCorridorGapThreshold - 0.20);
+      const wallContactBeforeCorridor = !this.firstDoorCorridorLocated
+        && !this.firstDoorUseAttempted
+        && depthEstimate <= 0.22;
+      const spawnLandmarkConflict = this.doorOpenedCount <= 0
+        && !this.firstDoorUseAttempted
+        && (this.spawnSecretDoorScore >= Math.max(0.18, profileNumber(this.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD) - 0.08)
+          || this.spawnWestStairScore >= Math.max(0.16, profileNumber(this.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD) - 0.04))
+        && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+        && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+        && this.courtyardScore < Math.max(0.12, COURTYARD_RESCUE_THRESHOLD - 0.20);
       const firstDoorCorridorCandidate = this.doorOpenedCount <= 0
+        && this.firstDoorCorridorSuppressFrames <= 0
+        && !wallContactBeforeCorridor
+        && !spawnLandmarkConflict
         && this.firstDoorCorridorSignature >= corridorSignatureThreshold
         && corridorCandidateFrame
-        && (corridorGapGate || blueFloorExitedGate || motionEntranceGate || this.firstDoorUseAttempted)
-        && (motionForwardGate || corridorGapGate || blueFloorExitedGate || this.firstDoorUseAttempted)
+        && (corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || motionEntranceGate || this.firstDoorUseAttempted)
+        && (motionForwardGate || corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || this.firstDoorUseAttempted)
         && (this.predictions >= profileNumber(this.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES) || this.firstDoorUseAttempted);
-      if (firstDoorCorridorCandidate) {
+      if (wallContactBeforeCorridor || spawnLandmarkConflict) {
+        this.firstDoorCorridorFrames = 0;
+        if (spawnLandmarkConflict && this.firstDoorCorridorLocated && !this.firstDoorUseAttempted) {
+          this.firstDoorCorridorLocated = false;
+          this.firstDoorCorridorSuppressFrames = Math.max(this.firstDoorCorridorSuppressFrames, 18);
+        }
+      } else if (firstDoorCorridorCandidate) {
         this.firstDoorCorridorFrames = Math.min(MAX_STUCK_COUNTER, this.firstDoorCorridorFrames + 1);
       } else {
         this.firstDoorCorridorFrames = Math.max(0, this.firstDoorCorridorFrames - 1);
       }
       if (!this.firstDoorCorridorLocated
+        && !wallContactBeforeCorridor
+        && !spawnLandmarkConflict
         && (this.firstDoorCorridorFrames >= corridorConfirmFrames
+          || lateCorridorRecoveryGate
           || (this.predictions >= 300
             && (corridorGapGate || blueFloorExitedGate)
             && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.16))) {
@@ -1182,7 +1470,30 @@
           || (this.computerDarkPanelScore >= 0.30 && this.computerPanelScore >= 0.16))
         && this.gameplayLuma > 0
         && this.gameplayLuma <= 108;
+      const computerRoomPanelAfterDoor = this.doorOpenedCount > 0
+        && this.darkZoneEntered
+        && this.computerRoomScore >= 0.14
+        && this.computerPanelScore >= 0.54
+        && this.gameplayLuma > 0
+        && this.gameplayLuma <= 108;
+      const postDoorBridgeCue = Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight);
+      const computerRoomRouteAfterDoor = this.doorOpenedCount > 0
+        && depthEstimate >= 0.72
+        && this.gameplayLuma > 0
+        && (this.firstDoorCorridorLocated || this.spawnCorridorGapScore >= 0.24 || this.corridorConfidence >= 0.58)
+        && (this.bridgeBrownScore >= 0.22
+          || postDoorBridgeCue >= 0.30
+          || this.bridgeDoorScore >= 0.10
+          || this.darkAreaScore >= 0.05)
+        && !this.healthLikelyDead;
+      const visualPostDoorRecovery = this.doorOpenedCount === 0
+        && this.firstDoorCorridorLocated
+        && !this.firstDoorUseAttempted
+        && computerRoomVisualAfterDoor
+        && this.blueFloorScore < blueFloorHomeThreshold
+        && this.predictions >= firstDoorSpawnScanFrames + 120;
       const firstDoorLikelyOpened = this.firstDoorTransitionFrames >= 10
+        || visualPostDoorRecovery
         || (this.firstDoorCorridorLocated
           && this.firstDoorUseAttempted
           && this.mapDoorSectorMatch
@@ -1193,22 +1504,42 @@
           && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold
           && this.doorTransitionArmedFrames > 0
           && computerRoomVisualAfterDoor);
+      const firstDoorAudioSuccess = this.auditorySnapshot?.eventType === "use-success-gate"
+        || auditorySnapshot?.eventType === "use-success-gate";
+      const firstDoorAudioFailure = this.auditorySnapshot?.eventType === "use-failed-voice"
+        || auditorySnapshot?.eventType === "use-failed-voice";
       const firstDoorOpeningConfirmed = this.doorOpenedCount === 0
         && this.firstDoorCorridorLocated
-        && this.firstDoorUseAttempted
-        && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold
+        && firstDoorAudioSuccess
+        && !firstDoorAudioFailure
+        && ((this.firstDoorUseAttempted
+            && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold)
+          || visualPostDoorRecovery)
         && (this.firstDoorTransitionFrames >= 8
           || this.darkZoneFrames >= Math.max(2, Math.floor(darkZoneConfirmFrames * 0.5))
           || (this.mapDoorSectorMatch && (this.mapDarkSectorMatch || darkZoneCandidate || computerRoomVisualAfterDoor))
-          || (this.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal));
+          || (this.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal)
+          || visualPostDoorRecovery);
       if (firstDoorOpeningConfirmed) {
         this.doorOpenedCount = 1;
         this.darkZoneEntered = true;
         this.computerRoomAdvanceFrames = Math.max(
           this.computerRoomAdvanceFrames,
           Math.round(profileNumber(this.profile, "computerRoomAdvanceFrames", COMPUTER_ROOM_ADVANCE_FRAMES)));
+        this.doorTransitionArmedFrames = Math.max(
+          this.doorTransitionArmedFrames,
+          Math.round(profileNumber(this.profile, "doorTransitionArmedFrames", DOOR_TRANSITION_ARMED_FRAMES)));
+        this.useCooldown = Math.max(
+          this.useCooldown,
+          Math.round(profileNumber(this.profile, "firstDoorShutterUseLockFrames", USE_COOLDOWN_FRAMES * 3)));
+        this.pendingUseResponseFrames = 0;
+        this.lastUseWasBlocked = false;
         this.wallUseProbeFrames = 0;
         this.wallUseProbeStage = 0;
+        this.firstDoorUseLatchFrames = 0;
+        this.firstDoorUsePulsed = false;
+        this.firstDoorUseAttempted = false;
+        this.firstDoorUseSignature = 0;
         this.cornerExitCommitFrames = 0;
         this.hardStuckEscapeFrames = 0;
         this.openStallEscapeFrames = 0;
@@ -1224,8 +1555,20 @@
         && this.enemyAlertFrames >= 4
         && isTrustedEnemyCluster(this.enemyAlertCluster, this.enemyAlertDepth)
         && isTrustedEnemyDepth(this.enemyAlertCluster, this.enemyAlertDepth, this.enemyAlertPeakConfidence);
-      const computerRoomCandidate = (firstDoorLikelyOpened && computerRoomVisualAfterDoor)
-        || computerRoomCombatAfterDoor;
+      const firstDoorTopologyAllowsComputerRoom = this.doorOpenedCount > 0
+        || this.darkZoneEntered
+        || this.firstDoorTransitionFrames >= 10
+        || (this.firstDoorUseAttempted && this.doorTransitionArmedFrames > 0);
+      const combatTransitionStable = !combatContextActive
+        || this.doorOpenedCount > 0
+        || this.darkZoneFrames >= Math.max(3, Math.floor(darkZoneConfirmFrames * 0.6))
+        || this.firstDoorTransitionFrames >= 12;
+      this.topologicalTransitionBlocked = Boolean(computerRoomVisualAfterDoor && (!firstDoorTopologyAllowsComputerRoom || !combatTransitionStable));
+      const postDoorTopologyStable = this.doorOpenedCount > 0 && this.darkZoneEntered;
+      const computerRoomCandidate = !this.topologicalTransitionBlocked
+        && (((firstDoorLikelyOpened || postDoorTopologyStable) && (computerRoomVisualAfterDoor || computerRoomPanelAfterDoor))
+          || computerRoomCombatAfterDoor
+          || computerRoomRouteAfterDoor);
       if (computerRoomCandidate) {
         this.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, this.computerRoomFrames + 1);
       } else {
@@ -1235,9 +1578,19 @@
       if (!this.computerRoomEntered && this.computerRoomFrames >= computerRoomConfirmFrames) {
         this.doorOpenedCount = Math.max(this.doorOpenedCount, 1);
         this.darkZoneEntered = true;
-        this.computerRoomAdvanceFrames = 0;
+        this.computerRoomAdvanceFrames = Math.max(
+          this.computerRoomAdvanceFrames,
+          Math.max(36, Math.round(profileNumber(this.profile, "computerRoomIngressFrames", COMPUTER_ROOM_ADVANCE_FRAMES * 0.35))));
         this.wallUseProbeFrames = 0;
         this.wallUseProbeStage = 0;
+        this.cornerExitCommitFrames = 0;
+        this.hardStuckEscapeFrames = 0;
+        this.openStallEscapeFrames = 0;
+        this.loopEscapeFrames = 0;
+        this.firstDoorUseLatchFrames = 0;
+        this.firstDoorUsePulsed = false;
+        this.firstDoorUseAttempted = false;
+        this.firstDoorUseSignature = 0;
         this.computerRoomEntered = true;
         this.mapSectorId = "visual-computer-room";
         this.safetyReason = "computer-room-confirmed";
@@ -1245,7 +1598,23 @@
 
       const centralHallFrame = Number(state?.frame || 0);
       const centralHallLateralBalance = Math.abs(Number(frame.left || 0) - Number(frame.right || 0));
-      const centralHallCandidate = this.computerRoomEntered
+      const computerPanelStillVisible = this.computerRoomScore >= 0.12
+        || this.computerPanelScore >= 0.34
+        || this.computerDarkPanelScore >= 0.16
+        || this.computerRedLightScore >= 0.05;
+      const bridgeExitCandidate = this.computerRoomEntered
+        && this.doorOpenedCount >= 1
+        && centralHallFrame >= 420
+        && depthEstimate >= 0.9
+        && this.bridgeBrownScore >= 0.38
+        && (this.bridgeBrownScore >= 0.48
+          || this.bridgeDoorScore >= 0.16
+          || Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight) >= 0.08)
+        && this.computerRoomFrames >= 48
+        && !cornered
+        && !knownCorner
+        && !cornerTrap;
+      const centralHallVisualCandidate = this.computerRoomEntered
         && this.doorOpenedCount >= 1
         && centralHallFrame >= 900
         && this.gameplayLuma >= 82
@@ -1254,9 +1623,11 @@
         && openView
         && wallPressure <= 22
         && centralHallLateralBalance <= 36
+        && !computerPanelStillVisible
         && !cornered
         && !knownCorner
         && !cornerTrap;
+      const centralHallCandidate = bridgeExitCandidate || centralHallVisualCandidate;
       if (centralHallCandidate) {
         this.centralHallFrames = Math.min(MAX_STUCK_COUNTER, this.centralHallFrames + 1);
       } else {
@@ -1305,12 +1676,39 @@
       }
 
       this.updateCombatMilestones(enemy);
-      if (healthState.likelyDead || healthState.zeroScore >= 0.78) {
+      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
+        this.stairsEntered = false;
+        this.stairsCandidateFrames = 0;
+        this.finalRoomEntered = false;
+        this.finalRoomCandidateFrames = 0;
+        this.exitSwitchPressed = false;
+        this.exitSwitchUseFrames = 0;
+      }
+
+      if (this.healthSensorSnapshot.retryRequested) {
         this.combatFireFrames = 0;
         this.enemyConfidencePeak = 0;
         this.enemyDropFrames = 0;
+        this.strategyContext = "health-retry";
+        this.strategyPriority = 100;
+        this.controlPipeline = "Retry";
+        this.objective = "retry-after-death";
         this.safetyReason = "dead-restart";
         this.mobilityMode = "reborn-use";
+        this.auditorySnapshot = auditorySnapshot;
+        this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+        this.ctgCarrier = createCtgCarrier({
+          phase: "Retry",
+          pipeline: "Retry",
+          lastDecision: "retry-requested",
+          confidence: this.healthSensorSnapshot.confidence,
+          timestamp: this.healthSensorSnapshot.timestamp,
+          retryRequested: true,
+          retryReason: "health-death",
+          retryPriority: this.healthSensorSnapshot.retryPriority,
+          ternaryTrace: this.nousCarrier?.bonsaiTernary || {}
+        });
+        this.nousCarrier = buildNousCarrier(this, state, this.healthSensorSnapshot.timestamp);
         this.lastAction = normalizeAction({
           move: "none",
           turn: "none",
@@ -1358,8 +1756,47 @@
       const quantizedWallStuck = this.quantizedStallFrames >= QUANTIZED_WALL_STALL_FRAMES || (cornerTrap && this.quantizedStallFrames >= 2) || (knownWall && movementIntent);
       const urgentCorner = cornered || knownCorner || quantizedWallStuck;
       const deepCorner = urgentCorner && this.depthEstimate <= DEEP_CORNER_DEPTH_THRESHOLD;
+      const doorTransitionGraceActive = isDoorTransitionGraceActive(this, state);
+      const preDoorDemoRouteGraceActive = isPreDoorDemoRouteGraceActive(this, {
+        depthEstimate: this.depthEstimate,
+        movementSpeed: Math.max(Number(this.motionForwardProgress || 0), Number(this.movementSensorSnapshot?.confidence || 0))
+      });
+      const legacyDoorTransitionCleared = clearLegacyDoorTransitionInterventions(this);
+      if (preDoorDemoRouteGraceActive) {
+        this.wallFollowFrames = 0;
+        this.hardStuckEscapeFrames = 0;
+        this.openStallEscapeFrames = 0;
+        this.loopEscapeFrames = 0;
+        this.recoveryFrames = 0;
+      }
+      const footBounceStall = movementIntent
+        && Number(this.footObstacleBounceFrames || 0) >= 3
+        && Number(this.footObstacleFlickerScore || 0) >= 0.42;
+      const localMinimaTrap = movementIntent
+        && !openView
+        && !navigableView
+        && !doorTransitionGraceActive
+        && !preDoorDemoRouteGraceActive
+        && this.wallUseProbeFrames <= 0
+        && (this.motionStallScore >= 0.74 || footBounceStall)
+        && this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.8
+        && (this.depthEstimate <= 0.72 || wallPressure > STUCK_WALL_THRESHOLD || this.inputStallFrames >= 4 || footBounceStall);
+      const combatStallTrap = combatContextActive
+        && !openView
+        && !doorTransitionGraceActive
+        && !preDoorDemoRouteGraceActive
+        && this.wallUseProbeFrames <= 0
+        && (this.motionStallScore >= 0.62 || this.inputStallFrames >= 3 || this.movementSensorSnapshot?.eventType === "movement-stall")
+        && (this.depthEstimate <= 0.82 || wallPressure > STUCK_WALL_THRESHOLD * 0.65 || this.priorFootObstacleScore >= 0.18 || footBounceStall);
+      if ((localMinimaTrap || combatStallTrap) && this.wallFollowFrames <= 0) {
+        this.wallFollowFrames = WALL_FOLLOW_FRAMES;
+        this.wallFollowSide = chooseWallHugSide(frame, this.wallFollowSide);
+      }
 
-      if (movementIntent && (urgentCorner || (frameChange < STUCK_CHANGE_THRESHOLD && wallPressure > STUCK_WALL_THRESHOLD))) {
+      if (!preDoorDemoRouteGraceActive
+        && !legacyDoorTransitionCleared
+        && movementIntent
+        && (urgentCorner || (frameChange < STUCK_CHANGE_THRESHOLD && wallPressure > STUCK_WALL_THRESHOLD))) {
         this.stuckFrames = Math.min(MAX_STUCK_COUNTER, this.stuckFrames + 1);
       } else {
         this.stuckFrames = Math.max(0, this.stuckFrames - 1);
@@ -1393,12 +1830,21 @@
       if (urgentDarkCombat) {
         safe = this.combatAlertAction(safe, frame, state);
         this.safetyReason = "dark-combat-alert";
-      } else if (firstDoorLatchActive && this.wallUseProbeFrames <= 0) {
+      } else if (this.combatSurveyFrames > 0) {
+        safe = this.combatSurveyAction();
+        this.combatSurveyFrames -= 1;
+        this.safetyReason = "combat-relocalization";
+      } else if (firstDoorLatchActive) {
         safe = this.firstDoorUseLatchAdvanceAction();
       } else if (this.wallUseProbeFrames > 0) {
-        safe = this.wallUseProbeAction();
-        this.wallUseProbeFrames -= 1;
-        this.safetyReason = `door-probe-${this.wallUseProbeStage}`;
+        if (this.shouldReprobeFirstDoorUse()) {
+          this.startFirstDoorReprobe(profileNumber(this.profile, "firstDoorReprobeFrames", 36));
+          safe = this.firstDoorReprobeAction(profileNumber(this.profile, "firstDoorReprobeFrames", 36));
+        } else {
+          safe = this.wallUseProbeAction();
+          this.wallUseProbeFrames -= 1;
+          this.safetyReason = `door-probe-${this.wallUseProbeStage}`;
+        }
       } else if (this.wallSurveyFrames > 0) {
         safe = this.wallSurveyAction();
         this.wallSurveyFrames -= 1;
@@ -1406,6 +1852,16 @@
           this.wallSurveyDecisionFrames = WALL_SURVEY_DECISION_FRAMES;
         }
         this.safetyReason = "wall-survey";
+      } else if (this.wallFollowFrames > 0 && !preDoorDemoRouteGraceActive && !doorTransitionGraceActive) {
+        if (openView || navigableView) {
+          this.wallFollowFrames = 0;
+          safe = this.openAdvanceAction(frame);
+          this.safetyReason = "open-view-wall-follow";
+        } else {
+          safe = this.wallFollowAction(safe, frame, state);
+          this.wallFollowFrames -= 1;
+          this.safetyReason = "wall-follow-local-minima";
+        }
       } else if (this.wallUseProbeStage > 0 && visualStallDelta <= WALL_USE_PROBE_CHANGE_THRESHOLD) {
         if (this.wallUseProbeStage === 1) {
           this.wallUseProbeStage = 2;
@@ -1534,6 +1990,26 @@
           safe = this.loopEscapeAction();
           this.safetyReason = "breadcrumb-loop";
         }
+      } else if (this.centralHallEntered
+        && this.objective === "engage-front-enemy"
+        && !this.ammoLikelyEmpty
+        && Math.max(Number(this.targetConfidence || 0), Number(enemy.confidence || 0)) >= 0.24
+        && enemy.cluster !== "green"
+        && enemy.cluster !== "gate"
+        && !String(enemy.cluster || "").startsWith("gate-")) {
+        safe = this.enemyLockAction(safe, frame, state);
+        this.safetyReason = "central-hall-front-enemy-lock";
+      } else if (this.centralHallEntered
+        && this.mapEnemyZoneMatch
+        && !this.ammoLikelyEmpty
+        && enemy.confidence >= Math.max(0.46, COMBAT_CONFIDENCE_THRESHOLD)
+        && enemy.distance <= 1.05
+        && enemy.cluster !== "none"
+        && enemy.cluster !== "green"
+        && enemy.cluster !== "gate"
+        && !String(enemy.cluster || "").startsWith("gate-")) {
+        safe = this.combatAction(safe, frame, state, enemy, faceQuantizedFrameChange);
+        this.safetyReason = "central-hall-front-enemy";
       } else if (enemy.confidence >= COMBAT_CONFIDENCE_THRESHOLD
         && this.darkZoneEntered
         && this.mapEnemyZoneMatch
@@ -1554,7 +2030,7 @@
         safe = this.cornerRecoveryAction();
         this.recoveryFrames -= 1;
         this.safetyReason = "corner-recovery";
-      } else if (wallLike && !openView && depthEstimate < doorApproachDepth) {
+      } else if (wallLike && !openView && !doorTransitionGraceActive && depthEstimate < doorApproachDepth) {
         if (this.useCooldown === 0) {
           safe.use = true;
           this.useCooldown = USE_COOLDOWN_FRAMES;
@@ -1599,38 +2075,63 @@
       this.learnDepthSignature(quantizedDepth, !dictionarySuppressed && (wallLike || urgentCorner));
 
       safe = this.applySensorFusionStrategy(safe, sensor, frame, state);
+      safe = this.applyCtgToposFeedback(safe, sensor, frame, state);
       if (safe.use && this.pendingUseResponseFrames <= 0) {
         if (this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated) {
-          this.firstDoorUseAttempted = true;
-          this.firstDoorUseSignature = this.firstDoorCorridorSignature;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
           this.firstDoorUseFrame = Number(state?.frame || 0);
         }
-        this.pendingUseResponseFrames = 14;
+        this.pendingUseResponseFrames = 30;
         this.lastUseDepthEstimate = depthEstimate;
         this.lastUseWasBlocked = wallLike || knownWall || urgentCorner || this.wallUseProbeStage > 0 || depthEstimate <= Math.max(DOOR_USE_DEPTH_THRESHOLD, profileNumber(this.profile, "doorUseDepth", DOOR_USE_DEPTH_THRESHOLD)) + 0.08;
         this.lastUseProbeStage = this.wallUseProbeStage;
       }
+      if (safe.use || this.pendingUseResponseFrames > 0 || this.firstDoorUseLatchFrames > 0 || this.firstDoorUsePulsed) {
+        auditorySnapshot = classifyUseAuditoryResponse(this, auditorySnapshot, {
+          quantizedFrameChange,
+          regionQuantizedFrameChange,
+          visualStallDelta,
+          depthEstimate
+        });
+      }
 
       this.auditorySnapshot = auditorySnapshot;
       this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+      refreshSensorCognition(this, state, frame, {
+        quantizedVision9x9,
+        motion,
+        auditorySnapshot,
+        action: safe
+      });
       this.ctgCarrier = createCtgCarrier({
         phase: this.semanticMemory?.phase || this.controlPipeline,
         pipeline: this.controlPipeline,
         lastDecision: this.enabled ? "policy-carried" : "disabled",
         confidence: this.spatialSnapshot.confidence,
-        timestamp: this.spatialSnapshot.timestamp
+        timestamp: this.spatialSnapshot.timestamp,
+        observedScores: this.ctgObservedScores,
+        toposDecision: this.toposDecisionCarrier,
+        decisionVector: this.toposDecisionCarrier?.decisionVector,
+        kairos: this.toposDecisionCarrier?.kairos,
+        ethosTarget: this.toposDecisionCarrier?.ethosTarget,
+        feedbackApplied: Boolean(this.toposDecisionCarrier?.feedbackApplied),
+        ternaryTrace: this.nousCarrier?.bonsaiTernary || {}
       });
+      this.nousCarrier = buildNousCarrier(this, state, this.spatialSnapshot.timestamp);
 
       const frameSnapshot = frame.sample?.length ? {
         sample: frame.sample.slice(0),
         quantizedSample,
         quantizedRegions,
         quantizedRegion9,
+        quantizedVision9x9,
         quantizedStatusBar,
         quantizedDepth,
         quantizedFace,
         quantizedAmmo,
         quantizedHealth,
+        footObstacleBandSample: Array.isArray(frame.footObstacleBandSample) ? frame.footObstacleBandSample.slice(0) : [],
         left: frame.left || 0,
         right: frame.right || 0,
         center: frame.center || 0
@@ -1645,6 +2146,30 @@
         this.previousFrame = previous;
       }
 
+      return normalizeAction(safe);
+    }
+
+    applyCtgToposFeedback(action, sensor, frame, state) {
+      let safe = normalizeAction(action);
+      const objective = inferObjective(this);
+      if (this.toposEthosObjective !== objective) {
+        this.toposEthosObjective = objective;
+        this.toposEthosFrames = 0;
+      } else {
+        this.toposEthosFrames = Math.min(MAX_STUCK_COUNTER, Number(this.toposEthosFrames || 0) + 1);
+      }
+
+      const observedScores = buildCtgObservedScores(this, safe, sensor, frame, state);
+      const carrier = buildToposDecisionCarrier(this, safe, observedScores, sensor, frame, state);
+      const feedback = mapToposDecisionToKinesis(this, safe, carrier, observedScores, sensor, frame, state);
+      safe = feedback.action;
+      this.ctgObservedScores = observedScores;
+      this.toposDecisionCarrier = {
+        ...carrier,
+        feedbackApplied: Boolean(feedback.applied),
+        feedbackReason: feedback.reason || "none",
+        mappedAction: describeActionVector(safe)
+      };
       return normalizeAction(safe);
     }
 
@@ -1687,8 +2212,34 @@
       const spawnCorridorGapAlignFrames = Math.max(4, Math.round(profileNumber(this.profile, "spawnCorridorGapAlignFrames", SPAWN_CORRIDOR_GAP_ALIGN_FRAMES)));
       const bridgeBrownThreshold = profileNumber(this.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD);
       const bridgeGreenHazardThreshold = profileNumber(this.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD);
+      const bridgeGreenHazard = Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight);
+      const bridgeVisualCueStrong = this.computerRoomEntered
+        && (this.bridgeBrownScore >= bridgeBrownThreshold * 0.55
+          || bridgeGreenHazard >= bridgeGreenHazardThreshold + 0.08
+          || this.bridgeDoorScore >= Math.max(0.18, BRIDGE_DOOR_PANEL_THRESHOLD - 0.1));
       const bridgeLaneVisible = this.doorOpenedCount > 0
+        && (!isComputerPanelStillVisible(this) || bridgeVisualCueStrong)
         && isBridgeLaneVisible(this.bridgeBrownScore, this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight, bridgeBrownThreshold, bridgeGreenHazardThreshold);
+      const legacyDoorTransitionCleared = clearLegacyDoorTransitionInterventions(this);
+      const stallSuppressedByRoute = legacyDoorTransitionCleared || isPreDoorDemoRouteGraceActive(this, {
+        depthEstimate: this.depthEstimate,
+        movementSpeed: Math.max(Number(this.motionForwardProgress || 0), Number(this.movementSensorSnapshot?.confidence || 0))
+      });
+      if (legacyDoorTransitionCleared && this.doorOpenedCount > 0 && !this.computerRoomEntered && !this.finalRoomEntered) {
+        this.computerRoomAdvanceFrames = Math.max(this.computerRoomAdvanceFrames, 36);
+        return this.computerRoomAdvanceAction(sensor, frame);
+      }
+
+      const firstDoorReprobeTotalFrames = Math.max(20, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+      if (this.firstDoorReprobeFrames > 0) {
+        return this.firstDoorReprobeAction(firstDoorReprobeTotalFrames);
+      }
+
+      if (this.shouldReprobeFirstDoorUse()) {
+        this.startFirstDoorReprobe(firstDoorReprobeTotalFrames);
+        return this.firstDoorReprobeAction(firstDoorReprobeTotalFrames);
+      }
+
       const semanticAction = this.semanticObjectiveAction(sensor, frame, {
         bridgeLaneVisible,
         courtyardRescueFrames,
@@ -1729,13 +2280,54 @@
         this.controlPipeline = "OpeningHome";
         this.safetyReason = "opening-route-lock";
 
+        const earlyFirstDoorPatch = this.firstDoorVision9x9Box || null;
+        const earlyFirstDoorPatchStrong = this.predictions >= firstDoorSpawnScanFrames
+          && earlyFirstDoorPatch?.kind === "first-door-9x9-patch"
+          && Number(earlyFirstDoorPatch.score || this.firstDoorVision9x9Score || 0) >= 0.46
+          && Number(earlyFirstDoorPatch.redScore || this.firstDoorVision9x9RedScore || 0) >= 0.12
+          && Number(earlyFirstDoorPatch.edgeScore || 0) >= 0.30
+          && this.blueFloorScore < blueFloorHomeThreshold + 0.12;
+        if (earlyFirstDoorPatchStrong) {
+          this.firstDoorCorridorLocated = true;
+          this.firstDoorCorridorFrames = corridorConfirmFrames;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "opening-door-patch-lock";
+          return this.firstDoorUseAimCorrectionAction(
+            this.firstDoorUseAlignmentState(earlyFirstDoorPatch),
+            "opening-first-door-9x9-lock",
+            { keepProbeFrames: true });
+        }
+
+        const spawnLandmarkScanReady = this.predictions >= Math.max(18, firstDoorSpawnScanFrames - 12);
+        const spawnSecretDoorAnchorVisible = spawnLandmarkScanReady
+          && this.spawnSecretDoorScore >= profileNumber(this.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD)
+          && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+          && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+          && this.courtyardScore < Math.max(0.18, courtyardRescueThreshold - 0.12);
+        const spawnWestStairAnchorVisible = spawnLandmarkScanReady
+          && this.spawnWestStairScore >= profileNumber(this.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD)
+          && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+          && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+          && this.courtyardScore < Math.max(0.18, courtyardRescueThreshold - 0.12);
+        if (spawnSecretDoorAnchorVisible) {
+          return this.openingSpawnLandmarkAnchorAction("secret-door", "left");
+        }
+
+        if (spawnWestStairAnchorVisible) {
+          return this.openingSpawnLandmarkAnchorAction("west-stair", "right");
+        }
+
         if (this.predictions < firstDoorOpeningForwardLockFrames) {
           return this.openingForwardLockAction(firstDoorOpeningForwardLockFrames);
         }
 
+        const lockedCourtyardSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
         const lockedCourtyardActive = this.courtyardRescueFrames > 0
           || (this.predictions >= firstDoorSpawnScanFrames
-            && this.courtyardScore >= Math.max(0.22, courtyardRescueThreshold - 0.06));
+            && !lockedCourtyardSuppressed
+            && this.courtyardTurn !== "none"
+            && this.courtyardScore >= Math.max(0.08, courtyardRescueThreshold - 0.24));
         if (lockedCourtyardActive) {
           if (this.courtyardRescueFrames <= 0) {
             this.courtyardRescueFrames = courtyardRescueFrames;
@@ -1746,14 +2338,16 @@
           return this.courtyardRescueAction(courtyardRescueFrames, courtyardRescueBackFrames);
         }
 
-        const lockedGapActive = this.spawnCorridorGapFrames > 0
+        const lockedGapSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
+        const lockedGapActive = !lockedGapSuppressed
+          && (this.spawnCorridorGapFrames > 0
           || (this.predictions >= firstDoorSpawnScanFrames
             && (this.spawnCorridorGapScore >= Math.max(0.18, spawnCorridorGapThreshold - 0.06)
               || (this.motionEntranceScore >= profileNumber(this.profile, "motionEntranceThreshold", 0.22)
                 && this.motionForwardProgress >= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
                 && this.motionTurnScore < profileNumber(this.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD)
                 && this.blueFloorScore < blueFloorHomeThreshold
-                && this.spawnCorridorGapScore >= Math.max(0.14, spawnCorridorGapThreshold - 0.12))));
+                && this.spawnCorridorGapScore >= Math.max(0.14, spawnCorridorGapThreshold - 0.12)))));
         if (lockedGapActive) {
           if (this.spawnCorridorGapFrames <= 0) {
             this.spawnCorridorGapFrames = spawnCorridorGapFrames;
@@ -1763,7 +2357,7 @@
           return this.spawnCorridorGapAction(spawnCorridorGapFrames);
         }
 
-        return this.openingRouteLockAction(firstDoorSpawnScanFrames, firstDoorWallRunFrames, firstDoorOpeningLockFrames);
+        return this.openingRouteLockAction(firstDoorSpawnScanFrames, firstDoorWallRunFrames, firstDoorOpeningLockFrames, sensor);
       }
 
       const lateDoorCandidate = this.doorOpenedCount > 0
@@ -1801,6 +2395,7 @@
       }
 
       if (bridgeLaneVisible
+        && !this.centralHallEntered
         && this.wallUseProbeFrames <= 0
         && this.safetyReason !== "combat"
         && this.safetyReason !== "combat-alert"
@@ -1816,14 +2411,16 @@
         return this.exitSwitchAction(sensor);
       }
 
+      const combatSafetyActive = (this.safetyReason === "combat"
+        || this.safetyReason === "combat-alert"
+        || this.safetyReason === "dark-combat-alert")
+        && Number(this.enemyConfidence || 0) >= COMBAT_CONFIDENCE_THRESHOLD;
       const computerRoomAdvanceAllowed = this.doorOpenedCount > 0
         && !this.centralHallEntered
         && !bridgeLaneVisible
         && !this.healthLikelyDead
         && this.wallUseProbeFrames <= 0
-        && this.safetyReason !== "combat"
-        && this.safetyReason !== "combat-alert"
-        && this.safetyReason !== "dark-combat-alert";
+        && !combatSafetyActive;
       if (computerRoomAdvanceAllowed
         && (this.computerRoomAdvanceFrames > 0 || this.darkZoneEntered || this.doorTransitionArmedFrames > 0)) {
         if (this.computerRoomAdvanceFrames <= 0) {
@@ -1848,10 +2445,13 @@
           this.wallUseProbeStage = 0;
           this.strategyPriority = 2;
           this.safetyReason = "map-spawn-corridor-route";
+          const courtyardRescueSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
           const courtyardRescueActive = this.courtyardRescueFrames > 0
             || (this.predictions >= firstDoorSpawnScanFrames
+              && !courtyardRescueSuppressed
               && (this.blueFloorScore >= blueFloorHomeThreshold || this.predictions < firstDoorWallRunFrames + 120)
-              && this.courtyardScore >= courtyardRescueThreshold);
+              && this.courtyardTurn !== "none"
+              && this.courtyardScore >= Math.max(0.08, courtyardRescueThreshold - 0.24));
           if (courtyardRescueActive) {
             if (this.courtyardRescueFrames <= 0) {
               this.courtyardRescueFrames = courtyardRescueFrames;
@@ -1864,7 +2464,7 @@
 
           const spawnCorridorGapActive = this.spawnCorridorGapFrames > 0
             || (this.predictions >= firstDoorSpawnScanFrames
-              && (this.spawnCorridorGapScore >= spawnCorridorGapThreshold
+              && (this.spawnCorridorGapScore >= Math.max(0.16, spawnCorridorGapThreshold - 0.04)
                 || (this.motionEntranceScore >= profileNumber(this.profile, "motionEntranceThreshold", 0.22)
                   && this.motionForwardProgress >= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
                   && this.motionTurnScore < profileNumber(this.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD)
@@ -1891,7 +2491,8 @@
             });
           }
 
-          if (this.predictions < firstDoorSpawnScanFrames + 54) {
+          if (this.predictions < firstDoorSpawnScanFrames + 42
+            && this.spawnCorridorGapScore < Math.max(0.14, spawnCorridorGapThreshold - 0.12)) {
             this.mobilityMode = "spawn-route-a-to-c-right-align";
             return normalizeAction({
               move: "forward",
@@ -1903,7 +2504,8 @@
             });
           }
 
-          if (this.predictions < firstDoorWallRunFrames + 120) {
+          if (this.predictions < firstDoorWallRunFrames + 84
+            && this.spawnCorridorGapScore < Math.max(0.16, spawnCorridorGapThreshold - 0.08)) {
             const driftTurn = Math.abs(sensor.wallVector) > 16
               ? (sensor.wallVector > 0 ? "left" : "right")
               : (this.blueFloorScore >= blueFloorHomeThreshold ? "right" : "none");
@@ -1998,7 +2600,7 @@
         this.mapDoorSweepFrames = 0;
         this.firstDoorCorridorSearchFrames = 0;
         this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
-        this.wallUseProbeTurn = "none";
+        this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
           if (this.wallUseProbeFrames <= 0) {
             this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
           }
@@ -2093,12 +2695,20 @@
             this.mobilityMode = backingOff
               ? `map-door-sweep-back-${turn}`
               : (turning ? `map-door-sweep-turn-use-${turn}` : "map-door-sweep-use");
+            const sweepUseRequested = sweepUse || useWindowA || useWindowB;
+            if (sweepUseRequested) {
+              const sweepAlignment = this.firstDoorUseAlignmentState();
+              if (!sweepAlignment.ready) {
+                return this.firstDoorUseAimCorrectionAction(sweepAlignment, "map-door-sweep-use-angle");
+              }
+            }
+
             return normalizeAction({
               move: backingOff ? "back" : "none",
               turn: turning || backingOff ? turn : "none",
               fire: false,
               strafe: false,
-              use: sweepUse || useWindowA || useWindowB,
+              use: sweepUseRequested,
               run: false
             });
           }
@@ -2208,7 +2818,7 @@
         this.mapDoorSweepFrames = 0;
         this.firstDoorCorridorSearchFrames = 0;
         this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
-        this.wallUseProbeTurn = "none";
+        this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
         if (this.wallUseProbeFrames <= 0) {
           this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
         }
@@ -2218,7 +2828,51 @@
         return this.wallUseProbeAction();
       }
 
+      const computerRoomIngressActive = this.computerRoomEntered
+        && Number(this.computerRoomAdvanceFrames || 0) > 0
+        && !this.finalRoomEntered
+        && !this.healthLikelyDead
+        && this.wallUseProbeFrames <= 0
+        && !combatSafetyActive;
+      if (computerRoomIngressActive) {
+        this.cornerExitCommitFrames = 0;
+        this.hardStuckEscapeFrames = 0;
+        return this.computerRoomAdvanceAction(sensor, frame);
+      }
+
+      const computerRoomEgressContext = this.computerRoomEntered
+        && !this.centralHallEntered
+        && this.doorOpenedCount > 0
+        && !this.healthLikelyDead
+        && this.wallUseProbeFrames <= 0
+        && !combatSafetyActive;
+      const computerRoomEgressCue = computerRoomEgressContext
+        && (sensor.contextDict === "open-space"
+          || Number(sensor.depthSig || 0) >= 0.56
+          || Number(this.computerRoomScore || 0) >= 0.10
+          || Number(this.computerPanelScore || 0) >= 0.22
+          || Number(this.bridgeBrownScore || 0) >= 0.08
+          || Math.max(Number(this.bridgeGreenLeft || 0), Number(this.bridgeGreenCenter || 0), Number(this.bridgeGreenRight || 0)) >= 0.10);
+      const computerRoomFalseStuck = computerRoomEgressCue
+        && Number(sensor.depthSig || 0) >= 0.48
+        && Number(sensor.qDelta || 0) <= QUANTIZED_STALL_THRESHOLD
+        && Math.abs(Number(sensor.wallVector || 0)) <= 0.58;
+      if (computerRoomFalseStuck) {
+        this.cornerExitCommitFrames = 0;
+        this.hardStuckEscapeFrames = 0;
+        this.openStallEscapeFrames = 0;
+        this.computerRoomAdvanceFrames = Math.max(this.computerRoomAdvanceFrames, 36);
+        return this.computerRoomAdvanceAction(sensor, frame);
+      }
+
       if (this.cornerExitCommitFrames > 0 && sensor.depthSig >= profileNumber(this.profile, "blockedDepth", 0.28) + 0.18) {
+        if (computerRoomEgressCue && Number(sensor.depthSig || 0) >= 0.56) {
+          this.cornerExitCommitFrames = 0;
+          this.hardStuckEscapeFrames = 0;
+          this.computerRoomAdvanceFrames = Math.max(this.computerRoomAdvanceFrames, 24);
+          return this.computerRoomAdvanceAction(sensor, frame);
+        }
+
         this.cornerExitCommitFrames -= 1;
         this.strategyPriority = 2;
         this.safetyReason = "corner-exit-commit";
@@ -2233,7 +2887,9 @@
         });
       }
 
-      const hardStuckDetected = sensor.stuckTicks >= STUCK_FRAMES && Number(sensor.qDelta || 0) <= QUANTIZED_STALL_THRESHOLD;
+      const hardStuckDetected = !stallSuppressedByRoute
+        && sensor.stuckTicks >= STUCK_FRAMES
+        && Number(sensor.qDelta || 0) <= QUANTIZED_STALL_THRESHOLD;
       if (hardStuckDetected || this.hardStuckEscapeFrames > 0) {
         if (this.hardStuckEscapeFrames <= 0) {
           this.hardStuckEscapeFrames = HARD_STUCK_ESCAPE_FRAMES;
@@ -2287,7 +2943,25 @@
 
       this.hardStuckEscapeFrames = Math.max(0, this.hardStuckEscapeFrames - 1);
 
-      const openAdvanceStalled = sensor.contextDict === "open-space"
+      const centralRouteActive = this.computerRoomEntered
+        && !this.finalRoomEntered
+        && (this.controlPipeline === "ComputerRoom"
+          || this.centralHallEntered
+          || this.objective === "reach-central-hall"
+          || this.objective === "cross-bridge"
+          || this.objective === "engage-front-enemy");
+      if (centralRouteActive) {
+        this.openAdvanceStallFrames = 0;
+        this.openStallEscapeFrames = 0;
+      }
+      if (this.doorOpenedCount <= 0) {
+        this.openAdvanceStallFrames = 0;
+        this.openStallEscapeFrames = 0;
+      }
+      const openAdvanceStalled = this.doorOpenedCount > 0
+        && !centralRouteActive
+        && !stallSuppressedByRoute
+        && sensor.contextDict === "open-space"
         && safe.move === "forward"
         && safe.turn === "none"
         && !safe.fire
@@ -2363,7 +3037,7 @@
         });
       }
 
-      if (sensor.stuckTicks >= profileNumber(this.profile, "emergencyStuckTicks", EMERGENCY_STUCK_TICKS)) {
+      if (!stallSuppressedByRoute && sensor.stuckTicks >= profileNumber(this.profile, "emergencyStuckTicks", EMERGENCY_STUCK_TICKS)) {
         this.strategyPriority = 3;
         this.safetyReason = sensor.contextDict === "open-space" ? "open-stuck-break" : "sensor-emergency";
         this.loopEscapeFrames = 0;
@@ -2570,6 +3244,23 @@
       const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
       const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
 
+      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
+        this.exitSwitchPressed = false;
+        this.exitSwitchUseFrames = 0;
+        this.finalRoomEntered = false;
+        this.finalRoomCandidateFrames = 0;
+        if (objective === "press-exit-switch"
+          || objective === "level-clear"
+          || objective === "reach-final-room"
+          || objective === "cross-bridge") {
+          this.strategyPriority = 3;
+          this.strategyContext = "central-hall-combat";
+          this.controlPipeline = "ComputerRoom";
+          this.safetyReason = "central-hall-front-enemy-hold";
+          return null;
+        }
+      }
+
       if (objective === "press-exit-switch" && this.finalRoomEntered) {
         this.strategyPriority = 3;
         this.strategyContext = "semantic-final-objective";
@@ -2598,7 +3289,7 @@
         return this.bridgeLaneGuardAction();
       }
 
-      if ((objective === "open-first-door" || objective === "find-and-open-first-door") && this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated) {
+      if ((objective === "open-first-door" || objective === "align-first-door" || objective === "approach-first-door" || objective === "find-and-open-first-door") && this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated) {
         this.cornerExitCommitFrames = 0;
         this.hardStuckEscapeFrames = 0;
         this.openStallEscapeFrames = 0;
@@ -2618,12 +3309,286 @@
         const firstDoorRetryReady = this.firstDoorUseAttempted
           || this.firstDoorUseSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
           || this.wallUseProbeStage >= 2;
+        const firstDoorSensorStall = this.movementSensorSnapshot?.eventType === "movement-stall"
+          && Number(this.movementSensorSnapshot?.confidence || 0) >= 0.55
+          && Boolean(this.nousDetectorResult?.sensorRecovery?.needed || this.nousDetectorResult?.stuck?.active || sensor.stuckTicks >= 1);
+        const firstDoorPatch = this.firstDoorVision9x9Box || null;
+        const firstDoorUseAlignment = this.firstDoorUseAlignmentState(firstDoorPatch);
+        const firstDoorPatchScore = Number(firstDoorPatch?.score || this.firstDoorVision9x9Score || 0);
+        const firstDoorEdgeOnlyCandidate = firstDoorUseAlignment.reason === "first-door-9x9-patch"
+          && !firstDoorUseAlignment.visualEvidenceReady
+          && !firstDoorUseAlignment.centered3x3
+          && !firstDoorUseAlignment.doorPatchKind
+          && Number(firstDoorUseAlignment.redScore || 0) < FIRST_DOOR_RED_ACCENT_THRESHOLD;
+        const firstDoorWallOnlyCandidate = (firstDoorUseAlignment.reason === "first-door-wall-pattern"
+            && !firstDoorUseAlignment.visualEvidenceReady
+            && !firstDoorUseAlignment.centered3x3
+            && !firstDoorUseAlignment.doorPatchKind
+            && Number(this.firstDoorUse3x3Score || 0) < 0.18
+            && (firstDoorPatchScore < 0.52 || Number(firstDoorUseAlignment.redScore || 0) < 0.26))
+          || firstDoorEdgeOnlyCandidate;
+        if (firstDoorWallOnlyCandidate) {
+          this.firstDoorWallOnlyCandidateFrames = Math.min(MAX_STUCK_COUNTER, Number(this.firstDoorWallOnlyCandidateFrames || 0) + 1);
+        } else {
+          this.firstDoorWallOnlyCandidateFrames = Math.max(0, Number(this.firstDoorWallOnlyCandidateFrames || 0) - 1);
+        }
+        const firstDoorWallOnlyPersistent = Number(this.firstDoorWallOnlyCandidateFrames || 0) >= 3
+          || Number(this.depthEstimate || 1) <= 0.18;
+        const firstDoorCloseCorridorWall = this.firstDoorCorridorLocated
+          && depth <= profileNumber(this.profile, "firstDoorApproachDepth", FIRST_DOOR_APPROACH_DEPTH)
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance;
+        const firstDoorStrongCorridorWall = this.firstDoorCorridorLocated
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold + 0.08;
+        if (!firstDoorRetryReady && firstDoorWallOnlyCandidate && firstDoorWallOnlyPersistent && depth <= 0.22) {
+          const resetTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : oppositeTurn(this.turnBias);
+          return this.resetFirstDoorSemanticLock("first-door-wall-contact-reset", resetTurn);
+        }
+        if (!firstDoorRetryReady && firstDoorWallOnlyCandidate && firstDoorWallOnlyPersistent && firstDoorCloseCorridorWall) {
+          this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
+          this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
+          this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
+          this.useCooldown = 0;
+          this.strategyPriority = 3;
+          this.safetyReason = "semantic-first-door-close-wall-probe";
+          this.mobilityMode = "semantic-door-close-wall-probe";
+          return this.wallUseProbeAction();
+        }
+        if (!firstDoorRetryReady && firstDoorWallOnlyCandidate && firstDoorWallOnlyPersistent && !firstDoorStrongCorridorWall) {
+          const resetTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : oppositeTurn(this.turnBias);
+          return this.resetFirstDoorSemanticLock("first-door-wall-only-reset", resetTurn);
+        }
+        const firstDoorNearDarkPanelReady = firstDoorUseAlignment.ready
+          && firstDoorPatch?.kind === "first-door-dark-panel"
+          && firstDoorPatchScore >= 0.32
+          && this.firstDoorUse3x3Turn === "none"
+          && Number(this.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+          && depth <= profileNumber(this.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.08;
+        const firstDoorPatchUseReady = firstDoorUseAlignment.ready
+          && (this.firstDoorVision9x9Score >= 0.54 || firstDoorNearDarkPanelReady)
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+          && this.useCooldown === 0;
+        const firstDoorPatchNeedsAim = firstDoorPatch
+          && !firstDoorPatchUseReady
+          && firstDoorUseAlignment.doorPatchKind
+          && this.firstDoorVision9x9Score >= 0.5
+          && this.wallUseProbeFrames <= 0
+          && !this.firstDoorUseAttempted;
+        const firstDoorUseFailedByAudio = this.firstDoorUseAttempted
+          && this.auditorySnapshot?.eventType === "use-failed-voice";
+        const firstDoor3x3Turn = this.firstDoorUse3x3Turn === "left" || this.firstDoorUse3x3Turn === "right"
+          ? this.firstDoorUse3x3Turn
+          : (firstDoorUseAlignment.turn === "left" || firstDoorUseAlignment.turn === "right" ? firstDoorUseAlignment.turn : "none");
+        const firstDoor3x3RecenterNeeded = !this.firstDoorUseAttempted
+          && this.wallUseProbeFrames <= 0
+          && firstDoor3x3Turn !== "none"
+          && this.firstDoorCorridorLocated
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+          && depth <= 0.86
+          && Number(this.firstDoorUse3x3Score || 0) < FIRST_DOOR_USE_ALIGNMENT_SCORE
+          && firstDoorUseAlignment.visualEvidenceReady
+          && (firstDoorUseAlignment.patchUseAngle || Number(this.firstDoorVision9x9Score || 0) >= 0.32);
+        const firstDoorPreUseStall = !this.firstDoorUseAttempted
+          && firstDoorSensorStall
+          && !firstDoorPatchUseReady
+          && (this.wallUseProbeFrames > 0
+            || this.quantizedStallFrames >= 8
+            || (Number(this.motionStallScore || 0) >= 0.9 && this.inputStallFrames >= 3));
+        const firstDoorCloseContactUse = !this.firstDoorUseAttempted
+          && this.useCooldown === 0
+          && this.firstDoorUseLatchFrames <= 0
+          && this.firstDoorCorridorLocated
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+          && depth <= 0.32
+          && (firstDoorUseAlignment.ready || firstDoorNearDarkPanelReady)
+          && (Number(this.stuckFrames || 0) >= 42
+            || Number(this.inputStallFrames || 0) >= 8
+            || Number(this.motionStallScore || 0) >= 0.82);
+        const firstDoorContactUseFallback = !this.firstDoorUseAttempted
+          && this.useCooldown === 0
+          && this.firstDoorUseLatchFrames <= 0
+          && this.wallUseProbeFrames <= 0
+          && this.firstDoorCorridorLocated
+          && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+          && depth <= 0.34
+          && firstDoor3x3Turn === "none"
+          && firstDoorUseAlignment.reason !== "first-door-wall-pattern"
+          && firstDoorUseAlignment.reason !== "first-door-floor-red"
+          && (firstDoorUseAlignment.ready
+            || firstDoorNearDarkPanelReady
+            || (firstDoorUseAlignment.patchUseAngle
+              && firstDoorUseAlignment.visualEvidenceReady
+              && Number(this.firstDoorUse3x3Score || 0) >= 0.30)
+            || (firstDoorUseAlignment.patchUseAngle
+              && Number(this.firstDoorVision9x9Score || 0) >= 0.54));
+
+        if (firstDoorUseFailedByAudio) {
+          const reprobeFrames = profileNumber(this.profile, "firstDoorReprobeFrames", 36);
+          const candidateTurn = firstDoor3x3Turn === "left" || firstDoor3x3Turn === "right"
+            ? firstDoor3x3Turn
+            : (firstDoorUseAlignment.turn === "left" || firstDoorUseAlignment.turn === "right"
+              ? firstDoorUseAlignment.turn
+              : "none");
+          const weakFailedCandidate = (firstDoorUseAlignment.reason === "first-door-wall-pattern"
+              || firstDoorUseAlignment.reason === "first-door-floor-red")
+            && !firstDoorUseAlignment.visualEvidenceReady
+            && !firstDoorUseAlignment.centered3x3;
+          const failedTurn = weakFailedCandidate
+            ? (Number.isFinite(firstDoorUseAlignment.column)
+              ? (firstDoorUseAlignment.column < 4 ? "right" : "left")
+              : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
+                ? oppositeTurn(this.wallUseProbeTurn)
+                : oppositeTurn(this.turnBias)))
+            : (candidateTurn !== "none"
+              ? candidateTurn
+              : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
+                ? this.wallUseProbeTurn
+                : this.turnBias));
+          const keepFirstDoorAfterAudioFailure = this.firstDoorCorridorLocated
+            && this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance;
+          if (this.firstDoorLockedUseCycles >= 4 && !keepFirstDoorAfterAudioFailure) {
+            return this.resetFirstDoorSemanticLock("first-door-audio-lock-reset", failedTurn);
+          }
+
+          this.firstDoorUseAttempted = false;
+          this.firstDoorUseSignature = 0;
+          this.firstDoorUseLatchFrames = 0;
+          this.firstDoorUsePulsed = false;
+          this.startFirstDoorReprobe(reprobeFrames, failedTurn);
+          this.strategyPriority = 3;
+          this.safetyReason = "first-door-audio-reprobe";
+          return this.firstDoorReprobeAction(reprobeFrames);
+        }
+
+        if (firstDoorContactUseFallback) {
+          this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+          this.firstDoorUsePulsed = true;
+          this.firstDoorUseAttempted = true;
+          this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = `first-door-contact-use-${firstDoorUseAlignment.reason || "corridor"}`;
+          this.mobilityMode = "semantic-door-contact-use";
+          return normalizeAction({
+            move: "none",
+            turn: "none",
+            fire: false,
+            strafe: false,
+            use: true,
+            run: false
+          });
+        }
+
+        if (firstDoor3x3RecenterNeeded) {
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "first-door-3x3-recenter";
+          this.mobilityMode = `semantic-door-3x3-recenter-${firstDoor3x3Turn}`;
+          return normalizeAction({
+            move: depth > 0.46 ? "forward" : "none",
+            turn: firstDoor3x3Turn,
+            fire: false,
+            strafe: false,
+            use: false,
+            run: false
+          });
+        }
 
         if (this.firstDoorUseLatchFrames > 0 && this.firstDoorUseAttempted) {
           return this.firstDoorUseLatchAdvanceAction();
         }
 
+        if (firstDoorCloseContactUse) {
+          this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+          this.firstDoorUsePulsed = true;
+          this.firstDoorUseAttempted = true;
+          this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = `first-door-close-contact-use-${firstDoorUseAlignment.reason}`;
+          this.mobilityMode = "semantic-door-close-contact-use";
+          return normalizeAction({
+            move: "none",
+            turn: "none",
+            fire: false,
+            strafe: false,
+            use: true,
+            run: false
+          });
+        }
+
+        if (!firstDoorRetryReady && firstDoorPatchUseReady && this.wallUseProbeFrames <= 0) {
+          this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
+          this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
+          this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
+          this.strategyPriority = 3;
+          this.safetyReason = "semantic-first-door-9x9-use-probe";
+          this.mobilityMode = "semantic-door-9x9-probe";
+          return this.wallUseProbeAction();
+        }
+
+        if (firstDoorPatchNeedsAim) {
+          return this.firstDoorUseAimCorrectionAction(firstDoorUseAlignment, "semantic-first-door-3x3-aim");
+        }
+
+        const firstDoorWeakDistantProbe = this.wallUseProbeFrames > 0
+          && this.wallUseProbeStage >= 2
+          && !this.firstDoorUseAttempted
+          && !firstDoorUseAlignment.ready
+          && !firstDoorUseAlignment.doorPatchKind
+          && depth >= 0.90
+          && Number(this.firstDoorUse3x3Score || 0) < 0.22
+          && firstDoorPatchScore < 0.54;
+        if (firstDoorWeakDistantProbe) {
+          const reprobeTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
+              ? oppositeTurn(this.wallUseProbeTurn)
+              : oppositeTurn(this.turnBias));
+          const reprobeFrames = Math.max(30, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+          this.startFirstDoorReprobe(reprobeFrames, reprobeTurn);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "first-door-weak-distant-probe-reprobe";
+          return this.firstDoorReprobeAction(reprobeFrames);
+        }
+
         if (this.wallUseProbeFrames > 0) {
+          return this.wallUseProbeAction();
+        }
+
+        if (firstDoorPreUseStall) {
+          const searchFrames = Math.max(36, Math.round(profileNumber(this.profile, "firstDoorCorridorSearchFrames", FIRST_DOOR_CORRIDOR_SEARCH_FRAMES)));
+          const backFrames = Math.max(0, Math.round(profileNumber(this.profile, "firstDoorCorridorBackFrames", FIRST_DOOR_CORRIDOR_BACK_FRAMES)));
+          const turnFrames = Math.max(8, Math.round(profileNumber(this.profile, "firstDoorCorridorTurnFrames", FIRST_DOOR_CORRIDOR_TURN_FRAMES)));
+          const fallbackTurn = this.spawnCorridorGapTurn !== "none"
+            ? this.spawnCorridorGapTurn
+            : (sensor.wallVector >= 0 ? "left" : "right");
+          this.wallUseProbeFrames = 0;
+          this.wallUseProbeStage = 0;
+          this.firstDoorCorridorSearchFrames = searchFrames;
+          this.firstDoorCorridorSearchTurn = this.firstDoorProbeTurn(fallbackTurn);
+          this.strategyPriority = 3;
+          this.safetyReason = "semantic-first-door-pre-use-realign";
+          return this.firstDoorCorridorSearchAction(searchFrames, backFrames, turnFrames);
+        }
+
+        if (!firstDoorRetryReady
+          && firstDoorSensorStall
+          && (doorConfidence >= 0.12 || this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance)) {
+          this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
+          this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
+          this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
+          this.strategyPriority = 3;
+          this.safetyReason = "semantic-first-door-stall-probe";
+          this.mobilityMode = "semantic-door-stall-probe";
           return this.wallUseProbeAction();
         }
 
@@ -2639,8 +3604,17 @@
           });
         }
 
+        const fallbackAlignment = this.firstDoorUseAlignmentState(firstDoorPatch);
+        if (!fallbackAlignment.ready
+          && fallbackAlignment.doorPatchKind
+          && (this.firstDoorVision9x9Score >= 0.42
+            || Number(firstDoorPatch?.redScore || 0) >= FIRST_DOOR_RED_ACCENT_THRESHOLD
+            || Number(this.firstDoorUse3x3Score || 0) >= 0.22)) {
+          return this.firstDoorUseAimCorrectionAction(fallbackAlignment, "semantic-first-door-use-angle");
+        }
+
         this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
-        this.wallUseProbeTurn = doorConfidence >= 0.48 || this.firstDoorUseAttempted ? "none" : (
+        this.wallUseProbeTurn = doorConfidence >= 0.48 || this.firstDoorUseAttempted ? this.firstDoorProbeTurn("none") : (
           this.spawnCorridorGapTurn !== "none"
             ? this.spawnCorridorGapTurn
             : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right" ? this.wallUseProbeTurn : "none"));
@@ -2648,7 +3622,7 @@
         return this.wallUseProbeAction();
       }
 
-      if ((objective === "reach-first-door" || objective === "find-and-open-first-door")
+      if ((objective === "find-corridor-to-first-door" || objective === "follow-demo-route-to-first-door" || objective === "recover-via-east-window" || objective === "locate-first-door-corridor" || objective === "enter-first-door-corridor" || objective === "reach-first-door" || objective === "find-and-open-first-door")
         && this.doorOpenedCount <= 0
         && !this.firstDoorCorridorLocated
         && this.predictions <= routeLockFrames) {
@@ -2667,8 +3641,10 @@
         this.controlPipeline = "OpeningHome";
         this.safetyReason = "semantic-route-lock";
 
+        const routeCourtyardSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
         if (this.courtyardRescueFrames > 0
           || (this.predictions >= Number(options.firstDoorSpawnScanFrames ?? FIRST_DOOR_SPAWN_SCAN_FRAMES)
+            && !routeCourtyardSuppressed
             && this.courtyardScore >= Math.max(0.22, profileNumber(this.profile, "courtyardRescueThreshold", COURTYARD_RESCUE_THRESHOLD) - 0.06))) {
           if (this.courtyardRescueFrames <= 0) {
             this.courtyardRescueFrames = Number(options.courtyardRescueFrames ?? COURTYARD_RESCUE_FRAMES);
@@ -2681,9 +3657,11 @@
             Number(options.courtyardRescueBackFrames ?? COURTYARD_RESCUE_BACK_FRAMES));
         }
 
-        if (this.spawnCorridorGapFrames > 0
+        const routeGapSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
+        if (!routeGapSuppressed
+          && (this.spawnCorridorGapFrames > 0
           || corridorConfidence >= corridorThreshold
-          || this.spawnCorridorGapScore >= Math.max(0.18, Number(options.spawnCorridorGapThreshold ?? SPAWN_CORRIDOR_GAP_THRESHOLD) - 0.06)) {
+          || this.spawnCorridorGapScore >= Math.max(0.18, Number(options.spawnCorridorGapThreshold ?? SPAWN_CORRIDOR_GAP_THRESHOLD) - 0.06))) {
           if (this.spawnCorridorGapFrames <= 0) {
             this.spawnCorridorGapFrames = Number(options.spawnCorridorGapFrames ?? SPAWN_CORRIDOR_GAP_FRAMES);
             this.spawnCorridorGapAlignFrames = Number(options.spawnCorridorGapAlignFrames ?? SPAWN_CORRIDOR_GAP_ALIGN_FRAMES);
@@ -2695,7 +3673,8 @@
         return this.openingRouteLockAction(
           Number(options.firstDoorSpawnScanFrames ?? FIRST_DOOR_SPAWN_SCAN_FRAMES),
           Number(options.firstDoorWallRunFrames ?? FIRST_DOOR_RIGHT_WALL_RUN_FRAMES),
-          Number(options.firstDoorOpeningLockFrames ?? FIRST_DOOR_OPENING_LOCK_FRAMES));
+          Number(options.firstDoorOpeningLockFrames ?? FIRST_DOOR_OPENING_LOCK_FRAMES),
+          sensor);
       }
 
       return null;
@@ -2708,6 +3687,24 @@
       this.spawnCorridorGapFrames = Math.max(0, this.spawnCorridorGapFrames - 1);
       this.strategyPriority = 2;
       this.safetyReason = "spawn-corridor-gap";
+      const depth = Number(this.depthEstimate || 1);
+      const stalledForward = Number(this.motionStallScore || 0) >= 0.9
+        && Number(this.inputStallFrames || 0) >= 6
+        && elapsed >= alignFrames + 8;
+      const commitBlocked = elapsed >= alignFrames
+        && (depth <= 0.22 || stalledForward);
+      if (commitBlocked) {
+        this.mobilityMode = `spawn-gap-blocked-realign-${turn}`;
+        return normalizeAction({
+          move: depth <= 0.12 ? "back" : (depth <= 0.22 ? "none" : "forward"),
+          turn,
+          fire: false,
+          strafe: false,
+          use: false,
+          run: depth > 0.22
+        });
+      }
+
       this.mobilityMode = elapsed < alignFrames
         ? `spawn-gap-align-${turn}`
         : "spawn-gap-commit-forward";
@@ -2743,16 +3740,45 @@
 
     computerRoomAdvanceAction(sensor, frame) {
       const wallVector = Number(sensor?.wallVector || 0);
-      const turn = Math.abs(wallVector) >= 0.26
-        ? (wallVector > 0 ? "left" : "right")
-        : (this.targetConfidence >= 0.28 ? targetTurnDirection(frame) : "none");
-      const sidePressure = Math.abs(wallVector) >= 0.34;
+      const openLaneStall = this.computerRoomEntered
+        && !this.centralHallEntered
+        && Number(sensor?.depthSig ?? this.depthEstimate ?? 1) >= 0.74
+        && (Number(this.quantizedStallFrames || 0) >= 18
+          || Number(this.stuckFrames || 0) >= 18
+          || Number(this.motionStallScore || 0) >= 0.82);
+      const openLaneSurvey = openLaneStall
+        && (Number(this.quantizedStallFrames || 0) >= 36
+          || Number(this.inputStallFrames || 0) >= 12
+          || Number(this.stuckFrames || 0) >= 36);
+      const openLaneSurveyTurn = openLaneSurvey
+        ? ((Math.floor(Number(this.predictions || 0) / 18) % 2) === 0 ? "right" : "left")
+        : "none";
+      const bridgeCueStrong = Number(this.bridgeBrownScore || 0) >= 0.24
+        || Number(this.bridgeDoorScore || 0) >= 0.22
+        || Math.max(Number(this.bridgeGreenLeft || 0), Number(this.bridgeGreenCenter || 0), Number(this.bridgeGreenRight || 0)) >= 0.40;
+      const bridgeCueTurn = !openLaneStall
+        && bridgeCueStrong
+        && (this.bridgeLaneTurn === "left" || this.bridgeLaneTurn === "right")
+        ? this.bridgeLaneTurn
+        : "none";
+      const turn = openLaneSurvey
+        ? openLaneSurveyTurn
+        : (openLaneStall
+        ? "none"
+        : (bridgeCueTurn !== "none"
+        ? bridgeCueTurn
+        : (Math.abs(wallVector) >= 0.26
+          ? (wallVector > 0 ? "left" : "right")
+          : (this.targetConfidence >= 0.28 ? targetTurnDirection(frame) : "none"))));
+      const sidePressure = !openLaneStall && Math.abs(wallVector) >= 0.34;
       this.computerRoomAdvanceFrames = Math.max(0, this.computerRoomAdvanceFrames - 1);
       this.strategyPriority = 2;
       this.strategyContext = "computer-room";
       this.controlPipeline = "ComputerRoom";
       this.safetyReason = "computer-room-advance";
-      this.mobilityMode = turn === "none" ? "computer-room-centerline" : `computer-room-trim-${turn}`;
+      this.mobilityMode = openLaneSurvey
+        ? `computer-room-open-lane-survey-${turn}`
+        : (openLaneStall ? "computer-room-open-lane-forward" : (turn === "none" ? "computer-room-centerline" : `computer-room-trim-${turn}`));
       return normalizeAction({
         move: "forward",
         turn,
@@ -2805,7 +3831,7 @@
       this.strategyContext = "spawn-home";
       this.controlPipeline = "OpeningHome";
       this.safetyReason = "opening-forward-lock";
-      this.mobilityMode = "opening-north-forward";
+      this.mobilityMode = "opening-map-straight-center";
       this.wallUseProbeFrames = 0;
       this.wallUseProbeStage = 0;
       this.spawnCorridorGapFrames = 0;
@@ -2820,7 +3846,211 @@
       });
     }
 
-    openingRouteLockAction(scanFrames, wallRunFrames, lockFrames) {
+    openingSpawnLandmarkAnchorAction(kind, turn) {
+      const safeKind = kind === "west-stair" ? "west-stair" : "secret-door";
+      const safeTurn = turn === "right" ? "right" : "left";
+      this.strategyPriority = 3;
+      this.strategyContext = "spawn-home-landmark";
+      this.controlPipeline = "OpeningHome";
+      this.safetyReason = `opening-${safeKind}-anchor`;
+      this.mobilityMode = `opening-${safeKind}-anchor-${safeTurn}`;
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+      this.spawnCorridorGapFrames = 0;
+      this.courtyardRescueFrames = 0;
+      return normalizeAction({
+        move: "none",
+        turn: safeTurn,
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      });
+    }
+
+    openingMapRouteAction(sensor, scanFrames, wallRunFrames, lockFrames) {
+      const frame = Math.max(0, Number(this.predictions || 0));
+      const wallVector = Number(sensor?.wallVector || 0);
+      const depth = Number(sensor?.depthSig ?? this.depthEstimate ?? 1);
+      const obstacle = Math.max(
+        Number(this.motionObstacleScore || 0),
+        Number(this.footObstacleScore || 0),
+        Number(this.footObstacleFlickerScore || 0),
+        Number(this.priorFootObstacleScore || 0));
+      const routeFrame = Math.max(0, frame - Math.max(0, scanFrames));
+      const footBounceBlocked = Number(this.footObstacleBounceFrames || 0) >= 3;
+      const obstacleBlocked = depth <= 0.24 || obstacle >= 0.46 || footBounceBlocked || Number(this.inputStallFrames || 0) >= 4;
+      const sidePressure = Math.abs(wallVector) >= 0.24;
+      const awayTurn = sidePressure
+        ? (wallVector > 0 ? "left" : "right")
+        : ((Math.floor(routeFrame / 24) % 2) === 0 ? "right" : "left");
+      const courtyardThreshold = profileNumber(this.profile, "courtyardRescueThreshold", COURTYARD_RESCUE_THRESHOLD);
+      const spawnSecretDoorThreshold = profileNumber(this.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD);
+      const spawnWestStairThreshold = profileNumber(this.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD);
+      const eastWindowRecoveryFrames = Math.max(96, Math.round(profileNumber(this.profile, "eastWindowRecoveryFrames", 132)));
+      const courtyardWindowVisible = this.courtyardTurn !== "none"
+        && this.courtyardScore >= Math.max(0.08, courtyardThreshold - 0.24)
+        && frame >= Math.max(24, scanFrames);
+      const eastWindowVisible = this.courtyardTurn === "right"
+        && this.courtyardScore >= Math.max(0.18, courtyardThreshold - 0.1)
+        && frame >= Math.max(24, scanFrames);
+      const secretDoorAnchorVisible = this.spawnSecretDoorScore >= spawnSecretDoorThreshold
+        && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+        && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+        && this.courtyardScore < Math.max(0.18, courtyardThreshold - 0.12)
+        && frame >= Math.max(18, scanFrames - 12);
+      const westStairAnchorVisible = this.spawnWestStairScore >= spawnWestStairThreshold
+        && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+        && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+        && this.courtyardScore < Math.max(0.18, courtyardThreshold - 0.12)
+        && frame >= Math.max(18, scanFrames - 12);
+
+      this.strategyPriority = 3;
+      this.strategyContext = "spawn-home-map-route";
+      this.controlPipeline = "OpeningHome";
+      this.safetyReason = obstacleBlocked
+        ? (footBounceBlocked ? "opening-map-foot-bounce-obstacle" : "opening-map-route-obstacle")
+        : "opening-map-route";
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+
+      if (!this.firstDoorCorridorLocated && secretDoorAnchorVisible) {
+        return this.openingSpawnLandmarkAnchorAction("secret-door", "left");
+      }
+
+      if (!this.firstDoorCorridorLocated && westStairAnchorVisible) {
+        return this.openingSpawnLandmarkAnchorAction("west-stair", "right");
+      }
+
+      if ((this.courtyardRescueFrames > 0 && this.courtyardRescueMode === "east-window-wall-left")
+        || ((eastWindowVisible || courtyardWindowVisible) && !this.firstDoorCorridorLocated)) {
+        if (this.courtyardRescueFrames <= 0 || this.courtyardRescueMode !== "east-window-wall-left") {
+          this.courtyardRescueFrames = eastWindowRecoveryFrames;
+          this.courtyardRescueMode = "east-window-wall-left";
+          this.courtyardRescueTurn = "left";
+        }
+
+        return this.eastWindowRouteRecoveryAction(eastWindowRecoveryFrames, sensor);
+      }
+
+      if (obstacleBlocked) {
+        this.mobilityMode = `opening-map-centerline-recover-${awayTurn}`;
+        return normalizeAction({
+          move: depth <= 0.12 ? "back" : "none",
+          turn: awayTurn,
+          fire: false,
+          strafe: depth > 0.12,
+          use: false,
+          run: false
+        });
+      }
+
+      if (routeFrame < 72) {
+        this.mobilityMode = "opening-map-straight-center";
+        return normalizeAction({
+          move: "forward",
+          turn: sidePressure ? awayTurn : "none",
+          fire: false,
+          strafe: sidePressure,
+          use: false,
+          run: true
+        });
+      }
+
+      if (routeFrame < 150) {
+        this.mobilityMode = "opening-map-ne-arc";
+        return normalizeAction({
+          move: "forward",
+          turn: sidePressure ? awayTurn : "right",
+          fire: false,
+          strafe: sidePressure,
+          use: false,
+          run: !sidePressure
+        });
+      }
+
+      if (routeFrame < 245) {
+        this.mobilityMode = "opening-map-ne-centerline";
+        return normalizeAction({
+          move: "forward",
+          turn: sidePressure ? awayTurn : "none",
+          fire: false,
+          strafe: sidePressure,
+          use: false,
+          run: true
+        });
+      }
+
+      if (routeFrame < Math.max(300, lockFrames - scanFrames)) {
+        this.mobilityMode = "opening-map-corridor-mouth-sweep";
+        return normalizeAction({
+          move: "forward",
+          turn: sidePressure ? awayTurn : (((Math.floor(routeFrame / 45) % 2) === 0) ? "right" : "left"),
+          fire: false,
+          strafe: sidePressure,
+          use: false,
+          run: !sidePressure
+        });
+      }
+
+      this.mobilityMode = "opening-map-slow-ne-rescan";
+      return normalizeAction({
+        move: "none",
+        turn: "right",
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      });
+    }
+
+    eastWindowRouteRecoveryAction(totalFrames, sensor) {
+      const total = Math.max(72, Math.round(totalFrames || 132));
+      const elapsed = Math.max(0, total - Number(this.courtyardRescueFrames || 0));
+      const depth = Number(sensor?.depthSig ?? this.depthEstimate ?? 1);
+      const closeWall = depth <= 0.22 || Number(this.motionStallScore || 0) >= 0.76 || Number(this.inputStallFrames || 0) >= 4;
+      this.courtyardRescueFrames = Math.max(0, Number(this.courtyardRescueFrames || 0) - 1);
+      this.strategyPriority = 3;
+      this.strategyContext = "spawn-east-window-recovery";
+      this.controlPipeline = "OpeningHome";
+      this.safetyReason = "opening-east-window-recovery";
+
+      if (elapsed < 42 && !closeWall) {
+        this.mobilityMode = "opening-east-window-forward-to-wall";
+        return normalizeAction({
+          move: "forward",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: false,
+          run: true
+        });
+      }
+
+      if (elapsed < 72 || closeWall) {
+        this.mobilityMode = "opening-east-window-left-turn";
+        return normalizeAction({
+          move: "none",
+          turn: "left",
+          fire: false,
+          strafe: false,
+          use: false,
+          run: false
+        });
+      }
+
+      this.mobilityMode = "opening-east-window-enter-corridor";
+      return normalizeAction({
+        move: "forward",
+        turn: "none",
+        fire: false,
+        strafe: false,
+        use: false,
+        run: true
+      });
+    }
+
+    openingRouteLockAction(scanFrames, wallRunFrames, lockFrames, sensor = null) {
       const frame = Math.max(0, Number(this.predictions || 0));
       this.strategyPriority = 3;
       this.strategyContext = "spawn-home";
@@ -2829,6 +4059,19 @@
       this.wallUseProbeFrames = 0;
       this.wallUseProbeStage = 0;
       this.mobilityMode = "opening-lock";
+
+      const routeSensor = sensor || buildSensorFusionPacket({
+          frame: this.previousFrame || {},
+          depthEstimate: this.depthEstimate,
+          stuckFrames: this.stuckFrames,
+          quantizedStallFrames: this.quantizedStallFrames,
+          motion: this.movementSensorSnapshot || {}
+        });
+      return this.openingMapRouteAction(
+        routeSensor,
+        scanFrames,
+        wallRunFrames,
+        lockFrames);
 
       if (frame < scanFrames) {
         this.mobilityMode = "opening-lock-scan-right-gap";
@@ -2954,6 +4197,641 @@
       });
     }
 
+    firstDoorUseAlignmentState(patch = this.firstDoorVision9x9Box || null) {
+      const box = patch || this.firstDoorVision9x9Box || null;
+      const column = Number(box?.column ?? -1);
+      const row = Number(box?.row ?? -1);
+      const kind = String(box?.kind || "none");
+      const patchUseAngle = box
+        && column >= 3
+        && column <= 4
+        && row >= 2
+        && row <= 5;
+      const redScore = Number(box?.redScore || 0);
+      const redReady = kind === "first-door-9x9-patch" && redScore >= FIRST_DOOR_RED_ACCENT_THRESHOLD;
+      const darkPanelReady = kind === "first-door-dark-panel"
+        && Number(box?.darkPanelScore || 0) >= 0.24
+        && Number(box?.edgeScore || 0) >= 0.30;
+      const use3x3Score = Number(this.firstDoorUse3x3Score || 0);
+      const closeDarkPanelReady = Boolean(darkPanelReady
+        && patchUseAngle
+        && this.firstDoorUse3x3Turn === "none"
+        && use3x3Score >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+        && Number(this.depthEstimate || 1) <= FIRST_DOOR_USE_DEPTH + 0.08);
+      const centered3x3 = this.firstDoorUse3x3Turn === "none"
+        && (use3x3Score >= FIRST_DOOR_USE_ALIGNMENT_SCORE
+          || (darkPanelReady && use3x3Score >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE))
+        || closeDarkPanelReady;
+      const doorPatchKind = redReady || darkPanelReady;
+      const visualEvidenceReady = doorPatchKind;
+      const ready = Boolean(patchUseAngle && centered3x3 && visualEvidenceReady && doorPatchKind);
+      let turn = "none";
+      const semanticBearing = this.semanticMemory?.firstDoor?.corridorBearing === "left" || this.semanticMemory?.firstDoor?.corridorBearing === "right"
+        ? this.semanticMemory.firstDoor.corridorBearing
+        : "none";
+      if (!doorPatchKind && kind !== "none") {
+        turn = "none";
+      } else if (doorPatchKind && patchUseAngle && !centered3x3) {
+        turn = this.firstDoorUse3x3Reason === "edge-gap"
+          ? "none"
+          : (this.firstDoorUse3x3Turn === "left" || this.firstDoorUse3x3Turn === "right"
+          ? this.firstDoorUse3x3Turn
+          : "none");
+      } else if (box && column < 3) {
+        turn = "left";
+      } else if (box && column > 4) {
+        turn = "right";
+      } else if (this.firstDoorUse3x3Turn === "left" || this.firstDoorUse3x3Turn === "right") {
+        turn = this.firstDoorUse3x3Turn;
+      } else if (!visualEvidenceReady) {
+        turn = semanticBearing !== "none"
+          ? semanticBearing
+          : (this.spawnCorridorGapTurn !== "none"
+            ? this.spawnCorridorGapTurn
+            : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right" ? this.wallUseProbeTurn : "right"));
+      } else if (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right") {
+        turn = this.wallUseProbeTurn;
+      }
+
+      const reason = ready
+        ? "ready"
+        : (!doorPatchKind && kind !== "none"
+          ? kind
+          : (!visualEvidenceReady
+            ? "door-visual-evidence"
+            : (!patchUseAngle ? "outside-30deg" : (centered3x3 ? "unknown" : this.firstDoorUse3x3Reason || "center-weak"))));
+      return {
+        ready,
+        turn,
+        reason,
+        redScore: round2(redScore),
+        patchUseAngle: Boolean(patchUseAngle),
+        centered3x3,
+        doorPatchKind,
+        visualEvidenceReady,
+        column,
+        row,
+        kind
+      };
+    }
+
+    firstDoorFalseCandidateRecoveryAction(alignment) {
+      const state = alignment || this.firstDoorUseAlignmentState();
+      const edgeOnlyPatch = state.reason === "first-door-9x9-patch"
+        && !state.visualEvidenceReady
+        && !state.centered3x3
+        && !state.doorPatchKind
+        && Number(state.redScore || 0) < FIRST_DOOR_RED_ACCENT_THRESHOLD;
+      if (state.reason !== "first-door-wall-pattern" && state.reason !== "first-door-floor-red" && !edgeOnlyPatch) {
+        return null;
+      }
+
+      const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+      const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+      const weakWallPattern = (state.reason === "first-door-wall-pattern" || edgeOnlyPatch)
+        && (Number(state.redScore || 0) < FIRST_DOOR_RED_ACCENT_THRESHOLD
+          || (!state.visualEvidenceReady
+            && !state.centered3x3
+            && !state.doorPatchKind
+            && Number(state.redScore || 0) < 0.26));
+      const lowDoorEvidence = weakWallPattern
+        && (Number(this.firstDoorUse3x3Score || 0) < 0.42
+          || Number(this.firstDoorVision9x9Score || 0) < 0.6
+          || Number(this.motionStallScore || 0) >= 0.8);
+      const activeCorridorProbe = !this.firstDoorUseAttempted
+        && this.wallUseProbeStage >= 2
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance
+        && Number(this.wallUseProbeFrames || 0) > 0;
+      const corridorAnchoredProbe = activeCorridorProbe
+        && Number(this.wallUseProbeFrames || 0) > 90
+        && !lowDoorEvidence;
+      if (corridorAnchoredProbe) {
+        return null;
+      }
+
+      const candidateColumn = Number(state.column);
+      const awayTurn = Number.isFinite(candidateColumn)
+        ? (candidateColumn < 4 ? "right" : "left")
+        : (this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right" ? this.spawnCorridorGapTurn : this.turnBias);
+      const stalledWallPattern = lowDoorEvidence
+        && (Number(this.motionStallScore || 0) >= 0.82
+          || Number(this.inputStallFrames || 0) >= 3
+          || Number(this.quantizedStallFrames || 0) >= 8
+          || Number(this.depthEstimate || 1) <= 0.12);
+      const activeDetachFrames = Number(this.firstDoorCorridorProbeDetachFrames || 0);
+      const contactCorridorUseProbe = activeCorridorProbe
+        && lowDoorEvidence
+        && state.ready
+        && Number(this.depthEstimate || 1) <= 0.75
+        && (activeDetachFrames >= 36 || Number(this.depthEstimate || 1) <= 0.20)
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0;
+      if (contactCorridorUseProbe) {
+        this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+        this.firstDoorUsePulsed = true;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = `first-door-contact-corridor-use-${state.reason}`;
+        this.mobilityMode = "semantic-door-contact-use-probe";
+        return normalizeAction({
+          move: "none",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: true,
+          run: false
+        });
+      }
+      if (activeCorridorProbe && lowDoorEvidence && Number(this.depthEstimate || 1) >= 0.64) {
+        const probeTurn = this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
+          ? this.wallUseProbeTurn
+          : (this.firstDoorReprobeTurn === "left" || this.firstDoorReprobeTurn === "right"
+            ? this.firstDoorReprobeTurn
+            : this.turnBias);
+        const distantWeakWallProbe = state.reason === "first-door-wall-pattern"
+          && Number(this.depthEstimate || 1) >= 0.86
+          && Number(this.wallUseProbeFrames || 0) >= Math.max(90, Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES) * 0.72))
+          && Number(this.firstDoorUse3x3Score || 0) < 0.30
+          && Number(state.redScore || 0) < 0.26;
+        if (distantWeakWallProbe) {
+          const reprobeTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : (probeTurn === "left" || probeTurn === "right" ? oppositeTurn(probeTurn) : "right");
+          const reprobeFrames = Math.max(30, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+          this.startFirstDoorReprobe(reprobeFrames, reprobeTurn);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "first-door-distant-wall-probe-reprobe";
+          return this.firstDoorReprobeAction(reprobeFrames);
+        }
+        const corridorProbeStalled = Number(this.motionStallScore || 0) >= 0.94
+          || Number(this.inputStallFrames || 0) >= 6
+          || Number(this.quantizedStallFrames || 0) >= 18;
+        if (corridorProbeStalled) {
+          this.firstDoorCorridorProbeDetachFrames = Math.min(
+            MAX_STUCK_COUNTER,
+            Number(this.firstDoorCorridorProbeDetachFrames || 0) + 1);
+        } else {
+          this.firstDoorCorridorProbeDetachFrames = Math.max(
+            0,
+            Number(this.firstDoorCorridorProbeDetachFrames || 0) - 1);
+        }
+        const detachFrameCount = Number(this.firstDoorCorridorProbeDetachFrames || 0);
+        if (corridorProbeStalled && detachFrameCount >= 48 && Number(this.depthEstimate || 1) >= 0.86) {
+          const surveyTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : (probeTurn === "left" || probeTurn === "right" ? oppositeTurn(probeTurn) : "left");
+          const action = this.resetFirstDoorSemanticLock("first-door-long-wall-pattern-survey", surveyTurn);
+          this.firstDoorCorridorSuppressFrames = Math.max(this.firstDoorCorridorSuppressFrames, 168);
+          this.firstDoorCorridorProbeDetachFrames = 0;
+          return action;
+        }
+        const detachPhase = detachFrameCount % 96;
+        const baseDetachTurn = probeTurn === "left" || probeTurn === "right" ? oppositeTurn(probeTurn) : "right";
+        const detachTurn = detachPhase < 24
+          ? baseDetachTurn
+          : oppositeTurn(baseDetachTurn);
+        const sweepTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+          ? this.spawnCorridorGapTurn
+          : (probeTurn === "left" || probeTurn === "right" ? probeTurn : detachTurn);
+        const corridorProbeSweep = corridorProbeStalled
+          && Number(this.depthEstimate || 1) >= 0.64
+          && detachPhase >= 24
+          && detachPhase < 60;
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = corridorProbeSweep
+          ? `first-door-corridor-probe-sweep-${state.reason}`
+          : (corridorProbeStalled
+          ? `first-door-corridor-probe-detach-${state.reason}`
+          : `first-door-corridor-probe-advance-${state.reason}`);
+        this.mobilityMode = corridorProbeSweep
+          ? `first-door-corridor-probe-sweep-${sweepTurn}`
+          : (corridorProbeStalled
+          ? `first-door-corridor-probe-detach-${detachTurn}`
+          : "first-door-corridor-probe-advance");
+        return normalizeAction({
+          move: corridorProbeSweep ? "none" : "forward",
+          turn: corridorProbeSweep
+            ? sweepTurn
+            : (corridorProbeStalled
+            ? detachTurn
+            : (this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+            ? this.spawnCorridorGapTurn
+            : "none")),
+          fire: false,
+          strafe: corridorProbeStalled && !corridorProbeSweep,
+          use: false,
+          run: !corridorProbeSweep
+        });
+      }
+      if (stalledWallPattern) {
+        const reprobeFrames = Math.max(36, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+        this.startFirstDoorReprobe(reprobeFrames, awayTurn);
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = `first-door-low-evidence-detach-${state.reason}`;
+        this.mobilityMode = `first-door-low-evidence-detach-${awayTurn}`;
+        return this.firstDoorReprobeAction(reprobeFrames);
+      }
+
+      if (lowDoorEvidence && Number(this.depthEstimate || 1) >= 0.86) {
+        this.wallUseProbeFrames = 0;
+        this.wallUseProbeStage = 0;
+        this.strategyPriority = 2;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = `first-door-low-evidence-scout-${state.reason}`;
+        this.mobilityMode = "first-door-low-evidence-forward";
+        return normalizeAction({
+          move: "forward",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: false,
+          run: true
+        });
+      }
+
+      if (lowDoorEvidence && !this.firstDoorUseAttempted && this.firstDoorLockedUseCycles >= 4) {
+        return this.resetFirstDoorSemanticLock(`first-door-low-evidence-reset-${state.reason}`, awayTurn);
+      }
+
+      const reprobeFrames = Math.max(30, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+      this.startFirstDoorReprobe(reprobeFrames, awayTurn);
+      this.strategyPriority = 3;
+      this.strategyContext = "semantic-first-door";
+      this.controlPipeline = "FirstDoor";
+      this.safetyReason = `first-door-false-candidate-${state.reason}`;
+      this.mobilityMode = `first-door-false-candidate-recover-${awayTurn}`;
+      return this.firstDoorReprobeAction(reprobeFrames);
+    }
+
+    resetFirstDoorSemanticLock(reason, preferredTurn = "right") {
+      const turn = preferredTurn === "left" || preferredTurn === "right" ? preferredTurn : "right";
+      this.firstDoorCorridorLocated = false;
+      this.firstDoorCorridorFrames = 0;
+      this.firstDoorCorridorSignature = 0;
+      this.firstDoorUseAttempted = false;
+      this.firstDoorUsePulsed = false;
+      this.firstDoorUseLatchFrames = 0;
+      this.firstDoorUseSignature = 0;
+      this.firstDoorLockedUseCycles = 0;
+      this.firstDoorReprobeFrames = 0;
+      this.firstDoorReprobeTurn = turn;
+      this.firstDoorWallOnlyCandidateFrames = 0;
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+      this.wallUseProbeTurn = turn;
+      this.courtyardRescueFrames = 0;
+      this.courtyardRescueTurnFrames = 0;
+      this.spawnCorridorGapFrames = 0;
+      this.spawnCorridorGapAlignFrames = 0;
+      this.firstDoorCorridorSuppressFrames = Math.max(54, Math.round(profileNumber(this.profile, "firstDoorCorridorSearchFrames", FIRST_DOOR_CORRIDOR_SEARCH_FRAMES) * 0.6));
+      this.strategyPriority = 2;
+      this.strategyContext = "semantic-opening-route";
+      this.controlPipeline = "OpeningHome";
+      this.safetyReason = reason;
+      this.mobilityMode = `first-door-lock-reset-${turn}`;
+      return normalizeAction({
+        move: "back",
+        turn,
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      });
+    }
+
+    firstDoorUseAimCorrectionAction(alignment, reason, options = {}) {
+      const state = alignment || this.firstDoorUseAlignmentState();
+      const falseCandidateAction = this.firstDoorFalseCandidateRecoveryAction(state);
+      if (falseCandidateAction) {
+        return falseCandidateAction;
+      }
+
+      const centeredApproach = state.patchUseAngle
+        && state.visualEvidenceReady
+        && !state.centered3x3
+        && state.turn === "none"
+        && (state.reason !== "edge-gap" || state.doorPatchKind);
+      const closeEdgeRecovery = state.reason === "edge-gap"
+        && Number(this.depthEstimate || 1) <= 0.28
+        && Number(this.motionStallScore || 0) >= 0.62;
+      const turn = centeredApproach
+        ? "none"
+        : (state.turn === "left" || state.turn === "right"
+        ? state.turn
+        : this.firstDoorProbeTurn("none"));
+      if (!options.keepProbeFrames) {
+        this.wallUseProbeFrames = 0;
+        this.wallUseProbeStage = 0;
+      }
+      const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+      const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+      const weakCenteredUseProbe = centeredApproach
+        && false
+        && this.doorOpenedCount <= 0
+        && this.firstDoorCorridorLocated
+        && !this.firstDoorUseAttempted
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0
+        && Number(this.depthEstimate || 1) <= 0.58
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance
+        && Number(this.firstDoorVision9x9Score || 0) >= 0.44;
+      const closeDoorPatchUseProbe = centeredApproach
+        && false
+        && state.doorPatchKind
+        && state.patchUseAngle
+        && this.doorOpenedCount <= 0
+        && this.firstDoorCorridorLocated
+        && !this.firstDoorUseAttempted
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0
+        && Number(this.depthEstimate || 1) <= 0.72
+        && (state.reason === "edge-gap" || Number(this.firstDoorVision9x9Score || 0) >= 0.34)
+        && (Number(this.firstDoorVision9x9Score || 0) >= 0.30
+          || Number(this.semanticMemory?.firstDoor?.doorConfidence || 0) >= 0.46);
+      const closeRedPatchUseProbe = state.doorPatchKind
+        && false
+        && state.patchUseAngle
+        && this.doorOpenedCount <= 0
+        && this.firstDoorCorridorLocated
+        && !this.firstDoorUseAttempted
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0
+        && Number(this.depthEstimate || 1) <= 0.58
+        && Number(state.redScore || 0) >= FIRST_DOOR_RED_ACCENT_THRESHOLD * 2;
+      if (weakCenteredUseProbe || closeDoorPatchUseProbe || closeRedPatchUseProbe) {
+        this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+        this.firstDoorUsePulsed = true;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = closeRedPatchUseProbe
+          ? `${reason}-close-red-patch-use`
+          : (closeDoorPatchUseProbe
+          ? `${reason}-close-door-patch-use`
+          : `${reason}-weak-centered-use`);
+        this.mobilityMode = closeRedPatchUseProbe
+          ? "semantic-door-close-red-patch-use-probe"
+          : (closeDoorPatchUseProbe
+          ? "semantic-door-close-patch-use-probe"
+          : "semantic-door-weak-use-probe");
+        return normalizeAction({
+          move: "none",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: true,
+          run: false
+        });
+      }
+      this.strategyPriority = 3;
+      this.strategyContext = "semantic-first-door";
+      this.controlPipeline = "FirstDoor";
+      this.safetyReason = `${reason}-${state.reason || "align"}`;
+      this.mobilityMode = centeredApproach
+        ? "semantic-door-approach-center"
+        : (closeEdgeRecovery
+          ? `semantic-door-edge-recover-${turn === "none" ? "center" : turn}`
+          : `semantic-door-align-${turn === "none" ? "center" : turn}`);
+      return normalizeAction({
+        move: centeredApproach ? "forward" : (closeEdgeRecovery ? "back" : "none"),
+        turn,
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      });
+    }
+
+    shouldReprobeFirstDoorUse(options = {}) {
+      if (this.doorOpenedCount > 0
+        || !this.firstDoorCorridorLocated
+        || !this.firstDoorUseAttempted
+        || (this.wallUseProbeFrames > 0 && !options.allowProbeInterrupt)
+        || this.firstDoorReprobeFrames > 0) {
+        return false;
+      }
+
+      if (this.firstDoorUseLatchFrames > 0 && !options.allowLatch) {
+        return false;
+      }
+
+      const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+      const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+      const plausibleDoor = this.firstDoorUseSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+        || this.firstDoorCorridorSignature >= firstDoorUseThreshold - firstDoorRetryTolerance
+        || Number(this.semanticMemory?.firstDoor?.doorConfidence || 0) >= 0.58
+        || this.mapDoorSectorMatch;
+      if (!plausibleDoor) {
+        return false;
+      }
+
+      const movementStalled = this.movementSensorSnapshot?.eventType === "movement-stall";
+      const noForwardProgress = Number(this.motionForwardProgress || 0) <= 0.04
+        || Number(this.movementSensorSnapshot?.vectorY || 0) <= 0.04;
+      const persistentStall = this.quantizedStallFrames >= 28
+        || this.stuckFrames >= 30
+        || this.inputStallFrames >= 18
+        || (Number(this.motionStallScore || 0) >= 0.9 && this.inputStallFrames >= 6);
+      return noForwardProgress && (persistentStall || movementStalled);
+    }
+
+    startFirstDoorReprobe(totalFrames, preferredTurn = "none") {
+      this.firstDoorLockedUseCycles = (this.firstDoorLockedUseCycles || 0) + 1;
+      this.firstDoorReprobeFrames = Math.max(20, Math.round(totalFrames || profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+      const corridorGapTurn = (this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right")
+        && Number(this.spawnCorridorGapScore || 0) >= 0.18
+        ? this.spawnCorridorGapTurn
+        : "none";
+      this.firstDoorReprobeTurn = preferredTurn === "left" || preferredTurn === "right"
+        ? preferredTurn
+        : (corridorGapTurn !== "none"
+          ? corridorGapTurn
+          : ((this.firstDoorLockedUseCycles % 2) === 0 ? "left" : "right"));
+      if (this.firstDoorUseAttempted) {
+        this.firstDoorUseAttempted = false;
+        this.firstDoorUseSignature = 0;
+      }
+      this.firstDoorUseLatchFrames = 0;
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+      this.wallUseProbeTurn = this.firstDoorReprobeTurn;
+      this.useCooldown = Math.min(this.useCooldown, 2);
+    }
+
+    firstDoorReprobeAction(totalFrames) {
+      const total = Math.max(20, Math.round(totalFrames || profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+      const closeWall = Number(this.depthEstimate || 1) <= 0.18
+        && Number(this.motionStallScore || 0) >= 0.62;
+      const backFrames = Math.max(closeWall ? 16 : 4, Math.round(profileNumber(this.profile, "firstDoorReprobeBackFrames", 8)));
+      const turnFrames = Math.max(closeWall ? 20 : 8, Math.round(profileNumber(this.profile, "firstDoorReprobeTurnFrames", 16)));
+      const elapsed = Math.max(0, total - this.firstDoorReprobeFrames);
+      const turn = this.firstDoorReprobeTurn || "right";
+      this.firstDoorReprobeFrames = Math.max(0, this.firstDoorReprobeFrames - 1);
+      this.strategyPriority = 3;
+      this.strategyContext = "semantic-first-door";
+      this.controlPipeline = "FirstDoor";
+      this.safetyReason = "first-door-reprobe";
+
+      const alignment = this.firstDoorUseAlignmentState();
+      const weakWallPattern = alignment.reason === "first-door-wall-pattern"
+        && (Number(alignment.redScore || 0) < FIRST_DOOR_RED_ACCENT_THRESHOLD
+          || (!alignment.visualEvidenceReady
+            && !alignment.centered3x3
+            && !alignment.doorPatchKind
+            && Number(alignment.redScore || 0) < 0.26))
+        && !alignment.visualEvidenceReady
+        && !alignment.centered3x3;
+      const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+      const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+      const reprobeCorridorEvidenceStrong = this.firstDoorCorridorLocated
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance;
+      const weakPatternStalled = weakWallPattern
+        && !reprobeCorridorEvidenceStrong
+        && Number(this.firstDoorUse3x3Score || 0) < 0.42
+        && Number(this.firstDoorVision9x9Score || 0) < 0.62
+        && (Number(this.firstDoorLockedUseCycles || 0) >= 3
+          || elapsed >= backFrames + turnFrames
+          || Number(this.motionStallScore || 0) >= 0.88
+          || Number(this.inputStallFrames || 0) >= 4);
+      if (weakPatternStalled) {
+        this.firstDoorReprobeFrames = 0;
+        this.wallUseProbeFrames = 0;
+        this.wallUseProbeStage = 0;
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = "first-door-reprobe-weak-pattern-scout";
+        this.mobilityMode = `first-door-reprobe-weak-pattern-scout-${oppositeTurn(turn)}`;
+        return normalizeAction({
+          move: "forward",
+          turn: oppositeTurn(turn),
+          fire: false,
+          strafe: false,
+          use: false,
+          run: true
+        });
+      }
+
+      if (elapsed < backFrames) {
+        this.mobilityMode = `first-door-reprobe-back-${turn}`;
+        return normalizeAction({
+          move: "back",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: false,
+          run: false
+        });
+      }
+
+      if (elapsed < backFrames + turnFrames) {
+        this.mobilityMode = closeWall
+          ? `first-door-reprobe-detach-${turn}`
+          : `first-door-reprobe-align-${turn}`;
+        return normalizeAction({
+          move: closeWall ? "back" : "none",
+          turn,
+          fire: false,
+          strafe: false,
+          use: false,
+          run: false
+        });
+      }
+
+      if (elapsed >= backFrames + turnFrames || this.firstDoorReprobeFrames <= 0) {
+        const farReprobeApproach = this.firstDoorCorridorLocated
+          && Number(this.depthEstimate || 1) >= 0.72
+          && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance
+          && !alignment.ready;
+        if (farReprobeApproach) {
+          this.firstDoorReprobeFrames = 0;
+          this.wallUseProbeFrames = 0;
+          this.wallUseProbeStage = 0;
+          this.useCooldown = Math.min(this.useCooldown, 2);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "first-door-reprobe-approach";
+          this.mobilityMode = "first-door-reprobe-approach-forward";
+          return normalizeAction({
+            move: "forward",
+            turn: this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right" ? this.spawnCorridorGapTurn : "none",
+            fire: false,
+            strafe: false,
+            use: false,
+            run: false
+          });
+        }
+
+        const lowEvidenceLoop = Number(this.firstDoorLockedUseCycles || 0) >= 3
+          && Number(this.depthEstimate || 1) >= 0.72
+          && Number(this.firstDoorUse3x3Score || 0) < 0.34
+          && Number(this.firstDoorVision9x9Score || 0) < 0.58
+          && !alignment.ready;
+        if (lowEvidenceLoop) {
+          this.firstDoorReprobeFrames = 0;
+          this.wallUseProbeFrames = 0;
+          this.wallUseProbeStage = 0;
+          this.useCooldown = Math.min(this.useCooldown, 2);
+          this.strategyPriority = 3;
+          this.strategyContext = "semantic-first-door";
+          this.controlPipeline = "FirstDoor";
+          this.safetyReason = "first-door-reprobe-low-evidence-scout";
+          this.mobilityMode = "first-door-reprobe-scout-forward";
+          return normalizeAction({
+            move: "forward",
+            turn: this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right" ? this.spawnCorridorGapTurn : "none",
+            fire: false,
+            strafe: false,
+            use: false,
+            run: true
+          });
+        }
+
+        this.firstDoorUseAttempted = false;
+        this.firstDoorUsePulsed = false;
+        this.firstDoorUseLatchFrames = 0;
+        this.wallUseProbeStage = 2;
+        this.wallUseProbeTurn = this.firstDoorProbeTurn(turn);
+        this.wallUseProbeFrames = Math.round(profileNumber(this.profile, "firstDoorRetryUseFrames", FIRST_DOOR_RETRY_USE_FRAMES));
+        this.useCooldown = 0;
+        this.safetyReason = "first-door-reprobe-use-probe";
+        this.mobilityMode = "first-door-reprobe-use-probe";
+        return this.wallUseProbeAction();
+      }
+
+      this.mobilityMode = "first-door-reprobe-ready";
+      return normalizeAction({
+        move: "none",
+        turn: "none",
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      });
+    }
+
+    firstDoorProbeTurn(fallback = "none") {
+      if (this.firstDoorLockedUseCycles > 0
+        && (this.firstDoorReprobeTurn === "left" || this.firstDoorReprobeTurn === "right")) {
+        return this.firstDoorReprobeTurn;
+      }
+
+      return fallback === "left" || fallback === "right" ? fallback : "none";
+    }
+
     wallUseProbeAction() {
       const firstDoorMode = this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated;
       const firstDoorRetryMode = firstDoorMode && this.firstDoorUseAttempted;
@@ -2992,11 +4870,153 @@
       const approaching = approachWindow && !closeEnough && this.depthEstimate > doorUseDepth;
       const pressWindow = firstDoorMode && useWindow && elapsed < aimFrames + approachFrames + settleFrames + pressFrames;
       const useSweepWindow = firstDoorMode && useWindow && elapsed < aimFrames + approachFrames + settleFrames + useSweepFrames;
-      const probingClosedGate = closeEnough || this.depthEstimate <= doorApproachDepth || useWindow;
+      const firstDoorUseDepthReady = firstDoorMode
+        ? this.depthEstimate <= doorUseDepth + 0.08
+        : true;
+      const probingClosedGate = firstDoorMode
+        ? (closeEnough || firstDoorUseDepthReady)
+        : (closeEnough || this.depthEstimate <= doorApproachDepth || useWindow);
       const phase = aiming ? "aim" : (approaching ? "approach" : (settleWindow ? "settle" : (pressWindow ? "press-use" : "use")));
+      const firstDoorAlignment = firstDoorMode ? this.firstDoorUseAlignmentState() : null;
+      const alignmentTurn = firstDoorAlignment?.turn === "left" || firstDoorAlignment?.turn === "right"
+        ? firstDoorAlignment.turn
+        : "none";
+      const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+      const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+      const weakFirstDoorUseProbe = firstDoorMode
+        && useWindow
+        && false
+        && !this.firstDoorUseAttempted
+        && firstDoorAlignment
+        && !firstDoorAlignment.ready
+        && firstDoorAlignment.patchUseAngle
+        && firstDoorAlignment.visualEvidenceReady
+        && alignmentTurn === "none"
+        && Number(this.depthEstimate || 1) <= 0.58
+        && Number(this.firstDoorVision9x9Score || 0) >= 0.48
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance;
+      const closeCorridorUseProbe = firstDoorMode
+        && useWindow
+        && false
+        && !this.firstDoorUseAttempted
+        && firstDoorAlignment?.patchUseAngle
+        && firstDoorAlignment?.visualEvidenceReady
+        && alignmentTurn === "none"
+        && Number(this.depthEstimate || 1) <= 0.52
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance
+        && (Number(this.firstDoorVision9x9Score || 0) >= 0.30
+          || Number(this.semanticMemory?.firstDoor?.doorConfidence || 0) >= 0.50);
+      const closeRedPatchUseProbe = firstDoorMode
+        && useWindow
+        && !this.firstDoorUseAttempted
+        && firstDoorAlignment?.patchUseAngle
+        && firstDoorAlignment?.centered3x3
+        && firstDoorAlignment?.doorPatchKind
+        && Number(firstDoorAlignment?.redScore || 0) >= FIRST_DOOR_RED_ACCENT_THRESHOLD * 2
+        && Number(this.depthEstimate || 1) <= 0.58
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance;
+      const stalledWallPatternUseProbe = firstDoorMode
+        && useWindow
+        && false
+        && !this.firstDoorUseAttempted
+        && firstDoorAlignment?.patchUseAngle
+        && firstDoorAlignment?.reason === "first-door-wall-pattern"
+        && Number(this.depthEstimate || 1) <= 0.24
+        && Number(this.motionStallScore || 0) >= 0.82
+        && Number(this.firstDoorCorridorSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance;
       const useSweepTurn = this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
         ? this.wallUseProbeTurn
-        : (firstDoorMode ? "none" : this.turnBias);
+        : (firstDoorMode ? alignmentTurn : this.turnBias);
+      if (firstDoorMode && firstDoorAlignment) {
+        const falseCandidateAction = this.firstDoorFalseCandidateRecoveryAction(firstDoorAlignment);
+        if (falseCandidateAction) {
+          return falseCandidateAction;
+        }
+      }
+
+      const weakDistantProbe = firstDoorMode
+        && this.wallUseProbeStage >= 2
+        && !this.firstDoorUseAttempted
+        && !firstDoorAlignment?.ready
+        && !firstDoorAlignment?.doorPatchKind
+        && Number(this.depthEstimate || 1) >= 0.90
+        && Number(this.firstDoorUse3x3Score || 0) < 0.22
+        && Number(this.firstDoorVision9x9Score || 0) < 0.54;
+      if (weakDistantProbe) {
+        const reprobeTurn = this.spawnCorridorGapTurn === "left" || this.spawnCorridorGapTurn === "right"
+          ? this.spawnCorridorGapTurn
+          : (this.wallUseProbeTurn === "left" || this.wallUseProbeTurn === "right"
+            ? oppositeTurn(this.wallUseProbeTurn)
+            : oppositeTurn(this.turnBias));
+        const reprobeFrames = Math.max(30, Math.round(profileNumber(this.profile, "firstDoorReprobeFrames", 36)));
+        this.startFirstDoorReprobe(reprobeFrames, reprobeTurn);
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = "first-door-weak-distant-probe-reprobe";
+        return this.firstDoorReprobeAction(reprobeFrames);
+      }
+
+      if (firstDoorMode
+        && firstDoorAlignment?.ready
+        && this.depthEstimate <= doorUseDepth + 0.08
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0) {
+        this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+        this.firstDoorUsePulsed = true;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+        this.mobilityMode = "semantic-door-use-ready";
+        this.safetyReason = "first-door-use-ready";
+        return normalizeAction({
+          move: "none",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: true,
+          run: false
+        });
+      }
+
+      const centeredDoorApproach = firstDoorAlignment
+        && firstDoorAlignment.patchUseAngle
+        && firstDoorAlignment.visualEvidenceReady
+        && !firstDoorAlignment.centered3x3;
+      if (firstDoorMode && firstDoorAlignment && !firstDoorAlignment.ready && aiming && (alignmentTurn !== "none" || centeredDoorApproach)) {
+        return this.firstDoorUseAimCorrectionAction(firstDoorAlignment, "first-door-probe-aim", { keepProbeFrames: true });
+      }
+      if ((weakFirstDoorUseProbe || closeCorridorUseProbe || closeRedPatchUseProbe || stalledWallPatternUseProbe)
+        && this.useCooldown === 0
+        && this.firstDoorUseLatchFrames <= 0) {
+        this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
+        this.firstDoorUsePulsed = true;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
+        this.strategyPriority = 3;
+        this.strategyContext = "semantic-first-door";
+        this.controlPipeline = "FirstDoor";
+        this.safetyReason = stalledWallPatternUseProbe
+          ? "first-door-stalled-wall-pattern-use"
+          : (closeRedPatchUseProbe ? "first-door-close-red-patch-use" : (closeCorridorUseProbe ? "first-door-close-corridor-use" : "first-door-weak-use"));
+        this.mobilityMode = stalledWallPatternUseProbe
+          ? "semantic-door-stalled-wall-use-probe"
+          : (closeRedPatchUseProbe ? "semantic-door-close-red-use-probe" : (closeCorridorUseProbe ? "semantic-door-close-use-probe" : "semantic-door-weak-use-probe"));
+        return normalizeAction({
+          move: "none",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: true,
+          run: false
+        });
+      }
+      if (firstDoorMode && firstDoorAlignment && !firstDoorAlignment.ready && (useWindow || firstDoorRetryMode)) {
+        this.wallUseProbeFrames = Math.max(
+          Number(this.wallUseProbeFrames || 0),
+          Math.round(profileNumber(this.profile, "firstDoorSettleFrames", FIRST_DOOR_SETTLE_FRAMES)) + 8);
+        return this.firstDoorUseAimCorrectionAction(firstDoorAlignment, "first-door-use-angle", { keepProbeFrames: true });
+      }
+
       const retrySweepTurn = firstDoorRetryMode && useWindow
         ? (useSweepTurn === "none" ? "none" : (((elapsed - aimFrames - approachFrames - settleFrames) % 18) < 9 ? useSweepTurn : oppositeTurn(useSweepTurn)))
         : "none";
@@ -3008,11 +5028,21 @@
       const turnCommand = noTurnUseWindow || settleWindow
         ? "none"
         : (retrySweepTurn !== "none" ? retrySweepTurn : (!firstDoorRetryMode && (aiming || useSweepWindow) ? useSweepTurn : "none"));
-      const requestedUse = (useWindow && probingClosedGate) || (firstDoorRetryMode && elapsed >= aimFrames + approachFrames);
+      const requestedUse = firstDoorMode
+        ? ((useWindow || (firstDoorRetryMode && elapsed >= aimFrames + approachFrames))
+          && Boolean(firstDoorAlignment?.ready)
+          && firstDoorUseDepthReady)
+          || weakFirstDoorUseProbe
+          || closeCorridorUseProbe
+          || closeRedPatchUseProbe
+          || stalledWallPatternUseProbe
+        : ((useWindow && probingClosedGate) || (firstDoorRetryMode && elapsed >= aimFrames + approachFrames));
       const shouldUse = requestedUse && !firstDoorUseLatched;
       if (firstDoorMode && shouldUse) {
         this.firstDoorUseLatchFrames = Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES));
         this.firstDoorUsePulsed = true;
+        this.firstDoorUseAttempted = true;
+        this.firstDoorUseSignature = Math.max(this.firstDoorCorridorSignature, this.firstDoorVision9x9Score);
       }
       this.mobilityMode = `door-probe-${this.wallUseProbeStage}-${firstDoorUseLatched ? "latched-forward" : phase}`;
       return normalizeAction({
@@ -3026,6 +5056,15 @@
     }
 
     firstDoorUseLatchAdvanceAction() {
+      const latchTotal = Math.max(24, Math.round(profileNumber(this.profile, "firstDoorUseLatchFrames", FIRST_DOOR_USE_LATCH_FRAMES)));
+      const latchElapsed = Math.max(0, latchTotal - Number(this.firstDoorUseLatchFrames || 0));
+      const latchUseProbe = latchElapsed < 18 || (latchElapsed % 18) < 5;
+      if (latchElapsed >= 18 && this.shouldReprobeFirstDoorUse({ allowLatch: true })) {
+        const reprobeFrames = profileNumber(this.profile, "firstDoorReprobeFrames", 36);
+        this.startFirstDoorReprobe(reprobeFrames);
+        return this.firstDoorReprobeAction(reprobeFrames);
+      }
+
       this.cornerExitCommitFrames = 0;
       this.hardStuckEscapeFrames = 0;
       this.openStallEscapeFrames = 0;
@@ -3038,7 +5077,7 @@
       this.mapDoorSweepFrames = 0;
       this.firstDoorCorridorSearchFrames = 0;
       this.wallUseProbeStage = Math.max(2, this.wallUseProbeStage || 2);
-      this.wallUseProbeTurn = "none";
+      this.wallUseProbeTurn = this.firstDoorProbeTurn("none");
       this.strategyPriority = 3;
       this.strategyContext = "semantic-first-door";
       this.controlPipeline = "FirstDoor";
@@ -3049,7 +5088,7 @@
         turn: "none",
         fire: false,
         strafe: false,
-        use: false,
+        use: latchUseProbe,
         run: false
       });
     }
@@ -3107,28 +5146,113 @@
         && this.motionStallScore >= 0.72
         && this.motionForwardProgress <= forwardThreshold * 0.75;
       const footObstacleStalled = forwardIntent
-        && this.priorFootObstacleScore >= 0.18
-        && this.inputStallFrames >= 2;
+        && (this.priorFootObstacleScore >= 0.18 || Number(this.footObstacleBounceFrames || 0) >= 3)
+        && (this.inputStallFrames >= 2 || Number(this.footObstacleFlickerScore || 0) >= 0.42);
+      const cognitionStalled = forwardIntent
+        && (this.movementSensorSnapshot?.eventType === "movement-stall"
+          || Boolean(this.nousDetectorResult?.sensorRecovery?.needed));
       const turningSweep = this.motionIntent.includes("turn") && this.motionTurnScore >= turnSweepThreshold;
-      const stalled = this.quantizedStallFrames >= turnStuckFrames || this.stuckFrames >= turnStuckFrames || (blocked && motionStalled) || footObstacleStalled;
+      const stalled = this.quantizedStallFrames >= turnStuckFrames || this.stuckFrames >= turnStuckFrames || (blocked && motionStalled) || footObstacleStalled || cognitionStalled;
+      const corridorStallTurn = stalled
+        && (blocked || motionStalled || footObstacleStalled || cognitionStalled || Boolean(this.nousDetectorResult?.stuck?.active));
       const shouldSkirt = !blocked
         && !turningSweep
         && (motionObstacle || footObstacleStalled || this.inputStallFrames >= 3 || this.quantizedStallFrames >= 2 || this.stuckFrames >= 2 || this.targetConfidence >= 0.24);
       const skirtPhase = skirtFrames > 0 && (this.predictions % Math.max(1, skirtFrames * 2)) < skirtFrames;
       this.strategyPriority = 2;
       this.controlPipeline = "FirstDoor";
-      this.safetyReason = blocked && stalled ? "corridor-end-right" : (footObstacleStalled ? "corridor-foot-obstacle" : (motionObstacle ? "corridor-motion-obstacle" : "corridor-transit"));
-      this.mobilityMode = blocked && stalled
-        ? "corridor-end-face-door"
+      this.safetyReason = corridorStallTurn ? "corridor-stall-right" : (footObstacleStalled ? "corridor-foot-obstacle" : (motionObstacle ? "corridor-motion-obstacle" : "corridor-transit"));
+      this.mobilityMode = corridorStallTurn
+        ? "corridor-stall-right-turn"
         : (shouldSkirt && skirtPhase ? "corridor-skirt-left-obstacle" : "corridor-forward-hold");
       return normalizeAction({
-        move: blocked && stalled ? "none" : "forward",
-        turn: blocked && stalled ? "right" : (shouldSkirt && skirtPhase ? "left" : "none"),
+        move: corridorStallTurn ? "none" : "forward",
+        turn: corridorStallTurn ? "right" : (shouldSkirt && skirtPhase ? "left" : "none"),
         fire: false,
-        strafe: shouldSkirt && skirtPhase,
+        strafe: !corridorStallTurn && shouldSkirt && skirtPhase,
         use: false,
-        run: !(blocked && stalled) && !(shouldSkirt && skirtPhase)
+        run: !corridorStallTurn && !(shouldSkirt && skirtPhase)
       });
+    }
+
+    resolveCombatContext(enemy, targetConfidence, hostileZoneSignal) {
+      const trustedEnemy = getTrustedEnemyThreatFromCandidate(enemy);
+      const trustedAlert = this.enemyAlertFrames > 0
+        && isTrustedEnemyCluster(this.enemyAlertCluster, this.enemyAlertDepth)
+        && isTrustedEnemyDepth(this.enemyAlertCluster, this.enemyAlertDepth, this.enemyAlertPeakConfidence);
+      return Boolean(hostileZoneSignal && (trustedEnemy >= 0.26 || trustedAlert))
+        || trustedEnemy >= 0.36
+        || (Number(targetConfidence || 0) >= 0.48 && trustedEnemy >= 0.24)
+        || trustedAlert
+        || (Number(this.enemyConfidencePeak || 0) >= 0.56 && trustedEnemy >= 0.28)
+        || (Number(this.combatFireFrames || 0) > 0 && trustedEnemy >= 0.2);
+    }
+
+    detectContextDiscontinuity(frame, state, quantizedFrameChange, regionQuantizedFrameChange, depthSignatureDistance, enemy) {
+      const frameIndex = Number(state?.frame || this.predictions || 0);
+      if (frameIndex < 80 || this.semanticContextResetCooldownFrames > 0 || this.healthLikelyDead) {
+        return null;
+      }
+
+      const combatContext = this.resolveCombatContext(enemy, this.targetConfidence, this.mapEnemyZoneMatch || this.enemyAlertFrames > 0);
+      if (combatContext) {
+        const combatVisionBreak = Number(quantizedFrameChange || 0) >= 28
+          && Number(regionQuantizedFrameChange || 0) >= 10;
+        const dynamicInterference = Number(enemy?.confidence || 0) >= 0.32
+          || Number(frame?.projectileScore || 0) >= 0.16
+          || Number(this.enemyAlertFrames || 0) > 0;
+        const uncontrolledMotion = Number(this.motionForwardProgress || 0) <= 0.1
+          && Number(this.motionTurnScore || 0) <= 0.18;
+        if (combatVisionBreak && dynamicInterference && uncontrolledMotion) {
+          return "combat-visual-discontinuity";
+        }
+      }
+
+      const turnIntent = this.motionIntent.includes("turn") || this.lastAction?.turn === "left" || this.lastAction?.turn === "right";
+      const forwardIntent = this.motionIntent.includes("forward") || this.lastAction?.move === "forward";
+      const calmMotor = !turnIntent
+        && (!forwardIntent || Number(this.motionForwardProgress || 0) <= 0.08)
+        && Number(this.motionTurnScore || 0) <= 0.12;
+      const severeVisionBreak = Number(quantizedFrameChange || 0) >= 42
+        && Number(regionQuantizedFrameChange || 0) >= 16;
+      const depthBreak = Number(depthSignatureDistance || 0) >= 2.4;
+      const lowDynamicInterference = Number(enemy?.confidence || 0) < 0.32
+        && Number(frame?.projectileScore || 0) < 0.16
+        && !this.soundCueActive;
+      if (calmMotor && lowDynamicInterference && severeVisionBreak && depthBreak) {
+        return "visual-context-discontinuity";
+      }
+
+      return null;
+    }
+
+    startCombatLocalRelocalization(reason, frame) {
+      this.combatSurveyFrames = Math.max(this.combatSurveyFrames, Math.floor(CONTEXT_RESET_SURVEY_FRAMES * 0.45));
+      this.combatSurveyTurn = chooseEscapeTurn(frame, this.turnBias);
+      this.semanticContextResetCooldownFrames = Math.max(this.semanticContextResetCooldownFrames, Math.floor(CONTEXT_RESET_COOLDOWN_FRAMES * 0.6));
+      this.contextResetReason = reason || "combat-local-relocalization";
+      this.repeatActionFrames = 0;
+      this.repeatTurnFrames = 0;
+      this.repeatActionSignature = "";
+      this.signatureMatchKind = "combat-relocalization";
+      this.safetyReason = "combat-relocalization";
+    }
+
+    startSemanticContextReset(reason, frame) {
+      this.semanticContextResetFrames = CONTEXT_RESET_SURVEY_FRAMES;
+      this.semanticContextResetCooldownFrames = CONTEXT_RESET_COOLDOWN_FRAMES;
+      this.contextResetReason = reason || "context-reset";
+      this.wallSurveyFrames = Math.max(this.wallSurveyFrames, WALL_SURVEY_FRAMES);
+      this.wallSurveyTurn = chooseEscapeTurn(frame, this.turnBias);
+      this.wallSurveyDecisionFrames = 0;
+      this.repeatActionFrames = 0;
+      this.repeatTurnFrames = 0;
+      this.repeatActionSignature = "";
+      this.quantizedStallFrames = 0;
+      this.stuckFrames = 0;
+      this.signatureMatchKind = "context-reset";
+      this.mapSectorId = this.doorOpenedCount > 0 || this.darkZoneEntered ? "context-reset-after-door" : "context-reset-survey";
+      this.safetyReason = "context-reset";
     }
 
     wallDetachAction() {
@@ -3151,6 +5275,18 @@
         turn: this.wallSurveyTurn,
         fire: false,
         strafe: true,
+        use: false,
+        run: false
+      });
+    }
+
+    combatSurveyAction() {
+      this.mobilityMode = "combat-survey";
+      return normalizeAction({
+        move: "none",
+        turn: this.combatSurveyTurn,
+        fire: false,
+        strafe: false,
         use: false,
         run: false
       });
@@ -3221,6 +5357,17 @@
     enemyLockAction(action, frame, state) {
       const fire = ((state?.frame || 0) % 3) === 0;
       const turn = targetTurnDirection(frame);
+      const confidence = Math.max(
+        Number(this.targetConfidence || 0),
+        Number(this.enemyConfidence || 0),
+        Number(this.enemyCenterCellConfidence || 0));
+      this.enemyFireReady = fire;
+      if (fire) {
+        this.combatFireFrames += 1;
+        this.enemyConfidencePeak = Math.max(this.enemyConfidencePeak, confidence);
+        this.enemyDropFrames = 0;
+      }
+
       this.mobilityMode = "enemy-lock";
       return normalizeAction(Object.assign({}, action, {
         move: fire ? "none" : "forward",
@@ -3315,6 +5462,13 @@
       }));
     }
 
+    wallFollowAction(action, frame, state) {
+      this.wallFollowSide = chooseWallHugSide(frame, this.wallFollowSide);
+      const awaySide = oppositeTurn(this.wallFollowSide);
+      this.mobilityMode = `wall-follow-${this.wallFollowSide}`;
+      return this.strafeRunAction(action, state, awaySide, `wall-follow-${this.wallFollowSide}`);
+    }
+
     wallHugAction(action, frame, state) {
       this.wallHugSide = chooseWallHugSide(frame, this.wallHugSide);
       const awaySide = oppositeTurn(this.wallHugSide);
@@ -3322,6 +5476,40 @@
     }
 
     updateCombatMilestones(enemy) {
+      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
+        const frontConfidence = Math.max(
+          Number(enemy?.confidence || 0),
+          Number(this.targetConfidence || 0),
+          Number(this.enemyCenterCellConfidence || 0));
+        if (frontConfidence >= 0.22 || this.enemyFireReady) {
+          this.enemyConfidencePeak = Math.max(this.enemyConfidencePeak, frontConfidence);
+          this.enemyDropFrames = 0;
+          return;
+        }
+
+        const hadFrontEngagement = this.combatFireFrames >= 8 && this.enemyConfidencePeak >= 0.22;
+        if (!hadFrontEngagement) {
+          return;
+        }
+
+        if (frontConfidence <= 0.14) {
+          this.enemyDropFrames += 1;
+        } else {
+          this.enemyDropFrames = Math.max(0, this.enemyDropFrames - 1);
+        }
+
+        if (this.enemyDropFrames >= 16) {
+          this.enemyDefeatedCount += 1;
+          this.combatFireFrames = 0;
+          this.enemyConfidencePeak = 0;
+          this.enemyDropFrames = 0;
+          this.enemyAlertFrames = 0;
+          this.safetyReason = "central-hall-front-enemy-defeated";
+        }
+
+        return;
+      }
+
       if (!this.darkZoneEntered) {
         this.enemyConfidencePeak = 0;
         this.enemyDropFrames = 0;
@@ -3511,6 +5699,13 @@
         sample: [],
         regionSample: [],
         region9Sample: [],
+        vision9x9Sample: [],
+        projectileRegion9Sample: [],
+        projectileVision9x9Sample: [],
+        projectileScore: 0,
+        resourceRegion9Sample: [],
+        resourceVision9x9Sample: [],
+        resourceScore: 0,
         depthSample: [],
         statusSample: [],
         ammoSample: [],
@@ -3527,8 +5722,19 @@
         blueFloorScore: 0,
         courtyardScore: 0,
         courtyardTurn: "none",
+        spawnSecretDoorScore: 0,
+        spawnSecretDoorTurn: "none",
+        spawnWestStairScore: 0,
+        spawnWestStairTurn: "none",
         spawnCorridorGapScore: 0,
         spawnCorridorGapTurn: "none",
+        firstDoorVision9x9Score: 0,
+        firstDoorVision9x9Box: null,
+        firstDoorVision9x9Heatmap: [],
+        firstDoorVision9x9RedScore: 0,
+        firstDoorUse3x3Score: 0,
+        firstDoorUse3x3Turn: "none",
+        firstDoorUse3x3Reason: "none",
         bridgeBrownScore: 0,
         bridgeGreenLeft: 0,
         bridgeGreenCenter: 0,
@@ -3557,10 +5763,22 @@
     const regionCounts = new Array(REGION_COLUMNS * REGION_ROWS).fill(0);
     const region9Totals = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
     const region9Counts = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
+    const vision9x9Totals = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const vision9x9Counts = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9DoorTotals = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9DoorCounts = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9DoorMax = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9RedTotals = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9RedCounts = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const firstDoorVision9x9RedMax = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
     const enemyRegionTotals = new Array(REGION_COLUMNS * REGION_ROWS).fill(0);
     const enemyRegionCounts = new Array(REGION_COLUMNS * REGION_ROWS).fill(0);
     const enemyRegion9Totals = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
     const enemyRegion9Counts = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
+    const projectileRegion9Max = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
+    const projectileVision9x9Max = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    const resourceRegion9Max = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
+    const resourceVision9x9Max = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
     const enemyClusterTotals = new Map();
     const depthTotals = new Array(DEPTH_BANDS).fill(0);
     const depthCounts = new Array(DEPTH_BANDS).fill(0);
@@ -3589,6 +5807,14 @@
     let courtyardLowerRightCount = 0;
     let courtyardUpperLeftCount = 0;
     let courtyardUpperRightCount = 0;
+    let spawnSecretDoorTotal = 0;
+    let spawnSecretDoorWeightedX = 0;
+    let spawnSecretDoorMax = 0;
+    let spawnSecretDoorCount = 0;
+    let spawnWestStairDark = 0;
+    let spawnWestStairLamp = 0;
+    let spawnWestStairWeightedX = 0;
+    let spawnWestStairCount = 0;
     let spawnGapDark = 0;
     let spawnGapPillar = 0;
     let spawnGapWeightedX = 0;
@@ -3614,6 +5840,11 @@
     let computerPanelCount = 0;
     let footObstacle = 0;
     let footObstacleCount = 0;
+    const footObstacleBandSample = [];
+    let projectileTotal = 0;
+    let projectileCount = 0;
+    let resourceTotal = 0;
+    let resourceCount = 0;
     let leftCount = 0;
     let centerCount = 0;
     let rightCount = 0;
@@ -3648,6 +5879,27 @@
             courtyardUpperRight += courtyardUpper;
             courtyardUpperRightCount += 1;
           }
+        }
+        if (row >= 1 && row <= 9 && column >= 1 && column <= 18) {
+          const xBias = ((column + 0.5) / SAMPLE_COLUMNS) * 2 - 1;
+          const secretScore = scoreSpawnSecretDoorPaletteIndex(value, rgbaBytes);
+          spawnSecretDoorTotal += secretScore;
+          spawnSecretDoorWeightedX += secretScore * xBias;
+          if (secretScore > spawnSecretDoorMax) {
+            spawnSecretDoorMax = secretScore;
+          }
+
+          spawnSecretDoorCount += 1;
+        }
+        if (row >= 2 && row <= 9 && column >= 0 && column <= 10) {
+          const xBias = ((column + 0.5) / SAMPLE_COLUMNS) * 2 - 1;
+          const darkScoreForStairs = scoreSpawnWestStairDarkPaletteIndex(value, rgbaBytes);
+          const lampScore = scoreSpawnWestStairLampPaletteIndex(value, rgbaBytes);
+          const stairScore = (darkScoreForStairs * 0.54) + (lampScore * 0.46);
+          spawnWestStairDark += darkScoreForStairs;
+          spawnWestStairLamp += lampScore;
+          spawnWestStairWeightedX += stairScore * xBias;
+          spawnWestStairCount += 1;
         }
         if (row >= 3 && row <= 7 && column >= 6 && column <= 17) {
           const gapScore = scoreSpawnCorridorGapPaletteIndex(value, rgbaBytes);
@@ -3695,7 +5947,9 @@
           computerPanelCount += 1;
         }
         if (row >= 8 && row <= 12 && column >= 8 && column <= 18) {
-          footObstacle += scoreFootObstaclePaletteIndex(value, rgbaBytes);
+          const footScore = scoreFootObstaclePaletteIndex(value, rgbaBytes);
+          footObstacle += footScore;
+          footObstacleBandSample.push(Math.round(clamp01(footScore) * 15));
           footObstacleCount += 1;
         }
         if (darkScore.luma > 0) {
@@ -3712,11 +5966,49 @@
         const region9Index = region9Row * REGION9_COLUMNS + region9Column;
         region9Totals[region9Index] += value;
         region9Counts[region9Index] += 1;
+        const vision9x9Column = Math.min(VISION_GRID_COLUMNS - 1, Math.floor(column * VISION_GRID_COLUMNS / SAMPLE_COLUMNS));
+        const vision9x9Row = Math.min(VISION_GRID_ROWS - 1, Math.floor(row * VISION_GRID_ROWS / SAMPLE_ROWS));
+        const vision9x9Index = vision9x9Row * VISION_GRID_COLUMNS + vision9x9Column;
+        vision9x9Totals[vision9x9Index] += value;
+        vision9x9Counts[vision9x9Index] += 1;
+        const firstDoorDoorScore = Math.max(
+          scoreBridgeDoorPanelPaletteIndex(value, rgbaBytes),
+          scoreBridgeBrownPaletteIndex(value, rgbaBytes) * 0.64,
+          scoreSpawnCorridorPillarPaletteIndex(value, rgbaBytes) * 0.34);
+        const firstDoorRedScore = scoreFirstDoorRedAccentPaletteIndex(value, rgbaBytes);
+        firstDoorVision9x9DoorTotals[vision9x9Index] += firstDoorDoorScore;
+        firstDoorVision9x9DoorCounts[vision9x9Index] += 1;
+        if (firstDoorDoorScore > firstDoorVision9x9DoorMax[vision9x9Index]) {
+          firstDoorVision9x9DoorMax[vision9x9Index] = firstDoorDoorScore;
+        }
+        firstDoorVision9x9RedTotals[vision9x9Index] += firstDoorRedScore;
+        firstDoorVision9x9RedCounts[vision9x9Index] += 1;
+        if (firstDoorRedScore > firstDoorVision9x9RedMax[vision9x9Index]) {
+          firstDoorVision9x9RedMax[vision9x9Index] = firstDoorRedScore;
+        }
         const enemyScore = scoreEnemyPaletteIndex(value, rgbaBytes);
         enemyRegionTotals[regionIndex] += enemyScore.score;
         enemyRegionCounts[regionIndex] += 1;
         enemyRegion9Totals[region9Index] += enemyScore.score;
         enemyRegion9Counts[region9Index] += 1;
+        const projectileScore = scoreProjectilePaletteIndex(value, rgbaBytes);
+        if (projectileScore > projectileRegion9Max[region9Index]) {
+          projectileRegion9Max[region9Index] = projectileScore;
+        }
+        if (projectileScore > projectileVision9x9Max[vision9x9Index]) {
+          projectileVision9x9Max[vision9x9Index] = projectileScore;
+        }
+        projectileTotal += projectileScore;
+        projectileCount += 1;
+        const resourceScore = scoreResourcePaletteIndex(value, rgbaBytes);
+        if (resourceScore > resourceRegion9Max[region9Index]) {
+          resourceRegion9Max[region9Index] = resourceScore;
+        }
+        if (resourceScore > resourceVision9x9Max[vision9x9Index]) {
+          resourceVision9x9Max[vision9x9Index] = resourceScore;
+        }
+        resourceTotal += resourceScore;
+        resourceCount += 1;
         if (enemyScore.score > 0) {
           enemyClusterTotals.set(enemyScore.name, (enemyClusterTotals.get(enemyScore.name) || 0) + enemyScore.score);
         }
@@ -3782,8 +6074,35 @@
 
     const regionSample = regionTotals.map((total, index) => regionCounts[index] ? Math.round(total / regionCounts[index]) : 0);
     const region9Sample = region9Totals.map((total, index) => region9Counts[index] ? Math.round(total / region9Counts[index]) : 0);
+    const vision9x9Sample = vision9x9Totals.map((total, index) => vision9x9Counts[index] ? Math.round(total / vision9x9Counts[index]) : 0);
+    const firstDoorVision9x9DoorSample = firstDoorVision9x9DoorTotals.map((total, index) => {
+      if (!firstDoorVision9x9DoorCounts[index]) {
+        return 0;
+      }
+
+      return round2(clamp01(Math.max(
+        total / firstDoorVision9x9DoorCounts[index],
+        firstDoorVision9x9DoorMax[index] * 0.62)));
+    });
+    const firstDoorVision9x9RedSample = firstDoorVision9x9RedTotals.map((total, index) => {
+      if (!firstDoorVision9x9RedCounts[index]) {
+        return 0;
+      }
+
+      return round2(clamp01(Math.max(
+        total / firstDoorVision9x9RedCounts[index],
+        firstDoorVision9x9RedMax[index] * 0.72)));
+    });
+    const firstDoorVision9x9 = scoreFirstDoorVision9x9Signature(
+      vision9x9Sample,
+      firstDoorVision9x9DoorSample,
+      firstDoorVision9x9RedSample);
     const enemyRegionSample = enemyRegionTotals.map((total, index) => enemyRegionCounts[index] ? round2(total / enemyRegionCounts[index]) : 0);
     const enemyRegion9Sample = enemyRegion9Totals.map((total, index) => enemyRegion9Counts[index] ? round2(total / enemyRegion9Counts[index]) : 0);
+    const projectileRegion9Sample = applyMorphologyMask(projectileRegion9Max, REGION9_COLUMNS, REGION9_ROWS, "dilation", 1);
+    const projectileVision9x9Sample = applyMorphologyMask(projectileVision9x9Max, VISION_GRID_COLUMNS, VISION_GRID_ROWS, "dilation", 1);
+    const resourceRegion9Sample = applyMorphologyMask(resourceRegion9Max, REGION9_COLUMNS, REGION9_ROWS, "dilation", 1);
+    const resourceVision9x9Sample = applyMorphologyMask(resourceVision9x9Max, VISION_GRID_COLUMNS, VISION_GRID_ROWS, "dilation", 1);
     const enemy = summarizeEnemyRegions(enemyRegionSample, enemyClusterTotals, estimateDepthDistance(depthTotals.map((total, index) => depthCounts[index] ? Math.round(total / depthCounts[index]) : 0)), enemyRegion9Sample);
     const depthSample = depthTotals.map((total, index) => depthCounts[index] ? Math.round(total / depthCounts[index]) : 0);
     const depthEstimate = estimateDepthDistance(depthSample);
@@ -3799,6 +6118,23 @@
     const courtyardTurn = Math.abs(courtyardLeft - courtyardRight) < 0.08
       ? "none"
       : (courtyardRight > courtyardLeft ? "right" : "left");
+    const spawnSecretDoorAverage = spawnSecretDoorCount ? spawnSecretDoorTotal / spawnSecretDoorCount : 0;
+    const spawnSecretDoorScore = round2(clamp01(Math.max(spawnSecretDoorAverage * 1.7, spawnSecretDoorMax * 0.68)));
+    const spawnSecretDoorCenter = spawnSecretDoorTotal > 0
+      ? spawnSecretDoorWeightedX / spawnSecretDoorTotal
+      : 0;
+    const spawnSecretDoorTurn = spawnSecretDoorScore < 0.08 || Math.abs(spawnSecretDoorCenter) < 0.08
+      ? "none"
+      : (spawnSecretDoorCenter > 0 ? "right" : "left");
+    const spawnWestStairDarkScore = spawnWestStairCount ? spawnWestStairDark / spawnWestStairCount : 0;
+    const spawnWestStairLampScore = spawnWestStairCount ? spawnWestStairLamp / spawnWestStairCount : 0;
+    const spawnWestStairScore = round2(clamp01((spawnWestStairDarkScore * 0.48) + (spawnWestStairLampScore * 0.86)));
+    const spawnWestStairCenter = (spawnWestStairDark + spawnWestStairLamp) > 0
+      ? spawnWestStairWeightedX / (spawnWestStairDark + spawnWestStairLamp)
+      : -0.45;
+    const spawnWestStairTurn = spawnWestStairScore < 0.08 || Math.abs(spawnWestStairCenter) < 0.08
+      ? "none"
+      : (spawnWestStairCenter > 0 ? "right" : "left");
     const spawnGapEdges = estimateSpawnCorridorGapEdges(lumaGrid);
     const spawnGapDarkScore = spawnGapCount ? spawnGapDark / spawnGapCount : 0;
     const spawnGapPillarScore = spawnPillarCount ? spawnGapPillar / spawnPillarCount : 0;
@@ -3842,6 +6178,7 @@
       sample,
       regionSample,
       region9Sample,
+      vision9x9Sample,
       depthSample,
       depthEstimate,
       statusSample,
@@ -3859,8 +6196,16 @@
       blueFloorScore: sample.length ? round2(blueFloorTotal / sample.length) : 0,
       courtyardScore,
       courtyardTurn,
+      spawnSecretDoorScore,
+      spawnSecretDoorTurn,
+      spawnWestStairScore,
+      spawnWestStairTurn,
       spawnCorridorGapScore,
       spawnCorridorGapTurn,
+      firstDoorVision9x9Score: firstDoorVision9x9.score,
+      firstDoorVision9x9Box: firstDoorVision9x9.box,
+      firstDoorVision9x9Heatmap: firstDoorVision9x9.heatmap,
+      firstDoorVision9x9RedScore: firstDoorVision9x9.redScore,
       bridgeBrownScore,
       bridgeGreenLeft: bridgeGreenLeftScore,
       bridgeGreenCenter: bridgeGreenCenterScore,
@@ -3873,8 +6218,15 @@
       computerPanelScore,
       computerRoomScore,
       footObstacleScore,
+      footObstacleBandSample,
       enemyRegionSample,
       enemyRegion9Sample,
+      projectileRegion9Sample,
+      projectileVision9x9Sample,
+      projectileScore: round2(clamp01(Math.max(maxArray(projectileVision9x9Sample), projectileCount ? projectileTotal / projectileCount : 0))),
+      resourceRegion9Sample,
+      resourceVision9x9Sample,
+      resourceScore: round2(clamp01(Math.max(maxArray(resourceVision9x9Sample), resourceCount ? resourceTotal / resourceCount : 0))),
       enemyConfidence: enemy.confidence,
       enemyTurn: enemy.turn,
       enemyCentered: enemy.centered,
@@ -3896,6 +6248,145 @@
 
     const offset = index * 4;
     return scoreEnemyRgb(rgbaBytes[offset] || 0, rgbaBytes[offset + 1] || 0, rgbaBytes[offset + 2] || 0);
+  }
+
+  function scoreProjectilePaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const hsv = rgbToHsv(red, green, blue);
+    const brightness = (red + green + blue) / 3;
+    const warmHue = hueInRange(hsv.hue, 8, 54) || hueInRange(hsv.hue, 350, 360);
+    const warm = warmHue && hsv.saturation >= 0.36 && hsv.value >= 0.18;
+    const redDominance = red - Math.max(green * 0.72, blue * 1.4);
+    const orangeBalance = green > blue ? clamp01((green - blue) / 128) : 0;
+    const hueScore = warmHue ? 0.44 : 0;
+    return warm
+      ? clamp01(hueScore + (hsv.saturation * 0.22) + (redDominance / 180) * 0.22 + orangeBalance * 0.08 + clamp01((brightness - 38) / 160) * 0.04)
+      : 0;
+  }
+
+  function scoreResourcePaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const hsv = rgbToHsv(red, green, blue);
+    const brightness = (red + green + blue) / 3;
+    const blueResource = hueInRange(hsv.hue, 178, 250) && hsv.saturation >= 0.28 && hsv.value >= 0.2;
+    const greenResource = hueInRange(hsv.hue, 78, 158) && hsv.saturation >= 0.26 && hsv.value >= 0.2;
+    const brightPickup = brightness > 164 && Math.max(red, green, blue) - Math.min(red, green, blue) < 78;
+    return blueResource || greenResource || brightPickup
+      ? clamp01((hsv.saturation * 0.44) + clamp01((brightness - 42) / 180) * 0.36 + (brightPickup ? 0.2 : 0))
+      : 0;
+  }
+
+  function rgbToHsv(red, green, blue) {
+    const r = clamp01(Number(red || 0) / 255);
+    const g = clamp01(Number(green || 0) / 255);
+    const b = clamp01(Number(blue || 0) / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    let hue = 0;
+    if (delta > 0) {
+      if (max === r) {
+        hue = 60 * (((g - b) / delta) % 6);
+      } else if (max === g) {
+        hue = 60 * (((b - r) / delta) + 2);
+      } else {
+        hue = 60 * (((r - g) / delta) + 4);
+      }
+    }
+
+    if (hue < 0) {
+      hue += 360;
+    }
+
+    return {
+      hue,
+      saturation: max === 0 ? 0 : delta / max,
+      value: max
+    };
+  }
+
+  function hueInRange(hue, min, max) {
+    const value = ((Number(hue || 0) % 360) + 360) % 360;
+    const lower = ((Number(min || 0) % 360) + 360) % 360;
+    const upper = ((Number(max || 0) % 360) + 360) % 360;
+    if (lower <= upper) {
+      return value >= lower && value <= upper;
+    }
+
+    return value >= lower || value <= upper;
+  }
+
+  function applyMorphologyMask(values, columns, rows, operation, iterations) {
+    const source = Array.isArray(values) ? values : [];
+    const width = Math.max(1, Number(columns || 1));
+    const height = Math.max(1, Number(rows || 1));
+    const total = width * height;
+    let current = new Array(total).fill(0);
+    for (let index = 0; index < total; index += 1) {
+      current[index] = clamp01(Number(source[index] || 0));
+    }
+
+    const loops = Math.max(1, Number(iterations || 1));
+    for (let pass = 0; pass < loops; pass += 1) {
+      const next = new Array(total).fill(0);
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          let value = operation === "erosion" ? 1 : 0;
+          for (let oy = -1; oy <= 1; oy += 1) {
+            const yy = y + oy;
+            if (yy < 0 || yy >= height) {
+              continue;
+            }
+
+            for (let ox = -1; ox <= 1; ox += 1) {
+              const xx = x + ox;
+              if (xx < 0 || xx >= width) {
+                continue;
+              }
+
+              const neighbor = current[yy * width + xx] || 0;
+              value = operation === "erosion" ? Math.min(value, neighbor) : Math.max(value, neighbor);
+            }
+          }
+
+          next[y * width + x] = value >= RESIDENT_MASK_THRESHOLD ? round2(value) : 0;
+        }
+      }
+
+      current = next;
+    }
+
+    return current;
+  }
+
+  function maxArray(values) {
+    if (!Array.isArray(values) || values.length === 0) {
+      return 0;
+    }
+
+    let max = 0;
+    for (let index = 0; index < values.length; index += 1) {
+      const value = Number(values[index] || 0);
+      if (value > max) {
+        max = value;
+      }
+    }
+
+    return max;
   }
 
   function scoreDarkPaletteIndex(index, rgbaBytes) {
@@ -3970,6 +6461,57 @@
     return darkGreen
       ? clamp01((72 - luma) / 72)
       : (paleGray ? clamp01((196 - Math.abs(luma - 142)) / 196) : 0);
+  }
+
+  function scoreSpawnSecretDoorPaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
+    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+    const brightWhite = luma >= 148 && saturation <= 42;
+    const washedGray = luma >= 118 && saturation <= 30;
+    return brightWhite
+      ? clamp01((luma - 122) / 104)
+      : (washedGray ? clamp01((luma - 106) / 104) * 0.42 : 0);
+  }
+
+  function scoreSpawnWestStairDarkPaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
+    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+    const darkOpening = luma >= 8 && luma <= 72 && saturation <= 58;
+    return darkOpening ? clamp01((76 - luma) / 68) : 0;
+  }
+
+  function scoreSpawnWestStairLampPaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
+    const hsv = rgbToHsv(red, green, blue);
+    const warmLamp = red >= 82 && green >= 44 && red >= blue + 30 && green >= blue + 12 && luma >= 44;
+    const paleTip = luma >= 132 && hsv.saturation >= 0.18 && hueInRange(hsv.hue, 16, 58);
+    return warmLamp
+      ? clamp01(((red - blue) / 150) * 0.56 + hsv.saturation * 0.26 + clamp01((luma - 40) / 154) * 0.18)
+      : (paleTip ? clamp01((luma - 110) / 118) * 0.74 : 0);
   }
 
   function scoreSpawnCorridorGapPaletteIndex(index, rgbaBytes) {
@@ -4051,6 +6593,30 @@
     return darkDoorBrown
       ? clamp01((96 - luma) / 78)
       : (blackPanel ? clamp01((42 - luma) / 34) * 0.68 : 0);
+  }
+
+  function scoreFirstDoorRedAccentPaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const hsv = rgbToHsv(red, green, blue);
+    const brightness = (red + green + blue) / 3;
+    const redHue = hueInRange(hsv.hue, 348, 18);
+    const redDominance = red - Math.max(green * 1.08, blue * 1.18);
+    const orangeLeak = green > blue + 8 && green >= red * 0.54;
+    if (!redHue || orangeLeak || redDominance < 16 || hsv.saturation < 0.34 || hsv.value < 0.14) {
+      return 0;
+    }
+
+    return clamp01(
+      (redDominance / 148) * 0.48
+      + hsv.saturation * 0.28
+      + clamp01((brightness - 28) / 156) * 0.24);
   }
 
   function scoreComputerRoomBluePaletteIndex(index, rgbaBytes) {
@@ -4161,6 +6727,17 @@
     return bridgeBrown >= brownThreshold || (bridgeBrown >= brownThreshold * 0.45 && greenHazard >= greenThreshold);
   }
 
+  function isComputerPanelStillVisible(controller) {
+    if (!controller) {
+      return false;
+    }
+
+    return Number(controller.computerRoomScore || 0) >= 0.12
+      || Number(controller.computerPanelScore || 0) >= 0.34
+      || Number(controller.computerDarkPanelScore || 0) >= 0.16
+      || Number(controller.computerRedLightScore || 0) >= 0.05;
+  }
+
   function estimateSpawnCorridorGapEdges(lumaGrid) {
     if (!lumaGrid?.length) {
       return { score: 0, weight: 0, weightedX: 0 };
@@ -4236,7 +6813,8 @@
     }
 
     if (value === "brown" || value === "gray") {
-      return Number(depth || 1) < 0.76;
+      const safeDepth = Number(depth || 1);
+      return safeDepth >= 0.18 && safeDepth < 0.76;
     }
 
     return true;
@@ -4250,10 +6828,65 @@
     }
 
     if (value === "brown" || value === "gray") {
-      return safeDepth < 0.86 || Number(centerConfidence || 0) >= 0.52;
+      return Number(centerConfidence || 0) >= 0.52
+        || (safeDepth >= 0.18 && safeDepth < 0.72 && Number(confidence || 0) >= 0.72);
     }
 
     return safeDepth < 0.95;
+  }
+
+  function getTrustedEnemyThreatFromCandidate(enemy) {
+    const cluster = String(enemy?.cluster || "none");
+    const depth = Number(enemy?.distance ?? 1);
+    const confidence = clamp01(Number(enemy?.confidence || 0));
+    const centerConfidence = clamp01(Number(enemy?.centerCellConfidence || 0));
+    if (isTrustedEnemyCluster(cluster, depth)
+      && isTrustedEnemyDepth(cluster, depth, confidence, centerConfidence)) {
+      return confidence;
+    }
+
+    if (cluster === "brown" || cluster === "gray") {
+      return Math.min(confidence, depth >= 0.72 && centerConfidence < 0.52 ? 0.12 : 0.24);
+    }
+
+    if (cluster === "none" || cluster === "green" || cluster === "gate" || cluster.startsWith("gate-")) {
+      return Math.min(confidence, 0.1);
+    }
+
+    return Math.min(confidence, 0.28);
+  }
+
+  function getTrustedEnemyThreat(controller) {
+    const direct = getTrustedEnemyThreatFromCandidate({
+      cluster: controller?.enemyCluster,
+      distance: controller?.enemyDistance ?? controller?.depthEstimate,
+      confidence: controller?.enemyConfidence,
+      centerCellConfidence: controller?.enemyCenterCellConfidence
+    });
+    const alertTrusted = Number(controller?.enemyAlertFrames || 0) > 0
+      && isTrustedEnemyCluster(controller?.enemyAlertCluster, controller?.enemyAlertDepth)
+      && isTrustedEnemyDepth(
+        controller?.enemyAlertCluster,
+        controller?.enemyAlertDepth,
+        controller?.enemyAlertPeakConfidence,
+        controller?.enemyCenterCellConfidence);
+    const alert = alertTrusted ? clamp01(Number(controller?.enemyAlertPeakConfidence || 0) * 0.72) : 0;
+    return Math.max(direct, alert);
+  }
+
+  function hasTrustedCombatEvidence(controller) {
+    const trustedEnemy = getTrustedEnemyThreat(controller);
+    const looming = Boolean(controller?.nousDetectorResult?.looming?.active);
+    const damage = Boolean(controller?.nousDetectorResult?.damageLocalization?.active);
+    const alertTrusted = Number(controller?.enemyAlertFrames || 0) > 0
+      && isTrustedEnemyCluster(controller?.enemyAlertCluster, controller?.enemyAlertDepth)
+      && isTrustedEnemyDepth(
+        controller?.enemyAlertCluster,
+        controller?.enemyAlertDepth,
+        controller?.enemyAlertPeakConfidence,
+        controller?.enemyCenterCellConfidence);
+    const projectile = looming && clamp01(Number(controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0)) >= 0.16;
+    return trustedEnemy >= 0.26 || alertTrusted || projectile || damage;
   }
 
   function summarizeEnemyRegions(enemyRegionSample, clusterTotals, depthEstimate, enemyRegion9Sample = null) {
@@ -4413,7 +7046,68 @@
       likelyDead,
       zeroScore,
       activeColumns: horizontalSpread,
-      activeCells: bright
+      activeCells: bright,
+      faceDeathScore: 0,
+      freezeScore: 0,
+      retryReason: likelyDead ? "health-zero-score" : "none"
+    };
+  }
+
+  function refineHealthState(healthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta) {
+    const zeroScore = clamp01(Number(healthState?.zeroScore || 0));
+    const faceScore = clamp01(Number(faceDeathScore || 0));
+    const activeCells = Number(healthState?.activeCells || 0);
+    const activeColumns = Number(healthState?.activeColumns || 0);
+    const faceStable = Number(faceQuantizedFrameChange ?? 255) <= 0.08;
+    const visualStable = Number(visualStallDelta ?? 255) <= 0.08;
+    const freezeScore = clamp01((faceStable ? 0.5 : 0) + (visualStable ? 0.5 : 0));
+    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
+    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
+    const faceDeath = (sparseHealthDigits && zeroScore >= 0.44 && faceScore >= 0.24)
+      || (severeHealthDigits && faceScore >= 0.22);
+    const frozenDeath = sparseHealthDigits && zeroScore >= 0.52 && faceScore >= 0.14 && freezeScore >= 0.75;
+    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath;
+    return Object.assign({}, healthState || {}, {
+      likelyDead,
+      faceDeathScore: faceScore,
+      freezeScore,
+      retryReason: likelyDead
+        ? (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score"))
+        : "none"
+    });
+  }
+
+  function estimateFaceDeathScore(quantizedFace) {
+    if (!Array.isArray(quantizedFace) || quantizedFace.length === 0) {
+      return 0;
+    }
+
+    let danger = 0;
+    let critical = 0;
+    const length = quantizedFace.length;
+    for (let index = 0; index < length; index += 1) {
+      const value = Number(quantizedFace[index] || 0);
+      if (value >= 5) {
+        danger += 1;
+      }
+      if (value >= 7) {
+        critical += 1;
+      }
+    }
+
+    return clamp01((danger / length) * 2.4 + (critical / length) * 1.2);
+  }
+
+  function createDisabledHealthState(signature) {
+    return {
+      signature: signature || "000000000000000000000000",
+      likelyDead: false,
+      zeroScore: 0,
+      activeColumns: 0,
+      activeCells: 0,
+      faceDeathScore: 0,
+      freezeScore: 0,
+      retryReason: "sensor-cutoff"
     };
   }
 
@@ -4663,6 +7357,139 @@
     return distant && notCorner && (hasForwardRelief || corridor);
   }
 
+  function scoreFirstDoorVision9x9Signature(vision9x9Sample, firstDoorDoorSample, firstDoorRedSample) {
+    if (!Array.isArray(vision9x9Sample)
+      || !Array.isArray(firstDoorDoorSample)
+      || vision9x9Sample.length < VISION_GRID_COLUMNS * VISION_GRID_ROWS
+      || firstDoorDoorSample.length < VISION_GRID_COLUMNS * VISION_GRID_ROWS) {
+      return {
+        score: 0,
+        box: null,
+        heatmap: [],
+        redScore: 0
+      };
+    }
+
+    const redSample = Array.isArray(firstDoorRedSample) ? firstDoorRedSample : [];
+    const heatmap = new Array(VISION_GRID_COLUMNS * VISION_GRID_ROWS).fill(0);
+    let bestScore = 0;
+    let bestBox = null;
+    let bestRedScore = 0;
+    for (let row = 1; row < VISION_GRID_ROWS - 1; row += 1) {
+      for (let column = 1; column < VISION_GRID_COLUMNS - 1; column += 1) {
+        const i0 = row * VISION_GRID_COLUMNS + column;
+        const i1 = i0 + 1;
+        const i2 = i0 + VISION_GRID_COLUMNS;
+        const i3 = i2 + 1;
+        const raw0 = Number(vision9x9Sample[i0] || 0);
+        const raw1 = Number(vision9x9Sample[i1] || 0);
+        const raw2 = Number(vision9x9Sample[i2] || 0);
+        const raw3 = Number(vision9x9Sample[i3] || 0);
+        const rawMin = Math.min(raw0, raw1, raw2, raw3);
+        const rawMax = Math.max(raw0, raw1, raw2, raw3);
+        const rawAvg = (raw0 + raw1 + raw2 + raw3) * 0.25;
+        const quant0 = Math.round(raw0 / WALL_QUANTIZATION_STEP);
+        const quant1 = Math.round(raw1 / WALL_QUANTIZATION_STEP);
+        const quant2 = Math.round(raw2 / WALL_QUANTIZATION_STEP);
+        const quant3 = Math.round(raw3 / WALL_QUANTIZATION_STEP);
+        const quantSpread = Math.max(quant0, quant1, quant2, quant3) - Math.min(quant0, quant1, quant2, quant3);
+        const door0 = Number(firstDoorDoorSample[i0] || 0);
+        const door1 = Number(firstDoorDoorSample[i1] || 0);
+        const door2 = Number(firstDoorDoorSample[i2] || 0);
+        const door3 = Number(firstDoorDoorSample[i3] || 0);
+        const doorAvg = clamp01((door0 + door1 + door2 + door3) * 0.25);
+        const doorPeak = Math.max(door0, door1, door2, door3);
+        const red0 = Number(redSample[i0] || 0);
+        const red1 = Number(redSample[i1] || 0);
+        const red2 = Number(redSample[i2] || 0);
+        const red3 = Number(redSample[i3] || 0);
+        const redAvg = clamp01((red0 + red1 + red2 + red3) * 0.25);
+        const redPeak = Math.max(red0, red1, red2, red3);
+        const redEvidence = clamp01((redAvg * 0.68) + (redPeak * 0.32));
+        const leftIndex0 = row * VISION_GRID_COLUMNS + Math.max(0, column - 1);
+        const leftIndex1 = (row + 1) * VISION_GRID_COLUMNS + Math.max(0, column - 1);
+        const rightIndex0 = row * VISION_GRID_COLUMNS + Math.min(VISION_GRID_COLUMNS - 1, column + 2);
+        const rightIndex1 = (row + 1) * VISION_GRID_COLUMNS + Math.min(VISION_GRID_COLUMNS - 1, column + 2);
+        const aboveIndex0 = Math.max(0, row - 1) * VISION_GRID_COLUMNS + column;
+        const aboveIndex1 = Math.max(0, row - 1) * VISION_GRID_COLUMNS + column + 1;
+        const belowIndex0 = Math.min(VISION_GRID_ROWS - 1, row + 2) * VISION_GRID_COLUMNS + column;
+        const belowIndex1 = Math.min(VISION_GRID_ROWS - 1, row + 2) * VISION_GRID_COLUMNS + column + 1;
+        const leftAvg = (Number(vision9x9Sample[leftIndex0] || 0) + Number(vision9x9Sample[leftIndex1] || 0)) * 0.5;
+        const rightAvg = (Number(vision9x9Sample[rightIndex0] || 0) + Number(vision9x9Sample[rightIndex1] || 0)) * 0.5;
+        const aboveAvg = (Number(vision9x9Sample[aboveIndex0] || 0) + Number(vision9x9Sample[aboveIndex1] || 0)) * 0.5;
+        const belowAvg = (Number(vision9x9Sample[belowIndex0] || 0) + Number(vision9x9Sample[belowIndex1] || 0)) * 0.5;
+        const sideContrast = clamp01(Math.max(Math.abs(leftAvg - rawAvg), Math.abs(rightAvg - rawAvg)) / 96);
+        const verticalContrast = clamp01(Math.max(Math.abs(aboveAvg - rawAvg), Math.abs(belowAvg - rawAvg)) / 112);
+        const stripeContrast = clamp01(Math.abs((raw0 + raw2) - (raw1 + raw3)) / 192);
+        const edgePattern = clamp01((sideContrast * 0.42) + (verticalContrast * 0.22) + (stripeContrast * 0.36));
+        const darkPanelBand = row >= 2 && row <= 5;
+        const darkPanelEvidence = darkPanelBand
+          ? clamp01(((doorAvg * 0.72) + (doorPeak * 0.28)) * edgePattern * 1.35)
+          : 0;
+        const uniformPatch = clamp01((56 - (rawMax - rawMin)) / 56);
+        const quantizedPatch = clamp01((4 - quantSpread) / 4);
+        const centerDistance = Math.abs((column + 1) - ((VISION_GRID_COLUMNS - 1) * 0.5)) / ((VISION_GRID_COLUMNS - 1) * 0.5);
+        const centerWeight = clamp01(1 - centerDistance);
+        const midLowerWeight = row >= 3 && row <= 6 ? 1 : (row >= 2 && row <= 7 ? 0.66 : 0.32);
+        const redDoorBand = row >= 2 && row <= 4;
+        const floorRedRisk = row >= 6
+          ? redEvidence
+          : (row === 5 ? redEvidence * (belowAvg > rawAvg + 10 ? 0.82 : 0.58) : 0);
+        const doorRedEvidence = redDoorBand ? redEvidence : 0;
+        const redGate = clamp01(doorRedEvidence / FIRST_DOOR_RED_ACCENT_THRESHOLD);
+        const orangeWallPenalty = redGate < 0.72 && doorAvg >= 0.24
+          ? (centerWeight >= 0.78 ? 0.08 : 0.18)
+          : 0;
+        const score = clamp01(
+          (doorAvg * 0.24)
+          + (doorPeak * 0.08)
+          + (doorRedEvidence * 0.24)
+          + (darkPanelEvidence * 0.18)
+          + (quantizedPatch * 0.11)
+          + (uniformPatch * 0.07)
+          + (edgePattern * 0.14)
+          + (centerWeight * 0.06)
+          + (midLowerWeight * 0.06)
+          - orangeWallPenalty
+          - (floorRedRisk * 0.3));
+        const kind = floorRedRisk >= FIRST_DOOR_RED_ACCENT_THRESHOLD
+          ? "first-door-floor-red"
+          : (doorRedEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD && edgePattern >= 0.22
+          ? "first-door-9x9-patch"
+          : (darkPanelBand && darkPanelEvidence >= 0.24 && centerWeight >= 0.55 && midLowerWeight >= 0.66
+            ? "first-door-dark-panel"
+            : "first-door-wall-pattern"));
+        heatmap[i0] = Math.max(heatmap[i0], score);
+        heatmap[i1] = Math.max(heatmap[i1], score);
+        heatmap[i2] = Math.max(heatmap[i2], score);
+        heatmap[i3] = Math.max(heatmap[i3], score);
+        bestRedScore = Math.max(bestRedScore, doorRedEvidence);
+        if (score > bestScore) {
+          bestScore = score;
+          bestBox = {
+            column,
+            row,
+            columns: 2,
+            rows: 2,
+            score: round2(score),
+            redScore: round2(doorRedEvidence),
+            edgeScore: round2(edgePattern),
+            doorScore: round2(doorAvg),
+            darkPanelScore: round2(darkPanelEvidence),
+            kind
+          };
+        }
+      }
+    }
+
+    return {
+      score: round2(bestScore),
+      box: bestScore >= 0.24 ? bestBox : null,
+      heatmap: heatmap.map(value => round2(value)),
+      redScore: round2(bestRedScore)
+    };
+  }
+
   function scoreFirstDoorCorridorSignature(frame, depthEstimate, blueFloorScore, spawnCorridorGapScore = 0) {
     const regions = frame.regionSample || [];
     if (regions.length < REGION_COLUMNS * REGION_ROWS) {
@@ -4700,6 +7527,46 @@
       + (verticalPocket * 0.16)
       + (rightGap * 0.1)
       + (clamp01(spawnCorridorGapScore) * 0.22));
+  }
+
+  function scoreFirstDoorUseAlignment3x3(frame, spawnCorridorGapScore = 0, spawnCorridorGapTurn = "none") {
+    const regions = frame.region9Sample || [];
+    if (regions.length < REGION9_COLUMNS * REGION9_ROWS) {
+      return { score: 0, turn: "none", reason: "no-region9" };
+    }
+
+    const topCenter = Number(regions[1] || 0);
+    const middleLeft = Number(regions[3] || 0);
+    const middleCenter = Number(regions[4] || 0);
+    const middleRight = Number(regions[5] || 0);
+    const lowerLeft = Number(regions[6] || 0);
+    const lowerCenter = Number(regions[7] || 0);
+    const lowerRight = Number(regions[8] || 0);
+    const centerColumn = (topCenter + middleCenter + lowerCenter) / 3;
+    const leftColumn = (Number(regions[0] || 0) + middleLeft + lowerLeft) / 3;
+    const rightColumn = (Number(regions[2] || 0) + middleRight + lowerRight) / 3;
+    const centerDominance = clamp01((centerColumn - Math.max(leftColumn, rightColumn) + 38) / 92);
+    const lowerContact = clamp01((lowerCenter - Math.max(lowerLeft, lowerRight) + 34) / 92);
+    const verticalContinuity = clamp01((96 - (Math.max(topCenter, middleCenter, lowerCenter) - Math.min(topCenter, middleCenter, lowerCenter))) / 96);
+    const sideGap = rightColumn + 8 < centerColumn ? "right" : (leftColumn + 8 < centerColumn ? "left" : "none");
+    const gapTurn = spawnCorridorGapTurn === "left" || spawnCorridorGapTurn === "right" ? spawnCorridorGapTurn : sideGap;
+    const edgePenalty = gapTurn !== "none" && Number(spawnCorridorGapScore || 0) >= 0.18 ? 0.34 : 0;
+    const score = clamp01(
+      (centerDominance * 0.38)
+      + (lowerContact * 0.24)
+      + (verticalContinuity * 0.22)
+      + (clamp01(Number(frame.bridgeDoorScore || 0)) * 0.16)
+      - edgePenalty);
+
+    if (score >= 0.58) {
+      return { score: round2(score), turn: "none", reason: "center-3x3" };
+    }
+
+    return {
+      score: round2(score),
+      turn: gapTurn,
+      reason: gapTurn === "none" ? "center-weak" : "edge-gap"
+    };
   }
 
   function looksLikeCorner(frame, frameChange) {
@@ -4868,11 +7735,18 @@
     const leftEnergy = clamp01(Number(overrides.leftEnergy ?? 0));
     const rightEnergy = clamp01(Number(overrides.rightEnergy ?? 0));
     const balance = Math.max(-1, Math.min(1, Number(overrides.balance ?? 0) || 0));
+    const lowEnergy = clamp01(Number(overrides.lowEnergy ?? 0));
+    const midEnergy = clamp01(Number(overrides.midEnergy ?? 0));
+    const highEnergy = clamp01(Number(overrides.highEnergy ?? 0));
     return {
       leftEnergy: round2(leftEnergy),
       rightEnergy: round2(rightEnergy),
       balance: round2(balance),
       dominantFreq: round2(Number(overrides.dominantFreq ?? 0)),
+      lowEnergy: round2(lowEnergy),
+      midEnergy: round2(midEnergy),
+      highEnergy: round2(highEnergy),
+      dominantBand: overrides.dominantBand || "none",
       eventDetected: Boolean(overrides.eventDetected),
       eventType: normalizeAuditoryEventType(overrides.eventType),
       timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
@@ -4886,15 +7760,133 @@
     const balance = Math.max(-1, Math.min(1, Number(source.balance ?? 0) || 0));
     const dominantFreq = Number(source.dominantFreq ?? source.frequency ?? source.dominantFrequency ?? 0);
     const eventDetected = Boolean(source.eventDetected ?? source.active);
+    const bandEnergy = buildAudioBandEnergy(source, dominantFreq, Math.max(leftEnergy, rightEnergy));
     return createAuditorySnapshot({
       leftEnergy,
       rightEnergy,
       balance,
       dominantFreq,
+      lowEnergy: bandEnergy.lowEnergy,
+      midEnergy: bandEnergy.midEnergy,
+      highEnergy: bandEnergy.highEnergy,
+      dominantBand: bandEnergy.dominantBand,
       eventDetected,
       eventType: eventDetected ? normalizeAuditoryEventType(source.eventType) : "none",
       timestamp: source.timestamp || state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
     });
+  }
+
+  function buildAudioBandEnergy(source, dominantFreq, totalEnergy) {
+    const low = source?.lowEnergy ?? source?.lowBandEnergy ?? source?.bands?.low;
+    const mid = source?.midEnergy ?? source?.middleEnergy ?? source?.midBandEnergy ?? source?.bands?.mid;
+    const high = source?.highEnergy ?? source?.highBandEnergy ?? source?.bands?.high;
+    if (Number.isFinite(Number(low)) || Number.isFinite(Number(mid)) || Number.isFinite(Number(high))) {
+      const lowEnergy = clamp01(Number(low || 0));
+      const midEnergy = clamp01(Number(mid || 0));
+      const highEnergy = clamp01(Number(high || 0));
+      return {
+        lowEnergy,
+        midEnergy,
+        highEnergy,
+        dominantBand: chooseDominantAudioBand(lowEnergy, midEnergy, highEnergy)
+      };
+    }
+
+    const energy = clamp01(Number(totalEnergy || 0));
+    const frequency = Number(dominantFreq || 0);
+    if (energy <= 0) {
+      return { lowEnergy: 0, midEnergy: 0, highEnergy: 0, dominantBand: "none" };
+    }
+
+    if (frequency <= 0) {
+      return {
+        lowEnergy: round2(energy * 0.38),
+        midEnergy: round2(energy * 0.72),
+        highEnergy: round2(energy * 0.28),
+        dominantBand: "mid"
+      };
+    }
+
+    if (frequency < 280) {
+      return { lowEnergy: energy, midEnergy: round2(energy * 0.32), highEnergy: 0, dominantBand: "low" };
+    }
+
+    if (frequency < 2100) {
+      return { lowEnergy: round2(energy * 0.24), midEnergy: energy, highEnergy: round2(energy * 0.18), dominantBand: "mid" };
+    }
+
+    return { lowEnergy: 0, midEnergy: round2(energy * 0.28), highEnergy: energy, dominantBand: "high" };
+  }
+
+  function chooseDominantAudioBand(lowEnergy, midEnergy, highEnergy) {
+    const low = Number(lowEnergy || 0);
+    const mid = Number(midEnergy || 0);
+    const high = Number(highEnergy || 0);
+    const peak = Math.max(low, mid, high);
+    if (peak <= 0.02) {
+      return "none";
+    }
+
+    if (high >= mid && high >= low) {
+      return "high";
+    }
+
+    return mid >= low ? "mid" : "low";
+  }
+
+  function classifyUseAuditoryResponse(controller, auditory, context) {
+    const pending = Number(controller?.pendingUseResponseFrames || 0) > 0
+      || Boolean(controller?.firstDoorUsePulsed)
+      || Number(controller?.firstDoorUseLatchFrames || 0) > 0;
+    if (!pending || !auditory) {
+      return auditory;
+    }
+
+    const energy = Math.max(Number(auditory.leftEnergy || 0), Number(auditory.rightEnergy || 0));
+    const low = Number(auditory.lowEnergy || 0);
+    const mid = Number(auditory.midEnergy || 0);
+    const high = Number(auditory.highEnergy || 0);
+    const bandEnergy = Math.max(low, mid, high);
+    const rawEventType = normalizeAuditoryEventType(auditory.eventType);
+    const nativeUseSfx = rawEventType === "native-sfx" || rawEventType === "doom-native-sfx";
+    const audibleResponse = Boolean(auditory.eventDetected)
+      || energy >= 0.002
+      || bandEnergy >= 0.002;
+    const visualResponse = Math.max(Number(context?.quantizedFrameChange || 0), Number(context?.regionQuantizedFrameChange || 0));
+    if (!audibleResponse && visualResponse < 0.18) {
+      return auditory;
+    }
+
+    const blockedBeforeUse = Boolean(controller?.lastUseWasBlocked);
+    const gateLike = visualResponse >= 0.28
+      || Number(context?.regionQuantizedFrameChange || 0) >= 0.2
+      || Number(context?.visualStallDelta || 255) >= 0.18
+      || Number(controller?.doorTransitionArmedFrames || 0) > 0;
+    const shutterOpenLike = nativeUseSfx
+      && (energy >= 0.018 || bandEnergy >= 0.018)
+      && (gateLike || visualResponse >= 0.08 || Number(context?.depthEstimate || 0) >= 0.65);
+    const voiceLike = high >= Math.max(0.012, low * 0.75) || mid >= 0.018;
+    let eventType = rawEventType === "none" ? "use-response" : rawEventType;
+    if (rawEventType === "use-success-gate") {
+      eventType = "use-success-gate";
+    } else if (rawEventType === "use-failed-voice") {
+      eventType = "use-failed-voice";
+    } else if (shutterOpenLike) {
+      eventType = "use-success-gate";
+    } else if (gateLike && (visualResponse >= 0.22 || !blockedBeforeUse) && (low >= 0.006 || energy >= 0.006 || bandEnergy >= 0.006)) {
+      eventType = "use-success-gate";
+    } else if (blockedBeforeUse || voiceLike || energy >= 0.006 || bandEnergy >= 0.006) {
+      eventType = "use-failed-voice";
+    }
+
+    return createAuditorySnapshot(Object.assign({}, auditory, {
+      eventType,
+      eventDetected: true,
+      lowEnergy: low,
+      midEnergy: mid,
+      highEnergy: high,
+      dominantBand: auditory.dominantBand || chooseDominantAudioBand(low, mid, high)
+    }));
   }
 
   function createSpatialSnapshot(overrides = {}) {
@@ -4917,17 +7909,1932 @@
 
   function buildSpatialSnapshot(state, auditory) {
     const source = state?.spatialSnapshot || {};
+    const derived = deriveSpatialSnapshot(state, auditory);
     return createSpatialSnapshot({
-      visualDirection: Number(source.visualDirection ?? 0),
-      auditoryCorrection: Number(source.auditoryCorrection ?? 0),
-      fusedDirection: Number(source.fusedDirection ?? source.visualDirection ?? 0),
-      confidence: Number(source.confidence ?? 0),
-      timestamp: source.timestamp || auditory?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
-      eventDetected: Boolean(source.eventDetected ?? auditory?.eventDetected),
-      eventType: source.eventType || auditory?.eventType || "none",
-      hudX: Number(source.hudX ?? 0.5),
-      hudY: Number(source.hudY ?? 0.45)
+      visualDirection: Number(source.visualDirection ?? derived.visualDirection),
+      auditoryCorrection: Number(source.auditoryCorrection ?? derived.auditoryCorrection),
+      fusedDirection: Number(source.fusedDirection ?? derived.fusedDirection),
+      confidence: Number(source.confidence ?? derived.confidence),
+      timestamp: source.timestamp || derived.timestamp,
+      eventDetected: Boolean(source.eventDetected ?? derived.eventDetected),
+      eventType: source.eventType || derived.eventType,
+      hudX: Number(source.hudX ?? derived.hudX),
+      hudY: Number(source.hudY ?? derived.hudY),
+      gain: Number(source.gain ?? derived.gain)
     });
+  }
+
+  function createVisionSensorSnapshot(overrides = {}) {
+    const quantized = normalizeVision9x9(overrides.quantized);
+    const signature = overrides.signature || regionSignature(quantized).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
+    const confidence = clamp01(Number(overrides.confidence ?? 0));
+    return {
+      active: Boolean(overrides.active),
+      gridColumns: VISION_GRID_COLUMNS,
+      gridRows: VISION_GRID_ROWS,
+      quantized,
+      signature,
+      left: Number(overrides.left || 0),
+      center: Number(overrides.center || 0),
+      right: Number(overrides.right || 0),
+      confidence: round2(confidence),
+      eventDetected: Boolean(overrides.eventDetected ?? confidence >= 0.62),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createMotorSensorSnapshot(overrides = {}) {
+    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
+    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
+    return {
+      active: Boolean(overrides.active),
+      move: overrides.move || "none",
+      turn: overrides.turn || "none",
+      strafe: Boolean(overrides.strafe),
+      run: Boolean(overrides.run),
+      use: Boolean(overrides.use),
+      fire: Boolean(overrides.fire),
+      vectorX: round2(vectorX),
+      vectorY: round2(vectorY),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createMovementSensorSnapshot(overrides = {}) {
+    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
+    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
+    const speed = clamp01(Number(overrides.speed ?? Math.sqrt((vectorX * vectorX) + (vectorY * vectorY))));
+    const confidence = clamp01(Number(overrides.confidence ?? speed));
+    return {
+      active: Boolean(overrides.active),
+      vectorX: round2(vectorX),
+      vectorY: round2(vectorY),
+      speed: round2(speed),
+      turn: ternarySigned(vectorX),
+      advance: ternarySigned(vectorY),
+      confidence: round2(confidence),
+      eventDetected: Boolean(overrides.eventDetected ?? confidence >= 0.42),
+      eventType: overrides.eventType || "movement",
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createCompassSensorSnapshot(overrides = {}) {
+    const heading = ((Number(overrides.heading ?? 0) % 360) + 360) % 360;
+    const baseHeading = ((Number(overrides.baseHeading ?? heading) % 360) + 360) % 360;
+    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
+    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
+    const active = Boolean(overrides.active);
+    const confidence = round2(clamp01(Number(overrides.confidence ?? 0)));
+    const headingUsable = overrides.headingUsable == null
+      ? active && confidence >= 0.05 && !overrides.headingUncertain
+      : overrides.headingUsable !== false && !overrides.headingUncertain;
+    return {
+      active,
+      heading: round2(heading),
+      origin: overrides.origin || "N=0deg",
+      baseHeading: round2(baseHeading),
+      vectorX: round2(vectorX),
+      vectorY: round2(vectorY),
+      visualBias: round2(clampSigned(Number(overrides.visualBias || 0))),
+      visualFlowBias: round2(clampSigned(Number(overrides.visualFlowBias || 0))),
+      baseFlowBias: round2(clampSigned(Number(overrides.baseFlowBias || 0))),
+      motorBias: round2(clampSigned(Number(overrides.motorBias || 0))),
+      audioBias: round2(clampSigned(Number(overrides.audioBias || 0))),
+      movementBias: round2(clampSigned(Number(overrides.movementBias || 0))),
+      visualBiasDelta: round2(Number(overrides.visualBiasDelta || 0)),
+      visualFlowDelta: round2(Number(overrides.visualFlowDelta || 0)),
+      baseFlowDelta: round2(Number(overrides.baseFlowDelta || 0)),
+      motorDelta: round2(Number(overrides.motorDelta || 0)),
+      audioDelta: round2(Number(overrides.audioDelta || 0)),
+      movementDelta: round2(Number(overrides.movementDelta || 0)),
+      landmarkDelta: round2(Number(overrides.landmarkDelta || 0)),
+      motorHeading: overrides.motorHeading == null ? null : round2(Number(overrides.motorHeading)),
+      visualFlowHeading: overrides.visualFlowHeading == null ? null : round2(Number(overrides.visualFlowHeading)),
+      rotationInstructionDelta: round2(Number(overrides.rotationInstructionDelta || 0)),
+      frameBufferVectorDelta: round2(Number(overrides.frameBufferVectorDelta || 0)),
+      edgeSnapDelta: round2(Number(overrides.edgeSnapDelta || 0)),
+      edgeSnapHeading: overrides.edgeSnapHeading == null ? null : round2(Number(overrides.edgeSnapHeading)),
+      edgeSnapConfidence: round2(clamp01(Number(overrides.edgeSnapConfidence || 0))),
+      edgeSnapWeight: round2(clamp01(Number(overrides.edgeSnapWeight || 0))),
+      correctionDegrees: round2(Number(overrides.correctionDegrees || 0)),
+      correctionSource: overrides.correctionSource || "relative-sensor-fusion",
+      landmark: overrides.landmark || "",
+      landmarkKind: overrides.landmarkKind || "",
+      landmarkLabel: overrides.landmarkLabel || "",
+      landmarkHeading: overrides.landmarkHeading == null ? null : round2(Number(overrides.landmarkHeading)),
+      landmarkConfidence: round2(clamp01(Number(overrides.landmarkConfidence || 0))),
+      landmarkForced: Boolean(overrides.landmarkForced),
+      evidence: round2(clamp01(Number(overrides.evidence || 0))),
+      confidence,
+      headingUsable,
+      headingUncertain: !headingUsable,
+      headingReliability: overrides.headingReliability || (headingUsable ? "relative-stable" : "relative-uncertain"),
+      useCompassForRouting: headingUsable && overrides.useCompassForRouting !== false,
+      contextResetActive: Boolean(overrides.contextResetActive),
+      wallFollowActive: Boolean(overrides.wallFollowActive),
+      wallOnlyView: Boolean(overrides.wallOnlyView),
+      corridorOnlyView: Boolean(overrides.corridorOnlyView),
+      source: overrides.source || "relative-sensor-fusion",
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createSpatialSensorSnapshot(overrides = {}) {
+    return {
+      active: Boolean(overrides.active),
+      vectorX: round2(clampSigned(Number(overrides.vectorX ?? 0))),
+      vectorY: round2(clampSigned(Number(overrides.vectorY ?? 0))),
+      fusedDirection: round2(Number(overrides.fusedDirection ?? 0)),
+      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
+      historyFrames: Number(overrides.historyFrames || 0),
+      eventDetected: Boolean(overrides.eventDetected),
+      eventType: overrides.eventType || "none",
+      hudX: round2(clamp01(Number(overrides.hudX ?? 0.5))),
+      hudY: round2(clamp01(Number(overrides.hudY ?? 0.45))),
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createNousCarrier(overrides = {}) {
+    return {
+      normalizedSensorMap: overrides.normalizedSensorMap || {},
+      spatial9x9: overrides.spatial9x9 || {
+        baseColumns: REGION9_COLUMNS,
+        baseRows: REGION9_ROWS,
+        baseSignature: "000000000",
+        baseFeatures: [],
+        columns: VISION_GRID_COLUMNS,
+        rows: VISION_GRID_ROWS,
+        signature: "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS),
+        features: []
+      },
+      movementEnvelope: overrides.movementEnvelope || {
+        x: "neutral",
+        y: "neutral",
+        rotation: "neutral"
+      },
+      healthEnvelope: overrides.healthEnvelope || {
+        life: "neutral",
+        retry: "neutral"
+      },
+      bonsaiTernary: overrides.bonsaiTernary || {
+        aisthesis: "neutral",
+        kinesis: "neutral",
+        phantasia: "neutral"
+      },
+      ctgTrace: overrides.ctgTrace || {
+        canonId: CTG_ROM_CANON_ID,
+        policyId: CTG_ROM_POLICY_ID,
+        gateExecuted: false,
+        ternaryTrace: {}
+      },
+      cognitionHints: overrides.cognitionHints || {},
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createChronosWindow(overrides = {}) {
+    const frames = Array.isArray(overrides.frames) ? overrides.frames.slice(-CHRONOS_WINDOW_LIMIT) : [];
+    return { frames };
+  }
+
+  function createPhantasiaSnapshot(overrides = {}) {
+    return {
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
+      signature: overrides.signature || "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS),
+      base3x3Signature: overrides.base3x3Signature || "000000000",
+      base3x3: overrides.base3x3 || [],
+      spatial9x9: overrides.spatial9x9 || [],
+      rawSpatial9x9: overrides.rawSpatial9x9 || overrides.spatial9x9 || [],
+      dynamicMask9x9: overrides.dynamicMask9x9 || [],
+      dynamicMaskCells: Number(overrides.dynamicMaskCells || 0),
+      baseDirection: normalizeRelativeDirection(overrides.baseDirection),
+      projectile9x9: overrides.projectile9x9 || [],
+      projectileScore: round2(clamp01(Number(overrides.projectileScore ?? 0))),
+      projectileDirection: normalizeRelativeDirection(overrides.projectileDirection),
+      resource9x9: overrides.resource9x9 || [],
+      resourceScore: round2(clamp01(Number(overrides.resourceScore ?? 0))),
+      resourceDirection: normalizeRelativeDirection(overrides.resourceDirection),
+      enemyConfidence: round2(clamp01(Number(overrides.enemyConfidence ?? 0))),
+      audioBalance: round2(clampSigned(Number(overrides.audioBalance ?? 0))),
+      audioEnergy: round2(clamp01(Number(overrides.audioEnergy ?? 0))),
+      audioLowEnergy: round2(clamp01(Number(overrides.audioLowEnergy ?? 0))),
+      audioMidEnergy: round2(clamp01(Number(overrides.audioMidEnergy ?? 0))),
+      audioHighEnergy: round2(clamp01(Number(overrides.audioHighEnergy ?? 0))),
+      audioDominantBand: overrides.audioDominantBand || "none",
+      movementSpeed: round2(clamp01(Number(overrides.movementSpeed ?? 0))),
+      motorForward: round2(clampSigned(Number(overrides.motorForward ?? 0))),
+      temporalDelta: round2(clamp01(Number(overrides.temporalDelta ?? 0))),
+      flowX: round2(clampSigned(Number(overrides.flowX ?? 0))),
+      flowY: round2(clampSigned(Number(overrides.flowY ?? 0))),
+      dynamicObjectScore: round2(clamp01(Number(overrides.dynamicObjectScore ?? 0))),
+      spatialConfidence: round2(clamp01(Number(overrides.spatialConfidence ?? 0))),
+      spatialEvent: Boolean(overrides.spatialEvent),
+      healthActiveCells: Number(overrides.healthActiveCells || 0),
+      healthZeroScore: round2(clamp01(Number(overrides.healthZeroScore ?? 0))),
+      faceDelta: round2(Number(overrides.faceDelta ?? 255)),
+      narrowness: round2(clamp01(Number(overrides.narrowness ?? 0))),
+      stuckFrames: Number(overrides.stuckFrames || 0),
+      inputStallFrames: Number(overrides.inputStallFrames || 0)
+    };
+  }
+
+  function createNousDetectorResult(overrides = {}) {
+    return {
+      looming: Object.assign({ active: false, direction: null }, overrides.looming || {}),
+      damageLocalization: Object.assign({ active: false, direction: null }, overrides.damageLocalization || {}),
+      trap: Object.assign({ active: false, kind: null }, overrides.trap || {}),
+      stuck: Object.assign({ active: false }, overrides.stuck || {}),
+      explorationEntropy: Object.assign({ high: false }, overrides.explorationEntropy || {}),
+      itemBacktrack: Object.assign({ suggested: false, targetKind: null }, overrides.itemBacktrack || {}),
+      sensorRecovery: Object.assign({ needed: false, reason: null }, overrides.sensorRecovery || {})
+    };
+  }
+
+  function buildPhantasiaSnapshot(controller, frame, timestamp) {
+    const vision = controller.visionSensorSnapshot || createVisionSensorSnapshot();
+    const movement = controller.movementSensorSnapshot || createMovementSensorSnapshot();
+    const motor = controller.motorSensorSnapshot || createMotorSensorSnapshot();
+    const health = controller.healthSensorSnapshot || createHealthSensorSnapshot();
+    const audio = controller.auditorySnapshot || createAuditorySnapshot();
+    const spatial = controller.spatialSensorSnapshot || createSpatialSensorSnapshot();
+    const previous = controller.phantasiaSnapshot || createPhantasiaSnapshot();
+    const projectile9x9 = Array.isArray(frame?.projectileVision9x9Sample) ? frame.projectileVision9x9Sample : [];
+    const resource9x9 = Array.isArray(frame?.resourceVision9x9Sample) ? frame.resourceVision9x9Sample : [];
+    const dynamicMask9x9 = createDynamicObstacleMask(frame, VISION_GRID_COLUMNS, VISION_GRID_ROWS);
+    const staticSpatial9x9 = applyStaticObstacleMask(vision.quantized, dynamicMask9x9, previous.spatial9x9, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
+    const dynamicMaskCells = countMaskCells(dynamicMask9x9);
+    const dynamicMaskCoverage = dynamicMaskCells / Math.max(1, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
+    const projectileDirection = gridDominantDirection(projectile9x9, VISION_GRID_COLUMNS)
+      || gridDominantDirection(frame?.projectileRegion9Sample, REGION9_COLUMNS);
+    const resourceDirection = gridDominantDirection(resource9x9, VISION_GRID_COLUMNS)
+      || gridDominantDirection(frame?.resourceRegion9Sample, REGION9_COLUMNS);
+    const temporalDelta = estimateTemporalDifference(previous.spatial9x9, staticSpatial9x9);
+    const flow = estimateDenseGridFlow(previous.spatial9x9, staticSpatial9x9, VISION_GRID_COLUMNS, VISION_GRID_ROWS);
+    const depth = Number(controller.depthEstimate ?? frame?.depthEstimate ?? 1);
+    const narrowness = clamp01(((1 - depth) * 0.58) + (Number(controller.cornerSignal || 0) * 0.42));
+    return createPhantasiaSnapshot({
+      timestamp,
+      signature: vision.signature,
+      base3x3Signature: controller.region9Signature,
+      base3x3: normalizeRegion9(frame?.region9Sample),
+      spatial9x9: staticSpatial9x9,
+      rawSpatial9x9: vision.quantized,
+      dynamicMask9x9,
+      dynamicMaskCells,
+      baseDirection: coarseBaseDirection(frame),
+      projectile9x9,
+      projectileScore: frame?.projectileScore,
+      projectileDirection,
+      resource9x9,
+      resourceScore: frame?.resourceScore,
+      resourceDirection,
+      enemyConfidence: Math.max(Number(frame?.enemyConfidence || 0), Number(controller.enemyConfidence || 0)),
+      audioBalance: audio.balance,
+      audioEnergy: Math.max(Number(audio.leftEnergy || 0), Number(audio.rightEnergy || 0)),
+      audioLowEnergy: audio.lowEnergy,
+      audioMidEnergy: audio.midEnergy,
+      audioHighEnergy: audio.highEnergy,
+      audioDominantBand: audio.dominantBand,
+      movementSpeed: movement.speed,
+      motorForward: motor.vectorY,
+      temporalDelta,
+      flowX: flow.flowX,
+      flowY: flow.flowY,
+      dynamicObjectScore: Math.max(flow.dynamicScore, temporalDelta, dynamicMaskCoverage, Number(frame?.projectileScore || 0), Math.max(Number(frame?.enemyConfidence || 0), Number(controller.enemyConfidence || 0)) * 0.4),
+      spatialConfidence: spatial.confidence,
+      spatialEvent: spatial.eventDetected,
+      healthActiveCells: health.activeCells,
+      healthZeroScore: health.zeroScore,
+      faceDelta: health.faceQuantizedFrameChange,
+      narrowness,
+      stuckFrames: controller.stuckFrames,
+      inputStallFrames: controller.inputStallFrames
+    });
+  }
+
+  function pushChronosFrame(chronosWindow, snapshot) {
+    if (!chronosWindow || !Array.isArray(chronosWindow.frames)) {
+      return createChronosWindow({ frames: [snapshot] });
+    }
+
+    chronosWindow.frames.push(snapshot);
+    while (chronosWindow.frames.length > CHRONOS_WINDOW_LIMIT) {
+      chronosWindow.frames.shift();
+    }
+
+    return chronosWindow;
+  }
+
+  function rememberResourceCandidate(controller, snapshot) {
+    if (!controller || !snapshot || snapshot.resourceScore < 0.22) {
+      return;
+    }
+
+    const healthy = Number(snapshot.healthActiveCells || 0) >= 10 && Number(snapshot.healthZeroScore || 0) < 0.34;
+    if (!healthy) {
+      return;
+    }
+
+    if (!Array.isArray(controller.itemMemory)) {
+      controller.itemMemory = [];
+    }
+
+    controller.itemMemory.push({
+      targetKind: "resource",
+      direction: snapshot.resourceDirection || "center",
+      confidence: snapshot.resourceScore,
+      signature: snapshot.signature,
+      timestamp: snapshot.timestamp
+    });
+    while (controller.itemMemory.length > ITEM_MEMORY_LIMIT) {
+      controller.itemMemory.shift();
+    }
+  }
+
+  function evaluateNousDetectorResult(nousCarrier, chronosWindow, spatialHistory, controller) {
+    const frames = Array.isArray(chronosWindow?.frames) ? chronosWindow.frames : [];
+    const latest = frames.length > 0 ? frames[frames.length - 1] : createPhantasiaSnapshot();
+    const previous = frames.length > 1 ? frames[frames.length - 2] : createPhantasiaSnapshot();
+    const result = createNousDetectorResult();
+    const demoRouteGraceActive = isPreDoorDemoRouteGraceActive(controller, latest);
+    let looming = detectLooming(latest, previous, frames);
+    const damageLocalization = detectDamageLocalization(latest, previous, frames);
+    const trap = detectTrap(latest, frames, spatialHistory);
+    let stuck = detectStuck(nousCarrier, latest, frames);
+    const explorationEntropy = detectExplorationEntropy(latest, frames);
+    const itemBacktrack = detectItemBacktrack(controller, latest);
+    const preDoorNoCombat = controller?.doorOpenedCount <= 0 && !hasTrustedCombatEvidence(controller);
+    if (preDoorNoCombat && looming.active) {
+      looming = { active: false, direction: null };
+    }
+
+    if (demoRouteGraceActive && stuck.active) {
+      stuck = { active: false, evidence: null };
+    }
+
+    const movementStallEvent = !demoRouteGraceActive
+      && controller?.movementSensorSnapshot?.eventType === "movement-stall"
+      && Number(controller?.movementSensorSnapshot?.confidence || 0) >= 0.74
+      && (Number(latest.stuckFrames || 0) >= 2
+        || Number(latest.inputStallFrames || 0) >= 4
+        || (countRecentLowMotion(frames, 8) >= 6 && Number(latest.temporalDelta || 0) <= 0.06));
+    const recoveryReason = stuck.active
+      ? "intent-result-mismatch"
+      : (movementStallEvent ? "movement-stall" : null);
+
+    result.looming = looming;
+    result.damageLocalization = damageLocalization;
+    result.trap = trap;
+    result.stuck = stuck;
+    result.explorationEntropy = explorationEntropy;
+    result.itemBacktrack = itemBacktrack;
+    result.sensorRecovery = {
+      needed: Boolean(recoveryReason),
+      reason: recoveryReason
+    };
+    return result;
+  }
+
+  function detectLooming(latest, previous, frames) {
+    const current = Number(latest.projectileScore || 0);
+    let baseline = Number(previous.projectileScore || 0);
+    let recentMin = current;
+    let risingFrames = 0;
+    const start = Math.max(0, frames.length - 5);
+    for (let index = start; index < frames.length - 1; index += 1) {
+      const score = Number(frames[index].projectileScore || 0);
+      baseline = Math.max(baseline, score);
+      recentMin = Math.min(recentMin, score);
+      if (index > start && score > Number(frames[index - 1]?.projectileScore || 0) + 0.025) {
+        risingFrames += 1;
+      }
+    }
+
+    const growth = current - baseline;
+    const trendGrowth = current - recentMin;
+    const dynamicSignal = Math.max(Number(latest.dynamicObjectScore || 0), Number(latest.temporalDelta || 0));
+    const flowMagnitude = Math.max(Math.abs(Number(latest.flowX || 0)), Math.abs(Number(latest.flowY || 0)));
+    const notAdvancing = Number(latest.motorForward || 0) <= 0.12;
+    const stableThreat = current >= 0.2 && trendGrowth >= 0.1 && risingFrames >= 2;
+    const active = notAdvancing
+      && current >= 0.16
+      && (growth >= LOOMING_DELTA_THRESHOLD
+        || stableThreat
+        || (current >= 0.28 && growth >= 0.08)
+        || (current >= 0.22 && dynamicSignal >= 0.08 && flowMagnitude >= 0.12));
+    return {
+      active,
+      direction: active ? (latest.projectileDirection || flowDirection(latest.flowX, latest.flowY) || latest.baseDirection) : null
+    };
+  }
+
+  function detectDamageLocalization(latest, previous, frames) {
+    const healthDrop = Number(previous.healthActiveCells || 0) - Number(latest.healthActiveCells || 0);
+    const zeroRise = Number(latest.healthZeroScore || 0) - Number(previous.healthZeroScore || 0);
+    const faceShock = Number(latest.faceDelta || 0) >= COMBAT_FACE_DANGER_DELTA;
+    const blind = Number(latest.enemyConfidence || 0) < 0.28 && Number(latest.projectileScore || 0) < 0.12;
+    const balance = weightedAudioBalance(frames, 8);
+    const audioEvidence = Math.max(Number(latest.audioEnergy || 0), Number(latest.audioMidEnergy || 0), Number(latest.audioHighEnergy || 0));
+    const recentHealthShock = countRecentHealthShock(frames, 8) >= 1;
+    const active = blind
+      && Math.abs(balance) >= DAMAGE_AUDIO_BALANCE_THRESHOLD
+      && audioEvidence >= 0.1
+      && (healthDrop >= 2 || zeroRise >= 0.12 || faceShock || recentHealthShock);
+    return {
+      active,
+      direction: active ? (balance > 0 ? "right" : "left") : null
+    };
+  }
+
+  function detectTrap(latest, frames, spatialHistory) {
+    const audioBursts = countRecentAudioBursts(frames, 8);
+    const spatialEvents = countRecentSpatialEvents(spatialHistory, 6);
+    const narrow = Number(latest.narrowness || 0) >= 0.62;
+    const highBandBurst = Number(latest.audioHighEnergy || 0) >= HIGH_AUDIO_BAND_THRESHOLD;
+    const active = narrow
+      && (Number(latest.audioEnergy || 0) >= TRAP_AUDIO_ENERGY_THRESHOLD || highBandBurst || audioBursts >= 2)
+      && (spatialEvents >= 1 || Number(latest.spatialConfidence || 0) >= 0.32);
+    return {
+      active,
+      kind: active ? "narrow-audio-burst" : null
+    };
+  }
+
+  function detectStuck(nousCarrier, latest, frames) {
+    const movement = nousCarrier?.movementEnvelope || {};
+    const wantsForward = movement.y === "positive" || Number(latest.motorForward || 0) > 0.55;
+    const lowMotion = Number(latest.movementSpeed || 0) <= 0.14;
+    const repeatedLowMotion = countRecentLowMotion(frames, 6) >= 4;
+    const repeatedView = countRecentBaseSignature(frames, latest.base3x3Signature, 10) >= 5;
+    const visualStill = Number(latest.temporalDelta || 0) <= 0.05 && Math.max(Math.abs(Number(latest.flowX || 0)), Math.abs(Number(latest.flowY || 0))) <= 0.08;
+    const blocked = Number(latest.stuckFrames || 0) >= 2 || Number(latest.inputStallFrames || 0) >= 3;
+    const persistentLowMotion = countRecentLowMotion(frames, 8) >= 6;
+    const active = wantsForward
+      && lowMotion
+      && (blocked || (persistentLowMotion && (repeatedView || visualStill)) || (repeatedView && visualStill && repeatedLowMotion));
+    return {
+      active,
+      evidence: active ? (blocked ? "input-stall" : (repeatedView ? "view-repeat" : "low-motion")) : null
+    };
+  }
+
+  function detectExplorationEntropy(latest, frames) {
+    const repeatCount = countRecentBaseSignature(frames, latest.base3x3Signature, 12);
+    const noThreat = Number(latest.enemyConfidence || 0) < 0.24
+      && Number(latest.projectileScore || 0) < 0.12
+      && Number(latest.audioEnergy || 0) < 0.38
+      && Number(latest.audioHighEnergy || 0) < 0.24;
+    const notDead = Number(latest.healthZeroScore || 0) < 0.78;
+    const lowMotion = Number(latest.movementSpeed || 0) <= 0.22;
+    return {
+      high: notDead && noThreat && lowMotion && repeatCount >= SPATIAL_ENTROPY_REPEAT_THRESHOLD
+    };
+  }
+
+  function countRecentBaseSignature(frames, signature, limit) {
+    if (!signature || !Array.isArray(frames)) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      if (frames[index]?.base3x3Signature === signature) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function detectItemBacktrack(controller, latest) {
+    const memory = Array.isArray(controller?.itemMemory) ? controller.itemMemory : [];
+    const lowHealth = Number(latest.healthActiveCells || 0) > 0
+      && (Number(latest.healthActiveCells || 0) <= 9 || Number(latest.healthZeroScore || 0) >= 0.42);
+    const calm = Number(latest.enemyConfidence || 0) < 0.34
+      && Number(latest.projectileScore || 0) < 0.16
+      && Number(latest.audioEnergy || 0) < 0.5;
+    const suggested = lowHealth && calm && memory.length > 0;
+    return {
+      suggested,
+      targetKind: suggested ? (memory[memory.length - 1].targetKind || "resource") : null
+    };
+  }
+
+  function countRecentSignature(frames, signature, limit) {
+    if (!signature || !Array.isArray(frames)) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      if (frames[index]?.signature === signature) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function countRecentLowMotion(frames, limit) {
+    if (!Array.isArray(frames)) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      if (Number(frames[index]?.movementSpeed || 0) <= 0.14) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function countRecentAudioBursts(frames, limit) {
+    if (!Array.isArray(frames)) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      if (Number(frames[index]?.audioEnergy || 0) >= TRAP_AUDIO_ENERGY_THRESHOLD
+        || Number(frames[index]?.audioHighEnergy || 0) >= HIGH_AUDIO_BAND_THRESHOLD) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function countRecentHealthShock(frames, limit) {
+    if (!Array.isArray(frames) || frames.length <= 1) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(1, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      const previous = frames[index - 1] || {};
+      const current = frames[index] || {};
+      const healthDrop = Number(previous.healthActiveCells || 0) - Number(current.healthActiveCells || 0);
+      const zeroRise = Number(current.healthZeroScore || 0) - Number(previous.healthZeroScore || 0);
+      if (healthDrop >= 2 || zeroRise >= 0.12 || Number(current.faceDelta || 0) >= COMBAT_FACE_DANGER_DELTA) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function countRecentSpatialEvents(spatialHistory, limit) {
+    if (!Array.isArray(spatialHistory)) {
+      return 0;
+    }
+
+    let count = 0;
+    const start = Math.max(0, spatialHistory.length - limit);
+    for (let index = start; index < spatialHistory.length; index += 1) {
+      if (spatialHistory[index]?.eventDetected) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function averageAudioBalance(frames, limit) {
+    if (!Array.isArray(frames) || frames.length === 0) {
+      return 0;
+    }
+
+    let total = 0;
+    let count = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      total += Number(frames[index]?.audioBalance || 0);
+      count += 1;
+    }
+
+    return count > 0 ? clampSigned(total / count) : 0;
+  }
+
+  function weightedAudioBalance(frames, limit) {
+    if (!Array.isArray(frames) || frames.length === 0) {
+      return 0;
+    }
+
+    let total = 0;
+    let weightTotal = 0;
+    const start = Math.max(0, frames.length - limit);
+    for (let index = start; index < frames.length; index += 1) {
+      const frame = frames[index] || {};
+      const energy = Math.max(Number(frame.audioEnergy || 0), Number(frame.audioMidEnergy || 0), Number(frame.audioHighEnergy || 0));
+      const weight = Math.max(0.001, energy);
+      total += Number(frame.audioBalance || 0) * weight;
+      weightTotal += weight;
+    }
+
+    return weightTotal > 0 ? clampSigned(total / weightTotal) : averageAudioBalance(frames, limit);
+  }
+
+  function flowDirection(flowX, flowY) {
+    const x = Number(flowX || 0);
+    const y = Number(flowY || 0);
+    if (Math.abs(x) >= Math.max(0.08, Math.abs(y) * 0.75)) {
+      return x > 0 ? "right" : "left";
+    }
+
+    return null;
+  }
+
+  function estimateTemporalDifference(previousValues, currentValues) {
+    if (!Array.isArray(previousValues) || !Array.isArray(currentValues) || previousValues.length === 0 || currentValues.length === 0) {
+      return 0;
+    }
+
+    const length = Math.min(previousValues.length, currentValues.length);
+    let total = 0;
+    for (let index = 0; index < length; index += 1) {
+      total += Math.abs(Number(currentValues[index] || 0) - Number(previousValues[index] || 0));
+    }
+
+    return clamp01(total / (length * 255));
+  }
+
+  function createDynamicObstacleMask(frame, columns, rows) {
+    const width = Math.max(1, Number(columns || 1));
+    const height = Math.max(1, Number(rows || 1));
+    const total = width * height;
+    const mask = new Array(total).fill(false);
+    const threshold = 0.12;
+    if (width === VISION_GRID_COLUMNS && height === VISION_GRID_ROWS) {
+      addMaskFromValues(mask, frame?.projectileVision9x9Sample, width, height, threshold);
+      addRegion9ObstacleMask(mask, frame?.projectileRegion9Sample, width, height, threshold);
+      addRegion9ObstacleMask(mask, frame?.enemyRegion9Sample, width, height, threshold);
+    } else if (width === REGION9_COLUMNS && height === REGION9_ROWS) {
+      addMaskFromValues(mask, frame?.projectileRegion9Sample, width, height, threshold);
+      addMaskFromValues(mask, frame?.enemyRegion9Sample, width, height, threshold);
+    }
+
+    return dilateObstacleMask(mask, width, height);
+  }
+
+  function addMaskFromValues(mask, values, columns, rows, threshold) {
+    if (!Array.isArray(mask) || !Array.isArray(values)) {
+      return;
+    }
+
+    const total = Math.min(mask.length, Math.max(1, Number(columns || 1)) * Math.max(1, Number(rows || 1)), values.length);
+    for (let index = 0; index < total; index += 1) {
+      if (Number(values[index] || 0) >= threshold) {
+        mask[index] = true;
+      }
+    }
+  }
+
+  function addRegion9ObstacleMask(mask, values, columns, rows, threshold) {
+    if (!Array.isArray(mask) || !Array.isArray(values) || values.length < 9) {
+      return;
+    }
+
+    const width = Math.max(1, Number(columns || 1));
+    const height = Math.max(1, Number(rows || 1));
+    for (let regionRow = 0; regionRow < REGION9_ROWS; regionRow += 1) {
+      for (let regionColumn = 0; regionColumn < REGION9_COLUMNS; regionColumn += 1) {
+        const regionIndex = regionRow * REGION9_COLUMNS + regionColumn;
+        if (Number(values[regionIndex] || 0) < threshold) {
+          continue;
+        }
+
+        const startY = Math.floor(regionRow * height / REGION9_ROWS);
+        const endY = Math.max(startY + 1, Math.floor((regionRow + 1) * height / REGION9_ROWS));
+        const startX = Math.floor(regionColumn * width / REGION9_COLUMNS);
+        const endX = Math.max(startX + 1, Math.floor((regionColumn + 1) * width / REGION9_COLUMNS));
+        for (let y = startY; y < Math.min(height, endY); y += 1) {
+          for (let x = startX; x < Math.min(width, endX); x += 1) {
+            mask[y * width + x] = true;
+          }
+        }
+      }
+    }
+  }
+
+  function dilateObstacleMask(mask, columns, rows) {
+    const width = Math.max(1, Number(columns || 1));
+    const height = Math.max(1, Number(rows || 1));
+    const total = width * height;
+    if (!Array.isArray(mask) || mask.length < total) {
+      return new Array(total).fill(false);
+    }
+
+    const next = mask.slice(0, total);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if (!mask[index]) {
+          continue;
+        }
+
+        for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1); yy += 1) {
+          for (let xx = Math.max(0, x - 1); xx <= Math.min(width - 1, x + 1); xx += 1) {
+            next[yy * width + xx] = true;
+          }
+        }
+      }
+    }
+
+    return next;
+  }
+
+  function applyStaticObstacleMask(values, mask, previousValues, totalCells) {
+    const total = Math.max(1, Number(totalCells || 1));
+    const next = new Array(total).fill(0);
+    for (let index = 0; index < total; index += 1) {
+      if (Array.isArray(mask) && mask[index]) {
+        next[index] = Array.isArray(previousValues) && previousValues.length > index
+          ? Number(previousValues[index] || 0)
+          : 0;
+      } else {
+        next[index] = Array.isArray(values) && values.length > index
+          ? Number(values[index] || 0)
+          : 0;
+      }
+    }
+
+    return next;
+  }
+
+  function countMaskCells(mask) {
+    if (!Array.isArray(mask)) {
+      return 0;
+    }
+
+    let count = 0;
+    for (let index = 0; index < mask.length; index += 1) {
+      if (mask[index]) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function estimateDenseGridFlow(previousValues, currentValues, columns, rows) {
+    const width = Math.max(1, Number(columns || 1));
+    const height = Math.max(1, Number(rows || 1));
+    const total = width * height;
+    if (!Array.isArray(previousValues) || !Array.isArray(currentValues) || previousValues.length < total || currentValues.length < total) {
+      return { flowX: 0, flowY: 0, dynamicScore: 0 };
+    }
+
+    let weightedX = 0;
+    let weightedY = 0;
+    let weightTotal = 0;
+    let dynamicTotal = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        const current = Number(currentValues[index] || 0);
+        let bestDifference = Math.abs(current - Number(previousValues[index] || 0));
+        let bestX = 0;
+        let bestY = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          const yy = y + oy;
+          if (yy < 0 || yy >= height) {
+            continue;
+          }
+
+          for (let ox = -1; ox <= 1; ox += 1) {
+            const xx = x + ox;
+            if (xx < 0 || xx >= width) {
+              continue;
+            }
+
+            const candidate = Math.abs(current - Number(previousValues[yy * width + xx] || 0));
+            if (candidate < bestDifference) {
+              bestDifference = candidate;
+              bestX = ox;
+              bestY = oy;
+            }
+          }
+        }
+
+        const sameCellDifference = Math.abs(current - Number(previousValues[index] || 0));
+        const weight = clamp01(sameCellDifference / 255);
+        weightedX += bestX * weight;
+        weightedY += bestY * weight;
+        weightTotal += weight;
+        dynamicTotal += sameCellDifference;
+      }
+    }
+
+    if (weightTotal <= 0) {
+      return { flowX: 0, flowY: 0, dynamicScore: clamp01(dynamicTotal / (total * 255)) };
+    }
+
+    return {
+      flowX: clampSigned(weightedX / weightTotal),
+      flowY: clampSigned(weightedY / weightTotal),
+      dynamicScore: clamp01(dynamicTotal / (total * 255))
+    };
+  }
+
+  function gridDominantDirection(values, columns) {
+    if (!Array.isArray(values) || values.length === 0) {
+      return null;
+    }
+
+    const width = Math.max(1, Number(columns || REGION9_COLUMNS));
+    let left = 0;
+    let center = 0;
+    let right = 0;
+    for (let index = 0; index < values.length; index += 1) {
+      const score = Number(values[index] || 0);
+      const column = index % width;
+      if (column < width / 3) {
+        left += score;
+      } else if (column >= (width * 2) / 3) {
+        right += score;
+      } else {
+        center += score;
+      }
+    }
+
+    const peak = Math.max(left, center, right);
+    if (peak <= 0.04) {
+      return null;
+    }
+
+    if (Math.abs(left - right) <= 0.03 && center >= peak * 0.72) {
+      return "center";
+    }
+
+    return right > left ? "right" : "left";
+  }
+
+  function coarseBaseDirection(frame) {
+    const left = Number(frame?.left || 0);
+    const center = Number(frame?.center || 0);
+    const right = Number(frame?.right || 0);
+    const peak = Math.max(left, center, right);
+    if (peak <= 0) {
+      return null;
+    }
+
+    if (Math.abs(left - right) <= Math.max(4, peak * 0.08) && center >= peak * 0.72) {
+      return "center";
+    }
+
+    return right > left ? "right" : "left";
+  }
+
+  function normalizeRelativeDirection(value) {
+    return value === "left" || value === "right" || value === "center" || value === "behind"
+      ? value
+      : null;
+  }
+
+  function refreshSensorCognition(controller, state, frame, context) {
+    const timestamp = state?.timestamp || context?.auditorySnapshot?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP;
+    const sensors = state?.sensors || {};
+    const quantizedVision9x9 = normalizeVision9x9(context?.quantizedVision9x9);
+    const visionConfidence = sensorEnabled(sensors, "visual") ? estimateTargetConfidence(frame) : 0;
+    const auditory = context?.auditorySnapshot || createAuditorySnapshot({ timestamp });
+    const motor = buildMotorSensorSnapshot(state, context?.action, timestamp);
+    const movement = buildMovementSensorSnapshot(state, frame, context?.motion, auditory, motor, timestamp);
+    const compass = buildCompassSensorSnapshot(state, movement, auditory, timestamp);
+    controller.visionSensorSnapshot = createVisionSensorSnapshot({
+      active: sensorEnabled(sensors, "visual") && quantizedVision9x9.length > 0,
+      quantized: quantizedVision9x9,
+      signature: regionSignature(quantizedVision9x9).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS),
+      left: frame?.left || 0,
+      center: frame?.center || 0,
+      right: frame?.right || 0,
+      confidence: visionConfidence,
+      eventDetected: visionConfidence >= 0.62 || Number(frame?.enemyConfidence || 0) >= 0.5,
+      timestamp
+    });
+    controller.motorSensorSnapshot = motor;
+    controller.movementSensorSnapshot = movement;
+    controller.compassSensorSnapshot = compass;
+    appendSpatialHistory(controller, controller.spatialSnapshot);
+    controller.spatialSensorSnapshot = buildSpatialSensorSnapshot(controller.spatialSnapshot, controller.spatialHistory, movement, compass);
+    controller.nousCarrier = buildNousCarrier(controller, state, timestamp);
+    controller.phantasiaSnapshot = buildPhantasiaSnapshot(controller, frame, timestamp);
+    rememberResourceCandidate(controller, controller.phantasiaSnapshot);
+    controller.chronosWindow = pushChronosFrame(controller.chronosWindow, controller.phantasiaSnapshot);
+    controller.nousDetectorResult = evaluateNousDetectorResult(controller.nousCarrier, controller.chronosWindow, controller.spatialHistory, controller);
+    controller.sensorDetections = buildSensorDetections(controller);
+    controller.nousCarrier = buildNousCarrier(controller, state, timestamp);
+  }
+
+  function buildMotorSensorSnapshot(state, action, timestamp) {
+    const sensors = state?.sensors || {};
+    const source = state?.motor || {};
+    const safeAction = action || source;
+    const active = sensorEnabled(sensors, "motor") && Boolean(source.active || safeAction.move !== "none" || safeAction.turn !== "none" || safeAction.strafe || safeAction.run || safeAction.use || safeAction.fire);
+    const turn = safeAction.turn === "left" ? "left" : (safeAction.turn === "right" ? "right" : (source.turn || "none"));
+    const move = safeAction.move === "forward" ? "forward" : (safeAction.move === "back" ? "back" : (source.move || "none"));
+    return createMotorSensorSnapshot({
+      active,
+      move,
+      turn,
+      strafe: Boolean(safeAction.strafe ?? source.strafe),
+      run: Boolean(safeAction.run ?? source.run),
+      use: Boolean(safeAction.use ?? source.use),
+      fire: Boolean(safeAction.fire ?? source.fire),
+      vectorX: turn === "right" ? 1 : (turn === "left" ? -1 : Number(source.vectorX || 0)),
+      vectorY: move === "forward" ? 1 : (move === "back" ? -1 : Number(source.vectorY || 0)),
+      timestamp
+    });
+  }
+
+  function buildMovementSensorSnapshot(state, frame, motion, auditory, motor, timestamp) {
+    const sensors = state?.sensors || {};
+    if (!sensorEnabled(sensors, "movement")) {
+      return createMovementSensorSnapshot({ timestamp, eventType: "none" });
+    }
+
+    const left = Number(frame?.left || 0);
+    const right = Number(frame?.right || 0);
+    const center = Number(frame?.center || 0);
+    const visualBias = sensorEnabled(sensors, "visual")
+      ? clampSigned((right - left) / Math.max(1, left + right + center))
+      : 0;
+    const auditoryBias = sensorEnabled(sensors, "audio") ? clampSigned(Number(auditory?.balance || 0)) : 0;
+    const motorX = sensorEnabled(sensors, "motor") ? clampSigned(Number(motor?.vectorX || 0)) : 0;
+    const motorY = sensorEnabled(sensors, "motor") ? clampSigned(Number(motor?.vectorY || 0)) : 0;
+    const forwardProgress = clamp01(Number(motion?.forwardProgress || 0));
+    const obstacle = clamp01(Number(motion?.obstacleScore || 0));
+    const stallScore = clamp01(Number(motion?.stallScore || 0));
+    const visualFlow = state?.visualMotion || {};
+    const visualMotionMagnitude = clamp01(Number(visualFlow.magnitude || visualFlow.baseMagnitude || 0));
+    const intentForward = motorY > 0.45;
+    const intentBlocked = intentForward
+      && forwardProgress <= 0.08
+      && (stallScore >= 0.72 || obstacle >= 0.42 || visualMotionMagnitude <= 0.03);
+    const vectorX = clampSigned((visualBias * 0.36) + (auditoryBias * 0.34) + (motorX * 0.3));
+    const vectorY = intentBlocked
+      ? clampSigned((forwardProgress * 0.34) - (obstacle * 0.22))
+      : clampSigned((motorY * 0.62) + (forwardProgress * 0.28) - (obstacle * 0.22));
+    const confidence = clamp01(Math.max(Math.abs(vectorX), Math.abs(vectorY), forwardProgress, obstacle, intentBlocked ? stallScore : 0));
+    return createMovementSensorSnapshot({
+      active: Boolean(motor?.active) || confidence >= 0.18,
+      vectorX,
+      vectorY,
+      confidence,
+      eventDetected: intentBlocked || confidence >= 0.42 || obstacle >= 0.55,
+      eventType: intentBlocked || obstacle >= 0.55 ? "movement-stall" : "movement",
+      timestamp
+    });
+  }
+
+  function buildCompassSensorSnapshot(state, movement, auditory, timestamp) {
+    const sensors = state?.sensors || {};
+    const source = state?.compass || {};
+    if (!sensorEnabled(sensors, "compass")) {
+      return createCompassSensorSnapshot({ timestamp, source: "sensor-cutoff" });
+    }
+
+    if (source.source === "health-freeze" || Number(source.confidence || 0) <= 0 && source.source === "evidence-hold") {
+      return createCompassSensorSnapshot({
+        active: false,
+        heading: Number.isFinite(Number(source.heading)) ? Number(source.heading) : 0,
+        origin: source.origin || "N=0deg",
+        baseHeading: Number.isFinite(Number(source.baseHeading)) ? Number(source.baseHeading) : Number(source.heading || 0),
+        vectorX: 0,
+        vectorY: 0,
+        confidence: 0,
+        source: source.source || "evidence-hold",
+        correctionSource: source.correctionSource || source.source || "evidence-hold",
+        landmark: source.landmark || "",
+        landmarkKind: source.landmarkKind || "",
+        landmarkLabel: source.landmarkLabel || "",
+        landmarkHeading: source.landmarkHeading,
+        landmarkConfidence: source.landmarkConfidence,
+        landmarkForced: source.landmarkForced,
+        headingUsable: false,
+        headingUncertain: true,
+        headingReliability: source.headingReliability || source.source || "evidence-hold",
+        useCompassForRouting: false,
+        contextResetActive: source.contextResetActive,
+        wallFollowActive: source.wallFollowActive,
+        wallOnlyView: source.wallOnlyView,
+        corridorOnlyView: source.corridorOnlyView,
+        timestamp
+      });
+    }
+
+    const movementX = Number(movement?.vectorX || 0);
+    const movementY = Number(movement?.vectorY || 0);
+    const audioBias = sensorEnabled(sensors, "audio") ? Number(auditory?.balance || 0) : 0;
+    const sourceFlow = clampSigned(Number(source.visualFlowBias || 0));
+    const sourceConfidence = clamp01(Number(source.confidence || 0));
+    const vectorX = clampSigned((movementX * 0.58) + (audioBias * 0.18) + (sourceFlow * sourceConfidence * 0.24));
+    const vectorY = clampSigned(Number(movement?.vectorY || 0));
+    const derivedHeading = ((Math.atan2(vectorX, Math.max(0.001, vectorY)) * 180 / Math.PI) + 360) % 360;
+    const heading = Number.isFinite(Number(source.heading)) ? Number(source.heading) : derivedHeading;
+    const baseHeading = Number.isFinite(Number(source.baseHeading)) ? Number(source.baseHeading) : heading;
+    const confidence = clamp01(Math.max(sourceConfidence, Number(movement?.confidence || 0) * 0.8));
+    return createCompassSensorSnapshot({
+      active: Boolean(source.active) || confidence >= 0.18,
+      heading,
+      origin: source.origin || "N=0deg",
+      baseHeading,
+      vectorX,
+      vectorY,
+      visualBias: source.visualBias,
+      visualFlowBias: source.visualFlowBias,
+      baseFlowBias: source.baseFlowBias,
+      motorBias: source.motorBias,
+      audioBias: source.audioBias,
+      movementBias: source.movementBias,
+      visualBiasDelta: source.visualBiasDelta,
+      visualFlowDelta: source.visualFlowDelta,
+      baseFlowDelta: source.baseFlowDelta,
+      motorDelta: source.motorDelta,
+      audioDelta: source.audioDelta,
+      movementDelta: source.movementDelta,
+      landmarkDelta: source.landmarkDelta,
+      motorHeading: source.motorHeading,
+      visualFlowHeading: source.visualFlowHeading,
+      rotationInstructionDelta: source.rotationInstructionDelta,
+      frameBufferVectorDelta: source.frameBufferVectorDelta,
+      edgeSnapDelta: source.edgeSnapDelta,
+      edgeSnapHeading: source.edgeSnapHeading,
+      edgeSnapConfidence: source.edgeSnapConfidence,
+      edgeSnapWeight: source.edgeSnapWeight,
+      correctionDegrees: source.correctionDegrees,
+      correctionSource: source.correctionSource,
+      landmark: source.landmark,
+      landmarkKind: source.landmarkKind,
+      landmarkLabel: source.landmarkLabel,
+      landmarkHeading: source.landmarkHeading,
+      landmarkConfidence: source.landmarkConfidence,
+      landmarkForced: source.landmarkForced,
+      evidence: source.evidence,
+      confidence,
+      headingUsable: source.headingUsable,
+      headingUncertain: source.headingUncertain,
+      headingReliability: source.headingReliability,
+      useCompassForRouting: source.useCompassForRouting,
+      contextResetActive: source.contextResetActive,
+      wallFollowActive: source.wallFollowActive,
+      wallOnlyView: source.wallOnlyView,
+      corridorOnlyView: source.corridorOnlyView,
+      source: source.source || "movement-audio-relative",
+      timestamp
+    });
+  }
+
+  function appendSpatialHistory(controller, spatial) {
+    if (!Array.isArray(controller.spatialHistory)) {
+      controller.spatialHistory = [];
+    }
+
+    controller.spatialHistory.push({
+      fusedDirection: Number(spatial?.fusedDirection || 0),
+      confidence: clamp01(Number(spatial?.confidence || 0)),
+      hudX: clamp01(Number(spatial?.hudX ?? 0.5)),
+      hudY: clamp01(Number(spatial?.hudY ?? 0.45)),
+      eventDetected: Boolean(spatial?.eventDetected),
+      eventType: spatial?.eventType || "none",
+      timestamp: spatial?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    });
+    while (controller.spatialHistory.length > SPATIAL_HISTORY_LIMIT) {
+      controller.spatialHistory.shift();
+    }
+  }
+
+  function buildSpatialSensorSnapshot(spatial, history, movement, compass) {
+    const frames = Array.isArray(history) ? history : [];
+    let direction = Number(spatial?.fusedDirection || 0);
+    let confidence = clamp01(Number(spatial?.confidence || 0));
+    let hudX = clamp01(Number(spatial?.hudX ?? 0.5));
+    let hudY = clamp01(Number(spatial?.hudY ?? 0.45));
+    let activeEvents = 0;
+    if (frames.length > 0) {
+      let directionTotal = 0;
+      let confidenceTotal = 0;
+      let hudXTotal = 0;
+      let hudYTotal = 0;
+      for (let index = 0; index < frames.length; index += 1) {
+        const item = frames[index];
+        directionTotal += Number(item.fusedDirection || 0);
+        confidenceTotal += Number(item.confidence || 0);
+        hudXTotal += Number(item.hudX ?? 0.5);
+        hudYTotal += Number(item.hudY ?? 0.45);
+        if (item.eventDetected) {
+          activeEvents += 1;
+        }
+      }
+
+      direction = directionTotal / frames.length;
+      confidence = clamp01(confidenceTotal / frames.length);
+      hudX = clamp01(hudXTotal / frames.length);
+      hudY = clamp01(hudYTotal / frames.length);
+    }
+
+    const directionRadians = direction * Math.PI / 180;
+    const compassConfidence = clamp01(Number(compass?.confidence || 0));
+    const movementConfidence = clamp01(Number(movement?.confidence || 0));
+    const fusedConfidence = Math.max(confidence, movementConfidence * 0.35, compassConfidence * 0.25);
+    return createSpatialSensorSnapshot({
+      active: Boolean(spatial?.eventDetected) || Boolean(movement?.active) || Boolean(compass?.active),
+      vectorX: Math.sin(directionRadians),
+      vectorY: Math.cos(directionRadians),
+      fusedDirection: direction,
+      confidence: fusedConfidence,
+      historyFrames: frames.length,
+      eventDetected: Boolean(spatial?.eventDetected) || (activeEvents >= 2 && fusedConfidence >= 0.18),
+      eventType: spatial?.eventType || (activeEvents >= 2 ? "spatial-persistence" : "spatial-event"),
+      hudX,
+      hudY,
+      timestamp: spatial?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    });
+  }
+
+  function buildSensorDetections(controller) {
+    const detections = [];
+    const detector = controller.nousDetectorResult || createNousDetectorResult();
+    const doorTransitionGraceActive = isDoorTransitionGraceActive(controller);
+    if (controller.healthSensorSnapshot?.retryRequested) {
+      detections.push("health-retry");
+    }
+
+    if (controller.visionSensorSnapshot?.eventDetected) {
+      detections.push("visual-attention");
+    }
+
+    if (controller.auditorySnapshot?.eventDetected) {
+      detections.push("audio-event");
+    }
+
+    if (controller.movementSensorSnapshot?.eventDetected) {
+      const movementEvent = controller.movementSensorSnapshot.eventType || "movement";
+      if (movementEvent === "movement-stall") {
+        if (!doorTransitionGraceActive && (detector.stuck.active || detector.sensorRecovery.needed)) {
+          detections.push("movement-stall");
+        }
+      } else if (movementEvent !== "movement") {
+        detections.push(movementEvent);
+      }
+    }
+
+    if (controller.spatialSensorSnapshot?.eventDetected) {
+      detections.push("spatial-event");
+    }
+
+    if (detector.looming.active) {
+      detections.push("looming");
+    }
+
+    if (detector.damageLocalization.active) {
+      detections.push("damage-localization");
+    }
+
+    if (detector.trap.active) {
+      detections.push("trap");
+    }
+
+    if (!doorTransitionGraceActive && detector.stuck.active) {
+      detections.push("stuck");
+    }
+
+    if (detector.explorationEntropy.high) {
+      detections.push("exploration-entropy");
+    }
+
+    if (detector.itemBacktrack.suggested) {
+      detections.push("item-backtrack");
+    }
+
+    if (!doorTransitionGraceActive && detector.sensorRecovery.needed) {
+      detections.push("sensor-recovery");
+    }
+
+    return detections;
+  }
+
+  function buildNousCarrier(controller, state, timestamp) {
+    const health = controller.healthSensorSnapshot || createHealthSensorSnapshot();
+    const movement = controller.movementSensorSnapshot || createMovementSensorSnapshot();
+    const spatial = controller.spatialSensorSnapshot || createSpatialSensorSnapshot();
+    const visual = controller.visionSensorSnapshot || createVisionSensorSnapshot();
+    const audio = controller.auditorySnapshot || createAuditorySnapshot();
+    const aisthesisScore = health.retryRequested
+      ? 0
+      : Math.max(Number(visual.confidence || 0), Number(audio.leftEnergy || 0), Number(audio.rightEnergy || 0));
+    const kinesisScore = Number(movement.confidence || 0);
+    const phantasiaScore = Number(spatial.confidence || 0);
+    const bonsaiTernary = {
+      aisthesis: health.retryRequested ? "negative" : ternaryScore(aisthesisScore),
+      kinesis: ternaryScore(kinesisScore),
+      phantasia: ternaryScore(phantasiaScore)
+    };
+    return createNousCarrier({
+      normalizedSensorMap: normalizeNousSensorMap(state?.sensors || {}),
+      spatial9x9: {
+        baseColumns: REGION9_COLUMNS,
+        baseRows: REGION9_ROWS,
+        baseSignature: controller.phantasiaSnapshot?.base3x3Signature || controller.region9Signature || "000000000",
+        baseFeatures: controller.phantasiaSnapshot?.base3x3 || [],
+        columns: VISION_GRID_COLUMNS,
+        rows: VISION_GRID_ROWS,
+        signature: visual.signature,
+        features: visual.quantized,
+        projectileMask: controller.phantasiaSnapshot?.projectile9x9 || [],
+        resourceMask: controller.phantasiaSnapshot?.resource9x9 || [],
+        temporalDelta: controller.phantasiaSnapshot?.temporalDelta || 0,
+        flowX: controller.phantasiaSnapshot?.flowX || 0,
+        flowY: controller.phantasiaSnapshot?.flowY || 0
+      },
+      movementEnvelope: {
+        x: movement.turn,
+        y: movement.advance,
+        rotation: ternarySigned(Number(movement.vectorX || 0))
+      },
+      healthEnvelope: {
+        life: health.retryRequested ? "negative" : (health.likelyDead ? "negative" : "positive"),
+        retry: health.retryRequested ? "positive" : "neutral"
+      },
+      bonsaiTernary,
+      ctgTrace: {
+        canonId: CTG_ROM_CANON_ID,
+        policyId: CTG_ROM_POLICY_ID,
+        gateExecuted: false,
+        ternaryTrace: bonsaiTernary
+      },
+      cognitionHints: {
+        retryRequested: Boolean(health.retryRequested),
+        spatialEvent: Boolean(spatial.eventDetected),
+        routeHint: controller.controlPipeline || "Idle",
+        activeDetections: controller.sensorDetections || [],
+        nousDetectorResult: controller.nousDetectorResult || createNousDetectorResult(),
+        audioBands: {
+          low: audio.lowEnergy || 0,
+          mid: audio.midEnergy || 0,
+          high: audio.highEnergy || 0,
+          dominant: audio.dominantBand || "none"
+        }
+      },
+      timestamp
+    });
+  }
+
+  function isDoorTransitionGraceActive(controller, state) {
+    if (!controller) {
+      return false;
+    }
+
+    if (Number(controller.pendingUseResponseFrames || 0) > 0
+      || Number(controller.doorTransitionArmedFrames || 0) > 0
+      || Number(controller.firstDoorUseLatchFrames || 0) > 0) {
+      return true;
+    }
+
+    const frame = Number(state?.frame || controller.predictions || 0);
+    const useFrame = Number(controller.firstDoorUseFrame || 0);
+    return controller.doorOpenedCount > 0
+      && useFrame > 0
+      && frame >= useFrame
+      && frame - useFrame <= 36
+      && !controller.finalRoomEntered;
+  }
+
+  function clearLegacyDoorTransitionInterventions(controller) {
+    if (!controller) {
+      return false;
+    }
+
+    const active = Number(controller.doorTransitionArmedFrames || 0) > 0
+      || (Number(controller.doorOpenedCount || 0) > 0
+        && !controller.computerRoomEntered
+        && !controller.finalRoomEntered);
+    if (!active) {
+      return false;
+    }
+
+    controller.wallUseProbeFrames = 0;
+    controller.wallUseProbeStage = 0;
+    controller.pendingUseResponseFrames = 0;
+    controller.lastUseWasBlocked = false;
+    controller.firstDoorReprobeFrames = 0;
+    controller.firstDoorUseLatchFrames = 0;
+    controller.firstDoorUsePulsed = false;
+    controller.wallFollowFrames = 0;
+    controller.wallDetachFrames = 0;
+    controller.wallSurveyFrames = 0;
+    controller.wallSurveyDecisionFrames = 0;
+    controller.hardStuckEscapeFrames = 0;
+    controller.openStallEscapeFrames = 0;
+    controller.loopEscapeFrames = 0;
+    controller.recoveryFrames = 0;
+    controller.repeatTurnFrames = 0;
+    controller.repeatActionFrames = 0;
+    controller.repeatActionSignature = "";
+    controller.mapRushCorrectionFrames = 0;
+    controller.mapRushCorrectionBackFrames = 0;
+    controller.mapDoorSweepFrames = 0;
+    controller.firstDoorCorridorSearchFrames = 0;
+    controller.stuckFrames = Math.min(Number(controller.stuckFrames || 0), 1);
+    controller.quantizedStallFrames = Math.min(Number(controller.quantizedStallFrames || 0), 1);
+    controller.inputStallFrames = Math.min(Number(controller.inputStallFrames || 0), 1);
+    return true;
+  }
+
+  function isPreDoorDemoRouteGraceActive(controller, latest) {
+    if (!controller || controller.doorOpenedCount > 0) {
+      return false;
+    }
+
+    if (controller.firstDoorUseAttempted
+      || Number(controller.wallUseProbeFrames || 0) > 0
+      || Number(controller.firstDoorUseLatchFrames || 0) > 0) {
+      return false;
+    }
+
+    const depth = Number(controller.depthEstimate ?? latest?.depthEstimate ?? 1);
+    if (depth < 0.38) {
+      return false;
+    }
+
+    const spawnCorridorGapThreshold = profileNumber(controller.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
+    const routeEvidence = Math.max(
+      Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.firstDoorCorridorSignature || 0),
+      Number(controller.firstDoorVision9x9Score || 0),
+      Number(controller.motionEntranceScore || 0));
+    const movingEvidence = Math.max(
+      Number(controller.motionForwardProgress || 0),
+      Number(controller.motionTurnScore || 0),
+      Number(latest?.movementSpeed || 0));
+    const routeVisible = controller.firstDoorCorridorLocated
+      || Number(controller.spawnCorridorGapFrames || 0) > 0
+      || routeEvidence >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
+
+    return Boolean(routeVisible && movingEvidence >= 0.04);
+  }
+
+  function normalizeNousSensorMap(sensors) {
+    const normalized = {};
+    const keys = Object.keys(sensors || {}).sort();
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index];
+      const sensor = sensors[key] || {};
+      normalized[key] = {
+        name: sensor.name || key,
+        conceptName: sensor.conceptName || "",
+        englishName: sensor.englishName || key,
+        category: sensor.category || (key === "movement" || key === "spatial" ? "derived" : "primary"),
+        enabled: sensor.enabled !== false,
+        observed: Boolean(sensor.observed),
+        metadata: Object.assign({}, sensor.metadata || {})
+      };
+    }
+
+    return normalized;
+  }
+
+  function sensorEnabled(sensors, name) {
+    const value = sensors?.[name];
+    if (value && typeof value === "object") {
+      return value.enabled !== false;
+    }
+
+    return value !== false;
+  }
+
+  function deriveSpatialSnapshot(state, auditory) {
+    const sensors = state?.sensors || {};
+    const timestamp = state?.timestamp || auditory?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP;
+    if (!sensorEnabled(sensors, "spatial")) {
+      return createSpatialSnapshot({ timestamp, eventType: "none" });
+    }
+
+    const frame = sensorEnabled(sensors, "visual") ? (state?.framebuffer || {}) : {};
+    const motor = sensorEnabled(sensors, "motor") ? (state?.motor || {}) : {};
+    const compass = sensorEnabled(sensors, "compass") ? (state?.compass || {}) : {};
+    const left = Number(frame.left || 0);
+    const right = Number(frame.right || 0);
+    const center = Number(frame.center || 0);
+    const total = Math.max(1, left + right + center);
+    const visualBias = clampSigned((right - left) / total);
+    const visualMotion = state?.visualMotion || frame?.visualMotion || {};
+    const visualFlowBias = clampSigned(Number(visualMotion.vectorX || 0));
+    const visualFlowConfidence = clamp01(Number(visualMotion.confidence || visualMotion.magnitude || 0));
+    const motorBias = clampSigned(Number(motor.vectorX || 0) * 0.45);
+    const heading = Number(compass.heading || 0);
+    const compassRelative = (((heading + 540) % 360) - 180) / 180;
+    const compassBias = clampSigned(compassRelative) * clamp01(Number(compass.confidence || 0));
+    const auditoryBalance = sensorEnabled(sensors, "audio") ? Number(auditory?.balance || 0) : 0;
+    const auditoryCorrection = clampSigned(auditoryBalance) * 35;
+    const visualDirection = clampSigned((visualBias * 0.46) + (visualFlowBias * 0.22) + (motorBias * 0.22) + (compassBias * 0.1)) * 45;
+    const fusedDirection = visualDirection + auditoryCorrection;
+    const audioEnergy = sensorEnabled(sensors, "audio") ? Math.max(Number(auditory?.leftEnergy || 0), Number(auditory?.rightEnergy || 0)) : 0;
+    const visualConfidence = sensorEnabled(sensors, "visual")
+      ? Math.max(estimateTargetConfidence(frame), visualFlowConfidence * 0.72)
+      : 0;
+    const compassConfidence = clamp01(Number(compass.confidence || 0));
+    const confidence = clamp01(Math.max(visualConfidence, audioEnergy * 0.85, compassConfidence * 0.55));
+    const spatialTurn = Math.abs(fusedDirection) >= 18 && confidence >= 0.35;
+    const eventDetected = Boolean(auditory?.eventDetected) || visualConfidence >= 0.62 || spatialTurn || visualFlowConfidence >= 0.22;
+    const eventType = auditory?.eventDetected
+      ? auditory.eventType
+      : (visualConfidence >= 0.62 ? "attention" : (eventDetected ? "spatial-event" : "none"));
+    const hudX = clamp01(0.5 + clampSigned(fusedDirection / 90) * 0.4);
+    const hudY = clamp01(0.46 - confidence * 0.16);
+    return createSpatialSnapshot({
+      visualDirection,
+      auditoryCorrection,
+      fusedDirection,
+      confidence,
+      timestamp,
+      eventDetected,
+      eventType,
+      hudX,
+      hudY,
+      gain: 35
+    });
+  }
+
+  function createHealthSensorSnapshot(overrides = {}) {
+    const zeroScore = clamp01(Number(overrides.zeroScore ?? 0));
+    const faceDeathScore = clamp01(Number(overrides.faceDeathScore ?? 0));
+    const freezeScore = clamp01(Number(overrides.freezeScore ?? 0));
+    const activeCells = Number(overrides.activeCells || 0);
+    const activeColumns = Number(overrides.activeColumns || 0);
+    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
+    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
+    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, freezeScore * 0.55)));
+    const likelyDead = Boolean(overrides.likelyDead)
+      || (sparseHealthDigits && zeroScore >= 0.44 && faceDeathScore >= 0.24)
+      || (severeHealthDigits && faceDeathScore >= 0.22)
+      || (sparseHealthDigits && zeroScore >= 0.52 && faceDeathScore >= 0.14 && freezeScore >= 0.75);
+    const retryReason = overrides.retryReason || (likelyDead ? "health-death" : "none");
+    const retryRequested = Boolean(overrides.retryRequested ?? (Boolean(overrides.active) && (likelyDead || zeroScore >= 0.78)));
+    return {
+      active: Boolean(overrides.active),
+      signature: overrides.signature || "000000000000000000000000",
+      faceSignature: overrides.faceSignature || "0000000000000000",
+      faceQuantizedFrameChange: round2(Number(overrides.faceQuantizedFrameChange ?? 255)),
+      faceDeathScore: round2(faceDeathScore),
+      freezeScore: round2(freezeScore),
+      zeroScore: round2(zeroScore),
+      activeColumns,
+      activeCells,
+      likelyDead,
+      confidence: round2(confidence),
+      retryRequested,
+      retryReason,
+      retryPipeline: retryRequested ? "Retry" : "none",
+      retryPriority: retryRequested ? Number(overrides.retryPriority ?? 100) : 0,
+      source: overrides.source || "status-health-face-quantized",
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function buildCtgObservedScores(controller, action, sensor, frame, state) {
+    const compass = controller.compassSensorSnapshot || createCompassSensorSnapshot();
+    const headingConfidence = clamp01(Number(compass.confidence || 0));
+    const headingRel = compass.headingUsable === false || compass.headingUncertain
+      ? Math.min(headingConfidence, 0.34)
+      : Math.max(headingConfidence, compass.headingReliability === "absolute-landmark" || compass.headingReliability === "absolute-forced-landmark" ? 0.82 : 0.48);
+    const routeEvidence = clamp01(Math.max(
+      Number(controller.firstDoorVision9x9Score || 0),
+      Number(controller.firstDoorCorridorSignature || 0),
+      Number(controller.computerRoomScore || 0),
+      Number(controller.computerPanelScore || 0),
+      Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.bridgeDoorScore || 0),
+      Number(controller.bridgeBrownScore || 0)));
+    const corridorConfidence = clamp01(Math.max(
+      Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.firstDoorCorridorLocated ? 0.82 : 0),
+      compass.headingReliability === "corridor-ambiguous" ? 0.72 : 0));
+    const corridorPenalty = corridorConfidence >= 0.7 && headingRel < 0.56 ? 0.12 : 0;
+    const logos = clamp01((headingRel * 0.36) + (routeEvidence * 0.48) + (controller.controlPipeline ? 0.12 : 0.04) - corridorPenalty);
+    const projectileRaw = clamp01(Number(controller.projectileScore || controller.phantasiaSnapshot?.projectileScore || 0));
+    const enemy = getTrustedEnemyThreat(controller);
+    const dynamicObjectRaw = clamp01(Number(controller.phantasiaSnapshot?.dynamicObjectScore || controller.dynamicObjectScore || 0));
+    const projectileContext = enemy > 0.34
+      || Boolean(controller.nousDetectorResult?.looming?.active)
+      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+    const projectile = projectileContext ? projectileRaw : projectileRaw * 0.22;
+    const dynamicThreatContext = enemy > 0.35
+      || Boolean(controller.nousDetectorResult?.looming?.active)
+      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+    const dynamicObject = dynamicThreatContext
+      ? dynamicObjectRaw
+      : dynamicObjectRaw * 0.18;
+    const health = controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested ? 1 : 0;
+    const terminalUseFocus = controller.exitSwitchPressed
+      || controller.finalRoomEntered
+      || Number(controller.exitSwitchUseFrames || 0) > 0
+      || String(controller.safetyReason || "") === "exit-switch-use";
+    const doorTransitionGraceActive = isDoorTransitionGraceActive(controller, state);
+    const nonTerminalDanger = terminalUseFocus
+      ? Math.max(projectile * 0.28, enemy * 0.24, dynamicObject * 0.18)
+      : (doorTransitionGraceActive
+        ? Math.max(projectile * 0.22, enemy * 0.2, dynamicObject * 0.14)
+        : Math.max(projectile, enemy, dynamicObject));
+    const danger = clamp01(Math.max(nonTerminalDanger, health));
+    const footBounceConfirmed = Number(controller.footObstacleBounceFrames || 0) >= 3
+      && Number(controller.footObstacleFlickerScore || 0) >= 0.42;
+    const stuckRaw = clamp01(Math.max(
+      Number(controller.motionStallScore || 0),
+      Number(controller.stuckFrames || 0) / 12,
+      Number(controller.quantizedStallFrames || 0) / 10,
+      footBounceConfirmed ? Number(controller.footObstacleFlickerScore || 0) : 0,
+      sensor?.stuckTicks ? Number(sensor.stuckTicks || 0) / 4 : 0));
+    const stuckConfirmed = Number(controller.stuckFrames || 0) >= 2
+      || Number(controller.quantizedStallFrames || 0) >= 3
+      || footBounceConfirmed
+      || sensor?.stuckTicks >= 2
+      || (controller.movementSensorSnapshot?.eventType === "movement-stall" && Number(controller.movementSensorSnapshot?.confidence || 0) >= 0.55);
+    const firstRouteWarmup = Number(controller.predictions || 0) < 36
+      && controller.doorOpenedCount <= 0
+      && Number(controller.depthEstimate || 1) > 0.48
+      && !controller.firstDoorUseAttempted;
+    let stuck = firstRouteWarmup
+      ? Math.min(stuckRaw, 0.34)
+      : (stuckConfirmed ? stuckRaw : Math.min(stuckRaw, 0.34));
+    const movingEvidence = Math.max(
+      Number(controller.motionForwardProgress || 0),
+      Number(controller.motionTurnScore || 0),
+      Number(controller.motionEntranceScore || 0));
+    const routeStillViable = controller.doorOpenedCount <= 0
+      && Number(controller.depthEstimate || 1) >= 0.55
+      && routeEvidence >= 0.46
+      && movingEvidence >= 0.08
+      && danger < 0.32;
+    if (routeStillViable) {
+      stuck = Math.min(stuck, 0.54);
+    }
+    const firstDoorUseWindow = controller.doorOpenedCount <= 0
+      && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor")
+      && Number(controller.depthEstimate || 1) >= 0.18
+      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18
+      && (routeEvidence >= 0.38
+        || Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
+        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE))
+      && danger < 0.32
+      && !Boolean(controller.nousDetectorResult?.looming?.active)
+      && !Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+    if (firstDoorUseWindow) {
+      stuck = Math.min(stuck, 0.42);
+    }
+    if (doorTransitionGraceActive && danger < 0.32) {
+      stuck = Math.min(stuck, 0.28);
+    }
+    const postDoorRouteStillViable = controller.doorOpenedCount > 0
+      && controller.computerRoomEntered
+      && !controller.finalRoomEntered
+      && Number(controller.depthEstimate || 1) >= 0.46
+      && routeEvidence >= 0.28
+      && movingEvidence >= 0.05
+      && danger < 0.32
+      && !Boolean(controller.nousDetectorResult?.stuck?.active);
+    if (postDoorRouteStillViable) {
+      stuck = Math.min(stuck, 0.42);
+    }
+    const postDoorTransitionStillViable = controller.doorOpenedCount > 0
+      && !controller.finalRoomEntered
+      && Number(controller.depthEstimate || 1) >= 0.46
+      && danger < 0.32
+      && !Boolean(controller.nousDetectorResult?.stuck?.active)
+      && (controller.darkZoneEntered
+        || controller.controlPipeline === "ComputerRoom"
+        || Number(controller.computerRoomAdvanceFrames || 0) > 0
+        || routeEvidence >= 0.18);
+    if (postDoorTransitionStillViable) {
+      stuck = Math.min(stuck, 0.42);
+    }
+    const kairos = resolveToposKairosCarrier(controller, danger, stuck);
+    const pathosBase = clamp01(Math.max(danger, stuck));
+    const nonlinearPathos = kairos.active
+      ? clamp01(Math.pow(Math.max(pathosBase, 0.32), 2) * 3.4 + kairos.boost * 0.42)
+      : clamp01(Math.pow(pathosBase, 2) * 1.12);
+    const pathos = clamp01(Math.max(pathosBase, nonlinearPathos));
+    const ethos = terminalUseFocus
+      ? Math.max(resolveToposEthosScore(controller), 0.92)
+      : resolveToposEthosScore(controller);
+    const dangerKind = health > 0
+      ? "health"
+      : (projectile >= Math.max(enemy, dynamicObject) && projectile > 0.18
+        ? "projectile"
+        : (enemy >= Math.max(dynamicObject, 0.18) ? "enemy" : (dynamicObject > 0.18 ? "dynamic" : "none")));
+    return createCtgObservedScores({
+      logos,
+      pathos,
+      ethos,
+      headingRel,
+      routeEvidence,
+      corridorConfidence,
+      corridorPenalty,
+      danger,
+      dangerKind,
+      stuck,
+      kairosBoost: kairos.boost,
+      kairosState: kairos.state,
+      kairosTrigger: kairos.trigger,
+      objective: inferObjective(controller),
+      phase: inferControlPipeline(controller),
+      timestamp: state?.timestamp || state?.frame || DEFAULT_SNAPSHOT_TIMESTAMP
+    });
+  }
+
+  function buildToposDecisionCarrier(controller, action, observedScores, sensor, frame, state) {
+    const logosVector = getToposLogosVector(controller, action, sensor, frame, state);
+    const pathosVector = getToposPathosVector(controller, action, sensor, frame, state);
+    const ethosVector = getToposEthosVector(controller, action, sensor, frame, state);
+    const weights = observedScores.weights || normalizeToposWeights(observedScores.logos, observedScores.pathos, observedScores.ethos);
+    const rawX = (weights.logos * logosVector.x) + (weights.pathos * pathosVector.x) + (weights.ethos * ethosVector.x);
+    const rawY = (weights.logos * logosVector.y) + (weights.pathos * pathosVector.y) + (weights.ethos * ethosVector.y);
+    const decisionVector = normalizeToposVector({ x: rawX, y: rawY });
+    return createToposDecisionCarrier({
+      source: "vector-superposition",
+      logosVector,
+      pathosVector,
+      ethosVector,
+      weights,
+      decisionVector,
+      confidence: Math.max(observedScores.logos, observedScores.pathos, observedScores.ethos),
+      dominantAxis: observedScores.dominant,
+      kairos: {
+        active: observedScores.kairosBoost > 0,
+        state: observedScores.kairosState,
+        trigger: observedScores.kairosTrigger,
+        boost: observedScores.kairosBoost
+      },
+      ethosTarget: {
+        objective: observedScores.objective,
+        phase: observedScores.phase,
+        stableFrames: Number(controller.toposEthosFrames || 0)
+      },
+      timestamp: observedScores.timestamp
+    });
+  }
+
+  function getToposLogosVector(controller, action, sensor, frame, state) {
+    let x = actionTurnToX(controller.firstDoorUse3x3Turn);
+    let y = 0.62;
+    const patch = controller.firstDoorVision9x9Box || null;
+    if (patch && controller.doorOpenedCount <= 0) {
+      const center = (Number(patch.column || 0) + (Number(patch.columns || 1) * 0.5)) / VISION_GRID_COLUMNS;
+      const patchBias = clampSigned((center - 0.5) * 2.4);
+      const patchScore = clamp01(Number(patch.score || controller.firstDoorVision9x9Score || 0));
+      x = clampSigned((x * 0.35) + (patchBias * patchScore * 0.65));
+      y = clampSigned(0.32 + patchScore * 0.68);
+    } else if (controller.doorOpenedCount > 0 && controller.computerRoomEntered) {
+      x = actionTurnToX(controller.bridgeLaneTurn) || actionTurnToX(action.turn);
+      y = controller.bridgeBrownScore >= 0.35 ? 0.86 : 0.58;
+    } else if (controller.spawnCorridorGapTurn === "left" || controller.spawnCorridorGapTurn === "right") {
+      x = actionTurnToX(controller.spawnCorridorGapTurn);
+      y = 0.78;
+    } else if (!x) {
+      x = actionTurnToX(action.turn);
+    }
+
+    if (Number(controller.depthEstimate || 1) <= 0.24 && controller.doorOpenedCount <= 0) {
+      y = Math.min(y, 0.22);
+    }
+
+    return normalizeToposVector({
+      x,
+      y,
+      source: controller.doorOpenedCount <= 0 ? "local-door-landmark" : "local-route-landmark"
+    });
+  }
+
+  function getToposPathosVector(controller, action, sensor, frame, state) {
+    const stuck = clamp01(Math.max(
+      Number(controller.motionStallScore || 0),
+      Number(controller.stuckFrames || 0) / 12,
+      Number(controller.quantizedStallFrames || 0) / 10,
+      Number(controller.footObstacleBounceFrames || 0) >= 3 ? Number(controller.footObstacleFlickerScore || 0) : 0));
+    const projectileRaw = clamp01(Number(controller.projectileScore || controller.phantasiaSnapshot?.projectileScore || 0));
+    const enemy = getTrustedEnemyThreat(controller);
+    const dynamicRaw = clamp01(Number(controller.phantasiaSnapshot?.dynamicObjectScore || 0));
+    const dynamicThreatContext = enemy > 0.35
+      || Boolean(controller.nousDetectorResult?.looming?.active)
+      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+    const danger = clamp01(Math.max(
+      dynamicThreatContext ? projectileRaw : projectileRaw * 0.22,
+      enemy,
+      dynamicThreatContext ? dynamicRaw : dynamicRaw * 0.18,
+      controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested ? 1 : 0));
+    const enemyBias = clampSigned(Number(controller.enemyLateralBias || 0));
+    const closeWall = Number(controller.depthEstimate || 1) <= 0.34 || stuck >= 0.52;
+    let x = enemyBias ? -enemyBias : 0;
+    if (!x && (action.turn === "left" || action.turn === "right")) {
+      x = actionTurnToX(oppositeTurn(action.turn)) * Math.max(0.28, stuck);
+    }
+    if (!x && controller.wallHugSide === "left") {
+      x = 0.42;
+    } else if (!x && controller.wallHugSide === "right") {
+      x = -0.42;
+    }
+
+    const y = closeWall || danger >= 0.42 ? -Math.max(0.42, stuck, danger) : -Math.max(0.12, danger * 0.72);
+    return normalizeToposVector({
+      x,
+      y,
+      source: danger >= stuck ? "danger-repulsion" : "stall-repulsion"
+    });
+  }
+
+  function getToposEthosVector(controller, action, sensor, frame, state) {
+    const objective = inferObjective(controller);
+    let x = 0;
+    let y = 0.72;
+    if (objective === "find-corridor-to-first-door"
+      || objective === "follow-demo-route-to-first-door"
+      || objective === "recover-via-east-window"
+      || objective === "locate-first-door-corridor"
+      || objective === "enter-first-door-corridor") {
+      x = actionTurnToX(controller.spawnCorridorGapTurn) || actionTurnToX(controller.firstDoorCorridorSearchTurn) || 0.34;
+      y = objective === "enter-first-door-corridor" || objective === "recover-via-east-window" ? 0.88 : 0.76;
+    } else if (objective === "align-first-door" || objective === "approach-first-door" || objective === "open-first-door" || objective === "find-and-open-first-door") {
+      x = actionTurnToX(controller.firstDoorUse3x3Turn) || actionTurnToX(controller.spawnCorridorGapTurn) || actionTurnToX(controller.firstDoorCorridorSearchTurn) || 0.18;
+      y = objective === "open-first-door" ? 0.42 : 0.68;
+    } else if (objective === "enter-computer-control-room") {
+      x = actionTurnToX(controller.bridgeLaneTurn) || 0;
+      y = 0.92;
+    } else if (objective === "reach-central-hall" || objective === "cross-bridge") {
+      x = actionTurnToX(controller.bridgeLaneTurn) || 0;
+      y = 0.9;
+    } else if (objective === "retry-after-death") {
+      x = 0;
+      y = 0;
+    } else if (objective === "restore-relative-motion") {
+      x = actionTurnToX(controller.wallHugSide === "left" ? "right" : "left");
+      y = -0.24;
+    }
+
+    const stability = clamp01(Number(controller.toposEthosFrames || 0) / 18);
+    return normalizeToposVector({
+      x: x * (0.58 + stability * 0.42),
+      y,
+      source: `telos-${objective}`
+    });
+  }
+
+  function mapToposDecisionToKinesis(controller, action, carrier, observedScores, sensor, frame, state) {
+    const safe = normalizeAction(action);
+    if (!controller.enabled || safe.fire || controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
+      return { action: safe, applied: false, reason: "guarded" };
+    }
+
+    const vector = carrier.decisionVector || normalizeToposVector();
+    const weights = carrier.weights || {};
+    const pathosDominant = carrier.dominantAxis === "PATHOS" || Number(weights.pathos || 0) >= 0.58;
+    const firstDoorContext = controller.doorOpenedCount <= 0 && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor");
+    let next = { ...safe };
+    let applied = false;
+    let reason = "none";
+
+    if (safe.use) {
+      next.run = false;
+      return { action: normalizeAction(next), applied: false, reason: "use-preserved" };
+    }
+
+    const firstDoorAlignmentWindow = firstDoorContext
+      && Number(controller.depthEstimate || 1) >= 0.18
+      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18
+      && Number(observedScores.danger || 0) < 0.32
+      && (Number(observedScores.routeEvidence || 0) >= 0.38
+        || Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
+        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE));
+    if (pathosDominant && Number(observedScores.pathos || 0) >= 0.62 && !firstDoorAlignmentWindow) {
+      const stallOnly = Number(observedScores.danger || 0) < 0.32
+        && Number(observedScores.stuck || 0) >= 0.58
+        && Number(controller.depthEstimate || 1) > 0.46;
+      if (stallOnly) {
+        next.move = "forward";
+        next.run = false;
+        next.turn = Math.abs(vector.x) >= 0.18
+          ? (vector.x > 0 ? "right" : "left")
+          : (controller.wallHugSide === "left" ? "right" : "left");
+        applied = true;
+        reason = "pathos-stall-wall-follow";
+      } else if (vector.y < -0.28) {
+        next.move = "back";
+        next.run = false;
+        applied = true;
+        reason = "pathos-repulsion";
+      }
+      if (!stallOnly && Math.abs(vector.x) >= 0.22) {
+        next.turn = vector.x > 0 ? "right" : "left";
+        applied = true;
+        reason = reason === "none" ? "pathos-turn-away" : reason;
+      }
+    } else {
+      const shouldAdvanceFirstDoor = firstDoorContext
+        && Number(observedScores.logos || 0) + Number(observedScores.ethos || 0) >= Number(observedScores.pathos || 0) + 0.16
+        && Number(controller.depthEstimate || 1) >= 0.34
+        && Math.max(Number(controller.firstDoorCorridorSignature || 0), Number(controller.firstDoorVision9x9Score || 0), Number(controller.spawnCorridorGapScore || 0)) >= 0.48;
+      if ((next.move === "none" || String(controller.safetyReason || "").startsWith("first-door-reprobe")) && vector.y >= 0.34 && shouldAdvanceFirstDoor) {
+        next.move = "forward";
+        next.run = Number(observedScores.pathos || 0) < 0.42;
+        applied = true;
+        reason = "logos-ethos-door-approach";
+      } else if (next.move === "none" && vector.y >= 0.52) {
+        next.move = "forward";
+        applied = true;
+        reason = `${carrier.dominantAxis.toLowerCase()}-forward`;
+      } else if (next.move === "forward" && Number(observedScores.pathos || 0) >= 0.48) {
+        next.run = false;
+        applied = true;
+        reason = carrier.dominantAxis === "PATHOS" ? "pathos-run-suppression" : `${carrier.dominantAxis.toLowerCase()}-run-suppression`;
+      }
+
+      if (next.turn === "none" && Math.abs(vector.x) >= 0.26) {
+        next.turn = vector.x > 0 ? "right" : "left";
+        applied = true;
+        reason = reason === "none" ? `${carrier.dominantAxis.toLowerCase()}-turn` : reason;
+      }
+    }
+
+    const contactUseReady = firstDoorContext
+      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.06
+      && Number(observedScores.pathos || 0) < 0.58
+      && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE))
+      && controller.useCooldown === 0
+      && !controller.firstDoorUseAttempted;
+    if (contactUseReady && Math.abs(vector.x) <= 0.44) {
+      next.move = "none";
+      next.turn = vector.x > 0.18 ? "right" : (vector.x < -0.18 ? "left" : "none");
+      next.use = true;
+      next.run = false;
+      applied = true;
+      reason = "logos-ethos-contact-use";
+    }
+
+    if (applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
+      controller.safetyReason = `ctg-topos-${reason}`;
+      controller.mobilityMode = `ctg-topos-${carrier.dominantAxis.toLowerCase()}`;
+    }
+
+    return { action: normalizeAction(next), applied, reason };
+  }
+
+  function createCtgObservedScores(overrides = {}) {
+    const logos = clamp01(Number(overrides.logos ?? 0));
+    const pathos = clamp01(Number(overrides.pathos ?? 0));
+    const ethos = clamp01(Number(overrides.ethos ?? 0));
+    const weights = normalizeToposWeights(logos, pathos, ethos);
+    const dominant = pathos >= Math.max(logos, ethos)
+      ? "PATHOS"
+      : (ethos >= Math.max(logos, pathos) ? "ETHOS" : "LOGOS");
+    return {
+      logos: round2(logos),
+      pathos: round2(pathos),
+      ethos: round2(ethos),
+      weights,
+      dominant,
+      headingRel: round2(clamp01(Number(overrides.headingRel ?? 0))),
+      routeEvidence: round2(clamp01(Number(overrides.routeEvidence ?? 0))),
+      corridorConfidence: round2(clamp01(Number(overrides.corridorConfidence ?? 0))),
+      corridorPenalty: round2(clamp01(Number(overrides.corridorPenalty ?? 0))),
+      danger: round2(clamp01(Number(overrides.danger ?? 0))),
+      dangerKind: overrides.dangerKind || "none",
+      stuck: round2(clamp01(Number(overrides.stuck ?? 0))),
+      kairosBoost: round2(clamp01(Number(overrides.kairosBoost ?? 0))),
+      kairosState: overrides.kairosState || "Monitor",
+      kairosTrigger: overrides.kairosTrigger || "none",
+      objective: overrides.objective || "disabled",
+      phase: overrides.phase || "Idle",
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
+  }
+
+  function createToposDecisionCarrier(overrides = {}) {
+    const weights = overrides.weights || normalizeToposWeights(0, 0, 0);
+    const decisionVector = normalizeToposVector(overrides.decisionVector);
+    return {
+      source: overrides.source || "vector-superposition",
+      logosVector: normalizeToposVector(overrides.logosVector),
+      pathosVector: normalizeToposVector(overrides.pathosVector),
+      ethosVector: normalizeToposVector(overrides.ethosVector),
+      weights,
+      decisionVector,
+      dominantAxis: overrides.dominantAxis || "LOGOS",
+      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
+      kairos: overrides.kairos || { active: false, state: "Monitor", trigger: "none", boost: 0 },
+      ethosTarget: overrides.ethosTarget || { objective: "disabled", phase: "Idle", stableFrames: 0 },
+      feedbackApplied: Boolean(overrides.feedbackApplied),
+      feedbackReason: overrides.feedbackReason || "none",
+      mappedAction: overrides.mappedAction || "-",
+      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    };
   }
 
   function createCtgCarrier(overrides = {}) {
@@ -4938,13 +9845,214 @@
       pipeline: overrides.pipeline || "Idle",
       lastDecision: overrides.lastDecision || "none",
       confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
+      retryRequested: Boolean(overrides.retryRequested),
+      retryReason: overrides.retryReason || "none",
+      retryPriority: Number(overrides.retryPriority || 0),
+      gateExecuted: false,
+      observedScores: overrides.observedScores || createCtgObservedScores(),
+      toposDecision: overrides.toposDecision || createToposDecisionCarrier(),
+      decisionVector: overrides.decisionVector || normalizeToposVector(),
+      kairos: overrides.kairos || { active: false, state: "Monitor", trigger: "none", boost: 0 },
+      ethosTarget: overrides.ethosTarget || { objective: "disabled", phase: "Idle", stableFrames: 0 },
+      feedbackApplied: Boolean(overrides.feedbackApplied),
+      ternaryTrace: overrides.ternaryTrace || {},
       timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
     };
   }
 
+  function resolveToposKairosCarrier(controller, danger, stuck) {
+    const reason = String(controller?.safetyReason || "none");
+    const doorTransitionGraceActive = isDoorTransitionGraceActive(controller);
+    const contextReset = Number(controller?.contextResetFrames || 0) > 0 || reason.indexOf("relocalization") >= 0;
+    const recovery = Number(controller?.recoveryFrames || 0) > 0 || Number(controller?.loopEscapeFrames || 0) > 0;
+    const useProbe = !doorTransitionGraceActive
+      && (Number(controller?.pendingUseResponseFrames || 0) > 0 || Number(controller?.wallUseProbeFrames || 0) > 0);
+    const threatEvidence = Math.max(
+      getTrustedEnemyThreat(controller),
+      clamp01(Number(controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0)),
+      Boolean(controller?.nousDetectorResult?.looming?.active) ? 0.72 : 0,
+      Boolean(controller?.nousDetectorResult?.damageLocalization?.active) ? 0.72 : 0);
+    const combatEvidence = hasTrustedCombatEvidence(controller);
+    const combat = Boolean(combatEvidence
+      && (controller?.combatContextActive || controller?.enemyAlertFrames > 0 || reason.indexOf("combat") >= 0)
+      && threatEvidence >= 0.34);
+    const abnormal = contextReset || recovery || useProbe || combat || (!doorTransitionGraceActive && Number(stuck || 0) >= 0.58) || Number(danger || 0) >= 0.55;
+    let state = "Monitor";
+    let trigger = reason || "none";
+    if (contextReset) {
+      state = "Survey";
+      trigger = controller?.contextResetReason || reason || "visual-discontinuity";
+    } else if (combat) {
+      state = "CombatWatch";
+      trigger = reason || "dynamic-mask";
+    } else if (useProbe) {
+      state = "UseProbe";
+      trigger = reason || "use-response";
+    } else if (recovery || Number(stuck || 0) >= 0.58) {
+      state = "Recovery";
+      trigger = reason || "motion-stall";
+    } else if (Number(danger || 0) >= 0.55) {
+      state = "Caution";
+      trigger = reason || "danger";
+    }
+
+    const boost = abnormal ? clamp01(Math.max(Number(danger || 0), Number(stuck || 0), contextReset ? 0.74 : 0, combat ? 0.62 : 0, useProbe ? 0.48 : 0)) : 0;
+    return { active: abnormal, state, trigger, boost: round2(boost) };
+  }
+
+  function resolveToposEthosScore(controller) {
+    const objective = inferObjective(controller);
+    let score = 0.44;
+    if (objective === "retry-after-death") {
+      score = 1;
+    } else if (objective === "find-corridor-to-first-door"
+      || objective === "follow-demo-route-to-first-door"
+      || objective === "recover-via-east-window"
+      || objective === "locate-first-door-corridor") {
+      score = 0.68;
+    } else if (objective === "enter-first-door-corridor") {
+      score = 0.74;
+    } else if (objective === "align-first-door" || objective === "approach-first-door" || objective === "open-first-door" || objective === "find-and-open-first-door") {
+      score = 0.78;
+    } else if (objective === "enter-computer-control-room") {
+      score = 0.82;
+    } else if (objective === "reach-central-hall") {
+      score = 0.76;
+    } else if (objective === "cross-bridge" || objective === "reach-final-room") {
+      score = 0.8;
+    } else if (objective === "restore-relative-motion") {
+      score = 0.66;
+    } else if (objective === "press-exit-switch" || objective === "level-clear") {
+      score = 0.92;
+    }
+
+    const stability = clamp01(Number(controller?.toposEthosFrames || 0) / 18);
+    const memory = controller?.semanticMemory || {};
+    const phaseConfidence = clamp01(Math.max(
+      Number(memory.firstDoor?.doorConfidence || 0),
+      Number(memory.firstDoor?.corridorConfidence || 0),
+      Number(memory.computerRoom?.confidence || 0),
+      Number(memory.bridge?.confidence || 0),
+      Number(memory.finalRoom?.confidence || 0),
+      controller?.controlPipeline ? 0.42 : 0));
+    const milestoneBonus = controller?.doorOpenedCount > 0 || controller?.computerRoomEntered ? 0.08 : 0;
+    return clamp01(score * (0.72 + stability * 0.16 + phaseConfidence * 0.12) + milestoneBonus);
+  }
+
+  function normalizeToposWeights(logos, pathos, ethos) {
+    const l = clamp01(Number(logos || 0));
+    const p = clamp01(Number(pathos || 0));
+    const e = clamp01(Number(ethos || 0));
+    const total = Math.max(0.0001, l + p + e);
+    return {
+      logos: round2(l / total),
+      pathos: round2(p / total),
+      ethos: round2(e / total)
+    };
+  }
+
+  function normalizeToposVector(vector = {}) {
+    const rawX = clampSigned(Number(vector?.x ?? 0));
+    const rawY = clampSigned(Number(vector?.y ?? 0));
+    const magnitude = Math.hypot(rawX, rawY);
+    const x = magnitude > 0.0001 ? clampSigned(rawX / magnitude) : 0;
+    const y = magnitude > 0.0001 ? clampSigned(rawY / magnitude) : 0;
+    return {
+      x: round2(x),
+      y: round2(y),
+      magnitude: round2(Math.min(1, magnitude)),
+      turn: x > 0.18 ? "right" : (x < -0.18 ? "left" : "none"),
+      move: y > 0.24 ? "forward" : (y < -0.24 ? "back" : "none"),
+      arrow: vectorArrow(x, y),
+      source: vector?.source || "none"
+    };
+  }
+
+  function vectorArrow(x, y) {
+    if (Math.abs(x) < 0.18 && Math.abs(y) < 0.18) {
+      return "-";
+    }
+
+    if (Math.abs(x) < 0.22) {
+      return y >= 0 ? "^" : "v";
+    }
+
+    if (Math.abs(y) < 0.22) {
+      return x >= 0 ? ">" : "<";
+    }
+
+    if (x >= 0 && y >= 0) {
+      return "^>";
+    }
+    if (x < 0 && y >= 0) {
+      return "<^";
+    }
+    if (x >= 0) {
+      return "v>";
+    }
+    return "<v";
+  }
+
+  function actionTurnToX(turn) {
+    return turn === "right" ? 1 : (turn === "left" ? -1 : 0);
+  }
+
+  function describeActionVector(action) {
+    const safe = normalizeAction(action);
+    return `${safe.turn || "none"}:${safe.move || "none"}${safe.use ? ":use" : ""}${safe.fire ? ":fire" : ""}`;
+  }
+
+  function clampSigned(value) {
+    return Math.max(-1, Math.min(1, Number(value) || 0));
+  }
+
+  function ternarySigned(value, threshold = 0.22) {
+    const number = Number(value) || 0;
+    if (number >= threshold) {
+      return "positive";
+    }
+
+    if (number <= -threshold) {
+      return "negative";
+    }
+
+    return "neutral";
+  }
+
+  function ternaryScore(value, low = 0.25, high = 0.62) {
+    const number = clamp01(Number(value) || 0);
+    if (number >= high) {
+      return "positive";
+    }
+
+    if (number <= low) {
+      return "negative";
+    }
+
+    return "neutral";
+  }
+
+  function normalizeVision9x9(values) {
+    const length = VISION_GRID_COLUMNS * VISION_GRID_ROWS;
+    const output = new Array(length);
+    for (let index = 0; index < length; index += 1) {
+      output[index] = Math.max(0, Math.min(15, Math.round(Number(values?.[index] || 0))));
+    }
+
+    return output;
+  }
+
   function normalizeAuditoryEventType(value) {
     const text = String(value || "spatial-event").toLowerCase();
-    if (text === "motion" || text === "contact" || text === "attention" || text === "spatial-event") {
+    if (text === "motion"
+      || text === "contact"
+      || text === "attention"
+      || text === "spatial-event"
+      || text === "native-sfx"
+      || text === "doom-native-sfx"
+      || text === "use-response"
+      || text === "use-success-gate"
+      || text === "use-failed-voice") {
       return text;
     }
 
@@ -5126,20 +10234,234 @@
     return 0;
   }
 
+  function relativeCorridorAlignment(controller, turn) {
+    if (!controller || (turn !== "left" && turn !== "right")) {
+      return { aligned: false, conflict: false, confidence: 0 };
+    }
+
+    const targetSign = turn === "right" ? 1 : -1;
+    const compass = controller.compassSensorSnapshot || {};
+    const components = [
+      Number(compass.motorDelta || 0),
+      Number(compass.rotationInstructionDelta || 0),
+      Number(compass.visualFlowDelta || 0),
+      Number(compass.frameBufferVectorDelta || 0),
+      Number(compass.movementDelta || 0)
+    ];
+    let aligned = 0;
+    let conflict = 0;
+    let total = 0;
+    for (let index = 0; index < components.length; index += 1) {
+      const value = components[index];
+      if (Math.abs(value) < 0.8) {
+        continue;
+      }
+
+      total += 1;
+      if (Math.sign(value) === targetSign) {
+        aligned += 1;
+      } else {
+        conflict += 1;
+      }
+    }
+
+    const vectorX = Number(compass.vectorX || 0);
+    if (Math.abs(vectorX) >= 0.12) {
+      total += 1;
+      if (Math.sign(vectorX) === targetSign) {
+        aligned += 1;
+      } else {
+        conflict += 1;
+      }
+    }
+
+    const confidence = total > 0 ? aligned / total : 0;
+    return {
+      aligned: aligned > 0 && aligned >= conflict,
+      conflict: conflict > aligned && conflict >= 2,
+      confidence
+    };
+  }
+
+  function firstDoorDemoObjectiveRank(objective) {
+    switch (objective) {
+      case "find-corridor-to-first-door":
+      case "follow-demo-route-to-first-door":
+      case "locate-first-door-corridor":
+        return 1;
+      case "recover-via-east-window":
+      case "enter-first-door-corridor":
+      case "approach-first-door":
+        return 2;
+      case "align-first-door":
+      case "open-first-door":
+        return 3;
+      case "enter-computer-control-room":
+        return 4;
+      case "reach-central-hall":
+        return 5;
+      default:
+        return 0;
+    }
+  }
+
+  function stabilizeFirstDoorDemoObjective(controller, candidate) {
+    if (!controller || !candidate || controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested) {
+      return candidate;
+    }
+
+    const previous = controller.objective || "";
+    const previousRank = firstDoorDemoObjectiveRank(previous);
+    const candidateRank = firstDoorDemoObjectiveRank(candidate);
+    const staleDoorProgress = controller.doorOpenedCount <= 0
+      && !controller.firstDoorCorridorLocated
+      && !controller.firstDoorUseAttempted
+      && Number(controller.firstDoorUseLatchFrames || 0) <= 0
+      && Number(controller.wallUseProbeFrames || 0) <= 0
+      && (candidate === "follow-demo-route-to-first-door"
+        || candidate === "recover-via-east-window"
+        || candidate === "find-corridor-to-first-door"
+        || candidate === "locate-first-door-corridor");
+    if (staleDoorProgress) {
+      return candidate;
+    }
+
+    if (previousRank > candidateRank && previousRank < 4 && controller.doorOpenedCount <= 0) {
+      return previous;
+    }
+
+    return candidate;
+  }
+
+  function inferFirstDoorDemoObjective(controller) {
+    if (!controller) {
+      return "find-corridor-to-first-door";
+    }
+
+    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
+      return "enter-computer-control-room";
+    }
+
+    if (controller.doorOpenedCount > 0) {
+      return null;
+    }
+
+    const firstDoorUseThreshold = profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+    const firstDoorRetryTolerance = profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+    const firstDoorUseDepth = profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH);
+    const nearDoor = Number(controller.depthEstimate || 1) <= firstDoorUseDepth + 0.08;
+    const corridorEstablished = Boolean(controller.firstDoorCorridorLocated)
+      || Number(controller.firstDoorCorridorFrames || 0) >= 4;
+    const eastWindowRecovery = Number(controller.courtyardRescueFrames || 0) > 0
+      && controller.courtyardRescueMode === "east-window-wall-left";
+    const activeUseProbe = controller.firstDoorUseAttempted
+      || Number(controller.firstDoorUseLatchFrames || 0) > 0;
+    const alignedUseProbe = Number(controller.wallUseProbeFrames || 0) > 0
+      && nearDoor
+      && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
+        || Number(controller.firstDoorUseSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance);
+    const useEvidence = activeUseProbe
+      || alignedUseProbe
+      || (corridorEstablished
+        && nearDoor
+        && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
+          || (Number(controller.firstDoorUseSignature || 0) >= firstDoorUseThreshold + 0.06
+            && Number(controller.firstDoorVision9x9Score || 0) >= 0.46)));
+    if (useEvidence) {
+      return stabilizeFirstDoorDemoObjective(controller, "open-first-door");
+    }
+
+    const recenterNeeded = corridorEstablished
+      && nearDoor
+      && (controller.firstDoorUse3x3Turn === "left" || controller.firstDoorUse3x3Turn === "right")
+      && Number(controller.firstDoorUse3x3Score || 0) < FIRST_DOOR_USE_ALIGNMENT_SCORE;
+    if (recenterNeeded) {
+      return stabilizeFirstDoorDemoObjective(controller, "align-first-door");
+    }
+
+    if (corridorEstablished) {
+      return stabilizeFirstDoorDemoObjective(controller, "approach-first-door");
+    }
+
+    if (eastWindowRecovery) {
+      return stabilizeFirstDoorDemoObjective(controller, "recover-via-east-window");
+    }
+
+    const spawnCorridorGapThreshold = profileNumber(controller.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
+    const gapTurn = controller.spawnCorridorGapTurn === "left" || controller.spawnCorridorGapTurn === "right"
+      ? controller.spawnCorridorGapTurn
+      : "none";
+    const relativeAlignment = relativeCorridorAlignment(controller, gapTurn);
+    const visualGap = Number(controller.spawnCorridorGapScore || 0) >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
+    const motionEntrance = Number(controller.motionEntranceScore || 0) >= profileNumber(controller.profile, "motionEntranceThreshold", 0.22);
+    const alignmentStarted = Number(controller.spawnCorridorGapFrames || 0) > 0
+      || (gapTurn !== "none"
+        && visualGap
+        && !relativeAlignment.conflict
+        && (relativeAlignment.aligned || motionEntrance || Number(controller.predictions || 0) >= profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES)));
+    const demoRouteActive = controller.controlPipeline === "OpeningHome"
+      || /^opening-map/.test(String(controller.mobilityMode || ""))
+      || Number(controller.predictions || 0) < profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES);
+    return stabilizeFirstDoorDemoObjective(controller, alignmentStarted
+      ? "locate-first-door-corridor"
+      : (demoRouteActive ? "follow-demo-route-to-first-door" : "find-corridor-to-first-door"));
+  }
+
   function inferControlPipeline(controller) {
     if (!controller || !controller.enabled) {
       return "Idle";
+    }
+
+    if (controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
+      return "Retry";
+    }
+
+    if (isDoorTransitionGraceActive(controller)) {
+      return controller.computerRoomEntered ? "ComputerRoom" : "FirstDoor";
+    }
+
+    if (controller.computerRoomEntered && !controller.centralHallEntered) {
+      return "ComputerRoom";
+    }
+
+    if (controller.doorOpenedCount <= 0) {
+      const objective = inferFirstDoorDemoObjective(controller);
+      return objective === "find-corridor-to-first-door"
+        || objective === "follow-demo-route-to-first-door"
+        || objective === "recover-via-east-window"
+        || objective === "locate-first-door-corridor"
+        ? "OpeningHome"
+        : "FirstDoor";
+    }
+
+    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
+      return "FirstDoor";
+    }
+
+    if (controller.centralHallEntered && Number(controller.enemyDefeatedCount || 0) <= 0 && !controller.ammoLikelyEmpty) {
+      return "ComputerRoom";
     }
 
     if (controller.finalRoomEntered) {
       return "ExitRoom";
     }
 
+    if (controller.movementSensorSnapshot?.eventType === "movement-stall"
+      && Number(controller.movementSensorSnapshot?.confidence || 0) >= 0.55
+      && Number(controller.stuckFrames || 0) >= 2) {
+      return "SensorRecovery";
+    }
+
     if (controller.doorOpenedCount > 1) {
       return "SecondDoor";
     }
 
+    if (controller.computerRoomEntered && !controller.centralHallEntered) {
+      return "ComputerRoom";
+    }
+
     if (controller.doorOpenedCount > 0
+      && !isComputerPanelStillVisible(controller)
       && isBridgeLaneVisible(
         controller.bridgeBrownScore,
         controller.bridgeGreenLeft,
@@ -5150,7 +10472,7 @@
       return "Bridge";
     }
 
-    if (controller.darkZoneEntered || controller.doorOpenedCount > 0) {
+    if (controller.computerRoomEntered) {
       return "ComputerRoom";
     }
 
@@ -5166,8 +10488,18 @@
       return "disabled";
     }
 
+    if (controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
+      return "retry-after-death";
+    }
+
     if (controller.exitSwitchPressed) {
       return "level-clear";
+    }
+
+    if (controller.centralHallEntered) {
+      return Number(controller.enemyDefeatedCount || 0) > 0
+        ? "secure-central-hall"
+        : "engage-front-enemy";
     }
 
     if (controller.finalRoomEntered) {
@@ -5178,7 +10510,17 @@
       return "reach-final-room";
     }
 
-    if (controller.doorOpenedCount > 0
+    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
+      return "enter-computer-control-room";
+    }
+
+    if (isDoorTransitionGraceActive(controller)) {
+      return controller.computerRoomEntered
+        ? "reach-central-hall"
+        : inferFirstDoorDemoObjective(controller);
+    }
+
+    if (controller.computerRoomEntered
       && isBridgeLaneVisible(
         controller.bridgeBrownScore,
         controller.bridgeGreenLeft,
@@ -5189,67 +10531,115 @@
       return "cross-bridge";
     }
 
-    if (controller.computerRoomEntered || controller.darkZoneEntered || controller.doorOpenedCount > 0) {
+    if (controller.computerRoomEntered) {
       return "reach-central-hall";
     }
 
-    if (controller.doorOpenedCount <= 0) {
-      return "find-and-open-first-door";
+    if (controller.controlPipeline === "SensorRecovery") {
+      return "restore-relative-motion";
     }
 
-    return "reach-central-hall";
+    if (controller.doorOpenedCount <= 0) {
+      return inferFirstDoorDemoObjective(controller);
+    }
+
+    return inferFirstDoorDemoObjective(controller) || "reach-central-hall";
   }
 
   function activeDetectionsForPipeline(controller) {
     const phase = inferControlPipeline(controller);
-    const withAuditory = (detections) => {
-      if (controller?.auditorySnapshot?.eventDetected || controller?.spatialSnapshot?.eventDetected) {
-        return Array.from(new Set([...detections, "audio"]));
+    const withSensorEvents = (detections) => {
+      let next = detections;
+      if (controller?.healthSensorSnapshot?.retryRequested || controller?.healthLikelyDead) {
+        next = [...next, "health"];
       }
 
-      return detections;
+      if (controller?.auditorySnapshot?.eventDetected || controller?.spatialSnapshot?.eventDetected) {
+        next = [...next, "audio", "spatial"];
+      }
+
+      if (Array.isArray(controller?.sensorDetections) && controller.sensorDetections.length > 0) {
+        next = [...next, ...controller.sensorDetections];
+      }
+      if (Number(controller?.semanticContextResetFrames || 0) > 0) {
+        next = [...next, "context-reset"];
+      }
+      if (controller?.topologicalTransitionBlocked) {
+        next = [...next, "topology-blocked"];
+      }
+      if (Number(controller?.wallFollowFrames || 0) > 0) {
+        next = [...next, "wall-follow"];
+      }
+      if (controller?.combatContextActive && hasTrustedCombatEvidence(controller)) {
+        next = [...next, "combat-context"];
+      }
+      if (Number(controller?.combatSurveyFrames || 0) > 0) {
+        next = [...next, "combat-survey"];
+      }
+
+      return Array.from(new Set(next));
     };
     if (!controller || !controller.enabled) {
-      return withAuditory(["objective", "hud"]);
+      return withSensorEvents(["objective", "hud"]);
+    }
+
+    if (phase === "Retry") {
+      return withSensorEvents(["objective", "health", "hud"]);
+    }
+
+    if (phase === "SensorRecovery") {
+      return withSensorEvents(["objective", "motion", "movement", "spatial", "wall", "hud"]);
     }
 
     if (phase === "OpeningHome") {
-      return withAuditory(["objective", "motion", "wall", "foot", "hud"]);
+      return withSensorEvents(["objective", "motion", "wall", "foot", "hud"]);
     }
 
     if (phase === "FirstDoor") {
-      return withAuditory(["objective", "motion", "door", "wall", "foot", "hud"]);
+      return withSensorEvents(["objective", "motion", "door", "wall", "foot", "hud"]);
     }
 
     if (phase === "ComputerRoom") {
-      return withAuditory(["objective", "motion", "computer", "enemy", "wall", "foot", "hud"]);
+      const detections = ["objective", "motion", "computer", "wall", "foot", "hud"];
+      if (hasTrustedCombatEvidence(controller)) {
+        detections.push("enemy");
+      }
+      return withSensorEvents(detections);
     }
 
     if (phase === "Bridge") {
-      return withAuditory(["objective", "motion", "wall", "foot", "hud"]);
+      return withSensorEvents(["objective", "motion", "wall", "foot", "hud"]);
     }
 
     if (phase === "SecondDoor") {
-      return withAuditory(["objective", "motion", "door", "enemy", "wall", "foot", "hud"]);
+      const detections = ["objective", "motion", "door", "wall", "foot", "hud"];
+      if (hasTrustedCombatEvidence(controller)) {
+        detections.push("enemy");
+      }
+      return withSensorEvents(detections);
     }
 
     if (phase === "ExitRoom") {
-      return withAuditory(["objective", "motion", "door", "hud"]);
+      return withSensorEvents(["objective", "motion", "door", "hud"]);
     }
 
-    return withAuditory(["objective", "hud"]);
+    return withSensorEvents(["objective", "hud"]);
   }
 
   function createE1M1SemanticMemory() {
     return {
       map: "E1M1",
-      coordinateHint: "spawn=A/south; corridor=north; courtyard=east; firstDoor=east-after-corridor; bridge=east-southeast; exit=southeast",
+      coordinateHint: "spawn=south; firstDoor=north; courtyard=east-after-first-door; computerControlRoom=northwest; bridge=east-southeast; exit=southeast",
       phase: "OpeningHome",
       objective: "find-and-open-first-door",
       spawn: {
         blueFloorScore: 0,
         courtyardScore: 0,
-        courtyardTurn: "none"
+        courtyardTurn: "none",
+        secretDoorScore: 0,
+        secretDoorTurn: "none",
+        westStairScore: 0,
+        westStairTurn: "none"
       },
       firstDoor: {
         corridorConfidence: 0,

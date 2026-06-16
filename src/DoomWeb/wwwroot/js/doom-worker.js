@@ -13,15 +13,59 @@
 
   importScripts(
     "/demo/doom/js/webgpu-provider.js?v=20260613-doomweb86",
-    "/demo/doom/js/bonsai.js?v=20260613-doomweb86",
-    "/demo/doom/js/doom.js?v=20260613-doomweb86"
+    "/demo/doom/js/bonsai.js?v=20260616-precision153",
+    "/demo/doom/js/doom.js?v=20260616-precision153"
   );
 
   let runtime = null;
 
-  function post(type, payload) {
-    self.postMessage(Object.assign({ type }, payload || {}));
+  function post(type, payload, transfer) {
+    self.postMessage(Object.assign({ type }, payload || {}), transfer || []);
   }
+
+  function numberOrZero(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  function toAudioCueSnapshot(snapshot) {
+    return {
+      leftEnergy: numberOrZero(snapshot?.leftEnergy),
+      rightEnergy: numberOrZero(snapshot?.rightEnergy),
+      balance: numberOrZero(snapshot?.balance),
+      dominantFreq: numberOrZero(snapshot?.dominantFreq ?? snapshot?.dominantFrequency),
+      eventDetected: Boolean(snapshot?.eventDetected),
+      eventType: snapshot?.eventType || "spatial-event",
+      timestamp: snapshot?.timestamp || new Date().toISOString()
+    };
+  }
+
+  self.AIKernelWasmAudioProvider = {
+    playSpatialCue(snapshot) {
+      post("audio-cue", { snapshot: toAudioCueSnapshot(snapshot) });
+      return true;
+    },
+    playPcm(payload) {
+      const samples = payload?.samples instanceof Float32Array
+        ? payload.samples
+        : new Float32Array(payload?.samples || []);
+      post("audio-pcm", {
+        samples: samples.buffer,
+        frames: payload?.frames || 0,
+        channels: payload?.channels || 2,
+        sampleRate: payload?.sampleRate || 44100,
+        snapshot: toAudioCueSnapshot(payload?.snapshot || {})
+      }, [samples.buffer]);
+      return true;
+    },
+    status() {
+      return {
+        proxied: true,
+        target: "main-thread-webaudio"
+      };
+    }
+  };
+  self.aikernelWasmAudioProvider = self.AIKernelWasmAudioProvider;
 
   function formatError(error) {
     if (!error) {

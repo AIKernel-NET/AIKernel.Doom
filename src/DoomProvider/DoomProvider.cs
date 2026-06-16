@@ -7,9 +7,17 @@ using AIKernel.Doom.Wasm;
 using AIKernel.Dtos.Core;
 using AIKernel.Wasm.Runtime;
 using AIKernel.Wasm.Runtime.Abstractions;
+/// <summary>
+/// EN: Represents DoomProvider.
+/// EN: Documentation for public API. JA: DoomProvider を表します。
+/// </summary>
 
 public sealed class DoomProvider : IProvider, IWasmProcessProvider
 {
+    /// <summary>
+    /// EN: Gets the DoomProcessName constant.
+    /// EN: Documentation for public API. JA: DoomProcessName 定数を取得します。
+    /// </summary>
     public const string DoomProcessName = "doom";
 
     private readonly DoomProviderOptions _options;
@@ -26,6 +34,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     private bool _initialized;
     private bool _modelReady;
     private string _lastFailure = string.Empty;
+    /// <summary>
+    /// EN: Executes DoomProvider.
+    /// EN: Documentation for public API. JA: DoomProvider を実行します。
+    /// </summary>
 
     public DoomProvider(DoomProviderOptions? options = null, IDoomWasmAssetResolver? assetResolver = null)
     {
@@ -40,21 +52,49 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             _bonsaiExecutionSurface,
             () => _modelReady);
     }
+    /// <summary>
+    /// EN: Gets ProviderId.
+    /// EN: Documentation for public API. JA: ProviderId を取得します。
+    /// </summary>
 
     public string ProviderId => "aikernel.doom.provider";
+    /// <summary>
+    /// EN: Gets Name.
+    /// EN: Documentation for public API. JA: Name を取得します。
+    /// </summary>
 
     public string Name => "AIKernel DOOM WASM Provider";
+    /// <summary>
+    /// EN: Gets Version.
+    /// EN: Documentation for public API. JA: Version を取得します。
+    /// </summary>
 
     public string Version => ThisAssemblyVersion;
 
     private const string ThisAssemblyVersion = "0.1.1-dev1";
+    /// <summary>
+    /// EN: Gets State.
+    /// EN: Documentation for public API. JA: State を取得します。
+    /// </summary>
 
     public DoomProviderState State { get; private set; } = DoomProviderState.NotInitialized;
+    /// <summary>
+    /// EN: Executes GetCapabilities.
+    /// EN: Documentation for public API. JA: GetCapabilities を実行します。
+    /// </summary>
 
     public IProviderCapabilities GetCapabilities() => _capabilities;
+    /// <summary>
+    /// EN: Executes IsAvailableAsync.
+    /// EN: Documentation for public API. JA: IsAvailableAsync を実行します。
+    /// </summary>
 
     public Task<bool> IsAvailableAsync()
         => Task.FromResult(_initialized && State is DoomProviderState.Ready or DoomProviderState.Running or DoomProviderState.Stopped);
+    /// <summary>
+    /// EN: Executes InitializeAsync.
+    /// EN: Documentation for public API. JA: InitializeAsync を実行します。
+    /// </summary>
 
     public async Task InitializeAsync()
     {
@@ -63,6 +103,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
         await _frameRenderer.InitializeAsync().ConfigureAwait(false);
         await _processProvider.InitializeAsync().ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes ShutdownAsync.
+    /// EN: Documentation for public API. JA: ShutdownAsync を実行します。
+    /// </summary>
 
     public async Task ShutdownAsync()
     {
@@ -73,6 +117,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
         await _frameRenderer.ShutdownAsync().ConfigureAwait(false);
         await _processProvider.ShutdownAsync().ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes GetHealthAsync.
+    /// EN: Documentation for public API. JA: GetHealthAsync を実行します。
+    /// </summary>
 
     public Task<ProviderHealthStatus> GetHealthAsync()
         => Task.FromResult(CheckRuntimeHealth().Map(ok => new ProviderHealthStatus(
@@ -83,6 +131,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             .Match(
                 error => new ProviderHealthStatus(false, error.Message, DateTime.UtcNow, 0),
                 health => health));
+    /// <summary>
+    /// EN: Executes CreateProcessAsync.
+    /// EN: Documentation for public API. JA: CreateProcessAsync を実行します。
+    /// </summary>
 
     public async Task<IProcess> CreateProcessAsync(string name, object? args = null)
     {
@@ -91,6 +143,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             error => new DoomFailedProcess(name, error.Message),
             process => process);
     }
+    /// <summary>
+    /// EN: Executes TryCreateProcessAsync.
+    /// EN: Documentation for public API. JA: TryCreateProcessAsync を実行します。
+    /// </summary>
 
     public async Task<Result<IProcess>> TryCreateProcessAsync(string name, object? args = null)
         => await ValidateProcessName(name)
@@ -112,6 +168,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             .Map(RegisterProcess)
             .ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes TryStartAsync.
+    /// EN: Documentation for public API. JA: TryStartAsync を実行します。
+    /// </summary>
 
     public async Task<Result<bool>> TryStartAsync(string processName, CancellationToken cancellationToken = default)
     {
@@ -122,8 +182,16 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
 
         return await TryStartDoomAsync(cancellationToken).ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes ListProcesses.
+    /// EN: Documentation for public API. JA: ListProcesses を実行します。
+    /// </summary>
 
     public IReadOnlyList<WasmProcess> ListProcesses() => _processProvider.ListProcesses();
+    /// <summary>
+    /// EN: Gets TryPrepareAsync.
+    /// EN: Documentation for public API. JA: TryPrepareAsync を取得します。
+    /// </summary>
 
     public async Task<Result<DoomProviderStatus>> TryPrepareAsync(
         DoomConsentGrant consent,
@@ -147,6 +215,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             .Map(_ => MarkReadyAndStatus())
             .ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes TryStartDoomAsync.
+    /// EN: Documentation for public API. JA: TryStartDoomAsync を実行します。
+    /// </summary>
 
     public async Task<Result<bool>> TryStartDoomAsync(CancellationToken cancellationToken = default)
     {
@@ -165,6 +237,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             .Bind(process => StartProcessAsync(process, cancellationToken))
             .ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes TryStopDoomAsync.
+    /// EN: Documentation for public API. JA: TryStopDoomAsync を実行します。
+    /// </summary>
 
     public async Task<Result<bool>> TryStopDoomAsync(CancellationToken cancellationToken = default)
     {
@@ -186,6 +262,10 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
             return true;
         }).ConfigureAwait(false);
     }
+    /// <summary>
+    /// EN: Executes TryStatus.
+    /// EN: Documentation for public API. JA: TryStatus を実行します。
+    /// </summary>
 
     public Result<DoomProviderStatus> TryStatus(bool verbose = false)
     {

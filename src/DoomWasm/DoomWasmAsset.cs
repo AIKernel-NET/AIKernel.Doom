@@ -1,6 +1,6 @@
 namespace AIKernel.Doom.Wasm;
 
-/// <summary>Resolved WASM bytes and provenance metadata.</summary>
+/// <summary>EN: Resolved WASM bytes and provenance metadata. JA: DoomWasmAsset を表します。</summary>
 public sealed record DoomWasmAsset(
     string EntryName,
     byte[] ModuleBytes,

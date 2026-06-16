@@ -1,17 +1,33 @@
 namespace AIKernel.Doom.Provider.Autoplay;
 
 using AIKernel.Core.Sdk.Runtime;
+/// <summary>
+/// EN: Represents SeparatedDoorProbeStrafeRunnerV4.
+/// EN: Documentation for public API. JA: SeparatedDoorProbeStrafeRunnerV4 を表します。
+/// </summary>
 
 public sealed class SeparatedDoorProbeStrafeRunnerV4 : IAutoplayStrategy
 {
     private readonly AutoplayOptimizationProfile _profile;
+    /// <summary>
+    /// EN: Executes SeparatedDoorProbeStrafeRunnerV4.
+    /// EN: Documentation for public API. JA: SeparatedDoorProbeStrafeRunnerV4 を実行します。
+    /// </summary>
 
     public SeparatedDoorProbeStrafeRunnerV4(AutoplayOptimizationProfile? profile = null)
     {
         _profile = profile ?? AutoplayOptimizationProfile.Default;
     }
+    /// <summary>
+    /// EN: Gets StrategyName.
+    /// EN: Documentation for public API. JA: StrategyName を取得します。
+    /// </summary>
 
     public string StrategyName => _profile.StrategyName;
+    /// <summary>
+    /// EN: Executes ExecuteTick.
+    /// EN: Documentation for public API. JA: ExecuteTick を実行します。
+    /// </summary>
 
     public ActionCommand ExecuteTick(SensorFusion sensor, int recoveryFrames)
     {

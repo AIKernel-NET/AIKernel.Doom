@@ -28,6 +28,7 @@ $overlay = @(
     "src\aik_doom_time.c",
     "src\aik_doom_log.c",
     "src\aik_doom_wad_file.c",
+    "src\aik_doom_sound.c",
     "src\doomgeneric_aikernel.c"
 ) | ForEach-Object { Join-Path $ProjectDir $_ }
 
@@ -52,7 +53,7 @@ $excludedUpstreamSources = @(
 $doomSources = Get-ChildItem -LiteralPath $DoomGenericDir -Filter "*.c" -File |
     Where-Object { $excludedUpstreamSources -notcontains $_.Name } |
     ForEach-Object { $_.FullName }
-$exports = '["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_malloc","_free"]'
+$exports = '["_main","_doom_init","_doom_tick","_doom_render","_doom_input","_doom_input_action","_doom_mount_wad","_doom_wad_status","_doom_audio_status","_doom_audio_sample_rate","_doom_audio_channels","_doom_audio_buffer","_doom_audio_capacity_frames","_doom_audio_read_offset_frames","_doom_audio_available_frames","_doom_audio_consume_frames","_doom_audio_event_count","_malloc","_free"]'
 $include = Join-Path $ProjectDir "include"
 $outDir = Split-Path -Parent $Output
 if (-not [string]::IsNullOrWhiteSpace($outDir)) {
@@ -71,6 +72,7 @@ if (-not [string]::IsNullOrWhiteSpace($outDir)) {
     "-DDOOMGENERIC_RESY=200" `
     "-DCMAP256=1" `
     "-DAIKERNEL_DOOM_WASM=1" `
+    "-DFEATURE_SOUND=1" `
     "-I$include" `
     "-I$DoomGenericDir" `
     @overlay `

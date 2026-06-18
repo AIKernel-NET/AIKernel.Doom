@@ -224,6 +224,18 @@
       results.push({ name: "audio-toggle-wired", ok: refs.doomAudioPlaybackToggle?.dataset?.command === "doom.audio toggle", detail: "browser-gesture-safe-check" });
       results.push({ name: "autoplay-toggle-wired", ok: refs.doomAutoplayToggle?.dataset?.command === "doom.autoplay toggle", detail: "debugbar-toggle" });
       results.push({ name: "controller-debug-log-visible", ok: Boolean(refs.doomControllerDebugLog && refs.doomControllerDebugLogList), detail: "control-top-n" });
+      const panelKeys = Array.from(document.querySelectorAll(".doom-sensor-node[data-sensor-panel]")).map(node => node.dataset.sensorPanel).join("|");
+      results.push({ name: "sensor-panel-canon-grid", ok: panelKeys === "aisthesis|noesis|krisis|kinesis", detail: panelKeys || "missing" });
+      results.push({
+        name: "phainesis-det-panelized",
+        ok: Boolean(document.querySelector('[data-sensor-panel="noesis"] [data-sensor-stage="phainesis"] [data-detection-toggle="motion"]')),
+        detail: "det-as-phainesis"
+      });
+      results.push({
+        name: "zoe-veto-panelized",
+        ok: Boolean(document.querySelector('[data-sensor-panel="kinesis"] [data-sensor-stage="zoe"] [data-detection-toggle="health"]')),
+        detail: "svc-veto"
+      });
       if (host.pushControllerDebugLog) {
         host.pushControllerDebugLog({ category: "priority", label: "PRIORITY", message: "selftest priority probe" }, { dedupe: false, limit: 6 });
       }

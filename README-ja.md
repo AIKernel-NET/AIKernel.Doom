@@ -79,7 +79,7 @@ CLI は `hintWord> yes` を表示します。`yes`、`y`、`approve`、または
 
 ## アセット
 
-`samples/doom.rom` は `doom.wasm` を参照します。実際の DOOM WASM バイナリはコミットしません。`DoomWasmOptions.DoomWasmPath` でアセットパスを設定するか、ROM の横に `doom.wasm` を配置してください。ランタイムキャッシュは既定でユーザーのローカルアプリケーションデータディレクトリを使います。
+`samples/doom.rom` は `doom.wasm` を参照します。公開 0.1.2 Web demo では、ホストされたデモを安定して起動できるように、生成済み `src/DoomWeb/wwwroot/demo/doom/doom.wasm` artifact を同梱します。その他の runtime deployment では、`DoomWasmOptions.DoomWasmPath` でアセットパスを設定するか、ROM の横に `doom.wasm` を配置できます。ランタイムキャッシュは既定でユーザーのローカルアプリケーションデータディレクトリを使います。
 
 デモ CLI では、大きなバイナリなしにブートフローを確認できるよう、小さな simulated WASM module を有効化しています。Provider / library 用途では simulation を無効化し、`DOOM_WASM_NOT_FOUND` を受け取れます。
 
@@ -93,7 +93,7 @@ CLI は `hintWord> yes` を表示します。`yes`、`y`、`approve`、または
 - public prompt bootstrap script
 - terms and license notice page
 
-`DOOM1.WAD`、Bonsai GGUF model、生成済み `doom.wasm` はリポジトリに含めません。これらはデプロイ運用者が別途ホストし、明示的なランタイム承認後にのみロードしてください。
+`DOOM1.WAD` と Bonsai GGUF model はリポジトリに含めません。公開 0.1.2 Web demo では、生成済み `doom.wasm` runtime artifact を、対応 source recipe、patch、build script、manifest、license notice とともに同梱します。WAD/model の hosting、consent text、manifest、checksum、license notice は、デプロイ運用者が実際の hosted files と整合させてください。
 
 ## Native DOOM WASM Build
 

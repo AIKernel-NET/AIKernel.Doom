@@ -5,10 +5,10 @@
     ["visual", "Aisthesis", "visual", "primary", true],
     ["audio", "Aisthesis", "audio", "primary", true],
     ["motor", "Kinesis", "motor", "primary", true],
-    ["movement", "Kinesis", "movement", "derived", true],
-    ["compass", "Hodos", "compass", "primary", true],
-    ["spatial", "Topos", "spatial", "derived", true],
-    ["health", "Zoe", "health", "primary", true]
+    ["movement", "Aisthesis", "movement", "primary", true],
+    ["compass", "Aisthesis", "compass", "primary", true],
+    ["spatial", "Krisis", "spatial", "derived", true],
+    ["health", "Aisthesis", "health", "primary", true]
   ]);
 
   function normalizeKind(kind) {
@@ -34,28 +34,20 @@
 
   function conceptName(kind) {
     const normalized = normalizeKind(kind);
-    if (normalized === "visual" || normalized === "audio") {
+    if (normalized === "visual" || normalized === "audio" || normalized === "movement" || normalized === "compass" || normalized === "health") {
       return "Aisthesis";
     }
 
-    if (normalized === "motor" || normalized === "movement") {
+    if (normalized === "motor") {
       return "Kinesis";
     }
 
-    if (normalized === "compass") {
-      return "Hodos";
-    }
-
-    if (normalized === "health") {
-      return "Zoe";
-    }
-
-    return normalized === "spatial" ? "Topos" : "";
+    return normalized === "spatial" ? "Krisis" : "";
   }
 
   function category(kind) {
     const normalized = normalizeKind(kind);
-    return normalized === "movement" || normalized === "spatial" ? "derived" : "primary";
+    return normalized === "spatial" ? "derived" : "primary";
   }
 
   function createState(name, sensorConceptName, englishName, sensorCategory, enabled, observed = false, metadata = {}) {

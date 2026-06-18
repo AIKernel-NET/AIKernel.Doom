@@ -28,12 +28,40 @@ const sandbox = {
 sandbox.window = sandbox.self;
 const context = vm.createContext(sandbox);
 
+loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/pipeline-graph.js");
+loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/zoe-veto.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/runtime-packets.js");
 
+const graph = context.self.AIKernelDoomControlPipelineGraph;
+const zoeVeto = context.self.AIKernelDoomControlZoeVeto;
 const packets = context.self.AIKernelDoomControlRuntimePackets;
+assert(graph?.compileCanonicalGraph, "control pipeline graph module should export compileCanonicalGraph");
+assert(zoeVeto?.applyZoeVeto, "control Zoe veto module should export applyZoeVeto");
 assert(packets?.actionFromStage, "runtime packet module should export actionFromStage");
 assert(packets?.idleAction, "runtime packet module should export idleAction");
 assert(packets?.statusFromAction, "runtime packet module should export statusFromAction");
+assert(packets?.compileCanonicalGraph, "runtime packet module should retain compileCanonicalGraph compatibility export");
+
+const customGraph = graph.compileCanonicalGraph({
+  pipeline: {
+    krisis: {
+      topos: { vectors: ["CustomDecisionVector"] },
+      kairos: { priorities: ["logos"] }
+    },
+    kinesis: {
+      motion: { actions: ["turnYaw"] }
+    }
+  }
+});
+assert(customGraph.nodes.map(node => node.id).join(">") === "aisthesis>phainesis>nous>topos>kairos>kinesis>zoe", "pipeline graph should keep canonical order");
+assert(customGraph.nodes.find(node => node.id === "kairos").inputs[0] === "CustomDecisionVector", "Kairos should consume the configured Topos vector");
+assert(packets.compileCanonicalGraph({}).version === "dynamic-pipeline-4layer/v1", "runtime packets should delegate graph compatibility export");
+const vetoed = packets.applyZoeVeto({ move: "forward", fire: true }, { health: 4 }, { pipeline: { kinesis: { zoe: { vetoRules: [{ when: "hp < 10" }] } } } }, {
+  evaluateWhen: (context, expression) => expression === "hp < 10" && context.values.hp < 10,
+  buildContext: (profile, state) => ({ profile, state, values: state })
+});
+assert(vetoed.zoeVetoed === true, "runtime packets should delegate Zoe veto compatibility export");
+assert(vetoed.move === "none" && vetoed.fire === false, "delegated Zoe veto should neutralize unsafe action");
 
 const action = packets.actionFromStage(
   {

@@ -3086,7 +3086,7 @@
     }
 
     if (typeof document !== "undefined") {
-      rendererProviderScriptLoading ||= loadScript("/demo/doom/js/webgpu-provider.js?v=20260618-auditoryruntime1")
+      rendererProviderScriptLoading ||= loadScript("/demo/doom/js/webgpu-provider.js?v=20260618-sensorpanel1")
         .catch(error => {
           rendererProviderScriptLoading = null;
           if (typeof log === "function") {

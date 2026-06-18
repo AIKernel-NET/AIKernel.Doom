@@ -129,7 +129,7 @@ public sealed class DoomWebGuiTests
     }
 
     [Fact]
-    public void DoomPrompt_HodosSensorShowsCompassFusionEvidence()
+    public void DoomPrompt_AisthesisCompassShowsToposFusionEvidence()
     {
         var script = ReadDoomPromptScript();
 
@@ -184,6 +184,40 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("const status = await Promise.resolve(doomRuntime.setSensorInput(kind, enabled));", script, StringComparison.Ordinal);
         Assert.DoesNotContain("function createOptimisticSensorStatus(kind, enabled) {\n      const status = doomRuntime?.status?.() || {}", normalizedScript, StringComparison.Ordinal);
         Assert.DoesNotContain("doomRuntime?.status?.().sensors", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomPrompt_UsesCanonicalAisthesisNoesisKrisisKinesisPanelMapping()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var prompt = ReadDoomPromptScript();
+        var panel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-sensor-panel.js"));
+        var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-sensor-panel-vm.test.mjs"));
+
+        Assert.Contains("self.AIKernelDoomSensorPanel", panel, StringComparison.Ordinal);
+        Assert.Contains("20260618-sensorpanel1", panel, StringComparison.Ordinal);
+        Assert.Contains("Aisthesis", panel, StringComparison.Ordinal);
+        Assert.Contains("Phainesis", panel, StringComparison.Ordinal);
+        Assert.Contains("Nous", panel, StringComparison.Ordinal);
+        Assert.Contains("Krisis", panel, StringComparison.Ordinal);
+        Assert.Contains("Topos", panel, StringComparison.Ordinal);
+        Assert.Contains("Kairos", panel, StringComparison.Ordinal);
+        Assert.Contains("Kinesis", panel, StringComparison.Ordinal);
+        Assert.Contains("Zoe", panel, StringComparison.Ordinal);
+        Assert.Contains("const doomSensorPanel = self.AIKernelDoomSensorPanel || {}", prompt, StringComparison.Ordinal);
+        Assert.Contains("sensorRow.dataset.sensorPanelVersion = sensorPanelVersion", prompt, StringComparison.Ordinal);
+        Assert.Contains("node.dataset.sensorPanel = panel.key", prompt, StringComparison.Ordinal);
+        Assert.Contains("stageNode.dataset.sensorStage = stage.key || \"\"", prompt, StringComparison.Ordinal);
+        Assert.Contains("existing.classList.remove(\"doom-debug-switch\")", prompt, StringComparison.Ordinal);
+        Assert.Contains("phainesis=${phainesisText}", prompt, StringComparison.Ordinal);
+        Assert.Contains("phainesis=${detections}", prompt, StringComparison.Ordinal);
+        Assert.Contains("autoplay.phainomenon || autoplay.nousDetectorResult", prompt, StringComparison.Ordinal);
+        Assert.Contains("[Topos Compass]", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("det=${", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Hodos]", prompt, StringComparison.Ordinal);
+        Assert.Contains("DOOM_SENSOR_PANEL_VM_TEST_OK", vmTest, StringComparison.Ordinal);
+        Assert.Contains("canonical panel order should be Aisthesis, Noesis, Krisis, Kinesis", vmTest, StringComparison.Ordinal);
+        Assert.Contains("detectors should not be duplicated across panels", vmTest, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -314,6 +348,9 @@ public sealed class DoomWebGuiTests
     [InlineData("audio-toggle-wired")]
     [InlineData("controller-debug-log-visible")]
     [InlineData("controller-debug-log-filter")]
+    [InlineData("sensor-panel-canon-grid")]
+    [InlineData("phainesis-det-panelized")]
+    [InlineData("zoe-veto-panelized")]
     public void DoomPrompt_GuiSelfTestCoversCriticalToggles(string marker)
     {
         var script = ReadDoomGuiSelfTestScript();
@@ -385,6 +422,8 @@ public sealed class DoomWebGuiTests
         var evidence = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "evidence.js"));
         var arbitration = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "arbitration.js"));
         var decisionTrace = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "decision-trace.js"));
+        var pipelineGraph = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "pipeline-graph.js"));
+        var zoeVeto = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "zoe-veto.js"));
         var runtimePackets = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "runtime-packets.js"));
         var worker = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker.js"));
         var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "control-runtime-vm.test.mjs"));
@@ -426,11 +465,24 @@ public sealed class DoomWebGuiTests
         Assert.Contains("self.AIKernelDoomDecisionTrace", decisionTrace, StringComparison.Ordinal);
         Assert.Contains("control-decision-trace-v1", decisionTrace, StringComparison.Ordinal);
         Assert.Contains("CATEGORY_CODES", decisionTrace, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomControlPipelineGraph", pipelineGraph, StringComparison.Ordinal);
+        Assert.Contains("function compileCanonicalGraph", pipelineGraph, StringComparison.Ordinal);
+        Assert.Contains("function normalizeRules", pipelineGraph, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomControlZoeVeto", zoeVeto, StringComparison.Ordinal);
+        Assert.Contains("function applyZoeVeto", zoeVeto, StringComparison.Ordinal);
+        Assert.Contains("function normalizeVetoRules", zoeVeto, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomControlRuntimePackets", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function actionFromStage", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function idleAction", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function statusFromAction", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function initializedStatus", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function requirePipelineGraph", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("return requirePipelineGraph(\"compileCanonicalGraph\")(profile)", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function requireZoeVeto", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("return requireZoeVeto(\"applyZoeVeto\")(action, state, profile, helpers)", runtimePackets, StringComparison.Ordinal);
+        Assert.DoesNotContain("function normalizeRules", runtimePackets, StringComparison.Ordinal);
+        Assert.DoesNotContain("function normalizeVetoRules", runtimePackets, StringComparison.Ordinal);
+        Assert.DoesNotContain("node(\"aisthesis\"", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function requireRuntimePackets", shim, StringComparison.Ordinal);
         Assert.Contains("requireRuntimePackets(\"actionFromStage\")", shim, StringComparison.Ordinal);
         Assert.Contains("requireRuntimePackets(\"idleAction\")", shim, StringComparison.Ordinal);
@@ -457,17 +509,21 @@ public sealed class DoomWebGuiTests
         Assert.Contains("autoplay/control/evidence.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/arbitration.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/decision-trace.js", vmTest, StringComparison.Ordinal);
+        Assert.Contains("autoplay/control/pipeline-graph.js", vmTest, StringComparison.Ordinal);
+        Assert.Contains("autoplay/control/zoe-veto.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/runtime-packets.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("same-priority arbitration should be deterministic", vmTest, StringComparison.Ordinal);
         Assert.Contains("sensor tensor bridge evidence should select bridge route", vmTest, StringComparison.Ordinal);
-        Assert.Contains("control/objective-routing.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/expression-dsl.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/doom-context.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/evidence.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/arbitration.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/decision-trace.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control/runtime-packets.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
-        Assert.Contains("control-runtime.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/objective-routing.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/expression-dsl.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/doom-context.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/evidence.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/arbitration.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/decision-trace.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/pipeline-graph.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/zoe-veto.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control/runtime-packets.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
+        Assert.Contains("control-runtime.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("const controlRuntimeFactory = self.AIKernelDoomControlRuntime?.create", runtime, StringComparison.Ordinal);
         Assert.Contains("this.autoplayControllerKind = \"control-runtime-shim\"", runtime, StringComparison.Ordinal);
         Assert.Contains("this.controlRuntime.predict(wasmState)", runtime, StringComparison.Ordinal);
@@ -498,7 +554,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("const desired = {", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("for (const [name, keycode] of Object.entries(AUTOPLAY_KEYS))", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("for (const keycode of Object.values(AUTOPLAY_KEYS))", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-action-adapter.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-action-adapter.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_ACTION_ADAPTER_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("native ABI path should be selected", vmTest, StringComparison.Ordinal);
         Assert.Contains("manual move mode should not queue movement keys", vmTest, StringComparison.Ordinal);
@@ -529,7 +585,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("this.autoplayRetryCooldownFrames", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayRetryReason", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayHealthRetryFrames", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-retry-dispatch.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-retry-dispatch.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_RETRY_DISPATCH_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("third retry frame should schedule retry dispatch", vmTest, StringComparison.Ordinal);
     }
@@ -557,7 +613,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("Object.keys(this.sensorInputs).sort()", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("movement-vector", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("sensor !== false", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-sensor-inputs.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-sensor-inputs.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_SENSOR_INPUTS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("vision alias should normalize to visual", vmTest, StringComparison.Ordinal);
     }
@@ -584,7 +640,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("async function validateBinaryBytes", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("async function readBinaryResponse", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("async function sha256", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-binary-assets.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-binary-assets.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_BINARY_ASSETS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("invalid cache entry should emit refresh progress", vmTest, StringComparison.Ordinal);
     }
@@ -615,7 +671,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("function parseSidedefs", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("function summarizeNearestDoor", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("function isDoorSpecial", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-wad-metadata.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-wad-metadata.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_WAD_METADATA_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("missing map should return null", vmTest, StringComparison.Ordinal);
     }
@@ -639,7 +695,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("function fdWrite", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("wasi_snapshot_preview1: {", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("emscripten_sleep: () => 0", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-wasm-imports.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-wasm-imports.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_WASM_IMPORTS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("proc_exit should throw an explicit error", vmTest, StringComparison.Ordinal);
     }
@@ -665,7 +721,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("new Int16Array(this.exports.memory.buffer", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.exports.doom_audio_consume_frames(frames)", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("bridge.playPcm({", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-native-audio.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-native-audio.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_NATIVE_AUDIO_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("muted native audio should still drain without playback", vmTest, StringComparison.Ordinal);
     }
@@ -692,7 +748,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("const bridgeSnapshot = this.readBridgeAuditorySnapshot()", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("Date.parse(snapshot.timestamp || \"\")", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("uploadGpuAudioSnapshot(\"doom.audio\", audio)", runtime, StringComparison.Ordinal);
-        Assert.Contains("doom-auditory-runtime.js?v=20260618-auditoryruntime1", worker, StringComparison.Ordinal);
+        Assert.Contains("doom-auditory-runtime.js?v=20260618-sensorpanel1", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_AUDITORY_RUNTIME_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("fresh higher-energy bridge snapshot should be preferred", vmTest, StringComparison.Ordinal);
     }
@@ -725,14 +781,17 @@ public sealed class DoomWebGuiTests
     public void DoomControlRuntimePackets_DefineProductNeutralExtractionBoundary()
     {
         var root = FindRepoRoot(AppContext.BaseDirectory);
-        var contracts = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlRuntimePackets.cs"));
+        var adapter = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlRuntimeAdapter.cs"));
+        var statePacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlStateTensorPacket.cs"));
+        var actionPacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlActionPacket.cs"));
+        var tracePacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlDecisionTracePacket.cs"));
         var issue = File.ReadAllText(Path.Combine(root, "docs", "issues", "control-wasm-runtime-library-extraction.md"));
 
-        Assert.Contains("IControlRuntimeAdapter", contracts, StringComparison.Ordinal);
-        Assert.Contains("ControlStateTensorPacket", contracts, StringComparison.Ordinal);
-        Assert.Contains("ControlActionPacket", contracts, StringComparison.Ordinal);
-        Assert.Contains("ControlDecisionTracePacket", contracts, StringComparison.Ordinal);
-        Assert.Contains("SemanticScore(string symbol)", contracts, StringComparison.Ordinal);
+        Assert.Contains("IControlRuntimeAdapter", adapter, StringComparison.Ordinal);
+        Assert.Contains("ControlStateTensorPacket", statePacket, StringComparison.Ordinal);
+        Assert.Contains("ControlActionPacket", actionPacket, StringComparison.Ordinal);
+        Assert.Contains("ControlDecisionTracePacket", tracePacket, StringComparison.Ordinal);
+        Assert.Contains("SemanticScore(string symbol)", statePacket, StringComparison.Ordinal);
         Assert.Contains("ControlRuntimeAdapter", issue, StringComparison.Ordinal);
         Assert.Contains("ControlStateTensorPacket", issue, StringComparison.Ordinal);
         Assert.Contains("ControlActionPacket", issue, StringComparison.Ordinal);
@@ -774,9 +833,12 @@ public sealed class DoomWebGuiTests
         var ctg = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "ctg.js"));
         var sensory = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "sensory.js"));
         var visionPalette = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "vision-palette.js"));
+        var phainesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "phainesis.js"));
         var nous = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "nous.js"));
         var phantasia = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "phantasia.js"));
+        var kairos = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kairos.js"));
         var kinesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kinesis.js"));
+        var zoe = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "zoe.js"));
 
         Assert.Contains("window.AIKernelDoomSemantics", semantics.Replace("self.", "window."), StringComparison.Ordinal);
         Assert.Contains("createE1M1SemanticMemory", semantics, StringComparison.Ordinal);
@@ -831,9 +893,16 @@ public sealed class DoomWebGuiTests
         Assert.Contains("scoreEnemyRgb", visionPalette, StringComparison.Ordinal);
         Assert.DoesNotContain("controller.", visionPalette, StringComparison.Ordinal);
 
+        Assert.Contains("window.AIKernelDoomPhainesis", phainesis.Replace("self.", "window."), StringComparison.Ordinal);
+        Assert.Contains("function createPhainomenon(overrides = {})", phainesis, StringComparison.Ordinal);
+        Assert.Contains("function evaluatePhainomenon(input = {})", phainesis, StringComparison.Ordinal);
+        Assert.Contains("function activePhainesisEvents(input = {})", phainesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("controller.", phainesis, StringComparison.Ordinal);
+
         Assert.Contains("window.AIKernelDoomNous", nous.Replace("self.", "window."), StringComparison.Ordinal);
         Assert.Contains("createNousCarrier", nous, StringComparison.Ordinal);
         Assert.Contains("createNousDetectorResult", nous, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomPhainesis?.createPhainomenon", nous, StringComparison.Ordinal);
         Assert.Contains("normalizeNousSensorMap", nous, StringComparison.Ordinal);
         Assert.DoesNotContain("controller.", nous, StringComparison.Ordinal);
 
@@ -843,12 +912,25 @@ public sealed class DoomWebGuiTests
         Assert.Contains("normalizeRelativeDirection", phantasia, StringComparison.Ordinal);
         Assert.DoesNotContain("controller.", phantasia, StringComparison.Ordinal);
 
+        Assert.Contains("window.AIKernelDoomKairos", kairos.Replace("self.", "window."), StringComparison.Ordinal);
+        Assert.Contains("function composeFirstDoorPriorityContext(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("function resolveMonitoringState(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("function resolveKairos(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("function resolvePriorityAxes(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("function normalizePriorityAxes(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("firstDoorAlignmentWindow:", kairos, StringComparison.Ordinal);
+        Assert.Contains("contactUseReady:", kairos, StringComparison.Ordinal);
+        Assert.Contains("firstDoorRouteEvidence", kairos, StringComparison.Ordinal);
+        Assert.Contains("pathosPriority", kairos, StringComparison.Ordinal);
+        Assert.Contains("shouldAdvanceFirstDoor", kairos, StringComparison.Ordinal);
+        Assert.Contains("state = \"CombatWatch\"", kairos, StringComparison.Ordinal);
+        Assert.DoesNotContain("controller.", kairos, StringComparison.Ordinal);
+
         Assert.Contains("window.AIKernelDoomKinesis", kinesis.Replace("self.", "window."), StringComparison.Ordinal);
         Assert.Contains("actionSignature", kinesis, StringComparison.Ordinal);
         Assert.Contains("actionTurnToX", kinesis, StringComparison.Ordinal);
         Assert.Contains("analyzeRegion9Motion", kinesis, StringComparison.Ordinal);
         Assert.Contains("commandPriority", kinesis, StringComparison.Ordinal);
-        Assert.Contains("composeFirstDoorContext", kinesis, StringComparison.Ordinal);
         Assert.Contains("createCompassSensorSnapshot", kinesis, StringComparison.Ordinal);
         Assert.Contains("createMovementSensorSnapshot", kinesis, StringComparison.Ordinal);
         Assert.Contains("createMotorSensorSnapshot", kinesis, StringComparison.Ordinal);
@@ -860,7 +942,77 @@ public sealed class DoomWebGuiTests
         Assert.Contains("resolveMotionIntent", kinesis, StringComparison.Ordinal);
         Assert.Contains("ternaryScore", kinesis, StringComparison.Ordinal);
         Assert.Contains("ternarySigned", kinesis, StringComparison.Ordinal);
+        Assert.Contains("const kairos = input.kairos || {}", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("healthRetryRequested", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("healthLikelyDead", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("weights.pathos", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("const observed = input.observed", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("composeFirstDoorContext", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("firstDoorRouteEvidence", kinesis, StringComparison.Ordinal);
         Assert.DoesNotContain("controller.", kinesis, StringComparison.Ordinal);
+
+        Assert.Contains("window.AIKernelDoomZoe", zoe.Replace("self.", "window."), StringComparison.Ordinal);
+        Assert.Contains("function auditAction(input = {})", zoe, StringComparison.Ordinal);
+        Assert.Contains("function normalizeHealthSignal(health = {})", zoe, StringComparison.Ordinal);
+        Assert.DoesNotContain("controller.", zoe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomBonsai_DelegatesPhainesisEventProjectionToCognitionModule()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var bonsai = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "bonsai.js"));
+        var phainesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "phainesis.js"));
+
+        Assert.Contains("function createPhainomenon(overrides = {})", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requirePhainesisCognition(\"createPhainomenon\")(overrides);", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requirePhainesisCognition(\"evaluatePhainomenon\")({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("controller.phainomenon = evaluateNousDetectorResult", bonsai, StringComparison.Ordinal);
+        Assert.Contains("controller.nousDetectorResult = controller.phainomenon", bonsai, StringComparison.Ordinal);
+        Assert.Contains("phainomenon: this.phainomenon", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return activePhainesisEvents({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requirePhainesisCognition(\"activePhainesisEvents\")(input);", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function requirePhainesisCognition(name)", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function evaluatePhainomenon(input = {})", phainesis, StringComparison.Ordinal);
+        Assert.Contains("function activePhainesisEvents(input = {})", phainesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("function detectLooming", bonsai, StringComparison.Ordinal);
+        Assert.DoesNotContain("function detectStuck", bonsai, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomBonsai_DelegatesZoeHealthVetoAfterKinesisGeneration()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var bonsai = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "bonsai.js"));
+        var kinesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kinesis.js"));
+        var zoe = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "zoe.js"));
+
+        Assert.Contains("const feedback = mapKinesisToposDecision({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("const audited = auditZoeAction(feedback.action", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requireZoeCognition(\"auditAction\")({ action, health });", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function requireZoeCognition(name)", bonsai, StringComparison.Ordinal);
+        Assert.DoesNotContain("input.healthRetryRequested", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("input.healthLikelyDead", kinesis, StringComparison.Ordinal);
+        Assert.Contains("function auditAction(input = {})", zoe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomBonsai_DelegatesKairosPriorityAxesBeforeKinesisGeneration()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var bonsai = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "bonsai.js"));
+        var kairos = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kairos.js"));
+        var kinesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kinesis.js"));
+
+        Assert.Contains("const kairos = resolveKairosPriorityAxes({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requireKairosCognition(\"resolvePriorityAxes\")(input);", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function requireKairosCognition(name)", bonsai, StringComparison.Ordinal);
+        Assert.Contains("kairos,", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function resolvePriorityAxes(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("pathosDominant", kairos, StringComparison.Ordinal);
+        Assert.Contains("const kairos = input.kairos || {}", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("const weights = input.weights", kinesis, StringComparison.Ordinal);
+        Assert.DoesNotContain("const observed = input.observed", kinesis, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -935,14 +1087,19 @@ public sealed class DoomWebGuiTests
     {
         var root = FindRepoRoot(AppContext.BaseDirectory);
         var bonsai = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "bonsai.js"));
+        var kairos = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kairos.js"));
         var topos = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "topos.js"));
 
-        Assert.Contains("return requireToposCognition(\"resolveKairos\")({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requireKairosCognition(\"resolveMonitoringState\")({", bonsai, StringComparison.Ordinal);
+        Assert.DoesNotContain("return requireToposCognition(\"resolveKairos\")({", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireToposCognition(\"resolveEthosScore\")({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("function resolveMonitoringState(input = {})", kairos, StringComparison.Ordinal);
+        Assert.Contains("state = \"CombatWatch\"", kairos, StringComparison.Ordinal);
         Assert.Contains("function resolveKairos(input = {})", topos, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomKairos?.resolveMonitoringState", topos, StringComparison.Ordinal);
+        Assert.DoesNotContain("state = \"CombatWatch\"", topos, StringComparison.Ordinal);
         Assert.Contains("function resolveEthosScore(input = {})", topos, StringComparison.Ordinal);
         Assert.Contains("objective === \"open-first-door\"", topos, StringComparison.Ordinal);
-        Assert.Contains("state = \"CombatWatch\"", topos, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -967,7 +1124,7 @@ public sealed class DoomWebGuiTests
     }
 
     [Fact]
-    public void DoomBonsai_DelegatesKinesisFirstDoorContextToCognitionModule()
+    public void DoomBonsai_DelegatesFirstDoorPriorityContextToKairosModule()
     {
         var root = FindRepoRoot(AppContext.BaseDirectory);
         var bonsai = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "bonsai.js"));
@@ -975,6 +1132,7 @@ public sealed class DoomWebGuiTests
         var visionPalette = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "vision-palette.js"));
         var nous = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "nous.js"));
         var phantasia = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "phantasia.js"));
+        var kairos = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kairos.js"));
         var kinesis = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "kinesis.js"));
 
         Assert.Contains("return requireKinesisCognition(\"actionSignature\")(action);", bonsai, StringComparison.Ordinal);
@@ -982,8 +1140,10 @@ public sealed class DoomWebGuiTests
         Assert.Contains("return requireKinesisCognition(\"analyzeRegion9Motion\")(previous, current, action);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireKinesisCognition(\"commandPriority\")(reason);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireKinesisCognition(\"describeActionVector\")(action);", bonsai, StringComparison.Ordinal);
-        Assert.Contains("const firstDoorKinesisContext = composeKinesisFirstDoorContext({", bonsai, StringComparison.Ordinal);
-        Assert.Contains("return requireKinesisCognition(\"composeFirstDoorContext\")(input);", bonsai, StringComparison.Ordinal);
+        Assert.Contains("const firstDoorKairosContext = composeKairosFirstDoorContext({", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requireKairosCognition(\"composeFirstDoorPriorityContext\")(input);", bonsai, StringComparison.Ordinal);
+        Assert.DoesNotContain("composeKinesisFirstDoorContext", bonsai, StringComparison.Ordinal);
+        Assert.DoesNotContain("requireKinesisCognition(\"composeFirstDoorContext\")", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireKinesisCognition(\"createCompassSensorSnapshot\")(overrides);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireKinesisCognition(\"createMovementSensorSnapshot\")(overrides);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireKinesisCognition(\"createMotorSensorSnapshot\")(overrides);", bonsai, StringComparison.Ordinal);
@@ -1008,7 +1168,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("return requireVisionPalette(\"scoreComputerRoomPanelPaletteIndex\")(index, rgbaBytes);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireVisionPalette(\"scoreEnemyRgb\")(red, green, blue);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireNousCognition(\"createNousCarrier\")(overrides);", bonsai, StringComparison.Ordinal);
-        Assert.Contains("return requireNousCognition(\"createNousDetectorResult\")(overrides);", bonsai, StringComparison.Ordinal);
+        Assert.Contains("return requirePhainesisCognition(\"createPhainomenon\")(overrides);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requireNousCognition(\"normalizeNousSensorMap\")(sensors);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requirePhantasiaCognition(\"createChronosWindow\")(overrides);", bonsai, StringComparison.Ordinal);
         Assert.Contains("return requirePhantasiaCognition(\"createPhantasiaSnapshot\")(overrides);", bonsai, StringComparison.Ordinal);
@@ -1021,7 +1181,8 @@ public sealed class DoomWebGuiTests
         Assert.Contains("function actionTurnToX(turn)", kinesis, StringComparison.Ordinal);
         Assert.Contains("function analyzeRegion9Motion(previous, current, action)", kinesis, StringComparison.Ordinal);
         Assert.Contains("function commandPriority(reason)", kinesis, StringComparison.Ordinal);
-        Assert.Contains("function composeFirstDoorContext(input = {})", kinesis, StringComparison.Ordinal);
+        Assert.Contains("function composeFirstDoorPriorityContext(input = {})", kairos, StringComparison.Ordinal);
+        Assert.DoesNotContain("function composeFirstDoorContext(input = {})", kinesis, StringComparison.Ordinal);
         Assert.Contains("function createCompassSensorSnapshot(overrides = {})", kinesis, StringComparison.Ordinal);
         Assert.Contains("function createMovementSensorSnapshot(overrides = {})", kinesis, StringComparison.Ordinal);
         Assert.Contains("function createMotorSensorSnapshot(overrides = {})", kinesis, StringComparison.Ordinal);
@@ -1056,9 +1217,10 @@ public sealed class DoomWebGuiTests
         Assert.Contains("function resolveMotionIntent(action)", kinesis, StringComparison.Ordinal);
         Assert.Contains("function ternaryScore(value, low = 0.25, high = 0.62)", kinesis, StringComparison.Ordinal);
         Assert.Contains("function ternarySigned(value, threshold = 0.22)", kinesis, StringComparison.Ordinal);
-        Assert.Contains("firstDoorAlignmentWindow:", kinesis, StringComparison.Ordinal);
-        Assert.Contains("contactUseReady:", kinesis, StringComparison.Ordinal);
-        Assert.Contains("firstDoorRouteEvidence", kinesis, StringComparison.Ordinal);
+        Assert.Contains("firstDoorAlignmentWindow:", kairos, StringComparison.Ordinal);
+        Assert.Contains("contactUseReady:", kairos, StringComparison.Ordinal);
+        Assert.Contains("firstDoorRouteEvidence", kairos, StringComparison.Ordinal);
+        Assert.DoesNotContain("firstDoorRouteEvidence", kinesis, StringComparison.Ordinal);
         Assert.DoesNotContain("return turn === \"right\" ? 1 : (turn === \"left\" ? -1 : 0);", bonsai, StringComparison.Ordinal);
         Assert.DoesNotContain("`${safe.turn || \"none\"}:${safe.move || \"none\"}", bonsai, StringComparison.Ordinal);
         Assert.DoesNotContain("const motion = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);", bonsai, StringComparison.Ordinal);

@@ -23,10 +23,10 @@ CLI は `hintWord=yes` で suspended 状態から始まり、approval 前でも
 `aik help`、`aik status`、provider/capability listing などの標準コマンドは
 利用できます。
 
-`DoomWeb` は `DOOM1.WAD`、Bonsai model weights、生成済み `doom.wasm`
-などの第三者バイナリを含みません。公開デプロイでは、それらのファイルを
-リポジトリ外でミラーし、対応する manifest、checksum、consent text、
-license notice を公開する必要があります。
+`DoomWeb` は `DOOM1.WAD` や Bonsai model weights などの WAD/model
+バイナリを含みません。公開 0.1.2 Web demo では、生成済み `doom.wasm`
+artifact を repository に含め、deployment manifest、checksum、対応 source
+recipe、patch、build script、consent text、license notice と一緒に管理します。
 
 開発者向けの読み順は、[ドキュメント](README-ja.md) から始め、
 [アーキテクチャ](architecture-ja.md)、[Web Runtime](web-runtime-ja.md)、

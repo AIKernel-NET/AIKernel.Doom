@@ -2,7 +2,10 @@
 
 `DoomWasm.Native` contains the AIKernel DOOM WASM native overlay for Emscripten.
 
-It does not include DOOM engine source, WAD files, or a generated `doom.wasm`.
+It does not include WAD files. The public 0.1.2 Web demo includes the generated
+`src/DoomWeb/wwwroot/demo/doom/doom.wasm` artifact; this native project keeps the
+source recipe, patches, build scripts, and GPL notice material required to
+rebuild and audit that artifact.
 
 ## Build Policy
 

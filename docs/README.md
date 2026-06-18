@@ -14,8 +14,10 @@ and evidence-driven Observer ROM development to a real interactive workload.
 
 This documentation is written for developers who want to understand or reuse
 the implementation techniques. The repository is a demo sample, not a packaged
-DOOM distribution. It does not commit third-party runtime artifacts such as
-`DOOM1.WAD`, Bonsai GGUF model files, or generated `doom.wasm` binaries.
+DOOM distribution. It does not commit WAD or model runtime artifacts such as
+`DOOM1.WAD` or Bonsai GGUF model files. The public 0.1.2 Web demo intentionally
+commits the generated `doom.wasm` artifact together with its manifest,
+corresponding source recipe, patches, build scripts, and license notices.
 
 ## Cross-Repository Alignment
 
@@ -107,10 +109,10 @@ The repository does not include:
 - commercial DOOM WADs,
 - shareware `DOOM1.WAD` binaries,
 - Bonsai model weights,
-- generated `doom.wasm` artifacts,
 - browser cache contents,
 - optimizer telemetry artifacts.
 
-Deployment operators must host runtime artifacts separately, publish manifests
-and license notices, and keep runtime consent text aligned with the hosted
-files.
+Deployment operators must host WAD and model artifacts separately, publish
+manifests and license notices, and keep runtime consent text aligned with the
+hosted files. The committed `doom.wasm` public demo artifact remains covered by
+the GPL corresponding-source materials in this repository.

@@ -298,63 +298,24 @@
     return "none";
   }
 
-  function number(value, fallback = 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  function composeFirstDoorContext(input = {}) {
-    const firstDoorContext = Boolean(input.firstDoorContext);
-    const depthEstimate = number(input.depthEstimate, 1);
-    const useDepth = number(input.firstDoorUseDepth);
-    const useSignatureThreshold = number(input.firstDoorUseSignatureThreshold);
-    const retrySignatureTolerance = number(input.firstDoorRetrySignatureTolerance);
-    const alignmentScore = number(input.firstDoorAlignmentScore);
-    const use3x3Score = number(input.firstDoorUse3x3Score);
-    const corridorSignature = number(input.firstDoorCorridorSignature);
-    const firstDoorRouteEvidence = Math.max(
-      corridorSignature,
-      number(input.firstDoorVision9x9Score),
-      number(input.spawnCorridorGapScore));
-    const alignmentReady = number(input.routeEvidence) >= 0.38
-      || use3x3Score >= alignmentScore - 0.08
-      || corridorSignature >= useSignatureThreshold - retrySignatureTolerance;
-    const contactReady = use3x3Score >= alignmentScore
-      || corridorSignature >= useSignatureThreshold - retrySignatureTolerance;
-
-    return {
-      firstDoorContext,
-      firstDoorAlignmentWindow: firstDoorContext
-        && depthEstimate >= 0.18
-        && depthEstimate <= useDepth + 0.18
-        && number(input.danger) < 0.32
-        && alignmentReady,
-      firstDoorRouteEvidence,
-      contactUseReady: firstDoorContext
-        && depthEstimate <= useDepth + 0.06
-        && number(input.pathos) < 0.58
-        && contactReady
-        && number(input.useCooldown) === 0
-        && !input.firstDoorUseAttempted,
-      depthEstimate,
-      wallHugSide: input.wallHugSide === "left" || input.wallHugSide === "right" ? input.wallHugSide : "none"
-    };
-  }
-
   function mapToposDecision(input = {}) {
     const safe = normalizeAction(input.action);
-    if (!input.enabled || safe.fire || input.healthRetryRequested || input.healthLikelyDead) {
+    if (!input.enabled || safe.fire) {
       return { action: safe, applied: false, reason: "guarded" };
     }
 
     const vector = input.vector || {};
-    const weights = input.weights || {};
-    const dominantAxis = input.dominantAxis || "LOGOS";
-    const pathosDominant = dominantAxis === "PATHOS" || Number(weights.pathos || 0) >= 0.58;
-    const observed = input.observed || {};
-    const danger = Number(observed.danger || 0);
-    const stuck = Number(observed.stuck || 0);
-    const pathos = Number(observed.pathos || 0);
+    const kairos = input.kairos || {};
+    const dominantAxis = kairos.dominantAxis || "LOGOS";
+    const pathosDominant = Boolean(kairos.pathosDominant);
+    const danger = Number(kairos.danger || 0);
+    const stuck = Number(kairos.stuck || 0);
+    const pathos = Number(kairos.pathos || 0);
+    const firstDoorAlignmentWindow = Boolean(kairos.firstDoorAlignmentWindow);
+    const contactUseReady = Boolean(kairos.contactUseReady);
+    const shouldAdvanceFirstDoor = Boolean(kairos.shouldAdvanceFirstDoor);
+    const depthEstimate = Number(kairos.depthEstimate || 1);
+    const wallHugSide = kairos.wallHugSide === "left" || kairos.wallHugSide === "right" ? kairos.wallHugSide : "none";
     let next = { ...safe };
     let applied = false;
     let reason = "none";
@@ -364,14 +325,14 @@
       return { action: normalizeAction(next), applied: false, reason: "use-preserved" };
     }
 
-    if (pathosDominant && pathos >= 0.62 && !input.firstDoorAlignmentWindow) {
-      const stallOnly = danger < 0.32 && stuck >= 0.58 && Number(input.depthEstimate || 1) > 0.46;
+    if (pathosDominant && pathos >= 0.62 && !firstDoorAlignmentWindow) {
+      const stallOnly = danger < 0.32 && stuck >= 0.58 && depthEstimate > 0.46;
       if (stallOnly) {
         next.move = "forward";
         next.run = false;
         next.turn = Math.abs(Number(vector.x || 0)) >= 0.18
           ? turnFromX(vector.x)
-          : (input.wallHugSide === "left" ? "right" : "left");
+          : (wallHugSide === "left" ? "right" : "left");
         applied = true;
         reason = "pathos-stall-wall-follow";
       } else if (Number(vector.y || 0) < -0.28) {
@@ -387,10 +348,6 @@
         reason = reason === "none" ? "pathos-turn-away" : reason;
       }
     } else {
-      const shouldAdvanceFirstDoor = input.firstDoorContext
-        && Number(observed.logos || 0) + Number(observed.ethos || 0) >= pathos + 0.16
-        && Number(input.depthEstimate || 1) >= 0.34
-        && Number(input.firstDoorRouteEvidence || 0) >= 0.48;
       if ((next.move === "none" || String(input.safetyReason || "").startsWith("first-door-reprobe"))
         && Number(vector.y || 0) >= 0.34
         && shouldAdvanceFirstDoor) {
@@ -415,7 +372,7 @@
       }
     }
 
-    if (input.contactUseReady && Math.abs(Number(vector.x || 0)) <= 0.44) {
+    if (contactUseReady && Math.abs(Number(vector.x || 0)) <= 0.44) {
       next.move = "none";
       next.turn = Number(vector.x || 0) > 0.18 ? "right" : (Number(vector.x || 0) < -0.18 ? "left" : "none");
       next.use = true;
@@ -432,7 +389,6 @@
     actionTurnToX,
     analyzeRegion9Motion,
     commandPriority,
-    composeFirstDoorContext,
     createCompassSensorSnapshot,
     createMovementSensorSnapshot,
     createMotorSensorSnapshot,

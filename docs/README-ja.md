@@ -14,8 +14,10 @@ fail-closed な実行時ゲート、Observer ROM による証拠駆動の開発�
 
 このドキュメントは、実装技術を理解し、他の AIKernel デモや Web/WASM
 ランタイムへ応用したい開発者向けです。このリポジトリはデモサンプルであり、
-DOOM の配布パッケージではありません。`DOOM1.WAD`、Bonsai GGUF モデル、
-生成済み `doom.wasm` などの第三者ランタイム成果物はコミットしません。
+DOOM の配布パッケージではありません。`DOOM1.WAD` や Bonsai GGUF モデルは
+コミットしません。公開 0.1.2 Web demo では、生成済み `doom.wasm` artifact を、
+対応 source recipe、patch、build script、manifest、license notice とともに
+意図的にコミットします。
 
 ## リポジトリ横断整合
 
@@ -108,9 +110,10 @@ samples/               Source metadata only
 - commercial DOOM WAD
 - shareware `DOOM1.WAD` バイナリ
 - Bonsai model weights
-- 生成済み `doom.wasm`
 - browser cache
 - optimizer telemetry artifacts
 
-デプロイ運用者は、ランタイム成果物を別途ホストし、manifest、license notice、
-checksum、runtime consent text を実ファイルに合わせて公開する必要があります。
+デプロイ運用者は、WAD/model runtime artifact を別途ホストし、manifest、
+license notice、checksum、runtime consent text を実ファイルに合わせて公開する
+必要があります。同梱する `doom.wasm` public demo artifact は、このリポジトリ内の
+GPL 対応 source materials によって説明されます。

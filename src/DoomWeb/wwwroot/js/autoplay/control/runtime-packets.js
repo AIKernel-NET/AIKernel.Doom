@@ -16,6 +16,24 @@
     return value;
   }
 
+  function requirePipelineGraph(name) {
+    const fn = self.AIKernelDoomControlPipelineGraph?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomControlPipelineGraph.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireZoeVeto(name) {
+    const fn = self.AIKernelDoomControlZoeVeto?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomControlZoeVeto.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
   function turnFromYaw(yaw, numberFn = number) {
     const value = numberFn(yaw, 0);
     return value > 0 ? "right" : (value < 0 ? "left" : "none");
@@ -23,6 +41,14 @@
 
   function strategyNameFromContext(context, fallback) {
     return context?.profile?.pipeline?.name || context?.profile?.strategyName || fallback || "DynamicPipeline";
+  }
+
+  function compileCanonicalGraph(profile = {}) {
+    return requirePipelineGraph("compileCanonicalGraph")(profile);
+  }
+
+  function applyZoeVeto(action, state, profile, helpers = {}) {
+    return requireZoeVeto("applyZoeVeto")(action, state, profile, helpers);
   }
 
   function actionFromStage(context, stage, helpers = {}) {
@@ -49,6 +75,8 @@
       objective: stage?.objective || "idle",
       strategyPriority: numberFn(stage?.priority, 0),
       evidenceScore: evidenceScore(context, stage),
+      zoeVetoed: false,
+      svcEvent: "none",
       semanticScores: semanticScores(context?.state, context?.profile)
     };
   }
@@ -68,6 +96,8 @@
       objective: "idle",
       strategyPriority: 0,
       evidenceScore: 0,
+      zoeVetoed: false,
+      svcEvent: "none",
       semanticScores: semanticScores(state || {}, profile)
     };
   }
@@ -101,13 +131,16 @@
       objective: action?.objective || "idle",
       strategyPriority: number(action?.strategyPriority, 0),
       evidenceScore: number(action?.evidenceScore, 0),
+      zoeVetoed: Boolean(action?.zoeVetoed),
+      svcEvent: action?.svcEvent || "none",
+      graph: helpers.graph || compileCanonicalGraph(context?.profile),
       decisionTrace,
       semanticScores: action?.semanticScores || {},
       stageEvaluations,
       predictions: predictions || 0,
       lastLatencyMs: 0,
       lastError: "",
-      safetyReason: "none"
+      safetyReason: action?.safetyReason || "none"
     };
   }
 
@@ -138,6 +171,7 @@
       controlPipeline: "initialized",
       stage: "initialized",
       objective: "idle",
+      graph: options.graph || null,
       decisionTrace,
       semanticScores: {},
       stageEvaluations: [],
@@ -149,10 +183,13 @@
   }
 
   self.AIKernelDoomControlRuntimePackets = Object.freeze({
+    applyZoeVeto,
     actionFromStage,
+    compileCanonicalGraph,
     idleAction,
     statusFromAction,
     initializedStatus,
     turnFromYaw
   });
+
 })();

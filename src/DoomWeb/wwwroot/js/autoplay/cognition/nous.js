@@ -48,11 +48,16 @@
   }
 
   function createNousDetectorResult(overrides = {}) {
+    const createPhainomenon = self.AIKernelDoomPhainesis?.createPhainomenon;
+    if (typeof createPhainomenon === "function") {
+      return createPhainomenon(overrides);
+    }
+
     return {
       looming: Object.assign({ active: false, direction: null }, overrides.looming || {}),
       damageLocalization: Object.assign({ active: false, direction: null }, overrides.damageLocalization || {}),
       trap: Object.assign({ active: false, kind: null }, overrides.trap || {}),
-      stuck: Object.assign({ active: false }, overrides.stuck || {}),
+      stuck: Object.assign({ active: false, evidence: null }, overrides.stuck || {}),
       explorationEntropy: Object.assign({ high: false }, overrides.explorationEntropy || {}),
       itemBacktrack: Object.assign({ suggested: false, targetKind: null }, overrides.itemBacktrack || {}),
       sensorRecovery: Object.assign({ needed: false, reason: null }, overrides.sensorRecovery || {})

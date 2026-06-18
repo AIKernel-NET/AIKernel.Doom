@@ -1,15 +1,11 @@
 namespace AIKernel.Doom.Provider.Autoplay;
 
-using System.Text.Json;
-
 /// <summary>
 /// EN: Profile-backed tuning values for the Doom autoplay control pipeline.
 /// JA: Doom AutoPlay control pipeline の調整値を保持する profile です。
 /// </summary>
 public sealed record AutoplayOptimizationProfile
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     public string Version { get; init; } = "0.1.1-dev1";
 
     public string StrategyName { get; init; } = "SeparatedDoorProbeStrafeRunnerV4";
@@ -91,169 +87,14 @@ public sealed record AutoplayOptimizationProfile
     public static AutoplayOptimizationProfile Default { get; } = new();
 
     public static AutoplayOptimizationProfile Load(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return Default;
-        }
-
-        return FromJson(File.ReadAllText(path));
-    }
+        => AutoplayOptimizationProfileJson.Load(path);
 
     public static AutoplayOptimizationProfile FromJson(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return Default;
-        }
+        => AutoplayOptimizationProfileJson.FromJson(json);
 
-        using var document = JsonDocument.Parse(json);
-        return FromJsonElement(document.RootElement);
-    }
-
-    public static AutoplayOptimizationProfile FromJsonElement(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            return Default;
-        }
-
-        var defaults = Default;
-        var parameters = root.TryGetProperty("parameters", out var parameterElement)
-            && parameterElement.ValueKind == JsonValueKind.Object
-                ? parameterElement
-                : root;
-
-        var pipeline = defaults.Pipeline;
-        if (root.TryGetProperty("pipeline", out var pipelineElement)
-            && pipelineElement.ValueKind == JsonValueKind.Object)
-        {
-            pipeline = pipelineElement.Deserialize<AutoplayPipelineDefinition>(JsonOptions) ?? pipeline;
-        }
-
-        return defaults with
-        {
-            Version = ReadString(root, root, "version", defaults.Version),
-            StrategyName = ReadString(root, root, "strategyName", defaults.StrategyName),
-            Pipeline = pipeline,
-            DoorAimToleranceDegrees = ReadInt(parameters, root, "doorAimToleranceDegrees", defaults.DoorAimToleranceDegrees),
-            DoorSoftAimToleranceDegrees = ReadInt(parameters, root, "doorSoftAimToleranceDegrees", defaults.DoorSoftAimToleranceDegrees),
-            DoorAimYawDegrees = ReadInt(parameters, root, "doorAimYawDegrees", defaults.DoorAimYawDegrees),
-            DoorAimFrames = ReadInt(parameters, root, "doorAimFrames", defaults.DoorAimFrames),
-            DoorApproachFrames = ReadInt(parameters, root, "doorApproachFrames", defaults.DoorApproachFrames),
-            DoorSettleFrames = ReadInt(parameters, root, "doorSettleFrames", defaults.DoorSettleFrames),
-            DoorUseHoldFrames = ReadInt(parameters, root, "doorUseHoldFrames", defaults.DoorUseHoldFrames),
-            EmergencyStuckTicks = ReadInt(parameters, root, "emergencyStuckTicks", defaults.EmergencyStuckTicks),
-            DoorProbeStuckTicks = ReadInt(parameters, root, "doorProbeStuckTicks", defaults.DoorProbeStuckTicks),
-            DoorUseDepth = ReadFloat(parameters, root, "doorUseDepth", defaults.DoorUseDepth),
-            DoorApproachDepth = ReadFloat(parameters, root, "doorApproachDepth", defaults.DoorApproachDepth),
-            BlockedDepth = ReadFloat(parameters, root, "blockedDepth", defaults.BlockedDepth),
-            CombatFaceThreshold = ReadFloat(parameters, root, "combatFaceThreshold", defaults.CombatFaceThreshold),
-            CombatAlertFrames = ReadInt(parameters, root, "combatAlertFrames", defaults.CombatAlertFrames),
-            CombatAlertPeakConfidence = ReadFloat(parameters, root, "combatAlertPeakConfidence", defaults.CombatAlertPeakConfidence),
-            CombatAlertMaxDepth = ReadFloat(parameters, root, "combatAlertMaxDepth", defaults.CombatAlertMaxDepth),
-            DarkZoneScoreThreshold = ReadFloat(parameters, root, "darkZoneScoreThreshold", defaults.DarkZoneScoreThreshold),
-            DarkZoneLumaThreshold = ReadFloat(parameters, root, "darkZoneLumaThreshold", defaults.DarkZoneLumaThreshold),
-            DarkZoneConfirmFrames = ReadInt(parameters, root, "darkZoneConfirmFrames", defaults.DarkZoneConfirmFrames),
-            DoorTransitionArmedFrames = ReadInt(parameters, root, "doorTransitionArmedFrames", defaults.DoorTransitionArmedFrames),
-            CombatYawDegrees = ReadInt(parameters, root, "combatYawDegrees", defaults.CombatYawDegrees),
-            LowHealthThreshold = ReadInt(parameters, root, "lowHealthThreshold", defaults.LowHealthThreshold),
-            EmergencyEscapeYawDegrees = ReadInt(parameters, root, "emergencyEscapeYawDegrees", defaults.EmergencyEscapeYawDegrees),
-            WallAwayYawDegrees = ReadInt(parameters, root, "wallAwayYawDegrees", defaults.WallAwayYawDegrees),
-            OpenCruiseYawDegrees = ReadInt(parameters, root, "openCruiseYawDegrees", defaults.OpenCruiseYawDegrees),
-            EnableStrafeRun = ReadBool(parameters, root, "enableStrafeRun", defaults.EnableStrafeRun),
-            OpenCruiseWallVectorDeadZone = ReadFloat(parameters, root, "openCruiseWallVectorDeadZone", defaults.OpenCruiseWallVectorDeadZone),
-            FirstDoorRushFrames = ReadInt(parameters, root, "firstDoorRushFrames", defaults.FirstDoorRushFrames),
-            FirstDoorRushDepth = ReadFloat(parameters, root, "firstDoorRushDepth", defaults.FirstDoorRushDepth),
-            FirstDoorRushWallVectorLimit = ReadFloat(parameters, root, "firstDoorRushWallVectorLimit", defaults.FirstDoorRushWallVectorLimit),
-            FirstDoorBearingFrames = ReadInt(parameters, root, "firstDoorBearingFrames", defaults.FirstDoorBearingFrames),
-            MapRushLookoutFrames = ReadInt(parameters, root, "mapRushLookoutFrames", defaults.MapRushLookoutFrames),
-            MapRushBackoffFrames = ReadInt(parameters, root, "mapRushBackoffFrames", defaults.MapRushBackoffFrames),
-            MapRushOpenWallVectorLimit = ReadFloat(parameters, root, "mapRushOpenWallVectorLimit", defaults.MapRushOpenWallVectorLimit),
-            MapRushOpenDelta = ReadFloat(parameters, root, "mapRushOpenDelta", defaults.MapRushOpenDelta),
-            MapDoorSweepFrames = ReadInt(parameters, root, "mapDoorSweepFrames", defaults.MapDoorSweepFrames)
-        };
-    }
+    public static AutoplayOptimizationProfile FromJsonElement(System.Text.Json.JsonElement root)
+        => AutoplayOptimizationProfileJson.FromJsonElement(root);
 
     public IReadOnlyDictionary<string, object> ToParameterDictionary()
-        => new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            ["doorAimToleranceDegrees"] = DoorAimToleranceDegrees,
-            ["doorSoftAimToleranceDegrees"] = DoorSoftAimToleranceDegrees,
-            ["doorAimYawDegrees"] = DoorAimYawDegrees,
-            ["doorAimFrames"] = DoorAimFrames,
-            ["doorApproachFrames"] = DoorApproachFrames,
-            ["doorSettleFrames"] = DoorSettleFrames,
-            ["doorUseHoldFrames"] = DoorUseHoldFrames,
-            ["emergencyStuckTicks"] = EmergencyStuckTicks,
-            ["doorProbeStuckTicks"] = DoorProbeStuckTicks,
-            ["doorUseDepth"] = DoorUseDepth,
-            ["doorApproachDepth"] = DoorApproachDepth,
-            ["blockedDepth"] = BlockedDepth,
-            ["combatFaceThreshold"] = CombatFaceThreshold,
-            ["combatAlertFrames"] = CombatAlertFrames,
-            ["combatAlertPeakConfidence"] = CombatAlertPeakConfidence,
-            ["combatAlertMaxDepth"] = CombatAlertMaxDepth,
-            ["darkZoneScoreThreshold"] = DarkZoneScoreThreshold,
-            ["darkZoneLumaThreshold"] = DarkZoneLumaThreshold,
-            ["darkZoneConfirmFrames"] = DarkZoneConfirmFrames,
-            ["doorTransitionArmedFrames"] = DoorTransitionArmedFrames,
-            ["combatYawDegrees"] = CombatYawDegrees,
-            ["lowHealthThreshold"] = LowHealthThreshold,
-            ["emergencyEscapeYawDegrees"] = EmergencyEscapeYawDegrees,
-            ["wallAwayYawDegrees"] = WallAwayYawDegrees,
-            ["openCruiseYawDegrees"] = OpenCruiseYawDegrees,
-            ["enableStrafeRun"] = EnableStrafeRun,
-            ["openCruiseWallVectorDeadZone"] = OpenCruiseWallVectorDeadZone,
-            ["firstDoorRushFrames"] = FirstDoorRushFrames,
-            ["firstDoorRushDepth"] = FirstDoorRushDepth,
-            ["firstDoorRushWallVectorLimit"] = FirstDoorRushWallVectorLimit,
-            ["firstDoorBearingFrames"] = FirstDoorBearingFrames,
-            ["mapRushLookoutFrames"] = MapRushLookoutFrames,
-            ["mapRushBackoffFrames"] = MapRushBackoffFrames,
-            ["mapRushOpenWallVectorLimit"] = MapRushOpenWallVectorLimit,
-            ["mapRushOpenDelta"] = MapRushOpenDelta,
-            ["mapDoorSweepFrames"] = MapDoorSweepFrames
-        };
-
-    private static string ReadString(JsonElement primary, JsonElement fallbackContainer, string key, string fallback)
-        => TryGet(primary, fallbackContainer, key, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? fallback
-            : fallback;
-
-    private static int ReadInt(JsonElement primary, JsonElement fallbackContainer, string key, int fallback)
-        => TryGet(primary, fallbackContainer, key, out var value) && value.TryGetInt32(out var parsed)
-            ? parsed
-            : fallback;
-
-    private static float ReadFloat(JsonElement primary, JsonElement fallbackContainer, string key, float fallback)
-        => TryGet(primary, fallbackContainer, key, out var value) && value.TryGetSingle(out var parsed)
-            ? parsed
-            : fallback;
-
-    private static bool ReadBool(JsonElement primary, JsonElement fallbackContainer, string key, bool fallback)
-        => TryGet(primary, fallbackContainer, key, out var value)
-            ? value.ValueKind switch
-            {
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => fallback
-            }
-            : fallback;
-
-    private static bool TryGet(JsonElement primary, JsonElement fallbackContainer, string key, out JsonElement value)
-    {
-        if (primary.ValueKind == JsonValueKind.Object && primary.TryGetProperty(key, out value))
-        {
-            return true;
-        }
-
-        if (fallbackContainer.ValueKind == JsonValueKind.Object && fallbackContainer.TryGetProperty(key, out value))
-        {
-            return true;
-        }
-
-        value = default;
-        return false;
-    }
+        => AutoplayOptimizationProfileParameters.ToDictionary(this);
 }

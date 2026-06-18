@@ -39,8 +39,11 @@ assert(sensors?.setEnabled, "sensor input module should export setEnabled");
 
 const map = sensors.createMap();
 assert(map.visual.conceptName === "Aisthesis", "visual should be classified as Aisthesis");
+assert(map.movement.conceptName === "Aisthesis", "movement should be classified as Aisthesis");
+assert(map.compass.conceptName === "Aisthesis", "compass should be classified as Aisthesis");
+assert(map.health.conceptName === "Aisthesis", "health should be classified as Aisthesis");
 assert(map.motor.conceptName === "Kinesis", "motor should be classified as Kinesis");
-assert(map.compass.conceptName === "Hodos", "compass should be classified as Hodos");
+assert(map.spatial.conceptName === "Krisis", "spatial should be classified as Krisis");
 assert(map.spatial.category === "derived", "spatial should be a derived sensor");
 assert(sensors.normalizeKind("vision") === "visual", "vision alias should normalize to visual");
 assert(sensors.normalizeKind("movement-vector") === "movement", "movement-vector alias should normalize to movement");

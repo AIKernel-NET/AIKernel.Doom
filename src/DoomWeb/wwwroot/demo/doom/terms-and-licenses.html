@@ -176,12 +176,14 @@
             this page should identify its location.
         </p>
         <p>
-            This deployment identifies the corresponding source in the public AIKernel.Doom repository and in the
-            deployment manifest at <code>/demo/doom/module.json</code>. The current <code>doom.wasm</code> build
-            uses doomgeneric commit <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code>.
+            This deployment identifies the corresponding source recipe in the public AIKernel.Doom repository and
+            in the deployment manifest at <code>/demo/doom/module.json</code>. The current
+            <code>doom.wasm</code> build uses doomgeneric commit
+            <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code>.
         </p>
         <ul>
-            <li>Upstream source: <code>AIKernel.Doom/src/DoomWasm.Native/third_party/doomgeneric</code></li>
+            <li>Upstream source: <code>https://github.com/ozkl/doomgeneric</code> at commit <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code></li>
+            <li>Source fetch scripts: <code>AIKernel.Doom/src/DoomWasm.Native/tools/fetch-doomgeneric.ps1</code> and <code>fetch-doomgeneric.sh</code></li>
             <li>AIKernel overlay source: <code>AIKernel.Doom/src/DoomWasm.Native/src</code></li>
             <li>WASM build scripts: <code>AIKernel.Doom/src/DoomWasm.Native/build.ps1</code>, <code>build.sh</code>, and <code>Makefile</code></li>
             <li>Patch record: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-aikernel.patch</code></li>
@@ -470,13 +472,14 @@
                 デプロイマニフェストまたはこのページでその場所を識別する必要があります。
             </p>
             <p>
-                本デプロイの対応ソースは、公開される AIKernel.Doom リポジトリと
+                本デプロイの対応ソースの再現手順は、公開される AIKernel.Doom リポジトリと
                 <code>/demo/doom/module.json</code> のデプロイマニフェストから識別できます。
                 現在の <code>doom.wasm</code> は doomgeneric commit
                 <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code> を使用してビルドされています。
             </p>
             <ul>
-                <li>Upstream source: <code>AIKernel.Doom/src/DoomWasm.Native/third_party/doomgeneric</code></li>
+                <li>Upstream source: <code>https://github.com/ozkl/doomgeneric</code> commit <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code></li>
+                <li>Source fetch scripts: <code>AIKernel.Doom/src/DoomWasm.Native/tools/fetch-doomgeneric.ps1</code> and <code>fetch-doomgeneric.sh</code></li>
                 <li>AIKernel overlay source: <code>AIKernel.Doom/src/DoomWasm.Native/src</code></li>
                 <li>WASM build scripts: <code>AIKernel.Doom/src/DoomWasm.Native/build.ps1</code>, <code>build.sh</code>, <code>Makefile</code></li>
                 <li>Patch record: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-aikernel.patch</code></li>

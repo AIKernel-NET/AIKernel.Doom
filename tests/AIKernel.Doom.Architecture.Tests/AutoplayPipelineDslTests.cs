@@ -107,6 +107,508 @@ public sealed class AutoplayPipelineDslTests
     }
 
     [Fact]
+    public void PhilosophicalPipelineContracts_DefineAisthesisPhainesisNousToposKairosKinesisZoeOrder()
+    {
+        var frame = new SensorFrame
+        {
+            SensorTensor = AutoplaySensorTensor.FromChannels(("semantic.door", 0.8f)),
+            Health = new HealthSignal { Health = 50, Source = "aisthesis.health" }
+        };
+        var phainomenon = new Phainomenon
+        {
+            Events = new Dictionary<string, float>(StringComparer.Ordinal)
+            {
+                ["looming"] = 0.7f,
+                ["stuck"] = 0.2f
+            }
+        };
+        var nous = new MeaningVectorPacket
+        {
+            Source = phainomenon,
+            MeaningVectors = new Dictionary<string, float>(StringComparer.Ordinal)
+            {
+                ["loomingVector"] = phainomenon.EventScore("looming")
+            }
+        };
+        var topos = new ToposDecisionVector
+        {
+            LogosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["route"] = 0.9f },
+            PathosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["danger"] = 0.7f },
+            EthosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["objective"] = 0.8f },
+            Decision = "open-door"
+        };
+        var kairos = new PriorityAxes
+        {
+            PathosPriority = 0.7f,
+            EthosPriority = 0.8f,
+            LogosPriority = 0.9f,
+            SelectedAxis = "logos"
+        };
+        var kinesis = new ActionVector { MoveForward = true, Source = "kinesis" };
+        var zoe = new ZoeAuditResult { Action = kinesis };
+
+        Assert.Equal(0.8f, frame.SensorTensor.SemanticScore("door"), precision: 2);
+        Assert.Equal(0.7f, phainomenon.EventScore("looming"), precision: 2);
+        Assert.Equal(0.7f, nous.MeaningVectors["loomingVector"], precision: 2);
+        Assert.Equal("open-door", topos.Decision);
+        Assert.Equal("logos", kairos.SelectedAxis);
+        Assert.True(zoe.Action.MoveForward);
+        Assert.False(zoe.Vetoed);
+    }
+
+    [Fact]
+    public void PhilosophicalPipelineContracts_KeepZoeHealthOnlyAndDeprecateLegacyDet()
+    {
+        var zoe = typeof(IZoe).GetMethod(nameof(IZoe.Audit));
+        Assert.NotNull(zoe);
+        Assert.Equal(typeof(ZoeAuditResult), zoe.ReturnType);
+        Assert.Equal(new[] { typeof(ActionVector), typeof(HealthSignal) }, zoe.GetParameters().Select(parameter => parameter.ParameterType).ToArray());
+
+#pragma warning disable CS0618
+        var obsolete = typeof(ILegacyDetAdapter)
+            .GetCustomAttributes(typeof(ObsoleteAttribute), inherit: false)
+            .OfType<ObsoleteAttribute>()
+            .SingleOrDefault();
+#pragma warning restore CS0618
+        Assert.NotNull(obsolete);
+        Assert.Contains("IPhainesis", obsolete.Message, StringComparison.Ordinal);
+        Assert.Contains("Phainomenon", obsolete.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PhilosophicalAutoplayPipeline_ExecutesStagesInCanonicalOrder()
+    {
+        var calls = new List<string>();
+        var frame = new SensorFrame
+        {
+            SensorTensor = AutoplaySensorTensor.FromChannels(("vision.enemy", 0.75f)),
+            Health = new HealthSignal { Health = 8, IsLikelyFatal = true }
+        };
+        var pipeline = new PhilosophicalAutoplayPipeline(
+            new SpyPhainesis(calls),
+            new SpyNous(calls),
+            new SpyTopos(calls),
+            new SpyKairos(calls),
+            new SpyKinesis(calls),
+            new SpyZoe(calls));
+
+        var result = pipeline.Execute(frame);
+
+        Assert.Equal(["phainesis", "nous", "topos", "kairos", "kinesis", "zoe"], calls);
+        Assert.True(result.Vetoed);
+        Assert.Equal("fatal-avoidance", result.Reason);
+        Assert.False(result.Action.MoveForward);
+        Assert.Equal("zoe", result.Action.Source);
+    }
+
+    [Fact]
+    public void DynamicPipelineCompiler_BuildsCanonicalFourLayerGraphFromProfileDsl()
+    {
+        var result = DynamicPipelineCompiler.Compile(new AutoplayPipelineDefinition
+        {
+            Aisthesis = new AutoplayAisthesisDefinition
+            {
+                Sensors = ["visual", "movement", "health"]
+            },
+            Noesis = new AutoplayNoesisDefinition
+            {
+                Phainesis = new AutoplayPhainesisDefinition
+                {
+                    Events =
+                    [
+                        new() { Event = "looming", From = "visual" },
+                        new() { Event = "stuck", From = "movement" }
+                    ]
+                },
+                Nous = new AutoplayNousDefinition
+                {
+                    Vectors =
+                    [
+                        new() { Vector = "loomingVector", From = "looming" },
+                        new() { Vector = "stuckVector", From = "stuck" }
+                    ]
+                }
+            },
+            Krisis = new AutoplayKrisisDefinition
+            {
+                Kairos = new AutoplayKairosDefinition
+                {
+                    Priorities = ["pathos", "ethos", "logos"]
+                }
+            },
+            Kinesis = new AutoplayKinesisLayerDefinition
+            {
+                Kinesis = new AutoplayKinesisDefinition
+                {
+                    Actions = ["moveForward", "turnYaw", "shoot"]
+                },
+                Zoe = new AutoplayZoeDefinition
+                {
+                    VetoRules =
+                    [
+                        new() { When = "hp < 10" },
+                        new() { When = "lethalRisk > 0.7" }
+                    ]
+                }
+            }
+        });
+
+        Assert.Empty(result.Diagnostics);
+        Assert.True(result.Graph.IsCanonical);
+        Assert.Equal(
+            ["Aisthesis", "Phainesis", "Nous", "Topos", "Kairos", "Kinesis", "Zoe"],
+            result.Graph.Nodes.Select(node => node.Stage.ToString()).ToArray());
+        Assert.Equal(["health"], result.Graph.Nodes.Single(node => node.Stage == DynamicPipelineStageKind.Zoe).Inputs);
+        Assert.Contains("pathos", result.Graph.Nodes.Single(node => node.Stage == DynamicPipelineStageKind.Kairos).Outputs);
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunAisthesis)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunPhainesis)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunNous)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunTopos)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunKairos)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunKinesis)));
+        Assert.NotNull(typeof(DynamicPipelineEvaluator).GetMethod(nameof(DynamicPipelineEvaluator.RunZoe)));
+    }
+
+    [Fact]
+    public void AutoplayPipelineDsl_SourceFiles_KeepDefinitionsSeparateFromCompilerRuntime()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var profile = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayOptimizationProfile.cs"));
+        var profileJson = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayOptimizationProfileJson.cs"));
+        var profileJsonParameters = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayOptimizationProfileJsonParameters.cs"));
+        var profileJsonReader = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayOptimizationProfileJsonReader.cs"));
+        var profileParameterCatalog = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayOptimizationProfileParameters.cs"));
+        var sensorFusion = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplaySensorFusion.cs"));
+        var sensorTensor = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplaySensorTensor.cs"));
+        var sensorTensorIcd = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplaySensorTensorIcd.cs"));
+        var actionContracts = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayActionContracts.cs"));
+        var controlRuntimeAdapter = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlRuntimeAdapter.cs"));
+        var controlStateTensorPacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlStateTensorPacket.cs"));
+        var controlActionPacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlActionPacket.cs"));
+        var controlDecisionTracePacket = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "ControlDecisionTracePacket.cs"));
+        var philosophicalPackets = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalPipelinePackets.cs"));
+        var philosophicalInterfaces = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalPipelineInterfaces.cs"));
+        var philosophicalPipeline = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalAutoplayPipeline.cs"));
+        var legacyDetAdapter = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "LegacyDetAdapter.cs"));
+        var definitions = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDsl.cs"));
+        var stageDefinition = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineStageDefinition.cs"));
+        var semanticDefinitions = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineSemanticDefinitions.cs"));
+        var layerDefinitions = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineLayerDefinitions.cs"));
+        var defaults = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDefaults.cs"));
+        var defaultStages = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDefaultStages.cs"));
+        var actionTemplates = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineActionTemplates.cs"));
+        var compiler = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDslCompiler.cs"));
+        var dslValue = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayDslValue.cs"));
+        var dslSyntax = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayDslExpressionSyntax.cs"));
+        var dslValueComparer = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayDslValueComparer.cs"));
+        var expressionCompiler = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineExpressionCompiler.cs"));
+        var autoplayContextValueResolver = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineContextValueResolver.cs"));
+        var dynamicContextValueResolver = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineContextValueResolver.cs"));
+        var profileParameters = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayProfileParameterResolver.cs"));
+        var pipelineContext = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineContext.cs"));
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineRuntime.cs"));
+        var runtimeStrategy = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineAutoplayStrategy.cs"));
+        var runtimeDecision = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDecision.cs"));
+        var runtimeStage = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "CompiledAutoplayPipelineStage.cs"));
+        var ctgContracts = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgContracts.cs"));
+        var ctgCouncilEvaluator = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgCouncilEvaluator.cs"));
+        var ctgCouncilEvidence = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgCouncilEvidence.cs"));
+        var ctgLogosCouncil = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgLogosCouncil.cs"));
+        var ctgEthosCouncil = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgEthosCouncil.cs"));
+        var ctgPathosCouncil = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgPathosCouncil.cs"));
+        var ctgGovernance = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgGovernance.cs"));
+        var ctgGateDecisionResolver = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgGateDecisionResolver.cs"));
+        var ctgGateOptionsNormalizer = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayCtgGateOptionsNormalizer.cs"));
+        var parser = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineDslParser.cs"));
+        var parserState = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineDslParseState.cs"));
+        var statementParser = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineDslStatementParser.cs"));
+        var builder = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineBuilder.cs"));
+        var graphValidator = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineGraphValidator.cs"));
+        var dynamicDefaults = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineDefaults.cs"));
+        var dynamicLegacyAdapters = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineLegacyAdapters.cs"));
+        var definitionNormalizer = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineDefinitionNormalizer.cs"));
+        var dynamicCompiler = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DynamicPipelineCompiler.cs"));
+
+        Assert.Contains("public sealed record AutoplayOptimizationProfile", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("JsonSerializerOptions", profile, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryGetProperty(\"parameters\"", profile, StringComparison.Ordinal);
+        Assert.Contains("AutoplayOptimizationProfileJson.FromJsonElement", profile, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayOptimizationProfileJson", profileJson, StringComparison.Ordinal);
+        Assert.Contains("TryGetProperty(\"parameters\"", profileJson, StringComparison.Ordinal);
+        Assert.Contains("AutoplayOptimizationProfileJsonParameters.Apply", profileJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("DoorAimToleranceDegrees = ReadInt", profileJson, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayOptimizationProfileJsonParameters", profileJsonParameters, StringComparison.Ordinal);
+        Assert.Contains("DoorAimToleranceDegrees = ReadInt", profileJsonParameters, StringComparison.Ordinal);
+        Assert.Contains("AutoplayOptimizationProfileJsonReader.ReadInt", profileJsonParameters, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static bool TryGet", profileJsonParameters, StringComparison.Ordinal);
+        Assert.DoesNotContain("JsonSerializerOptions", profileJsonParameters, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayOptimizationProfileJsonReader", profileJsonReader, StringComparison.Ordinal);
+        Assert.Contains("private static bool TryGet", profileJsonReader, StringComparison.Ordinal);
+        Assert.Contains("public static float ReadFloat", profileJsonReader, StringComparison.Ordinal);
+        Assert.DoesNotContain("DoorAimToleranceDegrees = ReadInt", profileJsonReader, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayOptimizationProfileParameters", profileParameterCatalog, StringComparison.Ordinal);
+        Assert.Contains("\"doorAimToleranceDegrees\"", profileParameterCatalog, StringComparison.Ordinal);
+        Assert.Contains("AutoplayOptimizationProfileParameters.ToDictionary", profile, StringComparison.Ordinal);
+        Assert.Contains("public sealed record SensorFusion", sensorFusion, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoplaySensorTensorIcd", sensorFusion, StringComparison.Ordinal);
+        Assert.Contains("public readonly record struct AutoplaySensorTensor", sensorTensor, StringComparison.Ordinal);
+        Assert.Contains("AutoplaySensorTensorIcd.SemanticScore(this, symbol)", sensorTensor, StringComparison.Ordinal);
+        Assert.DoesNotContain("public static class AutoplaySensorTensorIcd", sensorTensor, StringComparison.Ordinal);
+        Assert.Contains("public static class AutoplaySensorTensorIcd", sensorTensorIcd, StringComparison.Ordinal);
+        Assert.Contains("public static float SemanticScore", sensorTensorIcd, StringComparison.Ordinal);
+        Assert.Contains("semantic.bridge", sensorTensorIcd, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ActionCommand", actionContracts, StringComparison.Ordinal);
+        Assert.Contains("public interface IAutoplayStrategy", actionContracts, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoplaySensorTensorIcd", actionContracts, StringComparison.Ordinal);
+        Assert.Contains("public interface IControlRuntimeAdapter", controlRuntimeAdapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record ControlStateTensorPacket", controlRuntimeAdapter, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ControlStateTensorPacket", controlStateTensorPacket, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ControlSemanticMemoryPacket", controlStateTensorPacket, StringComparison.Ordinal);
+        Assert.Contains("SemanticScore(string symbol)", controlStateTensorPacket, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record ControlActionPacket", controlStateTensorPacket, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ControlActionPacket", controlActionPacket, StringComparison.Ordinal);
+        Assert.Contains("ControlDecisionTracePacket DecisionTrace", controlActionPacket, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ControlDecisionTracePacket", controlDecisionTracePacket, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ControlStageEvaluationPacket", controlDecisionTracePacket, StringComparison.Ordinal);
+        Assert.Contains("public sealed record SensorFrame", philosophicalPackets, StringComparison.Ordinal);
+        Assert.Contains("public sealed record ZoeAuditResult", philosophicalPackets, StringComparison.Ordinal);
+        Assert.DoesNotContain("public interface IPhainesis", philosophicalPackets, StringComparison.Ordinal);
+        Assert.Contains("public interface IPhainesis", philosophicalInterfaces, StringComparison.Ordinal);
+        Assert.Contains("public interface IZoe", philosophicalInterfaces, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed class PhilosophicalAutoplayPipeline", philosophicalInterfaces, StringComparison.Ordinal);
+        Assert.Contains("public sealed class PhilosophicalAutoplayPipeline", philosophicalPipeline, StringComparison.Ordinal);
+        Assert.Contains("zoe.Audit(action, frame.Health)", philosophicalPipeline, StringComparison.Ordinal);
+        Assert.Contains("public interface ILegacyDetAdapter", legacyDetAdapter, StringComparison.Ordinal);
+        Assert.Contains("Obsolete", legacyDetAdapter, StringComparison.Ordinal);
+        Assert.Contains("public sealed partial record AutoplayPipelineDefinition", definitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record AutoplayPipelineStageDefinition", definitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record AutoplayZoeVetoDefinition", definitions, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayPipelineStageDefinition", stageDefinition, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplaySemanticSymbolDefinition", semanticDefinitions, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayArbitrationDefinition", semanticDefinitions, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayAisthesisDefinition", layerDefinitions, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayZoeVetoDefinition", layerDefinitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed partial record AutoplayPipelineDefinition", stageDefinition, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed partial record AutoplayPipelineDefinition", semanticDefinitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed partial record AutoplayPipelineDefinition", layerDefinitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("public static AutoplayPipelineDefinition Default", definitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("DoorProbeAction", definitions, StringComparison.Ordinal);
+        Assert.Contains("public static AutoplayPipelineDefinition Default", defaults, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineDefaultStages.Create()", defaults, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoplayPipelineActionTemplates.DoorProbe", defaults, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayPipelineDefaultStages", defaultStages, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineActionTemplates.DoorProbe", defaultStages, StringComparison.Ordinal);
+        Assert.Contains("\"bridge-route-cruise\"", defaultStages, StringComparison.Ordinal);
+        Assert.DoesNotContain("DoorProbeAction", defaults, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayPipelineActionTemplates", actionTemplates, StringComparison.Ordinal);
+        Assert.Contains("public static Dictionary<string, string> DoorProbe", actionTemplates, StringComparison.Ordinal);
+        Assert.DoesNotContain("public static AutoplayPipelineDefinition Default", actionTemplates, StringComparison.Ordinal);
+        Assert.DoesNotContain("public static class AutoplayPipelineDslCompiler", definitions, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal sealed class AutoplayPipelineContext", definitions, StringComparison.Ordinal);
+        Assert.Contains("public static class AutoplayPipelineDslCompiler", compiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed class DynamicPipelineAutoplayStrategy", compiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal sealed class AutoplayPipelineContext", compiler, StringComparison.Ordinal);
+        Assert.Contains("public sealed class CompiledAutoplayPipeline", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed class DynamicPipelineAutoplayStrategy", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record AutoplayPipelineDecision", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal sealed record CompiledAutoplayPipelineStage", runtime, StringComparison.Ordinal);
+        Assert.Contains("public sealed class DynamicPipelineAutoplayStrategy", runtimeStrategy, StringComparison.Ordinal);
+        Assert.Contains("CompiledAutoplayPipeline _pipeline", runtimeStrategy, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayPipelineDecision", runtimeDecision, StringComparison.Ordinal);
+        Assert.Contains("public sealed record AutoplayPipelineStageEvaluation", runtimeDecision, StringComparison.Ordinal);
+        Assert.Contains("internal sealed record CompiledAutoplayPipelineStage", runtimeStage, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineStageEvaluation Evaluate", runtimeStage, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal sealed class AutoplayPipelineContext", runtime, StringComparison.Ordinal);
+        Assert.Contains("internal sealed class AutoplayPipelineContext", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("SensorFusion sensor", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("SemanticScore(string symbol)", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineExpressionCompiler.CompileBooleanExpression", compiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static bool Compare", compiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static AutoplayDslValue ResolveValue", compiler, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayPipelineExpressionCompiler", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoplayProfileParameterResolver.Resolve", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("context.Sensor.Health", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("AutoplayDslExpressionSyntax.TryReadComparison", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("AutoplayDslValueComparer.Compare", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineContextValueResolver.Resolve", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineContextValueResolver.Resolve", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static bool Compare", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static AutoplayDslValue ResolveValue", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("Split(\"||\"", expressionCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"doorAimToleranceDegrees\" =>", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayPipelineContextValueResolver", autoplayContextValueResolver, StringComparison.Ordinal);
+        Assert.Contains("AutoplayProfileParameterResolver.Resolve", autoplayContextValueResolver, StringComparison.Ordinal);
+        Assert.Contains("context.Sensor.Health", autoplayContextValueResolver, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineContextValueResolver", dynamicContextValueResolver, StringComparison.Ordinal);
+        Assert.Contains("lethalrisk", dynamicContextValueResolver, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayDslExpressionSyntax", dslSyntax, StringComparison.Ordinal);
+        Assert.Contains("ComparisonOperators", dslSyntax, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayDslValueComparer", dslValueComparer, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayProfileParameterResolver", profileParameters, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"doorAimToleranceDegrees\" =>", profileParameters, StringComparison.Ordinal);
+        Assert.Contains("AutoplayOptimizationProfileParameters.TryGetValue", profileParameters, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal readonly record struct AutoplayDslValue", expressionCompiler, StringComparison.Ordinal);
+        Assert.Contains("internal readonly record struct AutoplayDslValue", dslValue, StringComparison.Ordinal);
+        Assert.Contains("public sealed record CtgProposalPacket", ctgContracts, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed record CtgProposalPacket", ctgGovernance, StringComparison.Ordinal);
+        Assert.Contains("public static class AutoplayCtgGate", ctgGovernance, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgCouncilEvaluator.Evaluate", ctgGovernance, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgGateDecisionResolver.Resolve", ctgGovernance, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgGateOptionsNormalizer.Normalize", ctgGovernance, StringComparison.Ordinal);
+        Assert.DoesNotContain("EvaluateLogos", ctgGovernance, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApplyDecision", ctgGovernance, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgCouncilEvaluator", ctgCouncilEvaluator, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgLogosCouncil.Evaluate", ctgCouncilEvaluator, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgEthosCouncil.Evaluate", ctgCouncilEvaluator, StringComparison.Ordinal);
+        Assert.Contains("AutoplayCtgPathosCouncil.Evaluate", ctgCouncilEvaluator, StringComparison.Ordinal);
+        Assert.DoesNotContain("EvaluateLogos", ctgCouncilEvaluator, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgCouncilEvidence", ctgCouncilEvidence, StringComparison.Ordinal);
+        Assert.Contains("public static float Score", ctgCouncilEvidence, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgLogosCouncil", ctgLogosCouncil, StringComparison.Ordinal);
+        Assert.Contains("objective-action-aligned", ctgLogosCouncil, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgEthosCouncil", ctgEthosCouncil, StringComparison.Ordinal);
+        Assert.Contains("safety-contract-satisfied", ctgEthosCouncil, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgPathosCouncil", ctgPathosCouncil, StringComparison.Ordinal);
+        Assert.Contains("danger-forward-repulsion", ctgPathosCouncil, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgGateDecisionResolver", ctgGateDecisionResolver, StringComparison.Ordinal);
+        Assert.Contains("ApplyDecision", ctgGateDecisionResolver, StringComparison.Ordinal);
+        Assert.Contains("unknown-fail-closed", ctgGateDecisionResolver, StringComparison.Ordinal);
+        Assert.Contains("internal static class AutoplayCtgGateOptionsNormalizer", ctgGateOptionsNormalizer, StringComparison.Ordinal);
+        Assert.Contains("Math.Clamp", ctgGateOptionsNormalizer, StringComparison.Ordinal);
+        Assert.Contains("public static class DynamicPipelineDslParser", parser, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineDslStatementParser.Parse", parser, StringComparison.Ordinal);
+        Assert.DoesNotContain("parts is [\"event\"", parser, StringComparison.Ordinal);
+        Assert.Contains("internal sealed class DynamicPipelineDslParseState", parserState, StringComparison.Ordinal);
+        Assert.Contains("AutoplayPipelineDefinition ToDefinition", parserState, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineDslStatementParser", statementParser, StringComparison.Ordinal);
+        Assert.Contains("parts is [\"event\"", statementParser, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineGraphValidator.Validate", builder, StringComparison.Ordinal);
+        Assert.DoesNotContain("UsesHealthOnly", builder, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineGraphValidator", graphValidator, StringComparison.Ordinal);
+        Assert.Contains("Zoe veto", graphValidator, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineDefinitionNormalizer.Normalize", dynamicCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("DefaultSensors", dynamicCompiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapLegacyBehavior", dynamicCompiler, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineDefinitionNormalizer", definitionNormalizer, StringComparison.Ordinal);
+        Assert.DoesNotContain("DefaultSensors", definitionNormalizer, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapLegacyBehavior", definitionNormalizer, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineDefaults.Sensors", definitionNormalizer, StringComparison.Ordinal);
+        Assert.Contains("DynamicPipelineLegacyAdapters.ApplyDetect", definitionNormalizer, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineDefaults", dynamicDefaults, StringComparison.Ordinal);
+        Assert.Contains("public static readonly string[] Sensors", dynamicDefaults, StringComparison.Ordinal);
+        Assert.Contains("public static readonly ZoeVetoRule[] ZoeVetoRules", dynamicDefaults, StringComparison.Ordinal);
+        Assert.Contains("internal static class DynamicPipelineLegacyAdapters", dynamicLegacyAdapters, StringComparison.Ordinal);
+        Assert.Contains("MapLegacyBehavior", dynamicLegacyAdapters, StringComparison.Ordinal);
+        Assert.DoesNotContain("source.Split", dynamicCompiler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DynamicPipelineDslParser_ReadsExplicitFourLayerBlockStructure()
+    {
+        var result = DynamicPipelineCompiler.CompileScript("""
+            aisthesis {
+              sensor visual
+              sensor movement
+              sensor health
+            }
+            noesis {
+              phainesis {
+                event looming from visual
+                event stuck from movement
+              }
+              nous {
+                vector loomingVector from looming
+                vector stuckVector from stuck
+              }
+            }
+            krisis {
+              topos {
+                vectors LogosVector PathosVector EthosVector ToposDecisionVector
+              }
+              kairos {
+                priority pathos
+                priority ethos
+                priority logos
+              }
+            }
+            kinesis {
+              kinesis {
+                action moveForward
+                action turnYaw
+              }
+              zoe {
+                veto when hp < 10
+              }
+            }
+            """);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(["moveForward", "turnYaw"], result.Ast.Kinesis.Motion.Actions);
+        Assert.Equal(
+            ["LogosVector", "PathosVector", "EthosVector", "ToposDecisionVector"],
+            result.Ast.Krisis.Topos.Vectors);
+        Assert.Equal(["health"], result.Graph.Nodes.Single(node => node.Stage == DynamicPipelineStageKind.Zoe).Inputs);
+    }
+
+    [Fact]
+    public void DynamicPipelineCompiler_BlockDslRejectsWrongOrderAndUndefinedEvents()
+    {
+        var result = DynamicPipelineCompiler.CompileScript("""
+            noesis {
+              phainesis {
+                event looming from visual
+              }
+              nous {
+                vector enemyVector from enemySeen
+              }
+            }
+            aisthesis {
+              sensor visual
+            }
+            krisis {
+              kairos {
+                priority avoid
+              }
+            }
+            kinesis {
+              zoe {
+                veto when hp < 10
+              }
+            }
+            """);
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains("Top-level block order", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains("Undefined Phainesis event 'enemySeen'", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Contains("Invalid Kairos priority axis 'avoid'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DynamicPipelineCompiler_AdaptsDeprecatedDetectHodosAndBehaviorBlocks()
+    {
+#pragma warning disable CS0618
+        var result = DynamicPipelineCompiler.Compile(new AutoplayPipelineDefinition
+        {
+            Detect = [new() { Event = "enemySeen", From = "visual" }],
+            Hodos = [new() { Vector = "route", From = "enemySeen" }],
+            Behavior = ["avoid"],
+            Kinesis = new AutoplayKinesisLayerDefinition
+            {
+                Zoe = new AutoplayZoeDefinition
+                {
+                    VetoRules = [new() { When = "hp < 10" }]
+                }
+            }
+        });
+#pragma warning restore CS0618
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains(result.DeprecationWarnings, warning => warning.Contains("detect", StringComparison.Ordinal));
+        Assert.Contains(result.DeprecationWarnings, warning => warning.Contains("hodos", StringComparison.Ordinal));
+        Assert.Contains(result.DeprecationWarnings, warning => warning.Contains("behavior", StringComparison.Ordinal));
+        Assert.Contains("pathos", result.Ast.Krisis.Kairos.Priorities);
+    }
+
+    [Fact]
     public void DynamicPipelineAutoplayStrategy_CustomDsl_ExecutesCompiledStage()
     {
         var profile = AutoplayOptimizationProfile.Default with
@@ -139,6 +641,49 @@ public sealed class AutoplayPipelineDslTests
         Assert.Equal("TestPipeline", strategy.StrategyName);
         Assert.True(action.MoveBackward);
         Assert.Equal(profile.WallAwayYawDegrees, action.TurnYaw);
+    }
+
+    [Fact]
+    public void DynamicPipelineAutoplayStrategy_ZoeVetoOverridesKinesisAction()
+    {
+        var profile = AutoplayOptimizationProfile.Default with
+        {
+            Pipeline = new AutoplayPipelineDefinition
+            {
+                Name = "ZoeVetoPipeline",
+                Kinesis = new AutoplayKinesisLayerDefinition
+                {
+                    Zoe = new AutoplayZoeDefinition
+                    {
+                        VetoRules = [new() { When = "hp < 10" }]
+                    }
+                },
+                Stages =
+                [
+                    new AutoplayPipelineStageDefinition
+                    {
+                        Id = "unsafe-forward",
+                        Priority = 1,
+                        When = "true",
+                        Action = new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["moveForward"] = "true",
+                            ["attackKey"] = "true"
+                        }
+                    }
+                ]
+            }
+        };
+
+        var strategy = new DynamicPipelineAutoplayStrategy(profile);
+        var decision = strategy.EvaluateTick(
+            new SensorFusion([0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f], 0.9f, 5, 0, "open-space", false, 0, 0),
+            recoveryFrames: 0);
+
+        Assert.True(decision.ZoeVetoed);
+        Assert.Equal("zoe-veto:hp < 10", decision.SvcEvent);
+        Assert.False(decision.Action.MoveForward);
+        Assert.False(decision.Action.AttackKey);
     }
 
     [Fact]
@@ -401,6 +946,96 @@ public sealed class AutoplayPipelineDslTests
 
         Assert.True(action.UseKey);
         Assert.False(action.AttackKey);
+    }
+
+    private sealed class SpyPhainesis(List<string> calls) : IPhainesis
+    {
+        public Phainomenon Extract(SensorFrame frame)
+        {
+            calls.Add("phainesis");
+            Assert.Equal(0.75f, frame.SensorTensor.SemanticScore("enemy"), precision: 2);
+            return new Phainomenon
+            {
+                Events = new Dictionary<string, float>(StringComparer.Ordinal)
+                {
+                    ["enemySeen"] = 0.75f
+                }
+            };
+        }
+    }
+
+    private sealed class SpyNous(List<string> calls) : INous
+    {
+        public MeaningVectorPacket Vectorize(Phainomenon phainomenon)
+        {
+            calls.Add("nous");
+            return new MeaningVectorPacket
+            {
+                Source = phainomenon,
+                MeaningVectors = new Dictionary<string, float>(StringComparer.Ordinal)
+                {
+                    ["enemyVector"] = phainomenon.EventScore("enemySeen")
+                }
+            };
+        }
+    }
+
+    private sealed class SpyTopos(List<string> calls) : ITopos
+    {
+        public ToposDecisionVector Deliberate(MeaningVectorPacket nous)
+        {
+            calls.Add("topos");
+            return new ToposDecisionVector
+            {
+                LogosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["route"] = 0.2f },
+                PathosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["danger"] = nous.MeaningVectors["enemyVector"] },
+                EthosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["objective"] = 0.4f },
+                Decision = "avoid-enemy"
+            };
+        }
+    }
+
+    private sealed class SpyKairos(List<string> calls) : IKairos
+    {
+        public PriorityAxes Prioritize(ToposDecisionVector decision)
+        {
+            calls.Add("kairos");
+            return new PriorityAxes
+            {
+                PathosPriority = decision.PathosVector["danger"],
+                EthosPriority = 0.4f,
+                LogosPriority = 0.2f,
+                SelectedAxis = "pathos"
+            };
+        }
+    }
+
+    private sealed class SpyKinesis(List<string> calls) : IKinesis
+    {
+        public ActionVector Generate(PriorityAxes kairos)
+        {
+            calls.Add("kinesis");
+            Assert.Equal("pathos", kairos.SelectedAxis);
+            return new ActionVector { MoveForward = true, Source = "kinesis" };
+        }
+    }
+
+    private sealed class SpyZoe(List<string> calls) : IZoe
+    {
+        public ZoeAuditResult Audit(ActionVector action, HealthSignal health)
+        {
+            calls.Add("zoe");
+            Assert.True(action.MoveForward);
+            Assert.Equal(8, health.Health);
+            return health.IsLikelyFatal
+                ? new ZoeAuditResult
+                {
+                    Action = action with { MoveForward = false, Source = "zoe" },
+                    Vetoed = true,
+                    Reason = "fatal-avoidance"
+                }
+                : new ZoeAuditResult { Action = action };
+        }
     }
 
     private static CtgProposalPacket CreateProposal(ActionCommand action, IReadOnlyDictionary<string, float> semanticScores)

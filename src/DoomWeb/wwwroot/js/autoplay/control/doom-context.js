@@ -50,6 +50,9 @@
       ? Math.max(-24, Math.min(24, qDelta))
       : wall > 0 ? doorAimYawDegrees : -doorAimYawDegrees;
 
+    const health = number(state?.health, 100);
+    const lethalRisk = number(state?.lethalRisk, health <= 0 ? 1 : Math.max(0, Math.min(1, (10 - health) / 10)));
+
     return {
       profile,
       parameters,
@@ -61,7 +64,9 @@
       values: {
         true: true,
         false: false,
-        health: number(state?.health, 100),
+        health,
+        hp: health,
+        lethalRisk,
         depthSig,
         faceSig: number(state?.faceSig, 0),
         absFaceSig: Math.abs(number(state?.faceSig, 0)),

@@ -35,4 +35,4 @@ dotnet run --project src/DoomOptimizer/DoomOptimizer.csproj
 
 The latest telemetry is written to `artifacts/autoplay/observer-rom-latest.json`. The `artifacts` directory is ignored because it may contain repeated run data.
 
-The repository does not commit hosted third-party runtime artifacts such as `DOOM1.WAD`, Bonsai model weights, or generated `doom.wasm` binaries.
+The repository does not commit hosted WAD or model runtime artifacts such as `DOOM1.WAD` or Bonsai model weights. The public 0.1.2 Web demo intentionally commits `doom.wasm` with its manifest and GPL corresponding-source materials.

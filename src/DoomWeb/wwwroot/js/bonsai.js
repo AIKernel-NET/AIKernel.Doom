@@ -16,12 +16,7 @@
   const SPATIAL_HISTORY_LIMIT = 12;
   const CHRONOS_WINDOW_LIMIT = 32;
   const ITEM_MEMORY_LIMIT = 12;
-  const LOOMING_DELTA_THRESHOLD = 0.18;
-  const DAMAGE_AUDIO_BALANCE_THRESHOLD = 0.18;
-  const TRAP_AUDIO_ENERGY_THRESHOLD = 0.54;
-  const SPATIAL_ENTROPY_REPEAT_THRESHOLD = 5;
   const RESIDENT_MASK_THRESHOLD = 0.16;
-  const HIGH_AUDIO_BAND_THRESHOLD = 0.42;
   const DEPTH_BANDS = 4;
   const FACE_X = 144;
   const FACE_Y = 168;
@@ -386,7 +381,8 @@
       this.spatialHistory = [];
       this.chronosWindow = createChronosWindow();
       this.phantasiaSnapshot = createPhantasiaSnapshot();
-      this.nousDetectorResult = createNousDetectorResult();
+      this.phainomenon = createPhainomenon();
+      this.nousDetectorResult = this.phainomenon;
       this.itemMemory = [];
       this.repeatActionSignature = "";
       this.repeatActionFrames = 0;
@@ -616,7 +612,8 @@
         this.spatialHistory = [];
         this.chronosWindow = createChronosWindow();
         this.phantasiaSnapshot = createPhantasiaSnapshot();
-        this.nousDetectorResult = createNousDetectorResult();
+        this.phainomenon = createPhainomenon();
+        this.nousDetectorResult = this.phainomenon;
         this.itemMemory = [];
         this.repeatActionSignature = "";
         this.repeatActionFrames = 0;
@@ -791,6 +788,7 @@
         ctgObservedScores: this.ctgObservedScores,
         toposDecisionCarrier: this.toposDecisionCarrier,
         nousCarrier: this.nousCarrier,
+        phainomenon: this.phainomenon,
         nousDetectorResult: this.nousDetectorResult,
         phantasiaSnapshot: this.phantasiaSnapshot,
         sensorDetections: this.sensorDetections,
@@ -2776,7 +2774,7 @@
           || this.wallUseProbeStage >= 2;
         const firstDoorSensorStall = this.movementSensorSnapshot?.eventType === "movement-stall"
           && Number(this.movementSensorSnapshot?.confidence || 0) >= 0.55
-          && Boolean(this.nousDetectorResult?.sensorRecovery?.needed || this.nousDetectorResult?.stuck?.active || sensor.stuckTicks >= 1);
+          && Boolean(this.phainomenon?.sensorRecovery?.needed || this.phainomenon?.stuck?.active || sensor.stuckTicks >= 1);
         const firstDoorPatch = this.firstDoorVision9x9Box || null;
         const firstDoorUseAlignment = this.firstDoorUseAlignmentState(firstDoorPatch);
         const firstDoorPatchScore = Number(firstDoorPatch?.score || this.firstDoorVision9x9Score || 0);
@@ -4615,11 +4613,11 @@
         && (this.inputStallFrames >= 2 || Number(this.footObstacleFlickerScore || 0) >= 0.42);
       const cognitionStalled = forwardIntent
         && (this.movementSensorSnapshot?.eventType === "movement-stall"
-          || Boolean(this.nousDetectorResult?.sensorRecovery?.needed));
+          || Boolean(this.phainomenon?.sensorRecovery?.needed));
       const turningSweep = this.motionIntent.includes("turn") && this.motionTurnScore >= turnSweepThreshold;
       const stalled = this.quantizedStallFrames >= turnStuckFrames || this.stuckFrames >= turnStuckFrames || (blocked && motionStalled) || footObstacleStalled || cognitionStalled;
       const corridorStallTurn = stalled
-        && (blocked || motionStalled || footObstacleStalled || cognitionStalled || Boolean(this.nousDetectorResult?.stuck?.active));
+        && (blocked || motionStalled || footObstacleStalled || cognitionStalled || Boolean(this.phainomenon?.stuck?.active));
       const shouldSkirt = !blocked
         && !turningSweep
         && (motionObstacle || footObstacleStalled || this.inputStallFrames >= 3 || this.quantizedStallFrames >= 2 || this.stuckFrames >= 2 || this.targetConfidence >= 0.24);
@@ -6750,8 +6748,9 @@
 
   function hasTrustedCombatEvidence(controller) {
     const trustedEnemy = getTrustedEnemyThreat(controller);
-    const looming = Boolean(controller?.nousDetectorResult?.looming?.active);
-    const damage = Boolean(controller?.nousDetectorResult?.damageLocalization?.active);
+    const phainomenon = controller?.phainomenon || controller?.nousDetectorResult;
+    const looming = Boolean(phainomenon?.looming?.active);
+    const damage = Boolean(phainomenon?.damageLocalization?.active);
     const alertTrusted = Number(controller?.enemyAlertFrames || 0) > 0
       && isTrustedEnemyCluster(controller?.enemyAlertCluster, controller?.enemyAlertDepth)
       && isTrustedEnemyDepth(
@@ -7594,8 +7593,16 @@
     return requirePhantasiaCognition("createPhantasiaSnapshot")(overrides);
   }
 
+  function createPhainomenon(overrides = {}) {
+    return requirePhainesisCognition("createPhainomenon")(overrides);
+  }
+
   function createNousDetectorResult(overrides = {}) {
-    return requireNousCognition("createNousDetectorResult")(overrides);
+    return createPhainomenon(overrides);
+  }
+
+  function activePhainesisEvents(input = {}) {
+    return requirePhainesisCognition("activePhainesisEvents")(input);
   }
 
   function buildPhantasiaSnapshot(controller, frame, timestamp) {
@@ -7702,171 +7709,19 @@
   function evaluateNousDetectorResult(nousCarrier, chronosWindow, spatialHistory, controller) {
     const frames = Array.isArray(chronosWindow?.frames) ? chronosWindow.frames : [];
     const latest = frames.length > 0 ? frames[frames.length - 1] : createPhantasiaSnapshot();
-    const previous = frames.length > 1 ? frames[frames.length - 2] : createPhantasiaSnapshot();
-    const result = createNousDetectorResult();
     const demoRouteGraceActive = isPreDoorDemoRouteGraceActive(controller, latest);
-    let looming = detectLooming(latest, previous, frames);
-    const damageLocalization = detectDamageLocalization(latest, previous, frames);
-    const trap = detectTrap(latest, frames, spatialHistory);
-    let stuck = detectStuck(nousCarrier, latest, frames);
-    const explorationEntropy = detectExplorationEntropy(latest, frames);
-    const itemBacktrack = detectItemBacktrack(controller, latest);
     const preDoorNoCombat = controller?.doorOpenedCount <= 0 && !hasTrustedCombatEvidence(controller);
-    if (preDoorNoCombat && looming.active) {
-      looming = { active: false, direction: null };
-    }
-
-    if (demoRouteGraceActive && stuck.active) {
-      stuck = { active: false, evidence: null };
-    }
-
-    const movementStallEvent = !demoRouteGraceActive
-      && controller?.movementSensorSnapshot?.eventType === "movement-stall"
-      && Number(controller?.movementSensorSnapshot?.confidence || 0) >= 0.74
-      && (Number(latest.stuckFrames || 0) >= 2
-        || Number(latest.inputStallFrames || 0) >= 4
-        || (countRecentLowMotion(frames, 8) >= 6 && Number(latest.temporalDelta || 0) <= 0.06));
-    const recoveryReason = stuck.active
-      ? "intent-result-mismatch"
-      : (movementStallEvent ? "movement-stall" : null);
-
-    result.looming = looming;
-    result.damageLocalization = damageLocalization;
-    result.trap = trap;
-    result.stuck = stuck;
-    result.explorationEntropy = explorationEntropy;
-    result.itemBacktrack = itemBacktrack;
-    result.sensorRecovery = {
-      needed: Boolean(recoveryReason),
-      reason: recoveryReason
-    };
-    return result;
-  }
-
-  function detectLooming(latest, previous, frames) {
-    const current = Number(latest.projectileScore || 0);
-    let baseline = Number(previous.projectileScore || 0);
-    let recentMin = current;
-    let risingFrames = 0;
-    const start = Math.max(0, frames.length - 5);
-    for (let index = start; index < frames.length - 1; index += 1) {
-      const score = Number(frames[index].projectileScore || 0);
-      baseline = Math.max(baseline, score);
-      recentMin = Math.min(recentMin, score);
-      if (index > start && score > Number(frames[index - 1]?.projectileScore || 0) + 0.025) {
-        risingFrames += 1;
-      }
-    }
-
-    const growth = current - baseline;
-    const trendGrowth = current - recentMin;
-    const dynamicSignal = Math.max(Number(latest.dynamicObjectScore || 0), Number(latest.temporalDelta || 0));
-    const flowMagnitude = Math.max(Math.abs(Number(latest.flowX || 0)), Math.abs(Number(latest.flowY || 0)));
-    const notAdvancing = Number(latest.motorForward || 0) <= 0.12;
-    const stableThreat = current >= 0.2 && trendGrowth >= 0.1 && risingFrames >= 2;
-    const active = notAdvancing
-      && current >= 0.16
-      && (growth >= LOOMING_DELTA_THRESHOLD
-        || stableThreat
-        || (current >= 0.28 && growth >= 0.08)
-        || (current >= 0.22 && dynamicSignal >= 0.08 && flowMagnitude >= 0.12));
-    return {
-      active,
-      direction: active ? (latest.projectileDirection || flowDirection(latest.flowX, latest.flowY) || latest.baseDirection) : null
-    };
-  }
-
-  function detectDamageLocalization(latest, previous, frames) {
-    const healthDrop = Number(previous.healthActiveCells || 0) - Number(latest.healthActiveCells || 0);
-    const zeroRise = Number(latest.healthZeroScore || 0) - Number(previous.healthZeroScore || 0);
-    const faceShock = Number(latest.faceDelta || 0) >= COMBAT_FACE_DANGER_DELTA;
-    const blind = Number(latest.enemyConfidence || 0) < 0.28 && Number(latest.projectileScore || 0) < 0.12;
-    const balance = weightedAudioBalance(frames, 8);
-    const audioEvidence = Math.max(Number(latest.audioEnergy || 0), Number(latest.audioMidEnergy || 0), Number(latest.audioHighEnergy || 0));
-    const recentHealthShock = countRecentHealthShock(frames, 8) >= 1;
-    const active = blind
-      && Math.abs(balance) >= DAMAGE_AUDIO_BALANCE_THRESHOLD
-      && audioEvidence >= 0.1
-      && (healthDrop >= 2 || zeroRise >= 0.12 || faceShock || recentHealthShock);
-    return {
-      active,
-      direction: active ? (balance > 0 ? "right" : "left") : null
-    };
-  }
-
-  function detectTrap(latest, frames, spatialHistory) {
-    const audioBursts = countRecentAudioBursts(frames, 8);
-    const spatialEvents = countRecentSpatialEvents(spatialHistory, 6);
-    const narrow = Number(latest.narrowness || 0) >= 0.62;
-    const highBandBurst = Number(latest.audioHighEnergy || 0) >= HIGH_AUDIO_BAND_THRESHOLD;
-    const active = narrow
-      && (Number(latest.audioEnergy || 0) >= TRAP_AUDIO_ENERGY_THRESHOLD || highBandBurst || audioBursts >= 2)
-      && (spatialEvents >= 1 || Number(latest.spatialConfidence || 0) >= 0.32);
-    return {
-      active,
-      kind: active ? "narrow-audio-burst" : null
-    };
-  }
-
-  function detectStuck(nousCarrier, latest, frames) {
-    const movement = nousCarrier?.movementEnvelope || {};
-    const wantsForward = movement.y === "positive" || Number(latest.motorForward || 0) > 0.55;
-    const lowMotion = Number(latest.movementSpeed || 0) <= 0.14;
-    const repeatedLowMotion = countRecentLowMotion(frames, 6) >= 4;
-    const repeatedView = countRecentBaseSignature(frames, latest.base3x3Signature, 10) >= 5;
-    const visualStill = Number(latest.temporalDelta || 0) <= 0.05 && Math.max(Math.abs(Number(latest.flowX || 0)), Math.abs(Number(latest.flowY || 0))) <= 0.08;
-    const blocked = Number(latest.stuckFrames || 0) >= 2 || Number(latest.inputStallFrames || 0) >= 3;
-    const persistentLowMotion = countRecentLowMotion(frames, 8) >= 6;
-    const active = wantsForward
-      && lowMotion
-      && (blocked || (persistentLowMotion && (repeatedView || visualStill)) || (repeatedView && visualStill && repeatedLowMotion));
-    return {
-      active,
-      evidence: active ? (blocked ? "input-stall" : (repeatedView ? "view-repeat" : "low-motion")) : null
-    };
-  }
-
-  function detectExplorationEntropy(latest, frames) {
-    const repeatCount = countRecentBaseSignature(frames, latest.base3x3Signature, 12);
-    const noThreat = Number(latest.enemyConfidence || 0) < 0.24
-      && Number(latest.projectileScore || 0) < 0.12
-      && Number(latest.audioEnergy || 0) < 0.38
-      && Number(latest.audioHighEnergy || 0) < 0.24;
-    const notDead = Number(latest.healthZeroScore || 0) < 0.78;
-    const lowMotion = Number(latest.movementSpeed || 0) <= 0.22;
-    return {
-      high: notDead && noThreat && lowMotion && repeatCount >= SPATIAL_ENTROPY_REPEAT_THRESHOLD
-    };
-  }
-
-  function countRecentBaseSignature(frames, signature, limit) {
-    if (!signature || !Array.isArray(frames)) {
-      return 0;
-    }
-
-    let count = 0;
-    const start = Math.max(0, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      if (frames[index]?.base3x3Signature === signature) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  function detectItemBacktrack(controller, latest) {
-    const memory = Array.isArray(controller?.itemMemory) ? controller.itemMemory : [];
-    const lowHealth = Number(latest.healthActiveCells || 0) > 0
-      && (Number(latest.healthActiveCells || 0) <= 9 || Number(latest.healthZeroScore || 0) >= 0.42);
-    const calm = Number(latest.enemyConfidence || 0) < 0.34
-      && Number(latest.projectileScore || 0) < 0.16
-      && Number(latest.audioEnergy || 0) < 0.5;
-    const suggested = lowHealth && calm && memory.length > 0;
-    return {
-      suggested,
-      targetKind: suggested ? (memory[memory.length - 1].targetKind || "resource") : null
-    };
+    return requirePhainesisCognition("evaluatePhainomenon")({
+      nousCarrier,
+      frames,
+      latest,
+      spatialHistory,
+      itemMemory: controller?.itemMemory,
+      demoRouteGraceActive,
+      preDoorNoCombat,
+      movementEventType: controller?.movementSensorSnapshot?.eventType || "movement",
+      movementConfidence: Number(controller?.movementSensorSnapshot?.confidence || 0)
+    });
   }
 
   function countRecentSignature(frames, signature, limit) {
@@ -7883,120 +7738,6 @@
     }
 
     return count;
-  }
-
-  function countRecentLowMotion(frames, limit) {
-    if (!Array.isArray(frames)) {
-      return 0;
-    }
-
-    let count = 0;
-    const start = Math.max(0, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      if (Number(frames[index]?.movementSpeed || 0) <= 0.14) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  function countRecentAudioBursts(frames, limit) {
-    if (!Array.isArray(frames)) {
-      return 0;
-    }
-
-    let count = 0;
-    const start = Math.max(0, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      if (Number(frames[index]?.audioEnergy || 0) >= TRAP_AUDIO_ENERGY_THRESHOLD
-        || Number(frames[index]?.audioHighEnergy || 0) >= HIGH_AUDIO_BAND_THRESHOLD) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  function countRecentHealthShock(frames, limit) {
-    if (!Array.isArray(frames) || frames.length <= 1) {
-      return 0;
-    }
-
-    let count = 0;
-    const start = Math.max(1, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      const previous = frames[index - 1] || {};
-      const current = frames[index] || {};
-      const healthDrop = Number(previous.healthActiveCells || 0) - Number(current.healthActiveCells || 0);
-      const zeroRise = Number(current.healthZeroScore || 0) - Number(previous.healthZeroScore || 0);
-      if (healthDrop >= 2 || zeroRise >= 0.12 || Number(current.faceDelta || 0) >= COMBAT_FACE_DANGER_DELTA) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  function countRecentSpatialEvents(spatialHistory, limit) {
-    if (!Array.isArray(spatialHistory)) {
-      return 0;
-    }
-
-    let count = 0;
-    const start = Math.max(0, spatialHistory.length - limit);
-    for (let index = start; index < spatialHistory.length; index += 1) {
-      if (spatialHistory[index]?.eventDetected) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  function averageAudioBalance(frames, limit) {
-    if (!Array.isArray(frames) || frames.length === 0) {
-      return 0;
-    }
-
-    let total = 0;
-    let count = 0;
-    const start = Math.max(0, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      total += Number(frames[index]?.audioBalance || 0);
-      count += 1;
-    }
-
-    return count > 0 ? clampSigned(total / count) : 0;
-  }
-
-  function weightedAudioBalance(frames, limit) {
-    if (!Array.isArray(frames) || frames.length === 0) {
-      return 0;
-    }
-
-    let total = 0;
-    let weightTotal = 0;
-    const start = Math.max(0, frames.length - limit);
-    for (let index = start; index < frames.length; index += 1) {
-      const frame = frames[index] || {};
-      const energy = Math.max(Number(frame.audioEnergy || 0), Number(frame.audioMidEnergy || 0), Number(frame.audioHighEnergy || 0));
-      const weight = Math.max(0.001, energy);
-      total += Number(frame.audioBalance || 0) * weight;
-      weightTotal += weight;
-    }
-
-    return weightTotal > 0 ? clampSigned(total / weightTotal) : averageAudioBalance(frames, limit);
-  }
-
-  function flowDirection(flowX, flowY) {
-    const x = Number(flowX || 0);
-    const y = Number(flowY || 0);
-    if (Math.abs(x) >= Math.max(0.08, Math.abs(y) * 0.75)) {
-      return x > 0 ? "right" : "left";
-    }
-
-    return null;
   }
 
   function estimateTemporalDifference(previousValues, currentValues) {
@@ -8275,7 +8016,8 @@
     controller.phantasiaSnapshot = buildPhantasiaSnapshot(controller, frame, timestamp);
     rememberResourceCandidate(controller, controller.phantasiaSnapshot);
     controller.chronosWindow = pushChronosFrame(controller.chronosWindow, controller.phantasiaSnapshot);
-    controller.nousDetectorResult = evaluateNousDetectorResult(controller.nousCarrier, controller.chronosWindow, controller.spatialHistory, controller);
+    controller.phainomenon = evaluateNousDetectorResult(controller.nousCarrier, controller.chronosWindow, controller.spatialHistory, controller);
+    controller.nousDetectorResult = controller.phainomenon;
     controller.sensorDetections = buildSensorDetections(controller);
     controller.nousCarrier = buildNousCarrier(controller, state, timestamp);
   }
@@ -8507,65 +8249,17 @@
   }
 
   function buildSensorDetections(controller) {
-    const detections = [];
-    const detector = controller.nousDetectorResult || createNousDetectorResult();
     const doorTransitionGraceActive = isDoorTransitionGraceActive(controller);
-    if (controller.healthSensorSnapshot?.retryRequested) {
-      detections.push("health-retry");
-    }
-
-    if (controller.visionSensorSnapshot?.eventDetected) {
-      detections.push("visual-attention");
-    }
-
-    if (controller.auditorySnapshot?.eventDetected) {
-      detections.push("audio-event");
-    }
-
-    if (controller.movementSensorSnapshot?.eventDetected) {
-      const movementEvent = controller.movementSensorSnapshot.eventType || "movement";
-      if (movementEvent === "movement-stall") {
-        if (!doorTransitionGraceActive && (detector.stuck.active || detector.sensorRecovery.needed)) {
-          detections.push("movement-stall");
-        }
-      } else if (movementEvent !== "movement") {
-        detections.push(movementEvent);
-      }
-    }
-
-    if (controller.spatialSensorSnapshot?.eventDetected) {
-      detections.push("spatial-event");
-    }
-
-    if (detector.looming.active) {
-      detections.push("looming");
-    }
-
-    if (detector.damageLocalization.active) {
-      detections.push("damage-localization");
-    }
-
-    if (detector.trap.active) {
-      detections.push("trap");
-    }
-
-    if (!doorTransitionGraceActive && detector.stuck.active) {
-      detections.push("stuck");
-    }
-
-    if (detector.explorationEntropy.high) {
-      detections.push("exploration-entropy");
-    }
-
-    if (detector.itemBacktrack.suggested) {
-      detections.push("item-backtrack");
-    }
-
-    if (!doorTransitionGraceActive && detector.sensorRecovery.needed) {
-      detections.push("sensor-recovery");
-    }
-
-    return detections;
+    return activePhainesisEvents({
+      phainomenon: controller.phainomenon || controller.nousDetectorResult || createNousDetectorResult(),
+      doorTransitionGraceActive,
+      healthRetry: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      visualEventDetected: Boolean(controller.visionSensorSnapshot?.eventDetected),
+      audioEventDetected: Boolean(controller.auditorySnapshot?.eventDetected),
+      movementEventDetected: Boolean(controller.movementSensorSnapshot?.eventDetected),
+      movementEventType: controller.movementSensorSnapshot?.eventType || "movement",
+      spatialEventDetected: Boolean(controller.spatialSensorSnapshot?.eventDetected)
+    });
   }
 
   function buildNousCarrier(controller, state, timestamp) {
@@ -8622,7 +8316,8 @@
         spatialEvent: Boolean(spatial.eventDetected),
         routeHint: controller.controlPipeline || "Idle",
         activeDetections: controller.sensorDetections || [],
-        nousDetectorResult: controller.nousDetectorResult || createNousDetectorResult(),
+        phainomenon: controller.phainomenon || controller.nousDetectorResult || createNousDetectorResult(),
+        nousDetectorResult: controller.nousDetectorResult || controller.phainomenon || createNousDetectorResult(),
         audioBands: {
           low: audio.lowEnergy || 0,
           mid: audio.midEnergy || 0,
@@ -8817,12 +8512,12 @@
     const enemy = getTrustedEnemyThreat(controller);
     const dynamicObjectRaw = clamp01(Number(controller.phantasiaSnapshot?.dynamicObjectScore || controller.dynamicObjectScore || 0));
     const projectileContext = enemy > 0.34
-      || Boolean(controller.nousDetectorResult?.looming?.active)
-      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+      || Boolean(controller.phainomenon?.looming?.active)
+      || Boolean(controller.phainomenon?.damageLocalization?.active);
     const projectile = projectileContext ? projectileRaw : projectileRaw * 0.22;
     const dynamicThreatContext = enemy > 0.35
-      || Boolean(controller.nousDetectorResult?.looming?.active)
-      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
+      || Boolean(controller.phainomenon?.looming?.active)
+      || Boolean(controller.phainomenon?.damageLocalization?.active);
     const terminalUseFocus = controller.exitSwitchPressed
       || controller.finalRoomEntered
       || Number(controller.exitSwitchUseFrames || 0) > 0
@@ -8875,20 +8570,21 @@
       firstDoorUseDepthLimit: profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18,
       firstDoorUseEvidence: Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
         || Number(controller.firstDoorCorridorSignature || 0) >= firstDoorUseSignatureThreshold - firstDoorRetrySignatureTolerance,
-      firstDoorUseBlockedByThreat: Boolean(controller.nousDetectorResult?.looming?.active)
-        || Boolean(controller.nousDetectorResult?.damageLocalization?.active),
+      firstDoorUseBlockedByThreat: Boolean(controller.phainomenon?.looming?.active)
+        || Boolean(controller.phainomenon?.damageLocalization?.active),
       firstDoorUseAttempted: Boolean(controller.firstDoorUseAttempted),
       depthEstimate: controller.depthEstimate,
       movingEvidence,
       doorOpened: controller.doorOpenedCount > 0,
       computerRoomEntered: Boolean(controller.computerRoomEntered),
       finalRoomEntered: Boolean(controller.finalRoomEntered),
+      phainesisStuckActive: Boolean(controller.phainomenon?.stuck?.active),
       nousStuckActive: Boolean(controller.nousDetectorResult?.stuck?.active),
       darkZoneEntered: Boolean(controller.darkZoneEntered),
       controlPipeline: controller.controlPipeline,
       computerRoomAdvanceActive: Number(controller.computerRoomAdvanceFrames || 0) > 0
     });
-    const kairos = resolveToposKairosCarrier(controller, observedSignals.danger, observedSignals.stuck);
+    const kairos = resolveKairosMonitoringCarrier(controller, observedSignals.danger, observedSignals.stuck);
     const pathosBase = clamp01(Math.max(observedSignals.danger, observedSignals.stuck));
     const nonlinearPathos = kairos.active
       ? clamp01(Math.pow(Math.max(pathosBase, 0.32), 2) * 3.4 + kairos.boost * 0.42)
@@ -8958,8 +8654,8 @@
       enemy,
       dynamicRaw: controller.phantasiaSnapshot?.dynamicObjectScore,
       dynamicThreatContext: enemy > 0.35
-        || Boolean(controller.nousDetectorResult?.looming?.active)
-        || Boolean(controller.nousDetectorResult?.damageLocalization?.active),
+        || Boolean(controller.phainomenon?.looming?.active)
+        || Boolean(controller.phainomenon?.damageLocalization?.active),
       healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
       enemyLateralBias: controller.enemyLateralBias,
       depthEstimate: controller.depthEstimate,
@@ -8984,8 +8680,7 @@
   function mapToposDecisionToKinesis(controller, action, carrier, observedScores, sensor, frame, state) {
     const safe = normalizeAction(action);
     const vector = carrier.decisionVector || normalizeToposVector();
-    const weights = carrier.weights || {};
-    const firstDoorKinesisContext = composeKinesisFirstDoorContext({
+    const firstDoorKairosContext = composeKairosFirstDoorContext({
       firstDoorContext: controller.doorOpenedCount <= 0 && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor"),
       firstDoorUseDepth: profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH),
       firstDoorUseSignatureThreshold: profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD),
@@ -9003,25 +8698,43 @@
       useCooldown: controller.useCooldown,
       firstDoorUseAttempted: controller.firstDoorUseAttempted
     });
+    const kairos = resolveKairosPriorityAxes({
+      carrier,
+      observed: observedScores,
+      firstDoor: firstDoorKairosContext
+    });
     const feedback = mapKinesisToposDecision({
       action: safe,
       enabled: controller.enabled,
-      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
-      healthLikelyDead: Boolean(controller.healthLikelyDead),
       vector,
-      weights,
-      dominantAxis: carrier.dominantAxis,
-      observed: observedScores,
-      ...firstDoorKinesisContext,
+      kairos,
       safetyReason: controller.safetyReason
     });
+    const audited = auditZoeAction(feedback.action, {
+      likelyDead: Boolean(controller.healthLikelyDead),
+      retryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      zeroScore: Number(controller.healthZeroScore || controller.healthSensorSnapshot?.zeroScore || 0),
+      activeCells: Number(controller.healthActiveCells || controller.healthSensorSnapshot?.activeCells || 0),
+      retryReason: controller.healthSensorSnapshot?.retryReason || "none"
+    });
+    const safeFeedback = audited.vetoed
+      ? Object.assign({}, feedback, {
+        action: audited.action,
+        applied: false,
+        vetoed: true,
+        reason: `zoe-${audited.reason}`
+      })
+      : Object.assign({}, feedback, {
+        action: audited.action,
+        vetoed: false
+      });
 
-    if (feedback.applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
-      controller.safetyReason = `ctg-topos-${feedback.reason}`;
+    if (safeFeedback.applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
+      controller.safetyReason = `ctg-topos-${safeFeedback.reason}`;
       controller.mobilityMode = `ctg-topos-${carrier.dominantAxis.toLowerCase()}`;
     }
 
-    return feedback;
+    return safeFeedback;
   }
 
   function createCtgObservedScores(overrides = {}) {
@@ -9044,14 +8757,22 @@
     return requireKinesisCognition("mapToposDecision")(input);
   }
 
-  function composeKinesisFirstDoorContext(input = {}) {
-    return requireKinesisCognition("composeFirstDoorContext")(input);
+  function auditZoeAction(action, health) {
+    return requireZoeCognition("auditAction")({ action, health });
   }
 
-  function resolveToposKairosCarrier(controller, danger, stuck) {
+  function resolveKairosPriorityAxes(input = {}) {
+    return requireKairosCognition("resolvePriorityAxes")(input);
+  }
+
+  function composeKairosFirstDoorContext(input = {}) {
+    return requireKairosCognition("composeFirstDoorPriorityContext")(input);
+  }
+
+  function resolveKairosMonitoringCarrier(controller, danger, stuck) {
     const reason = String(controller?.safetyReason || "none");
     const doorTransitionGraceActive = isDoorTransitionGraceActive(controller);
-    return requireToposCognition("resolveKairos")({
+    return requireKairosCognition("resolveMonitoringState")({
       reason,
       doorTransitionGraceActive,
       contextResetActive: Number(controller?.contextResetFrames || 0) > 0,
@@ -9060,8 +8781,8 @@
       useProbeActive: Number(controller?.pendingUseResponseFrames || 0) > 0 || Number(controller?.wallUseProbeFrames || 0) > 0,
       trustedEnemyThreat: getTrustedEnemyThreat(controller),
       projectileScore: controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0,
-      loomingActive: Boolean(controller?.nousDetectorResult?.looming?.active),
-      damageLocalizationActive: Boolean(controller?.nousDetectorResult?.damageLocalization?.active),
+      loomingActive: Boolean(controller?.phainomenon?.looming?.active),
+      damageLocalizationActive: Boolean(controller?.phainomenon?.damageLocalization?.active),
       combatEvidence: hasTrustedCombatEvidence(controller),
       combatContextActive: Boolean(controller?.combatContextActive),
       enemyAlertActive: Number(controller?.enemyAlertFrames || 0) > 0,
@@ -9112,6 +8833,33 @@
     const fn = self.AIKernelDoomKinesis?.[name];
     if (typeof fn !== "function") {
       throw new Error(`AIKernel.Doom Kinesis cognition module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requireKairosCognition(name) {
+    const fn = self.AIKernelDoomKairos?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Kairos cognition module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requireZoeCognition(name) {
+    const fn = self.AIKernelDoomZoe?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Zoe cognition module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requirePhainesisCognition(name) {
+    const fn = self.AIKernelDoomPhainesis?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Phainesis cognition module is missing: ${name}`);
     }
 
     return fn;

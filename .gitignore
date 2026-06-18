@@ -66,6 +66,7 @@ samples/*.wad
 samples/*.WAD
 src/DoomWeb/wwwroot/models/
 src/DoomWeb/wwwroot/demo/doom/*.wasm
+!src/DoomWeb/wwwroot/demo/doom/doom.wasm
 src/DoomWeb/wwwroot/demo/doom/*.wad
 src/DoomWeb/wwwroot/demo/doom/*.WAD
 src/DoomWasm.Native/third_party/doomgeneric/

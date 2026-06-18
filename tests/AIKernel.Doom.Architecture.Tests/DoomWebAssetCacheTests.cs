@@ -2,7 +2,7 @@ namespace AIKernel.Doom.Architecture.Tests;
 
 public sealed class DoomWebAssetCacheTests
 {
-    private const string CacheBustingVersion = "20260618-auditoryruntime1";
+    private const string CacheBustingVersion = "20260618-sensorpanel1";
 
     [Fact]
     public void DoomRuntime_CachesProtectedWadAndBonsaiBinariesAfterConsent()
@@ -47,6 +47,25 @@ public sealed class DoomWebAssetCacheTests
     }
 
     [Fact]
+    public void DoomModuleManifest_IdentifiesRuntimeAndCorrespondingSource()
+    {
+        var manifest = File.ReadAllText(Path.Combine(
+            FindRepoRoot(AppContext.BaseDirectory),
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "demo",
+            "doom",
+            "module.json"));
+
+        Assert.Contains("\"entry\": \"doom.wasm\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"sha256\": \"d0e432c3c9bf8e562a5b36c9eab3381270d7a67bc46a01ebd3f90bb10bfe35ee\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"doomgenericCommit\": \"dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("fetch-doomgeneric.ps1", manifest, StringComparison.Ordinal);
+        Assert.Contains("doomgeneric-aikernel.patch", manifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DoomWorker_UsesVersionedRuntimeAssetsToAvoidBrowserCache()
     {
         var root = FindRepoRoot(AppContext.BaseDirectory);
@@ -63,9 +82,12 @@ public sealed class DoomWebAssetCacheTests
         Assert.Contains($"/demo/doom/js/autoplay/cognition/ctg.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/cognition/sensory.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/cognition/vision-palette.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
+        Assert.Contains($"/demo/doom/js/autoplay/cognition/phainesis.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/cognition/nous.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/cognition/phantasia.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
+        Assert.Contains($"/demo/doom/js/autoplay/cognition/kairos.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/cognition/kinesis.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
+        Assert.Contains($"/demo/doom/js/autoplay/cognition/zoe.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/sensor-tensor.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control/objective-routing.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control/expression-dsl.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
@@ -73,6 +95,8 @@ public sealed class DoomWebAssetCacheTests
         Assert.Contains($"/demo/doom/js/autoplay/control/evidence.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control/arbitration.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control/decision-trace.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
+        Assert.Contains($"/demo/doom/js/autoplay/control/pipeline-graph.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
+        Assert.Contains($"/demo/doom/js/autoplay/control/zoe-veto.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control/runtime-packets.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/wasm-state.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
         Assert.Contains($"/demo/doom/js/autoplay/control-runtime.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);

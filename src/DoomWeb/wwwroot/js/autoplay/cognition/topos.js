@@ -249,49 +249,17 @@
   }
 
   function resolveKairos(input = {}) {
-    const reason = String(input.reason || "none");
-    const contextReset = Boolean(input.contextResetActive) || reason.indexOf("relocalization") >= 0;
-    const recovery = Boolean(input.recoveryActive);
-    const useProbe = !input.doorTransitionGraceActive && Boolean(input.useProbeActive);
-    const threatEvidence = Math.max(
-      clamp01(input.trustedEnemyThreat),
-      clamp01(input.projectileScore),
-      input.loomingActive ? 0.72 : 0,
-      input.damageLocalizationActive ? 0.72 : 0);
-    const combat = Boolean(input.combatEvidence
-      && (input.combatContextActive || input.enemyAlertActive || reason.indexOf("combat") >= 0)
-      && threatEvidence >= 0.34);
-    const danger = number(input.danger);
-    const stuck = number(input.stuck);
-    const abnormal = contextReset
-      || recovery
-      || useProbe
-      || combat
-      || (!input.doorTransitionGraceActive && stuck >= 0.58)
-      || danger >= 0.55;
-    let state = "Monitor";
-    let trigger = reason || "none";
-    if (contextReset) {
-      state = "Survey";
-      trigger = input.contextResetReason || reason || "visual-discontinuity";
-    } else if (combat) {
-      state = "CombatWatch";
-      trigger = reason || "dynamic-mask";
-    } else if (useProbe) {
-      state = "UseProbe";
-      trigger = reason || "use-response";
-    } else if (recovery || stuck >= 0.58) {
-      state = "Recovery";
-      trigger = reason || "motion-stall";
-    } else if (danger >= 0.55) {
-      state = "Caution";
-      trigger = reason || "danger";
+    const resolver = self.AIKernelDoomKairos?.resolveMonitoringState || self.AIKernelDoomKairos?.resolveKairos;
+    if (typeof resolver === "function") {
+      return resolver(input);
     }
 
-    const boost = abnormal
-      ? clamp01(Math.max(danger, stuck, contextReset ? 0.74 : 0, combat ? 0.62 : 0, useProbe ? 0.48 : 0))
-      : 0;
-    return { active: abnormal, state, trigger, boost: round2(boost) };
+    return {
+      active: false,
+      state: "Monitor",
+      trigger: String(input.reason || "none"),
+      boost: 0
+    };
   }
 
   function resolveEthosScore(input = {}) {

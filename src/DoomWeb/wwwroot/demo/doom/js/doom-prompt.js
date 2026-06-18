@@ -86,7 +86,7 @@
     const doomManualMoveToggle = document.getElementById("doom-manual-move-toggle");
     const doomSenseOnlyToggle = document.getElementById("doom-sense-only-toggle");
     let doomSensorToggles = Array.from(document.querySelectorAll("[data-sensor-toggle]"));
-    const doomDetectionToggles = Array.from(document.querySelectorAll("[data-detection-toggle]"));
+    let doomDetectionToggles = Array.from(document.querySelectorAll("[data-detection-toggle]"));
     let doomSpatialHud = null;
     let doomGoalHud = null;
     let doomToposHud = null;
@@ -104,15 +104,30 @@
     let doomAudioHudEnvelope = { left: 0, right: 0, balance: 0, updatedAt: 0 };
     let doomAudioEventHolds = [];
 
-    const sensorUi = {
-      visual: { label: "Visual", signal: "9x9 frame", group: "is-sense", layer: "Aisthesis" },
-      audio: { label: "Audio", signal: "stereo energy", group: "is-sense", layer: "Aisthesis" },
-      motor: { label: "Motor", signal: "input vector", group: "is-motion", layer: "Kinesis" },
-      movement: { label: "Movement", signal: "motion vector", group: "is-motion", layer: "Kinesis" },
-      compass: { label: "Compass", signal: "heading vector", group: "is-heading", layer: "Hodos" },
-      spatial: { label: "Spatial", signal: "fused vector", group: "is-space", layer: "Topos" },
-      health: { label: "Health", signal: "life state", group: "is-life", layer: "Zoe" }
-    };
+    const doomSensorPanel = self.AIKernelDoomSensorPanel || {};
+    const sensorUi = typeof doomSensorPanel.cloneSensorDescriptors === "function"
+      ? doomSensorPanel.cloneSensorDescriptors()
+      : {
+        visual: { label: "Visual", signal: "9x9 frame", panel: "aisthesis", stage: "primary" },
+        audio: { label: "Audio", signal: "stereo energy", panel: "aisthesis", stage: "primary" },
+        movement: { label: "Movement", signal: "motion vector", panel: "aisthesis", stage: "primary" },
+        compass: { label: "Compass", signal: "heading vector", panel: "aisthesis", stage: "primary" },
+        health: { label: "Health", signal: "life state", panel: "aisthesis", stage: "primary" },
+        spatial: { label: "Spatial", signal: "Topos state", panel: "krisis", stage: "topos" },
+        motor: { label: "Motor", signal: "input vector", panel: "kinesis", stage: "motion" }
+      };
+    const detectionUi = typeof doomSensorPanel.cloneDetectionDescriptors === "function"
+      ? doomSensorPanel.cloneDetectionDescriptors()
+      : {};
+    const sensorPanelLayout = Array.isArray(doomSensorPanel.panelLayout)
+      ? doomSensorPanel.panelLayout
+      : [
+        { key: "aisthesis", className: "is-aisthesis", title: "Aisthesis", subtitle: "Perception layer", stages: [{ key: "primary", title: "Primary sensors", items: [{ type: "sensor", key: "visual" }, { type: "sensor", key: "audio" }, { type: "sensor", key: "movement" }, { type: "sensor", key: "compass" }, { type: "detection", key: "foot" }, { type: "sensor", key: "health" }] }] },
+        { key: "noesis", className: "is-noesis", title: "Noesis", subtitle: "Cognition layer", stages: [{ key: "phainesis", title: "Phainesis", items: [{ type: "detection", key: "motion" }, { type: "detection", key: "wall" }, { type: "signal", label: "Damage", signal: "localization" }, { type: "detection", key: "enemy" }, { type: "detection", key: "hud" }, { type: "detection", key: "computer" }] }, { key: "nous", title: "Nous", items: [{ type: "signal", label: "LoomingVector", signal: "approach" }, { type: "signal", label: "StuckVector", signal: "trap" }, { type: "signal", label: "DamageVector", signal: "damage" }, { type: "signal", label: "EnemyVector", signal: "enemy" }, { type: "signal", label: "EntropyVector", signal: "entropy" }, { type: "signal", label: "ItemVector", signal: "item" }] }] },
+        { key: "krisis", className: "is-krisis", title: "Krisis", subtitle: "Judgement layer", stages: [{ key: "topos", title: "Topos", items: [{ type: "sensor", key: "spatial" }, { type: "detection", key: "objective" }, { type: "detection", key: "door" }, { type: "detection", key: "spatial" }, { type: "signal", label: "LogosVector", signal: "route" }, { type: "signal", label: "PathosVector", signal: "risk" }, { type: "signal", label: "EthosVector", signal: "veto" }, { type: "signal", label: "ToposDecision", signal: "carrier" }] }, { key: "kairos", title: "Kairos", items: [{ type: "signal", label: "Pathos-priority", signal: "danger first" }, { type: "signal", label: "Ethos-priority", signal: "fail closed" }, { type: "signal", label: "Logos-priority", signal: "route proof" }] }] },
+        { key: "kinesis", className: "is-kinesis", title: "Kinesis", subtitle: "Action layer", stages: [{ key: "motion", title: "Kinesis", items: [{ type: "sensor", key: "motor" }, { type: "signal", label: "Move", signal: "forward / back" }, { type: "signal", label: "Turn", signal: "left / right" }, { type: "signal", label: "Strafe", signal: "lateral" }, { type: "signal", label: "Shoot", signal: "fire" }] }, { key: "zoe", title: "Zoe", items: [{ type: "detection", key: "health" }, { type: "signal", label: "HP veto", signal: "life guard" }, { type: "signal", label: "Life audit", signal: "action check" }, { type: "signal", label: "Fatal avoid", signal: "forced stop" }] }] }
+      ];
+    const sensorPanelVersion = doomSensorPanel.version || "legacy-sensorpanel";
     const commandHistory = [];
     const controllerDebugLogEntries = [];
     const controllerDebugLogSignatureByCategory = new Map();
@@ -701,7 +716,8 @@
         return `Kairos: Advance ${milestones.computerRoomAdvanceFrames}`;
       }
 
-      if (autoplay?.nousDetectorResult?.sensorRecovery?.needed) {
+      const phainomenon = autoplay?.phainomenon || autoplay?.nousDetectorResult;
+      if (phainomenon?.sensorRecovery?.needed) {
         return "Kairos: Recovery";
       }
 
@@ -1056,7 +1072,7 @@
       const enemyText = `${enemyConfidence}/${autoplay.enemyTurn || "none"}/${autoplay.enemyCluster || "none"}/${autoplay.enemyFireReady ? "fire" : "hold"}/${enemyDistance}/c${enemyCenter}`;
       const pipelineText = autoplay.controlPipeline || "Idle";
       const objectiveText = autoplay.objective || "none";
-      const detectionText = Array.isArray(autoplay.activeDetections) && autoplay.activeDetections.length > 0
+      const phainesisText = Array.isArray(autoplay.activeDetections) && autoplay.activeDetections.length > 0
         ? autoplay.activeDetections.join(",")
         : "none";
       const semantic = autoplay.semanticMemory || {};
@@ -1079,13 +1095,13 @@
       const audioText = `${audioSnapshot.eventDetected ? "event" : "idle"}/${audioSnapshot.eventType || "none"}/${audioEnergy.toFixed(3)}/b${Number(audioSnapshot.lowEnergy || 0).toFixed(3)}-${Number(audioSnapshot.midEnergy || 0).toFixed(3)}-${Number(audioSnapshot.highEnergy || 0).toFixed(3)}`;
       const visualMotion = autoplay.visualMotion || {};
       const nous = autoplay.nousCarrier || {};
-      const detector = autoplay.nousDetectorResult || nous.cognitionHints?.nousDetectorResult || {};
+      const detector = autoplay.phainomenon || autoplay.nousDetectorResult || nous.cognitionHints?.phainomenon || nous.cognitionHints?.nousDetectorResult || {};
       const motionText = `${autoplay.motion9Signature || "000000000"}/${Number(autoplay.motion9Delta ?? 255).toFixed(2)}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/o${Number(autoplay.motionObstacleScore || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/e${Number(autoplay.motionEntranceScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}/${autoplay.motionIntent || "idle"}`;
       const footText = `${Number(autoplay.footObstacleScore || 0).toFixed(2)}/${Number(autoplay.priorFootObstacleScore || 0).toFixed(2)}/f${Number(autoplay.footObstacleFlickerScore || 0).toFixed(2)}/b${autoplay.footObstacleBounceFrames || 0}/d${Number(autoplay.footObstacleBandDelta || 0).toFixed(2)}`;
       const visualFlowText = `${Number(visualMotion.vectorX || 0).toFixed(2)}/${Number(visualMotion.vectorY || 0).toFixed(2)}/m${Number(visualMotion.magnitude || 0).toFixed(2)}/b${Number(visualMotion.baseMagnitude || 0).toFixed(2)}/lm${autoplay.compassLandmarks || 0}`;
       const nousText = `${nous.bonsaiTernary?.aisthesis || "neutral"}/${nous.bonsaiTernary?.kinesis || "neutral"}/${nous.bonsaiTernary?.phantasia || "neutral"}`;
-      const nousDetectorText = `loom=${detector.looming?.active ? detector.looming.direction || "active" : "-"}; dmg=${detector.damageLocalization?.active ? detector.damageLocalization.direction || "active" : "-"}; trap=${detector.trap?.active ? detector.trap.kind || "active" : "-"}; stuck=${detector.stuck?.active ? "yes" : "no"}; ent=${detector.explorationEntropy?.high ? "high" : "ok"}; item=${detector.itemBacktrack?.suggested ? detector.itemBacktrack.targetKind || "yes" : "-"}; rec=${detector.sensorRecovery?.needed ? detector.sensorRecovery.reason || "yes" : "-"}`;
-      const autoplayText = `${autoplay.enabled ? "on" : "off"}/${autoplay.mode || "disabled"}${autoplay.manualMove ? "/manual-move" : ""}${autoplay.senseOnly ? "/sense-only" : ""}; pipeline=${pipelineText}; objective=${objectiveText}; det=${detectionText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; move=${Number(movement.vectorX || 0).toFixed(2)}/${Number(movement.vectorY || 0).toFixed(2)}/${Number(movement.confidence || 0).toFixed(2)}; flow=${visualFlowText}; nous=${nousText}; nousDet=${nousDetectorText}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; ammo=${ammoText}; health=${healthText}; retry=${retryText}; milestones=${milestoneText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; vision9x9=${String(autoplay.vision9x9Signature || "").slice(0, 18)}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; audio=${audioText}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; useLatch=${autoplay.firstDoorUseLatchFrames || 0}/${autoplay.firstDoorUsePulsed ? "pulsed" : "armed"}; predictions=${autoplay.predictions || 0}; reuse=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`;
+      const phainesisEvidenceText = `loom=${detector.looming?.active ? detector.looming.direction || "active" : "-"}; dmg=${detector.damageLocalization?.active ? detector.damageLocalization.direction || "active" : "-"}; trap=${detector.trap?.active ? detector.trap.kind || "active" : "-"}; stuck=${detector.stuck?.active ? "yes" : "no"}; ent=${detector.explorationEntropy?.high ? "high" : "ok"}; item=${detector.itemBacktrack?.suggested ? detector.itemBacktrack.targetKind || "yes" : "-"}; rec=${detector.sensorRecovery?.needed ? detector.sensorRecovery.reason || "yes" : "-"}`;
+      const autoplayText = `${autoplay.enabled ? "on" : "off"}/${autoplay.mode || "disabled"}${autoplay.manualMove ? "/manual-move" : ""}${autoplay.senseOnly ? "/sense-only" : ""}; pipeline=${pipelineText}; objective=${objectiveText}; phainesis=${phainesisText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; move=${Number(movement.vectorX || 0).toFixed(2)}/${Number(movement.vectorY || 0).toFixed(2)}/${Number(movement.confidence || 0).toFixed(2)}; flow=${visualFlowText}; nous=${nousText}; phainesisEvidence=${phainesisEvidenceText}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; ammo=${ammoText}; health=${healthText}; retry=${retryText}; milestones=${milestoneText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; vision9x9=${String(autoplay.vision9x9Signature || "").slice(0, 18)}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; audio=${audioText}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; useLatch=${autoplay.firstDoorUseLatchFrames || 0}/${autoplay.firstDoorUsePulsed ? "pulsed" : "armed"}; predictions=${autoplay.predictions || 0}; reuse=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`;
       const text = `runtime=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
       runtimeStatus.innerHTML = `<strong>runtime</strong>=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
       const hudControl = status.hudFlowControl || {};
@@ -1735,7 +1751,7 @@
         `  Landmark: ${formatLandmark(compass, autoplay)}`,
         `  CorridorMode: ${topos.corridor}`,
         "",
-        "[Hodos]",
+        "[Topos Compass]",
         `  Heading: ${formatHeading(compass)}`,
         `  Reliability: ${String(compass.headingReliability || "unknown")}`,
         "",
@@ -1927,6 +1943,92 @@
       return `${labelize(kind)} (${formatHudScore(confidence)})`;
     }
 
+    function createSensorToggleButton(key) {
+      const descriptor = sensorUi[key] || { label: `${key} Sensor`, signal: "sensor input" };
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "doom-sensor-switch is-on";
+      button.dataset.sensorToggle = key;
+      button.dataset.sensorLabel = descriptor.label;
+      button.dataset.sensorSignal = descriptor.signal;
+      button.dataset.command = `doom.sensor ${key} toggle`;
+      button.setAttribute("aria-pressed", "true");
+      renderSensorButtonContent(button, descriptor.label, descriptor.signal, true);
+      return button;
+    }
+
+    function getOrCreateSensorToggle(sensorRow, key) {
+      const existing = sensorRow.querySelector(`[data-sensor-toggle="${key}"]`)
+        || document.querySelector(`[data-sensor-toggle="${key}"]`);
+      if (existing) {
+        existing.classList.remove("doom-debug-switch");
+        existing.classList.add("doom-sensor-switch");
+        return existing;
+      }
+
+      return createSensorToggleButton(key);
+    }
+
+    function createDetectionToggleButton(key) {
+      const descriptor = detectionUi[key] || { label: labelize(key), signal: "detector" };
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.detectionToggle = key;
+      button.setAttribute("aria-pressed", "true");
+      button.textContent = descriptor.label || labelize(key);
+      button.title = descriptor.signal || "Detector panel";
+      return button;
+    }
+
+    function getOrCreateDetectionToggle(key) {
+      const existing = document.querySelector(`[data-detection-toggle="${key}"]`);
+      if (existing) {
+        const descriptor = detectionUi[key] || {};
+        if (descriptor.label) {
+          existing.textContent = descriptor.label;
+        }
+        if (descriptor.signal) {
+          existing.dataset.detectionSignal = descriptor.signal;
+        }
+        return existing;
+      }
+
+      return createDetectionToggleButton(key);
+    }
+
+    function createSensorSignalChip(item) {
+      const chip = document.createElement("span");
+      chip.className = "doom-panel-signal-chip";
+      chip.dataset.panelSignal = item.label || "signal";
+      const label = document.createElement("strong");
+      label.textContent = item.label || "Signal";
+      const detail = document.createElement("span");
+      detail.textContent = item.signal || "pending";
+      chip.appendChild(label);
+      chip.appendChild(detail);
+      return chip;
+    }
+
+    function appendSensorPanelItem(stageBody, item, sensorRow) {
+      if (!item || !item.type) {
+        return;
+      }
+
+      if (item.type === "sensor") {
+        stageBody.appendChild(getOrCreateSensorToggle(sensorRow, item.key));
+        return;
+      }
+
+      if (item.type === "detection") {
+        stageBody.appendChild(getOrCreateDetectionToggle(item.key));
+        return;
+      }
+
+      if (item.type === "signal") {
+        stageBody.appendChild(createSensorSignalChip(item));
+      }
+    }
+
     function ensureDoomSensorToggleRow() {
       if (!doomDebugBar) {
         return;
@@ -1939,50 +2041,64 @@
         doomDebugBar.appendChild(sensorRow);
       }
 
-      const sensors = ["visual", "audio", "motor", "movement", "compass", "spatial", "health"];
-      for (let index = 0; index < sensors.length; index += 1) {
-        const key = sensors[index];
-        const descriptor = sensorUi[key] || { label: `${key} Sensor`, signal: "sensor input", group: "", layer: "Sensor" };
-        if (sensorRow.querySelector(`[data-sensor-toggle="${key}"]`)) {
-          continue;
-        }
+      if (sensorRow.dataset.sensorPanelVersion !== sensorPanelVersion) {
+        sensorRow.dataset.sensorPanelVersion = sensorPanelVersion;
+        sensorRow.replaceChildren();
+        for (const panel of sensorPanelLayout) {
+          const node = document.createElement("section");
+          node.className = `doom-sensor-node ${panel.className || ""}`.trim();
+          node.dataset.sensorPanel = panel.key;
+          node.setAttribute("aria-label", `${panel.title} ${panel.subtitle || ""}`.trim());
 
-        let host = descriptor.group ? sensorRow.querySelector(`.doom-sensor-node.${descriptor.group} .doom-sensor-node-buttons`) : null;
-        if (!host) {
-          const node = document.createElement("div");
-          node.className = `doom-sensor-node ${descriptor.group || ""}`.trim();
-          node.setAttribute("aria-label", `${descriptor.label} sensor`);
+          const header = document.createElement("header");
+          header.className = "doom-sensor-node-header";
           const nodeLabel = document.createElement("div");
           nodeLabel.className = "doom-sensor-node-label";
-          nodeLabel.textContent = descriptor.layer || "Sensor";
-          host = document.createElement("div");
-          host.className = "doom-sensor-node-buttons";
-          node.appendChild(nodeLabel);
-          node.appendChild(host);
-          if (sensorRow.childElementCount > 0) {
-            const link = document.createElement("div");
-            link.className = "doom-sensor-link";
-            link.setAttribute("aria-hidden", "true");
-            link.textContent = ">";
-            sensorRow.appendChild(link);
+          nodeLabel.textContent = panel.title || labelize(panel.key);
+          const subtitle = document.createElement("div");
+          subtitle.className = "doom-sensor-node-subtitle";
+          subtitle.textContent = panel.subtitle || "";
+          header.appendChild(nodeLabel);
+          header.appendChild(subtitle);
+          node.appendChild(header);
+
+          const stages = document.createElement("div");
+          stages.className = "doom-sensor-stages";
+          if ((panel.stages || []).length === 1) {
+            stages.classList.add("is-single-stage");
           }
+
+          for (const stage of panel.stages || []) {
+            const stageNode = document.createElement("section");
+            stageNode.className = "doom-sensor-stage";
+            stageNode.dataset.sensorStage = stage.key || "";
+            const stageTitle = document.createElement("div");
+            stageTitle.className = "doom-sensor-stage-title";
+            stageTitle.textContent = stage.title || labelize(stage.key);
+            const stageBody = document.createElement("div");
+            stageBody.className = "doom-sensor-node-buttons";
+            for (const item of stage.items || []) {
+              appendSensorPanelItem(stageBody, item, sensorRow);
+            }
+            stageNode.appendChild(stageTitle);
+            stageNode.appendChild(stageBody);
+            stages.appendChild(stageNode);
+          }
+
+          node.appendChild(stages);
           sensorRow.appendChild(node);
         }
-
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "doom-debug-switch doom-sensor-switch is-on";
-        button.dataset.sensorToggle = key;
-        button.dataset.sensorLabel = descriptor.label;
-        button.dataset.sensorSignal = descriptor.signal;
-        button.dataset.command = `doom.sensor ${key} toggle`;
-        button.setAttribute("aria-pressed", "true");
-        renderSensorButtonContent(button, descriptor.label, descriptor.signal, true);
-        host.appendChild(button);
       }
 
       doomSensorToggles = Array.from(document.querySelectorAll("[data-sensor-toggle]"));
+      doomDetectionToggles = Array.from(document.querySelectorAll("[data-detection-toggle]"));
+      const detectionSource = doomDebugBar.querySelector(".doom-detection-toggles");
+      if (detectionSource) {
+        detectionSource.classList.add("is-panelized");
+        detectionSource.setAttribute("aria-hidden", "true");
+      }
       syncSensorToggles();
+      syncDetectionToggleButtons();
     }
 
     function updateDoomSpatialHud(status) {
@@ -2227,6 +2343,20 @@
           ? "Detector is enabled for the current AutoPlay phase."
           : "Detector is user-enabled but inactive in the current AutoPlay phase.";
       });
+    }
+
+    function runDetectionToggleButton(button) {
+      const key = button?.dataset?.detectionToggle;
+      if (!key) {
+        return false;
+      }
+
+      const enabled = doomDetectionVisibility.get(key) === false;
+      doomDetectionVisibility.set(key, enabled);
+      syncDetectionToggleButtons();
+      renderDoomDebugOverlay(doomRuntime?.status?.() || {});
+      focusPromptUnlessGameRunning();
+      return true;
     }
 
     function syncAudioPlaybackToggle(status = doomRuntime?.status?.() || {}) {
@@ -3573,7 +3703,7 @@
       const finalRoom = semantic.finalRoom || {};
       const detections = Array.isArray(autoplay.activeDetections) ? autoplay.activeDetections.join(",") : "none";
       const action = autoplay.action || {};
-      return `pipeline=${autoplay.controlPipeline || "Idle"}; objective=${autoplay.objective || "none"}; det=${detections}; senseOnly=${Boolean(autoplay.senseOnly)}; manualMove=${Boolean(autoplay.manualMove)}; firstDoor(corr=${Number(firstDoor.corridorConfidence || 0).toFixed(2)},door=${Number(firstDoor.doorConfidence || 0).toFixed(2)},v9=${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)},opened=${Boolean(firstDoor.opened)},use=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}); computer(conf=${Number(computerRoom.confidence || 0).toFixed(2)},dark=${Number(computerRoom.darkAreaScore || milestones.darkAreaScore || 0).toFixed(2)},entered=${Boolean(milestones.computerRoomEntered)}); bridge(conf=${Number(bridge.confidence || 0).toFixed(2)},lane=${bridge.laneTurn || milestones.bridgeLaneTurn || "none"}); final(conf=${Number(finalRoom.confidence || 0).toFixed(2)},entered=${Boolean(milestones.finalRoomEntered)}); motion=${autoplay.motion9Signature || "000000000"}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}; action=${action.move || "none"}/${action.turn || "none"}/use=${Boolean(action.use)}/fire=${Boolean(action.fire)}`;
+      return `pipeline=${autoplay.controlPipeline || "Idle"}; objective=${autoplay.objective || "none"}; phainesis=${detections}; senseOnly=${Boolean(autoplay.senseOnly)}; manualMove=${Boolean(autoplay.manualMove)}; firstDoor(corr=${Number(firstDoor.corridorConfidence || 0).toFixed(2)},door=${Number(firstDoor.doorConfidence || 0).toFixed(2)},v9=${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)},opened=${Boolean(firstDoor.opened)},use=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}); computer(conf=${Number(computerRoom.confidence || 0).toFixed(2)},dark=${Number(computerRoom.darkAreaScore || milestones.darkAreaScore || 0).toFixed(2)},entered=${Boolean(milestones.computerRoomEntered)}); bridge(conf=${Number(bridge.confidence || 0).toFixed(2)},lane=${bridge.laneTurn || milestones.bridgeLaneTurn || "none"}); final(conf=${Number(finalRoom.confidence || 0).toFixed(2)},entered=${Boolean(milestones.finalRoomEntered)}); motion=${autoplay.motion9Signature || "000000000"}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}; action=${action.move || "none"}/${action.turn || "none"}/use=${Boolean(action.use)}/fire=${Boolean(action.fire)}`;
     }
 
     function sendDoomKeycode(keycode, pressed, holdMs = 0) {
@@ -3720,6 +3850,12 @@
         return;
       }
 
+      const detectionButton = event.target.closest("button[data-detection-toggle]");
+      if (detectionButton && runDetectionToggleButton(detectionButton)) {
+        event.preventDefault();
+        return;
+      }
+
       const button = event.target.closest("button[data-command], button[data-command-sequence]");
       if (!button) {
         return;
@@ -3756,13 +3892,6 @@
       }
 
       syncDetectionToggleButtons();
-      button.addEventListener("click", () => {
-        const enabled = doomDetectionVisibility.get(key) === false;
-        doomDetectionVisibility.set(key, enabled);
-        syncDetectionToggleButtons();
-        renderDoomDebugOverlay(doomRuntime?.status?.() || {});
-        focusPromptUnlessGameRunning();
-      });
     });
 
     doomController.addEventListener("pointerdown", (event) => {

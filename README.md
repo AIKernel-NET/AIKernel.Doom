@@ -80,7 +80,7 @@ The CLI prints `hintWord> yes`. Typing `yes`, `y`, `approve`, or `aik approve do
 
 ## Assets
 
-`samples/doom.rom` points to `doom.wasm`. The actual DOOM WASM binary is not committed. Configure an asset path with `DoomWasmOptions.DoomWasmPath` or place `doom.wasm` beside the ROM. Runtime cache defaults to the user local application data directory.
+`samples/doom.rom` points to `doom.wasm`. The public 0.1.2 Web demo includes the generated `src/DoomWeb/wwwroot/demo/doom/doom.wasm` artifact so the hosted demo can boot consistently. Other runtime deployments can still configure an asset path with `DoomWasmOptions.DoomWasmPath` or place `doom.wasm` beside the ROM. Runtime cache defaults to the user local application data directory.
 
 The demo CLI enables a tiny simulated WASM module so the boot flow can be tested without a large binary. Provider/library usage can disable simulation to receive `DOOM_WASM_NOT_FOUND`.
 
@@ -94,7 +94,7 @@ The demo CLI enables a tiny simulated WASM module so the boot flow can be tested
 - public prompt bootstrap script
 - terms and license notice page
 
-This project is source-only. It does not include `DOOM1.WAD`, Bonsai GGUF model files, or generated `doom.wasm` binaries. Deployment operators must host those runtime artifacts separately and keep consent text, manifests, checksums, and license notices aligned with the hosted files.
+This project does not include `DOOM1.WAD` or Bonsai GGUF model files. The public 0.1.2 Web demo includes the generated `doom.wasm` runtime artifact together with the corresponding source recipe, patches, build scripts, manifest, and license notices. Deployment operators must keep WAD/model hosting, consent text, manifests, checksums, and license notices aligned with the hosted files.
 
 ## Native DOOM WASM Build
 

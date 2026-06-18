@@ -95,18 +95,32 @@
     });
   }
 
+  function applyZoeVeto(action, state, profile) {
+    return requireRuntimePackets("applyZoeVeto")(action, state, profile, {
+      controller: "control-runtime-shim",
+      evaluateWhen,
+      buildContext
+    });
+  }
+
   function semanticScores(state, profile) {
     return requireControlEvidence("semanticScores")(state, profile);
+  }
+
+  function compileCanonicalGraph(profile) {
+    return requireRuntimePackets("compileCanonicalGraph")(profile);
   }
 
   function compile(profile) {
     const pipeline = profile?.pipeline || {};
     const defaultThreshold = number(pipeline?.arbitration?.defaultThreshold, 0);
     const stages = requireControlArbitration("sortStages")(pipeline.stages, number);
+    const graph = compileCanonicalGraph(profile);
 
     return {
       id: CONTROL_RUNTIME_ID,
       strategyName: pipeline.name || profile?.strategyName || "DynamicPipeline",
+      graph,
       predict(state) {
         const context = buildContext(profile, state || {});
         const arbitration = requireControlArbitration("evaluateStages")(context, stages, {
@@ -117,13 +131,13 @@
         });
         const evaluations = arbitration.evaluations;
         if (arbitration.selectedStage) {
-          this.lastAction = actionFromStage(context, arbitration.selectedStage);
+          this.lastAction = applyZoeVeto(actionFromStage(context, arbitration.selectedStage), state || {}, profile);
           this.predictions += 1;
           this.lastStatus = statusFromAction(this.lastAction, evaluations, context, this.predictions);
           return this.lastAction;
         }
 
-        this.lastAction = idleAction(state || {}, profile);
+        this.lastAction = applyZoeVeto(idleAction(state || {}, profile), state || {}, profile);
         this.predictions += 1;
         this.lastStatus = statusFromAction(this.lastAction, evaluations, context, this.predictions);
         return this.lastAction;
@@ -137,6 +151,7 @@
           strategyName: this.strategyName,
           controller: "control-runtime-shim",
           runtimeId: CONTROL_RUNTIME_ID,
+          graph: this.graph,
           predictions: this.predictions,
           createDecisionTrace: requireDecisionTrace("createPacket")
         });
@@ -151,6 +166,7 @@
     return requireRuntimePackets("statusFromAction")(action, evaluations, context, predictions, {
       runtimeId: CONTROL_RUNTIME_ID,
       controller: "control-runtime-shim",
+      graph: context?.profile ? compileCanonicalGraph(context.profile) : null,
       createDecisionTrace: requireDecisionTrace("createPacket")
     });
   }

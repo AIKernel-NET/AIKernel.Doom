@@ -19,7 +19,7 @@ The demo intentionally separates contracts, adapters, and execution flow:
 
 Runtime asset acquisition is gated by explicit user consent. The CLI starts suspended with `hintWord=yes`; standard `aik help`, `aik status`, provider, and capability listing commands remain available before approval.
 
-`DoomWeb` does not include hosted third-party binaries such as `DOOM1.WAD`, Bonsai model weights, or generated `doom.wasm` artifacts. Public deployments must mirror those files outside the source repository and publish the corresponding manifests, checksums, consent text, and license notices.
+`DoomWeb` does not include hosted WAD or model binaries such as `DOOM1.WAD` or Bonsai model weights. The public 0.1.2 Web demo includes the generated `doom.wasm` artifact in the repository with a deployment manifest, checksum, corresponding source recipe, patches, build scripts, consent text, and license notices.
 
 For a developer-oriented reading path, start with [Documentation](README.md),
 then continue through [Architecture](architecture.md), [Web Runtime](web-runtime.md),

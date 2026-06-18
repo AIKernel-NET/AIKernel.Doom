@@ -42,6 +42,8 @@ loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/cognition/semantics.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/evidence.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/arbitration.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/decision-trace.js");
+loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/pipeline-graph.js");
+loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/zoe-veto.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control/runtime-packets.js");
 loadScript(context, "src/DoomWeb/wwwroot/js/autoplay/control-runtime.js");
 
@@ -65,6 +67,8 @@ assert(evidence?.evidenceScore, "control evidence module was not exported");
 assert(arbitration?.evaluateStages, "control arbitration module was not exported");
 assert(decisionTrace?.createPacket, "decision trace packet module was not exported");
 assert(runtimePackets?.statusFromAction, "control runtime packet module was not exported");
+assert(runtimePackets?.compileCanonicalGraph, "control runtime graph compiler was not exported");
+assert(runtimePackets?.applyZoeVeto, "control runtime Zoe veto helper was not exported");
 assert(runtimeFactory?.create, "control runtime module was not exported");
 
 const bridgeRoute = router.resolveObjectiveRoute({ semanticObjective: "cross-bridge" });
@@ -153,6 +157,29 @@ const arbitrationProfile = {
 };
 
 const arbitrationRuntime = runtimeFactory.create(arbitrationProfile);
+assert(
+  arbitrationRuntime.graph.nodes.map(node => node.id).join(">") === "aisthesis>phainesis>nous>topos>kairos>kinesis>zoe",
+  "runtime should compile the canonical 4-layer pipeline graph"
+);
+const customToposGraph = runtimePackets.compileCanonicalGraph({
+  pipeline: {
+    krisis: {
+      topos: { vectors: ["CustomDecisionVector"] },
+      kairos: { priorities: ["logos"] }
+    },
+    kinesis: {
+      kinesis: { actions: ["moveForward"] }
+    }
+  }
+});
+assert(
+  customToposGraph.nodes.find(node => node.id === "topos").outputs.join(",") === "CustomDecisionVector",
+  "Topos graph outputs should be profile-driven"
+);
+assert(
+  customToposGraph.nodes.find(node => node.id === "kairos").inputs.join(",") === "CustomDecisionVector",
+  "Kairos graph inputs should follow Topos outputs"
+);
 const tieAction = arbitrationRuntime.predict({
   health: 100,
   faceSig: 0.7,
@@ -174,6 +201,7 @@ assert(tieStatus.decisionTrace?.version === "control-decision-trace-v1", "status
 assert(tieStatus.decisionTrace.entries.some(item => item.code === "P" && item.category === "priority"), "decision trace should include priority entries");
 assert(tieStatus.decisionTrace.entries.some(item => item.code === "T" && item.category === "telos"), "decision trace should include telos entries");
 assert(tieStatus.decisionTrace.entries.some(item => item.code === "O" && item.category === "objective"), "decision trace should include objective entries");
+assert(tieStatus.graph.nodes[6].inputs.join(",") === "health", "Zoe graph node should receive only health input");
 
 const thresholdRuntime = runtimeFactory.create(arbitrationProfile);
 const thresholdAction = thresholdRuntime.predict({
@@ -236,8 +264,39 @@ assert(tensorAction.stage === "bridge-route", "sensor tensor bridge evidence sho
 assert(tensorAction.move === "forward", "bridge route should move forward");
 assert(tensorAction.semanticScores.bridge === 0.75, "semantic score should expose tensor-backed bridge evidence");
 
+const vetoProfile = {
+  strategyName: "UnitZoeVetoPipeline",
+  pipeline: {
+    name: "UnitZoeVetoPipeline",
+    kinesis: {
+      zoe: {
+        vetoRules: [{ when: "hp < 10" }]
+      }
+    },
+    stages: [
+      {
+        id: "unsafe-forward",
+        objective: "advance-route",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true",
+          attackKey: "true"
+        }
+      }
+    ]
+  }
+};
+const vetoRuntime = runtimeFactory.create(vetoProfile);
+const vetoAction = vetoRuntime.predict({ health: 5 });
+assert(vetoAction.zoeVetoed === true, "Zoe should veto unsafe low-health actions");
+assert(vetoAction.move === "none", "Zoe veto should override movement");
+assert(vetoAction.fire === false, "Zoe veto should override attack");
+assert(vetoRuntime.status().safetyReason === "zoe-veto", "Zoe veto should be visible in runtime status");
+
 console.log("CONTROL_RUNTIME_VM_TEST_OK", {
   bridgeObjective: bridgeRoute.objective,
   deterministicStage: tieAction.stage,
-  tensorStage: tensorAction.stage
+  tensorStage: tensorAction.stage,
+  vetoed: vetoAction.zoeVetoed
 });

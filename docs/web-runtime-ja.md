@@ -106,6 +106,21 @@ web runtime は以下の経路で表示できます。
 - `canvas-fallback(WebGpuComputeProvider)`: GPU provider はあるが texture binding が使えない場合。
 - Canvas-only fallback: WebGPU 非対応ブラウザ。
 
+texture path が有効な場合、`webgpu-provider.js` は fragment shader による HUD
+compositor も担当します。present pass は DOOM framebuffer texture を sample し、
+debug evidence を VRAM 内で合成します。
+
+- 9x9 detector heatmap は 81 個の float storage buffer として upload し、1 回の
+  full-screen draw call で描画する。
+- Kairos pulse は DOM/CSS の点滅ではなく shader time で制御する。
+- probe arrow、center enemy ring、near-wall foot glow は fragment shader で生成する。
+- `doom-prompt.js` は GPU HUD が active な間だけ DOM detection overlay を隠す。
+  Canvas/CPU fallback では既存の DOM/CSS overlay を維持する。
+
+AutoPlay の tuning は shader へ閉じ込めません。`doom.js` が現在の perception/DSL
+control state を compact な HUD state buffer に変換するため、controller logic は
+presentation shader を再コンパイルせずに発展させられます。
+
 perception path は frame が WebGPU surface 上に残ったかを status に記録します。
 
 ```text
@@ -123,6 +138,10 @@ runtime は以下を download/cache/load できます。
 - hosted shareware `DOOM1.WAD`
 - Bonsai model manifest と model file
 - 関連 runtime metadata
+
+runtime は approval 後の download 状態を `status.downloadProgress` に出します。
+各 asset は `receivedBytes`、`totalBytes`、`percent`、phase label を持つため、
+`doom.wasm` / WAD / model の取得で数秒待つ場合でも prompt UI は進捗を表示できます。
 
 approval 前に大容量 protected runtime asset はロードされません。これは public demo
 で最も見えやすい fail-closed boundary です。

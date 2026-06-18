@@ -53,6 +53,10 @@ public static class DoomCapabilityContracts
             {
                 ["provider"] = "aikernel.doom.provider",
                 ["runtime"] = "wasm",
-                ["process"] = "doom"
+                ["process"] = "doom",
+                ["schema.autoplayProfile"] = "https://aikernel.net/schemas/doom/autoplay-profile.schema.json",
+                ["schema.autoplayState"] = "https://aikernel.net/schemas/doom/autoplay-state.schema.json",
+                ["schema.autoplayAction"] = "https://aikernel.net/schemas/doom/autoplay-action.schema.json",
+                ["schema.autoplayStatus"] = "https://aikernel.net/schemas/doom/autoplay-status.schema.json"
             });
 }

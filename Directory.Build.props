@@ -7,8 +7,8 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
-    <StablePackageVersion>0.1.1.1</StablePackageVersion>
-    <LocalPackageVersionPrefix>0.1.1.1</LocalPackageVersionPrefix>
+    <StablePackageVersion>0.1.2</StablePackageVersion>
+    <LocalPackageVersionPrefix>0.1.2</LocalPackageVersionPrefix>
     <LocalPackageBuildNumber Condition="'$(LocalPackageBuildNumber)' == ''">0</LocalPackageBuildNumber>
     <UseLocalPackageVersion Condition="'$(UseLocalPackageVersion)' == ''">false</UseLocalPackageVersion>
     <Version Condition="'$(UseLocalPackageVersion)' == 'true'">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</Version>
@@ -17,11 +17,11 @@
     <AssemblyVersion>$(StablePackageVersion)</AssemblyVersion>
     <FileVersion>$(StablePackageVersion)</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
-    <AIKernelPackageVersion>[0.1.1.1]</AIKernelPackageVersion>
-    <AIKernelCorePackageVersion>0.1.1.1-dev1</AIKernelCorePackageVersion>
-    <AIKernelProvidersPackageVersion>0.1.1.1-dev2</AIKernelProvidersPackageVersion>
-    <AIKernelWasmRuntimePackageVersion>0.1.1.1-dev0</AIKernelWasmRuntimePackageVersion>
-    <AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.1.1-dev0</AIKernelWasmWebGpuComputeProviderPackageVersion>
+    <AIKernelPackageVersion>[0.1.2]</AIKernelPackageVersion>
+    <AIKernelCorePackageVersion>0.1.2</AIKernelCorePackageVersion>
+    <AIKernelProvidersPackageVersion>0.1.2</AIKernelProvidersPackageVersion>
+    <AIKernelWasmRuntimePackageVersion>0.1.2</AIKernelWasmRuntimePackageVersion>
+    <AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.2</AIKernelWasmWebGpuComputeProviderPackageVersion>
     <AIKernelProvidersPackageId>AIKernel.Providers.Standard</AIKernelProvidersPackageId>
   </PropertyGroup>
 </Project>

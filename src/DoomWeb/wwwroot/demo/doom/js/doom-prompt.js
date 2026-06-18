@@ -40,7 +40,7 @@
       {
         t: "[LEGAL]",
         c: "log-warn",
-        m: "Read /demo/doom/terms-and-licenses.html before typing yes."
+        m: "Review terms and licenses before approval. / 起動前に利用規約とライセンスを確認してください。"
       },
       {
         t: "[ WAIT ]",
@@ -55,16 +55,20 @@
       {
         t: "--------",
         c: "log-muted",
-        m: "AIKERNEL.DOOM PROMPT SUSPENDED. hintWord=yes"
+        m: "AIKERNEL.DOOM WAITING FOR EXPLICIT USER APPROVAL. Type yes in the aik console or use the approval button below. / aik コンソールで yes と入力するか、下のボタンで同意して起動できます。"
       }
     ];
 
     const container = document.getElementById("output");
+    const consoleBody = document.querySelector(".console-body");
     const halted = document.getElementById("halted");
     const panic = document.getElementById("panic");
     const promptForm = document.getElementById("wasm-prompt");
     const promptInput = document.getElementById("wasm-command");
     const promptSubmit = document.getElementById("wasm-command-run");
+    const approvalActions = document.getElementById("doom-approval-actions");
+    const approvalAccept = document.getElementById("doom-approval-accept");
+    const approvalDecline = document.getElementById("doom-approval-decline");
     const runtimeStatus = document.getElementById("runtime-status");
     const doomScreen = document.getElementById("doom-screen");
     const doomScreenPanel = document.getElementById("doom-screen-panel");
@@ -72,9 +76,13 @@
     const doomController = document.getElementById("doom-controller");
     const doomRuntimePanel = document.getElementById("doom-runtime-panel");
     const doomState = document.getElementById("doom-state");
+    const doomControllerDebugLog = document.getElementById("doom-controller-debug-log");
+    const doomControllerDebugLogList = document.getElementById("doom-controller-debug-log-list");
+    let doomControllerDebugFilters = Array.from(document.querySelectorAll("[data-debug-log-filter]"));
     const doomDebugBar = document.getElementById("doom-debug-bar");
     const doomDebugOverlay = document.getElementById("doom-debug-overlay");
     const doomOverlayToggle = document.getElementById("doom-overlay-toggle");
+    let doomAutoplayToggle = document.getElementById("doom-autoplay-toggle");
     const doomManualMoveToggle = document.getElementById("doom-manual-move-toggle");
     const doomSenseOnlyToggle = document.getElementById("doom-sense-only-toggle");
     let doomSensorToggles = Array.from(document.querySelectorAll("[data-sensor-toggle]"));
@@ -106,10 +114,18 @@
       health: { label: "Health", signal: "life state", group: "is-life", layer: "Zoe" }
     };
     const commandHistory = [];
+    const controllerDebugLogEntries = [];
+    const controllerDebugLogSignatureByCategory = new Map();
+    const CONTROLLER_DEBUG_LOG_MAX_VISIBLE = 18;
     let commandHistoryIndex = 0;
+    let controllerDebugLogFilter = "all";
+    let controllerDebugLogLimit = CONTROLLER_DEBUG_LOG_MAX_VISIBLE;
+    let controllerDebugLogAutoLimit = true;
+    let controllerDebugLogResizeObserver = null;
     let wasmApprovalPending = true;
     let lastRuntimeStatus = "";
     let lastObjectiveStatus = "";
+    const downloadProgressTracker = requireDownloadProgressAdapter("createTracker")();
     let doomDebugOverlayEnabled = true;
     let doomToposDetailEnabled = false;
     const doomDetectionVisibility = new Map([
@@ -127,6 +143,13 @@
       ["health", true]
     ]);
     const DOOM_PULSE_INPUT_MS = 140;
+    const doomSchemaDefinitionUrls = [
+      "/demo/doom/autoplay-action.schema.json",
+      "/demo/doom/autoplay-profile.schema.json",
+      "/demo/doom/autoplay-sensor-tensor.schema.json",
+      "/demo/doom/autoplay-state.schema.json",
+      "/demo/doom/autoplay-status.schema.json"
+    ];
     const activeDoomInputs = new Set();
     const doomKeyCodes = {
       forward: 0xad,
@@ -167,13 +190,16 @@
         modelManifestUrl: "/models/bonsai1.7b/manifest.json",
         autoplayProfileUrl: "/demo/doom/autoplay-profile.json",
         log: appendConsoleLine,
-        onStatusChange: updateRuntimeStatus
+        onStatusChange: queueRuntimeStatusUpdate
       })
       : null;
     window.AIKernelDoomRuntime = doomRuntime;
     let doomHasStarted = false;
 
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    let consoleFollowTimer = 0;
+    const runtimeStatusFlow = requireRuntimeStatusFlowAdapter("createFlow")();
+    let latestRuntimeStatus = null;
 
     function appendLine(log) {
       const line = document.createElement("div");
@@ -192,8 +218,53 @@
       line.appendChild(label);
       line.appendChild(document.createTextNode(` ${message}`));
       container.appendChild(line);
-      container.scrollTop = container.scrollHeight;
       followConsoleOutput(Boolean(options.pageFollow));
+    }
+
+    function setApprovalUiState(state = "ready") {
+      if (!approvalActions) {
+        return;
+      }
+
+      const waiting = state === "ready" || state === "suspended" || state === "failed";
+      const busy = state === "loading";
+      const hidden = state === "hidden" || state === "running";
+      approvalActions.dataset.state = state;
+      approvalActions.classList.toggle("is-collapsed", hidden);
+      approvalActions.setAttribute("aria-hidden", hidden ? "true" : "false");
+      [approvalAccept, approvalDecline].forEach(button => {
+        if (button) {
+          button.disabled = !waiting || busy || hidden;
+        }
+      });
+    }
+
+    function setApprovalNoticeHtml(state = "ready") {
+      if (!halted) {
+        return;
+      }
+
+      if (state === "loading") {
+        halted.classList.add("is-visible");
+        halted.innerHTML = "[ LOADING ] AIKERNEL.DOOM APPROVED DOWNLOAD/LOAD ACTIVE.<span>Fetching and validating doom.wasm, DOOM1.WAD, Bonsai model, manifests, and metadata.</span><span>同意後のダウンロードと検証を実行しています。</span>";
+      } else if (state === "ready") {
+        halted.classList.add("is-visible");
+        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>The public demo asks for consent before downloading DOOM1.WAD, Bonsai-1.7B, and doom.wasm. Type <code>yes</code> in the aik console or use the approval button below. Current protected size estimate: about 270MB, under 300MB.</span><span>利用規約とライセンスを確認し、aik コンソールで <code>yes</code> と入力するか下のボタンで同意すると、約300MBのデータ取得を許可して Doom デモを起動します。</span>";
+      }
+    }
+
+    function scrollConsoleHistoryToTail() {
+      if (!container) {
+        return;
+      }
+
+      const target = Math.max(0, container.scrollHeight - container.clientHeight);
+      if (typeof container.scrollTo === "function") {
+        container.scrollTo({ top: target, left: 0, behavior: "auto" });
+      } else {
+        container.scrollTop = target;
+      }
+      container.scrollTop = target;
     }
 
     function followConsoleOutput(pageFollow = false) {
@@ -201,16 +272,39 @@
         return;
       }
 
-      container.scrollTop = container.scrollHeight;
+      scrollConsoleHistoryToTail();
       if (typeof window.requestAnimationFrame === "function") {
         window.requestAnimationFrame(() => {
-          container.scrollTop = container.scrollHeight;
+          scrollConsoleHistoryToTail();
+          window.requestAnimationFrame(scrollConsoleHistoryToTail);
           const tail = container.lastElementChild;
           const keepGameViewport = document.activeElement === doomScreen && doomRuntime?.status?.().state === "running";
           if (pageFollow && !keepGameViewport && tail && typeof tail.scrollIntoView === "function") {
             tail.scrollIntoView({ block: "end", inline: "nearest" });
           }
         });
+      }
+      window.clearTimeout(consoleFollowTimer);
+      consoleFollowTimer = window.setTimeout(scrollConsoleHistoryToTail, 80);
+    }
+
+    function renderDownloadProgress(progress, status = {}, reason = "") {
+      if (!progress || wasmApprovalPending) {
+        return;
+      }
+
+      const view = downloadProgressTracker.update(progress, status, reason);
+      if (!view) {
+        return;
+      }
+
+      if (halted && view.active) {
+        halted.classList.add("is-visible");
+        halted.innerHTML = `[ LOADING ] AIKERNEL.DOOM APPROVED DOWNLOAD/LOAD ACTIVE.<span>${escapeText(view.headline)}</span><span>${escapeText(view.detail)}</span>`;
+      }
+
+      if (view.shouldLog) {
+        appendConsoleLine("[ LOAD ]", view.logClass, view.progressText);
       }
     }
 
@@ -220,22 +314,22 @@
       }
 
       doomHasStarted = true;
+      if (doomScreenPanel) {
+        doomScreenPanel.hidden = false;
+      }
       setDoomRuntimeUiVisibility(doomRuntime?.status?.() || { state: "running" });
 
       if (doomScreen.tabIndex < 0) {
         doomScreen.tabIndex = 0;
       }
 
-      if (doomScreenPanel) {
-        doomScreenPanel.hidden = false;
-      }
-
       const applyFocus = () => {
-        doomScreenPanel?.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "auto" });
+        scrollDoomRuntimeIntoView(reason);
         try {
-          doomScreen.focus();
+          doomScreen.focus({ preventScroll: true });
         } catch {
           doomScreen.focus();
+          scrollDoomRuntimeIntoView(reason);
         }
 
         renderDoomState(doomRuntime?.status?.() || { state: "unknown" }, `focus=game:${reason}`);
@@ -247,13 +341,31 @@
       }
       window.setTimeout?.(applyFocus, 120);
       window.setTimeout?.(applyFocus, 360);
+      window.setTimeout?.(applyFocus, 900);
 
       return true;
     }
 
-    function focusPromptUnlessGameRunning() {
-      const status = doomRuntime?.status?.() || {};
-      if (status.state === "running" && doomScreenPanel?.hidden === false) {
+    function scrollDoomRuntimeIntoView(reason = "runtime") {
+      const anchor = doomScreenPanel || doomScreen;
+      if (!anchor || typeof window.scrollTo !== "function") {
+        return;
+      }
+
+      const margin = reason.indexOf("approved") >= 0 ? 10 : 12;
+      const anchorRect = anchor.getBoundingClientRect();
+      const top = anchorRect.top + window.scrollY;
+      const target = top - margin;
+
+      window.scrollTo({
+        top: Math.max(0, Math.round(target)),
+        left: window.scrollX || 0,
+        behavior: "auto"
+      });
+    }
+
+    function focusAikConsole(reason = "prompt") {
+      if (!promptInput || promptInput.disabled) {
         return false;
       }
 
@@ -263,7 +375,16 @@
         promptInput.focus();
       }
 
-      return true;
+      return document.activeElement === promptInput;
+    }
+
+    function focusPromptUnlessGameRunning(reason = "prompt") {
+      const status = doomRuntime?.status?.() || {};
+      if (status.state === "running" && doomScreenPanel?.hidden === false) {
+        return focusDoomViewport(`release-console:${reason}`);
+      }
+
+      return focusAikConsole(reason);
     }
 
     function isDoomRuntimeUiVisible(status = doomRuntime?.status?.() || {}) {
@@ -272,6 +393,8 @@
 
     function setDoomRuntimeUiVisibility(status = doomRuntime?.status?.() || {}) {
       const visible = isDoomRuntimeUiVisible(status);
+      const gameSurfaceVisible = visible && doomScreenPanel?.hidden === false;
+      consoleBody?.classList.toggle("is-doom-running", gameSurfaceVisible);
       if (runtimeStatus) {
         runtimeStatus.hidden = !visible;
       }
@@ -289,6 +412,7 @@
       }
 
       if (!visible) {
+        setGpuHudOverlayEnabled(false);
         if (doomDebugOverlay) {
           doomDebugOverlay.classList.remove("is-visible");
           doomDebugOverlay.replaceChildren();
@@ -601,7 +725,302 @@
       doomState.textContent = `Status: ${status?.state || "unknown"} · fps=${fps}/${targetFps} · autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}${modeFlags ? ` · ${modeFlags}` : ""}`;
     }
 
+    function queueRuntimeStatusUpdate(status, reason = "status") {
+      runtimeStatusFlow.queue(status, reason, {
+        light: syncRuntimeStatusLight,
+        update: updateRuntimeStatus
+      });
+    }
+
+    function requireDownloadProgressAdapter(name) {
+      const fn = window.AIKernelDoomDownloadProgress?.[name];
+      if (typeof fn !== "function") {
+        throw new Error(`AIKernelDoomDownloadProgress.${name} is not available.`);
+      }
+
+      return fn;
+    }
+
+    function requireRuntimeStatusFlowAdapter(name) {
+      const fn = window.AIKernelDoomRuntimeStatusFlow?.[name];
+      if (typeof fn !== "function") {
+        throw new Error(`AIKernelDoomRuntimeStatusFlow.${name} is not available.`);
+      }
+
+      return fn;
+    }
+
+    function requireControllerDebugLogAdapter(name) {
+      const fn = window.AIKernelDoomControllerDebugLog?.[name];
+      if (typeof fn !== "function") {
+        throw new Error(`AIKernelDoomControllerDebugLog.${name} is not available.`);
+      }
+
+      return fn;
+    }
+
+    function normalizeControllerDebugCategory(value) {
+      return requireControllerDebugLogAdapter("normalizeCategory")(value);
+    }
+
+    function normalizeControllerDebugEntry(entry, fallbackCategory = "control") {
+      return requireControllerDebugLogAdapter("normalizeEntry")(entry, fallbackCategory);
+    }
+
+    function controllerDebugEntriesFromDecisionTrace(trace, optionText, reason = "status") {
+      return requireControllerDebugLogAdapter("entriesFromDecisionTrace")(trace, optionText, reason);
+    }
+
+    function controllerDebugEntryMatches(entry, filter) {
+      return requireControllerDebugLogAdapter("entryMatches")(entry, filter);
+    }
+
+    function controllerDebugCategoryGlyph(entry) {
+      return requireControllerDebugLogAdapter("categoryGlyph")(entry);
+    }
+
+    function estimateControllerDebugLogLimit() {
+      if (!doomControllerDebugLog || !doomControllerDebugLogList) {
+        return controllerDebugLogLimit;
+      }
+
+      const header = doomControllerDebugLog.querySelector(".doom-controller-debug-log-head");
+      const headerHeight = header?.getBoundingClientRect?.().height || 0;
+      const style = getComputedStyle(doomControllerDebugLog);
+      const paddingY = (Number.parseFloat(style.paddingTop || "0") || 0)
+        + (Number.parseFloat(style.paddingBottom || "0") || 0);
+      const availableHeight = Math.max(
+        0,
+        Math.min(
+          doomControllerDebugLogList.clientHeight || 0,
+          doomControllerDebugLog.clientHeight - headerHeight - paddingY
+        )
+      );
+      const sample = doomControllerDebugLogList.querySelector(".doom-control-log-entry, .doom-control-log-empty");
+      const sampleHeight = sample?.getBoundingClientRect?.().height || 12;
+      const rowGap = Number.parseFloat(getComputedStyle(doomControllerDebugLogList).rowGap || "3") || 3;
+      return Math.max(4, Math.min(
+        CONTROLLER_DEBUG_LOG_MAX_VISIBLE,
+        Math.floor((availableHeight + rowGap) / Math.max(8, sampleHeight + rowGap))
+      ));
+    }
+
+    function resolveControllerDebugLogLimit() {
+      if (!controllerDebugLogAutoLimit) {
+        return Math.max(1, Math.min(CONTROLLER_DEBUG_LOG_MAX_VISIBLE, Number(controllerDebugLogLimit) || CONTROLLER_DEBUG_LOG_MAX_VISIBLE));
+      }
+
+      controllerDebugLogLimit = estimateControllerDebugLogLimit();
+      return controllerDebugLogLimit;
+    }
+
+    function renderControllerDebugLog() {
+      if (!doomControllerDebugLog || !doomControllerDebugLogList) {
+        return;
+      }
+
+      doomControllerDebugLog.dataset.filter = controllerDebugLogFilter;
+      for (const button of doomControllerDebugFilters) {
+        const active = normalizeControllerDebugCategory(button.dataset.debugLogFilter || "all") === controllerDebugLogFilter;
+        button.classList.toggle("is-on", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+
+      const limit = resolveControllerDebugLogLimit();
+      doomControllerDebugLog.dataset.limit = String(limit);
+      const entries = controllerDebugLogEntries
+        .filter(entry => controllerDebugEntryMatches(entry, controllerDebugLogFilter))
+        .slice(0, limit);
+      const fragment = document.createDocumentFragment();
+      if (!entries.length) {
+        const empty = document.createElement("li");
+        empty.className = "doom-control-log-empty";
+        empty.textContent = "awaiting control telemetry";
+        fragment.appendChild(empty);
+      } else {
+        for (const entry of entries) {
+          const item = document.createElement("li");
+          item.className = `doom-control-log-entry is-${entry.category} is-${entry.level}`;
+          const label = document.createElement("span");
+          label.className = "doom-control-log-label";
+          label.textContent = controllerDebugCategoryGlyph(entry);
+          label.title = entry.label;
+          const message = document.createElement("span");
+          message.className = "doom-control-log-message";
+          message.textContent = entry.message;
+          item.title = `${entry.timestamp} ${entry.category}: ${entry.message}`;
+          item.appendChild(label);
+          item.appendChild(message);
+          fragment.appendChild(item);
+        }
+      }
+
+      doomControllerDebugLogList.replaceChildren(fragment);
+      window.AIKernelDoomLastControllerDebugLog = getControllerDebugLogEntries(controllerDebugLogLimit);
+    }
+
+    function getControllerDebugLogEntries(limit = controllerDebugLogLimit, filter = controllerDebugLogFilter) {
+      const count = Math.max(1, Math.min(100, Number(limit) || resolveControllerDebugLogLimit()));
+      return controllerDebugLogEntries
+        .filter(entry => controllerDebugEntryMatches(entry, filter || "all"))
+        .slice(0, count)
+        .map(entry => Object.assign({}, entry));
+    }
+
+    function pushControllerDebugLog(entry, options = {}) {
+      const normalized = normalizeControllerDebugEntry(entry, options.category || "control");
+      const signature = `${normalized.category}|${normalized.label}|${normalized.message}|${normalized.value}`;
+      if (options.dedupe !== false && controllerDebugLogSignatureByCategory.get(normalized.category) === signature) {
+        return null;
+      }
+
+      controllerDebugLogSignatureByCategory.set(normalized.category, signature);
+      controllerDebugLogEntries.unshift(normalized);
+      const maxEntries = Math.max(12, Math.min(200, Number(options.maxEntries) || 72));
+      if (controllerDebugLogEntries.length > maxEntries) {
+        controllerDebugLogEntries.length = maxEntries;
+      }
+      if (Number.isFinite(Number(options.limit))) {
+        controllerDebugLogLimit = Math.max(1, Math.min(CONTROLLER_DEBUG_LOG_MAX_VISIBLE, Number(options.limit)));
+        controllerDebugLogAutoLimit = false;
+      } else if (options.autoLimit !== false) {
+        controllerDebugLogAutoLimit = true;
+      }
+      renderControllerDebugLog();
+      return Object.assign({}, normalized);
+    }
+
+    function setControllerDebugLogEntries(entries, options = {}) {
+      controllerDebugLogEntries.length = 0;
+      controllerDebugLogSignatureByCategory.clear();
+      if (Number.isFinite(Number(options.limit))) {
+        controllerDebugLogLimit = Math.max(1, Math.min(CONTROLLER_DEBUG_LOG_MAX_VISIBLE, Number(options.limit)));
+        controllerDebugLogAutoLimit = false;
+      } else if (options.autoLimit !== false) {
+        controllerDebugLogAutoLimit = true;
+      }
+      const values = Array.isArray(entries) ? entries : [entries];
+      for (let index = values.length - 1; index >= 0; index -= 1) {
+        const normalized = normalizeControllerDebugEntry(values[index], options.category || "control");
+        controllerDebugLogEntries.unshift(normalized);
+        controllerDebugLogSignatureByCategory.set(
+          normalized.category,
+          `${normalized.category}|${normalized.label}|${normalized.message}|${normalized.value}`
+        );
+      }
+      renderControllerDebugLog();
+      return getControllerDebugLogEntries(controllerDebugLogLimit, controllerDebugLogFilter);
+    }
+
+    function setControllerDebugLogFilter(filter = "all") {
+      controllerDebugLogFilter = normalizeControllerDebugCategory(filter || "all");
+      renderControllerDebugLog();
+      return controllerDebugLogFilter;
+    }
+
+    function clearControllerDebugLog() {
+      controllerDebugLogEntries.length = 0;
+      controllerDebugLogSignatureByCategory.clear();
+      renderControllerDebugLog();
+    }
+
+    function setControllerDebugMessage(message, options = {}) {
+      const payload = message && typeof message === "object"
+        ? message
+        : Object.assign({}, options, { message });
+      return pushControllerDebugLog(payload, options);
+    }
+
+    function scheduleControllerDebugLogRender() {
+      if (!controllerDebugLogAutoLimit) {
+        return;
+      }
+
+      window.requestAnimationFrame(() => renderControllerDebugLog());
+    }
+
+    function observeControllerDebugLogLayout() {
+      if (!doomControllerDebugLog || controllerDebugLogResizeObserver) {
+        return;
+      }
+
+      if (typeof ResizeObserver === "function") {
+        controllerDebugLogResizeObserver = new ResizeObserver(scheduleControllerDebugLogRender);
+        controllerDebugLogResizeObserver.observe(doomControllerDebugLog);
+        if (doomController) {
+          controllerDebugLogResizeObserver.observe(doomController);
+        }
+      }
+      window.addEventListener("resize", scheduleControllerDebugLogRender, { passive: true });
+      window.visualViewport?.addEventListener?.("resize", scheduleControllerDebugLogRender, { passive: true });
+      window.visualViewport?.addEventListener?.("scroll", scheduleControllerDebugLogRender, { passive: true });
+    }
+
+    function syncControllerDebugLog(status = {}, reason = "status") {
+      const autoplay = status?.autoplay || {};
+      const semantic = autoplay.semanticMemory || {};
+      const control = status?.hudFlowControl || {};
+      const telos = resolveTelosObjective(autoplay);
+      const objective = autoplay.objective || semantic.objective || "none";
+      const pipeline = autoplay.controlPipeline || semantic.phase || "Idle";
+      const priority = Number(autoplay.strategyPriority ?? autoplay.priority ?? 0);
+      const optionText = `auto=${autoplay.enabled ? "on" : "off"} manual=${Boolean(autoplay.manualMove)} sense=${Boolean(autoplay.senseOnly)} hud=${control.mode || "adaptive"}`;
+      const traceEntries = controllerDebugEntriesFromDecisionTrace(autoplay.decisionTrace, optionText, reason);
+      if (traceEntries.length) {
+        setControllerDebugLogEntries(traceEntries, { autoLimit: true });
+        return;
+      }
+
+      pushControllerDebugLog({
+        category: "priority",
+        label: "PRIORITY",
+        message: `${Number.isFinite(priority) ? priority : 0} ${autoplay.strategyName || pipeline}`,
+        value: priority,
+        level: priority >= 2 ? "warn" : "info"
+      });
+      pushControllerDebugLog({
+        category: "telos",
+        label: "TELOS",
+        message: telos || "Monitor runtime",
+        value: telos
+      });
+      pushControllerDebugLog({
+        category: "objective",
+        label: "OBJECTIVE",
+        message: `${objective} via ${pipeline}`,
+        value: objective
+      });
+      pushControllerDebugLog({
+        category: "control",
+        label: "CONTROL",
+        message: `${reason}: ${optionText}`,
+        value: optionText
+      });
+    }
+
+    function syncRuntimeStatusLight(status, reason = "status") {
+      latestRuntimeStatus = status || latestRuntimeStatus;
+      renderDownloadProgress(status?.downloadProgress, status, reason);
+      if (!setDoomRuntimeUiVisibility(status)) {
+        return;
+      }
+
+      renderDoomState(status, reason);
+      syncSensorToggles(status);
+      syncAutoplayToggle(status);
+      syncManualMoveToggle(status);
+      syncSenseOnlyToggle(status);
+      syncOverlayToggle();
+      syncAudioPlaybackToggle(status);
+      syncControllerDebugLog(status, reason);
+      const control = status?.hudFlowControl || {};
+      const fps = Number.isFinite(status?.fps) ? Number(status.fps).toFixed(1) : "0.0";
+      doomFps.textContent = `320x200 paletted framebuffer; fps=${fps}; hud=${control.mode || "adaptive"}; drop=${runtimeStatusFlow.snapshot().droppedFrames}; auto=${status?.autoplay?.enabled ? "on" : "off"}`;
+    }
+
     function updateRuntimeStatus(status, reason = "status") {
+      latestRuntimeStatus = status || latestRuntimeStatus;
+      renderDownloadProgress(status?.downloadProgress, status, reason);
       if (!setDoomRuntimeUiVisibility(status)) {
         lastRuntimeStatus = "";
         lastObjectiveStatus = "";
@@ -669,9 +1088,11 @@
       const autoplayText = `${autoplay.enabled ? "on" : "off"}/${autoplay.mode || "disabled"}${autoplay.manualMove ? "/manual-move" : ""}${autoplay.senseOnly ? "/sense-only" : ""}; pipeline=${pipelineText}; objective=${objectiveText}; det=${detectionText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; move=${Number(movement.vectorX || 0).toFixed(2)}/${Number(movement.vectorY || 0).toFixed(2)}/${Number(movement.confidence || 0).toFixed(2)}; flow=${visualFlowText}; nous=${nousText}; nousDet=${nousDetectorText}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; ammo=${ammoText}; health=${healthText}; retry=${retryText}; milestones=${milestoneText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; vision9x9=${String(autoplay.vision9x9Signature || "").slice(0, 18)}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; audio=${audioText}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; useLatch=${autoplay.firstDoorUseLatchFrames || 0}/${autoplay.firstDoorUsePulsed ? "pulsed" : "armed"}; predictions=${autoplay.predictions || 0}; reuse=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`;
       const text = `runtime=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
       runtimeStatus.innerHTML = `<strong>runtime</strong>=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
-      doomFps.textContent = `320x200 paletted framebuffer; fps=${fps}; cap=${targetFps}; yield=${yieldMs}ms; gpu=${gpuWaitMs}ms/${gpuTimeouts}; auto=${autoplay.enabled ? "on" : "off"}`;
+      const hudControl = status.hudFlowControl || {};
+      doomFps.textContent = `320x200 paletted framebuffer; fps=${fps}; cap=${targetFps}; yield=${yieldMs}ms; gpu=${gpuWaitMs}ms/${gpuTimeouts}; hud=${hudControl.mode || "adaptive"}/drop${runtimeStatusFlow.snapshot().droppedFrames}; auto=${autoplay.enabled ? "on" : "off"}`;
       renderDoomState(status);
       setDoomRuntimeUiVisibility(status);
+      syncAutoplayToggle(status);
       syncManualMoveToggle(status);
       syncSenseOnlyToggle(status);
       syncOverlayToggle();
@@ -686,6 +1107,7 @@
       updateDoomToposHud(status);
       syncAudioPlaybackToggle(status);
       renderDoomDebugOverlay(status);
+      syncControllerDebugLog(status, reason);
 
       lastObjectiveStatus = objectiveText;
 
@@ -724,6 +1146,14 @@
 
       doomDebugOverlay.classList.toggle("is-visible", doomDebugOverlayEnabled);
       if (!doomDebugOverlayEnabled) {
+        setGpuHudOverlayEnabled(false);
+        doomDebugOverlay.replaceChildren();
+        return;
+      }
+
+      const gpuHudActive = syncGpuHudOverlay(status);
+      doomDebugOverlay.classList.toggle("is-gpu-backed", gpuHudActive);
+      if (gpuHudActive) {
         doomDebugOverlay.replaceChildren();
         return;
       }
@@ -965,6 +1395,35 @@
       doomDebugOverlay.replaceChildren(fragment);
     }
 
+    function resolveWebGpuProvider() {
+      return window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider || null;
+    }
+
+    function setGpuHudOverlayEnabled(enabled) {
+      const provider = resolveWebGpuProvider();
+      if (typeof provider?.setHudOverlayEnabled !== "function") {
+        return false;
+      }
+
+      const next = Boolean(enabled);
+      provider.setHudOverlayEnabled(next);
+      return next;
+    }
+
+    function syncGpuHudOverlay(status = doomRuntime?.status?.() || {}) {
+      const provider = resolveWebGpuProvider();
+      if (typeof provider?.setHudOverlayEnabled !== "function") {
+        return false;
+      }
+
+      const providerStatus = typeof provider.status === "function" ? provider.status() : {};
+      const renderer = `${status?.renderer || ""} ${providerStatus?.backend || ""}`;
+      const ready = Boolean(providerStatus?.hudOverlayReady && providerStatus?.usingCpuFallback === false && /webgpu/i.test(renderer));
+      provider.setHudOverlayEnabled(Boolean(doomDebugOverlayEnabled && ready));
+      const nextStatus = typeof provider.status === "function" ? provider.status() : providerStatus;
+      return Boolean(nextStatus?.hudOverlayActive);
+    }
+
     function appendVision9x9Heatmap(fragment, milestones) {
       const heatmap = Array.isArray(milestones?.firstDoorVision9x9Heatmap)
         ? milestones.firstDoorVision9x9Heatmap
@@ -1097,6 +1556,18 @@
       doomSpatialEventIcon.style.cssText = "position:absolute;z-index:9;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,240,120,.95);background:rgba(255,80,40,.78);box-shadow:0 0 14px rgba(255,120,40,.8);transform:translate(-50%,-50%);pointer-events:none;";
       doomSpatialEventIcon.hidden = true;
       host.appendChild(doomSpatialEventIcon);
+
+      if (doomDebugBar && !doomAutoplayToggle) {
+        const doomDebugActions = doomDebugBar.querySelector(".doom-debug-actions") || doomDebugBar;
+        doomAutoplayToggle = document.createElement("button");
+        doomAutoplayToggle.id = "doom-autoplay-toggle";
+        doomAutoplayToggle.type = "button";
+        doomAutoplayToggle.dataset.command = "doom.autoplay toggle";
+        doomAutoplayToggle.className = "doom-debug-switch doom-autoplay-switch is-off";
+        doomAutoplayToggle.setAttribute("aria-pressed", "false");
+        doomAutoplayToggle.textContent = "Autoplay: Off";
+        doomDebugActions.appendChild(doomAutoplayToggle);
+      }
 
       if (doomDebugBar && !doomAudioPlaybackToggle) {
         const doomDebugActions = doomDebugBar.querySelector(".doom-debug-actions") || doomDebugBar;
@@ -1784,7 +2255,9 @@
 
       const detail = document.createElement("span");
       detail.className = "sensor-signal";
-      detail.textContent = `${enabled ? "On" : "Off"} / ${signal}`;
+      detail.textContent = button.dataset.sensorToggle === "compass"
+        ? signal
+        : `${enabled ? "On" : "Off"} / ${signal}`;
 
       button.replaceChildren(title, detail);
     }
@@ -1848,11 +2321,15 @@
         return "sensor cutoff";
       }
 
-      if (text.indexOf("relative-sensor-fusion") >= 0 || text.indexOf("movement-audio-relative") >= 0) {
-        return "relative";
+      if (text.indexOf("movement-audio-relative") >= 0) {
+        return "movement+audio fusion";
       }
 
-      return text.length > 22 ? `${text.slice(0, 22)}...` : text;
+      if (text.indexOf("relative-sensor-fusion") >= 0) {
+        return "relative sensor fusion";
+      }
+
+      return text.length > 32 ? `${text.slice(0, 32)}...` : text;
     }
 
     function compassSignalText(status, descriptor) {
@@ -1885,14 +2362,10 @@
         ? `lm ${landmarkText} ${Math.round(landmarkHeading)}deg${compass.landmarkForced ? " force" : ""}`
         : `lm ${landmarkText}`;
       return [
-        headingUsable
-          ? `H ${Math.round(heading)}deg c ${confidence.toFixed(2)}`
-          : `H ? c ${confidence.toFixed(2)} / ${reliability}`,
-        `src ${source}`,
+        `fuse ${source}`,
         `d ${formatSignedNumber(correction)} rot ${formatSignedNumber(motorDelta)} fb ${formatSignedNumber(frameDelta)}`,
         `vis ${formatSignedNumber(visualDelta)} wall ${formatSignedNumber(wallFlowDelta)} m${wallPatternMagnitude.toFixed(2)}`,
-        `edge ${formatSignedNumber(edgeDelta)} w${edgeWeight.toFixed(2)} ${compass.wallOnlyView ? "wall-only" : (compass.corridorOnlyView ? "corridor" : "open")}`,
-        `${landmarkLine} ${formatSignedNumber(landmarkDelta)}`
+        `edge ${formatSignedNumber(edgeDelta)} w${edgeWeight.toFixed(2)} ${compass.wallOnlyView ? "wall-only" : (compass.corridorOnlyView ? "corridor" : "open")} / ${landmarkLine} ${formatSignedNumber(landmarkDelta)}`
       ].join("\n");
     }
 
@@ -1996,18 +2469,23 @@
       button.classList.toggle("is-compass-uncertain", !headingUsable);
       if (headingUsable) {
         arrow.style.setProperty("--compass-needle-angle", `${(heading - 90).toFixed(1)}deg`);
-        label.textContent = `N0 E90 / ${Math.round(heading)}deg`;
+        label.textContent = `estimate ${Math.round(heading)}deg / c ${Number(compass.confidence || 0).toFixed(2)}`;
       } else if (Number.isFinite(heading)) {
         arrow.style.setProperty("--compass-needle-angle", `${(heading - 90).toFixed(1)}deg`);
-        label.textContent = `Hodos uncertain / ${String(compass.headingReliability || "low-evidence")}`;
+        label.textContent = `estimate ? / c ${Number(compass.confidence || 0).toFixed(2)} / ${String(compass.headingReliability || "low-evidence")}`;
       } else {
         arrow.style.setProperty("--compass-needle-angle", "-90deg");
-        label.textContent = "Hodos uncertain / hold";
+        label.textContent = "estimate ? / hold";
       }
 
       needle.appendChild(arrow);
       needle.appendChild(label);
-      button.appendChild(needle);
+      const detail = button.querySelector(".sensor-signal");
+      if (detail) {
+        button.insertBefore(needle, detail);
+      } else {
+        button.appendChild(needle);
+      }
     }
 
     function sensorInputEnabled(sensors, key) {
@@ -2019,7 +2497,7 @@
       return value !== false;
     }
 
-    function syncSensorToggles(status = doomRuntime?.status?.() || {}) {
+    function syncSensorToggles(status = latestRuntimeStatus || doomRuntime?.status?.() || {}) {
       const sensors = status?.sensors || status?.autoplay?.sensorInputs || {};
       for (let index = 0; index < doomSensorToggles.length; index += 1) {
         const button = doomSensorToggles[index];
@@ -2037,6 +2515,104 @@
         );
         syncCompassNeedle(button, status);
       }
+    }
+
+    function syncSingleSensorToggle(kind, enabled, status = latestRuntimeStatus || {}, button = null) {
+      const normalized = normalizeSensorToggleKind(kind);
+      const target = button || doomSensorToggles.find(item => normalizeSensorToggleKind(item.dataset.sensorToggle) === normalized);
+      if (!target) {
+        return;
+      }
+
+      const descriptor = sensorUi[normalized] || {};
+      syncSensorButton(
+        target,
+        target.dataset.sensorLabel || descriptor.label || `${normalized} Sensor`,
+        sensorSignalText(status, normalized),
+        Boolean(enabled)
+      );
+      if (normalized === "compass") {
+        syncCompassNeedle(target, status);
+      }
+    }
+
+    function normalizeSensorToggleKind(kind) {
+      const text = String(kind || "").toLowerCase();
+      return text === "vision" ? "visual" : text;
+    }
+
+    function createOptimisticSensorStatus(kind, enabled, baseStatus = latestRuntimeStatus) {
+      const status = baseStatus || {};
+      const normalized = normalizeSensorToggleKind(kind);
+      const currentSensors = status.sensors || status.autoplay?.sensorInputs || {};
+      const currentSensor = currentSensors[normalized] || {};
+      const nextSensor = currentSensor && typeof currentSensor === "object"
+        ? Object.assign({}, currentSensor, { enabled: Boolean(enabled) })
+        : { enabled: Boolean(enabled) };
+      const sensors = Object.assign({}, currentSensors, { [normalized]: nextSensor });
+      const autoplay = Object.assign({}, status.autoplay || {}, {
+        sensorInputs: Object.assign({}, status.autoplay?.sensorInputs || {}, sensors)
+      });
+      latestRuntimeStatus = Object.assign({}, status, { sensors, autoplay });
+      return latestRuntimeStatus;
+    }
+
+    function applyOptimisticSensorToggle(kind, enabled, options = {}) {
+      const status = createOptimisticSensorStatus(kind, enabled);
+      if (options.button) {
+        syncSingleSensorToggle(kind, enabled, status, options.button);
+      } else {
+        syncRuntimeStatusLight(status, `${normalizeSensorToggleKind(kind)}-sensor-pending`);
+      }
+      return status;
+    }
+
+    function setSensorInputAsync(kind, enabled, options = {}) {
+      const normalized = normalizeSensorToggleKind(kind);
+      const promise = Promise.resolve(doomRuntime?.setSensorInput?.(normalized, enabled));
+      promise.then(status => {
+        latestRuntimeStatus = status || latestRuntimeStatus;
+        const nextStatus = status || createOptimisticSensorStatus(normalized, enabled);
+        if (options.button) {
+          syncSingleSensorToggle(normalized, enabled, nextStatus, options.button);
+        } else {
+          syncRuntimeStatusLight(nextStatus, `${normalized}-sensor-${enabled ? "on" : "off"}`);
+        }
+        if (options.log) {
+          appendConsoleLine("[SENSOR]", enabled ? "log-ok" : "log-warn", `${normalized} sensor ${enabled ? "enabled" : "cut off"}.`);
+        }
+      }).catch(error => {
+        const restored = createOptimisticSensorStatus(normalized, !enabled);
+        if (options.button) {
+          syncSingleSensorToggle(normalized, !enabled, restored, options.button);
+        } else {
+          syncRuntimeStatusLight(restored, `${normalized}-sensor-failed`);
+        }
+        appendConsoleLine("[SENSOR]", "log-fail", error instanceof Error ? error.message : String(error));
+      });
+      return promise;
+    }
+
+    function runSensorToggleButton(button) {
+      if (!button || !doomRuntime?.setSensorInput) {
+        return false;
+      }
+
+      const kind = normalizeSensorToggleKind(button.dataset.sensorToggle);
+      const current = latestRuntimeStatus?.sensors || latestRuntimeStatus?.autoplay?.sensorInputs || {};
+      const enabled = !sensorInputEnabled(current, kind);
+      button.dataset.pendingSensor = "true";
+      button.setAttribute("aria-busy", "true");
+      applyOptimisticSensorToggle(kind, enabled, { button });
+      setSensorInputAsync(kind, enabled, { button }).finally(() => {
+        delete button.dataset.pendingSensor;
+        button.removeAttribute("aria-busy");
+      });
+      try {
+        doomScreen?.focus?.({ preventScroll: true });
+      } catch {
+      }
+      return true;
     }
 
     function clampHud01(value) {
@@ -2155,37 +2731,43 @@
       return Math.max(0.06, Math.min(1, Math.sqrt(energy * 2.25)));
     }
 
-    async function runWasmCommand(rawCommand) {
-      const command = rawCommand.trim();
+    async function runWasmCommand(rawCommand, options = {}) {
+      const command = String(rawCommand || "").trim();
       const normalized = command.toLowerCase();
+      const echoCommand = options.echo !== false;
 
       if (!command) {
-        return;
+        return false;
       }
 
-      commandHistory.push(command);
-      commandHistoryIndex = commandHistory.length;
-      appendConsoleLine("aik>", "log-ok", command);
+      if (echoCommand) {
+        commandHistory.push(command);
+        commandHistoryIndex = commandHistory.length;
+        appendConsoleLine("aik>", "log-ok", command);
+      }
 
       const responses = {
-        "help": "commands: yes, doom.status, doom.phase.check, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio test, doom.audio status, doom.sensor <visual|audio|motor|movement|compass|spatial|health> <toggle|on|off>, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
-        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. hintWord=yes",
+        "help": "commands: yes, doom.status, doom.phase.check, doom.gui.selftest, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio test, doom.audio status, doom.sensor <visual|audio|motor|movement|compass|spatial|health> <toggle|on|off>, doom.autoplay toggle, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
+        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button below.",
         "doom.stop": "ok: no active public runtime process is running.",
         "wasm.exports": "main, doom_init, doom_tick, doom_render, doom_input, doom_input_action, doom_mount_wad, doom_wad_status, malloc, free",
-        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. hintWord=yes",
+        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. Type yes in the aik console or use the approval button below.",
         "legal": "open /demo/doom/terms-and-licenses.html in a new tab before approval"
       };
 
       if (["yes", "y", "approve", "accept"].includes(normalized)) {
         wasmApprovalPending = false;
+        setApprovalUiState("loading");
+        downloadProgressTracker.reset();
         appendConsoleLine("[  OK  ]", "log-ok", "approval recorded: hosted WAD/model/WASM download and load accepted.");
         if (!doomRuntime) {
           halted.innerHTML = "[ FAILED ] AIKERNEL.DOOM BROWSER RUNTIME UNAVAILABLE.<span>Doom browser runtime script is missing.</span>";
+          setApprovalUiState("failed");
           appendConsoleLine("[ FAIL ]", "log-fail", "Doom browser runtime script is unavailable.");
-          return;
+          return false;
         }
 
-        halted.innerHTML = "[ LOADING ] AIKERNEL.DOOM APPROVED DOWNLOAD/LOAD ACTIVE.<span>Fetching and validating doom.wasm, DOOM1.WAD, Bonsai model, manifests, and metadata.</span><span>Protected downloads started only after explicit yes.</span>";
+        setApprovalNoticeHtml("loading");
         promptInput.disabled = true;
         promptSubmit.disabled = true;
         let gameStarted = false;
@@ -2201,18 +2783,24 @@
           doomRuntimePanel.open = false;
           updateRuntimeStatus(runningStatus, "running");
           appendConsoleLine("[ RESP ]", "log-ok", `${runningStatus.state}: doom_tick -> doom_render loop active.`);
+          focusDoomViewport("approved-running");
           await advanceDoomTitleToGameplay();
           const autoplayStatus = await doomRuntime.setAutoplay(true);
           updateRuntimeStatus(autoplayStatus, "autoplay-on");
           appendConsoleLine("[AUTOPLAY]", "log-ok", "Bonsai active: predicting next move...");
           halted.innerHTML = "[ RUNNING ] AIKERNEL.DOOM AUTOPLAY ACTIVE.<span>doom_tick -> doom_render is driving the framebuffer.</span><span>Bonsai AutoPlay is enabled; manual keys still temporarily override matching AI inputs.</span>";
+          setApprovalUiState("running");
           gameStarted = true;
         } catch (error) {
           halted.innerHTML = "[ FAILED ] AIKERNEL.DOOM APPROVED LOAD FAILED.<span>Review the console output, hosted manifests, asset hashes, and browser cache state.</span>";
+          setApprovalUiState("failed");
           appendConsoleLine("[ FAIL ]", "log-fail", error instanceof Error ? error.message : String(error));
         } finally {
           promptInput.disabled = false;
           promptSubmit.disabled = false;
+          if (!gameStarted) {
+            setApprovalUiState("failed");
+          }
         }
         if (gameStarted) {
           focusDoomViewport("approved-start");
@@ -2224,16 +2812,19 @@
 
       if (["no", "n", "reject", "deny"].includes(normalized)) {
         await doomRuntime?.stop();
+        wasmApprovalPending = true;
         doomHasStarted = false;
         setDoomRuntimeUiVisibility({ state: "suspended" });
         doomScreenPanel.hidden = true;
-        appendConsoleLine("[SUSP]", "log-warn", "approval not granted. Runtime remains suspended. hintWord=yes");
-        return;
+        setApprovalNoticeHtml("ready");
+        setApprovalUiState("ready");
+        appendConsoleLine("[SUSP]", "log-warn", "approval not granted. Runtime remains suspended.");
+        return false;
       }
 
       if (wasmApprovalPending && ["doom.start", "aik exec run doom"].includes(normalized)) {
-        appendConsoleLine("[SUSP]", "log-warn", "approval required before hosted WAD/model/WASM download or load. hintWord=yes");
-        return;
+        appendConsoleLine("[SUSP]", "log-warn", "approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button below.");
+        return false;
       }
 
       if (!wasmApprovalPending && normalized === "doom.status") {
@@ -2304,8 +2895,8 @@
         }
 
         const parts = normalized.split(/\s+/);
-        const kind = parts[1] === "vision" ? "visual" : parts[1];
-        const current = doomRuntime?.status?.().sensors || {};
+        const kind = normalizeSensorToggleKind(parts[1]);
+        const current = latestRuntimeStatus?.sensors || latestRuntimeStatus?.autoplay?.sensorInputs || {};
         let enabled = parts[2] === "on";
         if (parts[2] === "toggle") {
           enabled = !sensorInputEnabled(current, kind);
@@ -2314,10 +2905,15 @@
           return;
         }
 
-        const status = await Promise.resolve(doomRuntime.setSensorInput(kind, enabled));
-        updateRuntimeStatus(status, `${kind}-sensor-${enabled ? "on" : "off"}`);
-        appendConsoleLine("[SENSOR]", enabled ? "log-ok" : "log-warn", `${kind} sensor ${enabled ? "enabled" : "cut off"}.`);
+        applyOptimisticSensorToggle(kind, enabled);
+        setSensorInputAsync(kind, enabled, { log: true });
         return;
+      }
+
+      if (!wasmApprovalPending && normalized === "doom.autoplay toggle") {
+        const enabled = !Boolean(latestRuntimeStatus?.autoplay?.enabled);
+        await runWasmCommand(enabled ? "doom.autoplay on" : "doom.autoplay off");
+        return true;
       }
 
       if (!wasmApprovalPending && normalized === "doom.autoplay on") {
@@ -2333,13 +2929,13 @@
       }
 
       if (!wasmApprovalPending && normalized === "doom.autoplay manual-move toggle") {
-        const manualMove = Boolean(doomRuntime?.status?.().autoplay?.manualMove);
+        const manualMove = Boolean(latestRuntimeStatus?.autoplay?.manualMove);
         await runWasmCommand(manualMove ? "doom.autoplay manual-move off" : "doom.autoplay manual-move on");
         return;
       }
 
       if (!wasmApprovalPending && normalized === "doom.autoplay sense-only toggle") {
-        const senseOnly = Boolean(doomRuntime?.status?.().autoplay?.senseOnly);
+        const senseOnly = Boolean(latestRuntimeStatus?.autoplay?.senseOnly);
         await runWasmCommand(senseOnly ? "doom.autoplay sense-only off" : "doom.autoplay sense-only on");
         return;
       }
@@ -2397,6 +2993,20 @@
         updateRuntimeStatus(status, "phase-check");
         appendConsoleLine("[PHASE]", "log-info", formatPhaseCheck(status));
         return;
+      }
+
+      if (normalized === "doom.gui.selftest") {
+        const result = await doomGuiSelfTest?.runDoomGuiSelfTest?.();
+        if (!result) {
+          appendConsoleLine("[ GUI ]", "log-warn", "GUI selftest module is unavailable.");
+          return false;
+        }
+        appendConsoleLine(
+          "[ GUI ]",
+          result.ok ? "log-ok" : "log-warn",
+          `${result.ok ? "pass" : "check"}: ${result.passed}/${result.total} controls verified; ${result.summary}`
+        );
+        return false;
       }
 
       if (!wasmApprovalPending && (normalized === "doom.capture" || normalized === "doom.sense.capture")) {
@@ -2581,6 +3191,13 @@
     }
 
     window.runWasmCommand = runWasmCommand;
+    window.pushAIKernelDoomControllerDebugLog = pushControllerDebugLog;
+    window.setAIKernelDoomControllerDebugMessage = setControllerDebugMessage;
+    window.setAIKernelDoomControllerDebugLogEntries = setControllerDebugLogEntries;
+    window.setAIKernelDoomControllerDebugLogFilter = setControllerDebugLogFilter;
+    window.clearAIKernelDoomControllerDebugLog = clearControllerDebugLog;
+    observeControllerDebugLogLayout();
+    renderControllerDebugLog();
 
     async function runButtonCommands(button) {
       const sequence = button.dataset.commandSequence
@@ -2601,6 +3218,58 @@
         focusPromptUnlessGameRunning();
       }
     }
+
+    const doomGuiSelfTest = window.AIKernelDoomGuiSelfTest?.install?.({
+      delay,
+      getDoomRuntime: () => doomRuntime,
+      getWasmApprovalPending: () => wasmApprovalPending,
+      getOverlayEnabled: () => doomDebugOverlayEnabled,
+      setOverlayEnabled: value => {
+        doomDebugOverlayEnabled = Boolean(value);
+      },
+      getToposDetailEnabled: () => doomToposDetailEnabled,
+      setToposDetailEnabled: value => {
+        doomToposDetailEnabled = Boolean(value);
+      },
+      getDetectionVisible: key => doomDetectionVisibility.get(key) !== false,
+      setDetectionVisible: (key, value) => {
+        doomDetectionVisibility.set(key, Boolean(value));
+      },
+      sensorInputEnabled,
+      runWasmCommand,
+      appendConsoleLine,
+      ensureDoomSpatialHud,
+      ensureDoomGoalHud,
+      ensureDoomToposHud,
+      ensureDoomSensorToggleRow,
+      syncManualMoveToggle,
+      syncSenseOnlyToggle,
+      syncOverlayToggle,
+      syncToposDetailToggle,
+      syncSensorToggles,
+      syncSingleSensorToggle,
+      syncAutoplayToggle,
+      syncDetectionToggleButtons,
+      syncAudioPlaybackToggle,
+      pushControllerDebugLog,
+      setControllerDebugMessage,
+      setControllerDebugLogFilter,
+      renderDoomDebugOverlay,
+      updateDoomToposHud,
+      elements: () => ({
+        promptInput,
+        doomController,
+        doomControllerDebugLog,
+        doomControllerDebugLogList,
+        doomDebugBar,
+        doomOverlayToggle,
+        doomAutoplayToggle,
+        doomManualMoveToggle,
+        doomSenseOnlyToggle,
+        doomAudioPlaybackToggle,
+        doomToposDetailToggle
+      })
+    });
     window.getAIKernelDoomStatus = function getAIKernelDoomStatus() {
       return doomRuntime?.status?.() || null;
     };
@@ -2611,6 +3280,155 @@
     window.holdAIKernelDoomInput = function holdAIKernelDoomInput(name, holdMs) {
       sendDoomInput(name, true, Math.max(1, Number(holdMs) || DOOM_PULSE_INPUT_MS));
       setTimeout(() => sendDoomInput(name, false), Math.max(1, Number(holdMs) || DOOM_PULSE_INPUT_MS));
+    };
+
+    function getConsoleLogEntries(limit = 250) {
+      const lines = Array.from(container?.querySelectorAll?.(".line") || []);
+      return lines.slice(Math.max(0, lines.length - Math.max(1, Number(limit) || 250))).map((line, index) => {
+        const label = line.querySelector("span");
+        const tag = (label?.textContent || "").trim();
+        const text = (line.textContent || "").trim();
+        return {
+          index,
+          tag,
+          level: label?.className || "",
+          message: tag && text.startsWith(tag) ? text.slice(tag.length).trim() : text,
+          text
+        };
+      });
+    }
+
+    function captureGameFrame() {
+      if (!doomScreen || typeof doomScreen.toDataURL !== "function") {
+        return {
+          ok: false,
+          reason: "game-canvas-unavailable",
+          timestamp: new Date().toISOString()
+        };
+      }
+
+      return {
+        ok: true,
+        contentType: "image/png",
+        width: doomScreen.width || doomScreen.clientWidth || 0,
+        height: doomScreen.height || doomScreen.clientHeight || 0,
+        dataUrl: doomScreen.toDataURL("image/png"),
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    async function getSchemaDefinitions() {
+      const schemas = await Promise.all(doomSchemaDefinitionUrls.map(async url => {
+        const response = await fetch(url, { cache: "no-cache" });
+        return {
+          url,
+          ok: response.ok,
+          status: response.status,
+          schema: response.ok ? await response.json() : null
+        };
+      }));
+      return {
+        version: "20260618-palette1",
+        timestamp: new Date().toISOString(),
+        schemas
+      };
+    }
+
+    async function sendSchemaDefinitions(target = "/api/doom/schema-definitions", options = {}) {
+      const endpoint = typeof target === "string"
+        ? target
+        : (options.endpoint || "/api/doom/schema-definitions");
+      const payload = target && typeof target === "object" && Array.isArray(target.schemas)
+        ? target
+        : await getSchemaDefinitions();
+      window.AIKernelDoomLastSchemaDefinitions = payload;
+
+      let response;
+      try {
+        response = await fetch(endpoint, {
+          method: options.method || "POST",
+          headers: Object.assign({ "content-type": "application/json" }, options.headers || {}),
+          body: JSON.stringify(payload)
+        });
+      } catch (error) {
+        if (options.allowLocalFallback === false) {
+          throw error;
+        }
+
+        return {
+          ok: true,
+          status: 0,
+          statusText: "local-fallback",
+          endpoint,
+          transport: "local-cache",
+          reason: String(error?.message || error || "fetch-failed"),
+          payload
+        };
+      }
+
+      if (response.status === 404 && options.allowLocalFallback !== false) {
+        return {
+          ok: true,
+          status: response.status,
+          statusText: response.statusText,
+          endpoint,
+          transport: "local-cache",
+          reason: "schema-endpoint-not-found",
+          payload
+        };
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        endpoint,
+        transport: "http",
+        payload
+      };
+    }
+
+    function getDebugState() {
+      const runtime = doomRuntime?.status?.() || null;
+      return {
+        timestamp: new Date().toISOString(),
+        debugApi: {
+          version: "20260618-palette1"
+        },
+        approvalPending: wasmApprovalPending,
+        approvalUiState: approvalActions?.dataset?.state || "unknown",
+        runtime,
+        sensorTensor: runtime?.autoplay?.sensorTensor || null,
+        gui: window.getAIKernelDoomGuiSnapshot?.() || null,
+        controllerDebugLog: getControllerDebugLogEntries(controllerDebugLogLimit, controllerDebugLogFilter),
+        lastDownloadProgress: downloadProgressTracker.snapshot().lastText || "",
+        guiSelfTest: window.AIKernelDoomLastGuiSelfTest || null
+      };
+    }
+
+    window.AIKernelDoomDebugApi = {
+      getState: getDebugState,
+      getAnalysisLogs: (limit = 250) => ({
+        timestamp: new Date().toISOString(),
+        state: getDebugState(),
+        logs: getConsoleLogEntries(limit)
+      }),
+      getSensorTensor: () => getDebugState().sensorTensor,
+      getConsoleLogs: getConsoleLogEntries,
+      getControllerDebugLog: getControllerDebugLogEntries,
+      pushControllerDebugLog,
+      setControllerDebugMessage,
+      setControllerDebugLogEntries,
+      setControllerDebugLogFilter,
+      clearControllerDebugLog,
+      captureGameFrame,
+      getSchemaDefinitions,
+      sendSchemaDefinitions,
+      runCommand: (command, options = {}) => runWasmCommand(command, options),
+      approve: () => runWasmCommand("yes", { echo: false, source: "debug-api" }),
+      runGuiSelfTest: (options = {}) => options.log
+        ? window.runAIKernelDoomGuiSelfTestCommand?.()
+        : doomGuiSelfTest?.runDoomGuiSelfTest?.()
     };
 
     function sendDoomInput(name, pressed, holdMs = 0) {
@@ -2631,6 +3449,75 @@
       }
 
       renderDoomState(doomRuntime.status(), `input=${name}:${pressed ? "down" : "up"}`);
+    }
+
+    function syncAutoplayToggle(status) {
+      if (!doomAutoplayToggle) {
+        return;
+      }
+
+      const enabled = Boolean(status?.autoplay?.enabled);
+      doomAutoplayToggle.classList.toggle("is-on", enabled);
+      doomAutoplayToggle.classList.toggle("is-off", !enabled);
+      doomAutoplayToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+      doomAutoplayToggle.textContent = enabled ? "Autoplay: On" : "Autoplay: Off";
+    }
+
+    function createOptimisticAutoplayStatus(enabled, baseStatus = latestRuntimeStatus) {
+      const status = baseStatus || {};
+      const autoplay = Object.assign({}, status.autoplay || {}, {
+        enabled: Boolean(enabled),
+        mode: enabled ? (status.autoplay?.mode || "pending") : "disabled"
+      });
+      latestRuntimeStatus = Object.assign({}, status, { autoplay });
+      return latestRuntimeStatus;
+    }
+
+    function runAutoplayToggleButton(button = doomAutoplayToggle) {
+      if (!button || !doomRuntime?.setAutoplay) {
+        return false;
+      }
+
+      const enabled = !Boolean(latestRuntimeStatus?.autoplay?.enabled);
+      button.setAttribute("aria-busy", "true");
+      const optimistic = createOptimisticAutoplayStatus(enabled);
+      syncAutoplayToggle(optimistic);
+      pushControllerDebugLog({
+        category: "control",
+        label: "CONTROL",
+        message: enabled ? "autoplay enable requested" : "autoplay disable requested",
+        level: "info"
+      }, { dedupe: false });
+
+      Promise.resolve(doomRuntime.setAutoplay(enabled)).then(status => {
+        if (!enabled) {
+          releaseAllDoomInputs();
+        }
+        updateRuntimeStatus(status, enabled ? "autoplay-on" : "autoplay-off");
+        appendConsoleLine(
+          "[AUTOPLAY]",
+          enabled ? "log-ok" : "log-info",
+          enabled ? "Bonsai active: predicting next move..." : "Bonsai idle: AI input disabled."
+        );
+      }).catch(error => {
+        const restored = createOptimisticAutoplayStatus(!enabled);
+        syncAutoplayToggle(restored);
+        pushControllerDebugLog({
+          category: "control",
+          label: "CONTROL",
+          message: `autoplay toggle failed: ${error instanceof Error ? error.message : String(error)}`,
+          level: "error"
+        }, { dedupe: false });
+        appendConsoleLine("[AUTOPLAY]", "log-fail", error instanceof Error ? error.message : String(error));
+      }).finally(() => {
+        button.removeAttribute("aria-busy");
+      });
+
+      try {
+        doomScreen?.focus?.({ preventScroll: true });
+      } catch {
+      }
+      return true;
     }
 
     function syncManualMoveToggle(status) {
@@ -2663,6 +3550,7 @@
       doomOverlayToggle.classList.toggle("is-on", doomDebugOverlayEnabled);
       doomOverlayToggle.setAttribute("aria-pressed", doomDebugOverlayEnabled ? "true" : "false");
       doomOverlayToggle.textContent = doomDebugOverlayEnabled ? "Detection Overlay: On" : "Detection Overlay: Off";
+      syncGpuHudOverlay();
     }
 
     function syncToposDetailToggle() {
@@ -2794,6 +3682,14 @@
     }
 
     doomController.addEventListener("click", async (event) => {
+      const debugFilterButton = event.target.closest("button[data-debug-log-filter]");
+      if (debugFilterButton) {
+        event.preventDefault();
+        setControllerDebugLogFilter(debugFilterButton.dataset.debugLogFilter || "all");
+        focusPromptUnlessGameRunning();
+        return;
+      }
+
       const button = event.target.closest("button[data-command], button[data-command-sequence]");
       if (!button) {
         return;
@@ -2809,6 +3705,18 @@
         syncToposDetailToggle();
         updateDoomToposHud(doomRuntime?.status?.() || {});
         focusPromptUnlessGameRunning();
+        return;
+      }
+
+      const autoplayButton = event.target.closest("#doom-autoplay-toggle");
+      if (autoplayButton && runAutoplayToggleButton(autoplayButton)) {
+        event.preventDefault();
+        return;
+      }
+
+      const sensorButton = event.target.closest("button[data-sensor-toggle]");
+      if (sensorButton && runSensorToggleButton(sensorButton)) {
+        event.preventDefault();
         return;
       }
 
@@ -2828,16 +3736,16 @@
     });
 
     doomManualMoveToggle?.addEventListener("click", async () => {
-      const manualMove = Boolean(doomRuntime?.status?.().autoplay?.manualMove);
+      const manualMove = Boolean(latestRuntimeStatus?.autoplay?.manualMove);
       await runWasmCommand(manualMove ? "doom.autoplay manual-move off" : "doom.autoplay manual-move on");
-      syncManualMoveToggle(doomRuntime?.status?.() || {});
+      syncManualMoveToggle(latestRuntimeStatus || {});
       focusPromptUnlessGameRunning();
     });
 
     doomSenseOnlyToggle?.addEventListener("click", async () => {
-      const senseOnly = Boolean(doomRuntime?.status?.().autoplay?.senseOnly);
+      const senseOnly = Boolean(latestRuntimeStatus?.autoplay?.senseOnly);
       await runWasmCommand(senseOnly ? "doom.autoplay sense-only off" : "doom.autoplay sense-only on");
-      syncSenseOnlyToggle(doomRuntime?.status?.() || {});
+      syncSenseOnlyToggle(latestRuntimeStatus || {});
       focusPromptUnlessGameRunning();
     });
 
@@ -2924,6 +3832,28 @@
       }
     });
 
+    async function runApprovalUiCommand(command) {
+      [approvalAccept, approvalDecline].forEach(button => {
+        if (button) {
+          button.disabled = true;
+        }
+      });
+      const focusGame = await runWasmCommand(command, { echo: false, source: "approval-ui" });
+      if (focusGame) {
+        focusDoomViewport("approval-button");
+      } else {
+        focusPromptUnlessGameRunning();
+      }
+    }
+
+    approvalAccept?.addEventListener("click", () => {
+      runApprovalUiCommand("yes");
+    });
+
+    approvalDecline?.addEventListener("click", () => {
+      runApprovalUiCommand("no");
+    });
+
     promptInput.addEventListener("keydown", (event) => {
       if (event.key === "ArrowUp" && commandHistory.length) {
         event.preventDefault();
@@ -2952,10 +3882,17 @@
       await delay(700);
 
       panic.style.display = "block";
-      halted.style.display = "block";
+      halted.classList.add("is-visible");
       promptInput.disabled = false;
       promptSubmit.disabled = false;
+      setApprovalUiState("ready");
       focusPromptUnlessGameRunning();
+      if (doomGuiSelfTest?.shouldAutoRun?.()) {
+        await delay(120);
+        const result = await doomGuiSelfTest.runDoomGuiSelfTest?.();
+        window.AIKernelDoomLastGuiSelfTestAuto = result || null;
+        focusPromptUnlessGameRunning("auto-gui-selftest");
+      }
 
       console.info("AIKernel.Doom public prompt deployed.");
     }

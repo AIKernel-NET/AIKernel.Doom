@@ -51,6 +51,32 @@ not invent placeholder WAD content.
 
 `doom_render()` returns an 8-bit paletted framebuffer in WASM memory. The build fixes the resolution at 320x200 with `-DDOOMGENERIC_RESX=320`, `-DDOOMGENERIC_RESY=200`, and `-DCMAP256=1`.
 
+## Control Runtime Boundary
+
+The native overlay does not own AutoPlay policy execution. The production
+`doom.wasm` boundary is limited to engine compatibility, framebuffer/audio
+access, WAD mounting, and input adaptation. Dynamic control policy belongs in
+the `AIKernel.Control -> AIKernel.Wasm -> AIKernel.Doom` path.
+
+The browser runtime currently uses a Doom-scoped `AIKernelDoomControlRuntime`
+shim as the temporary adapter. JavaScript builds an
+`autoplay-state.schema.json` packet, invokes the Control runtime adapter, then
+applies the returned `autoplay-action.schema.json` packet through the existing
+DOOM input bridge. If that adapter is unavailable or fails, the Web runtime
+falls back to the Bonsai supervisor.
+
+The state packet includes purpose-level and semantic evidence fields such as
+`objective`, `semanticMemory`, `sensorTensor`, and the stable symbols `door`,
+`corridor`, `enemy`, `safe-zone`, `bridge`, and `computer-room`. The Control
+runtime adapter uses those values for deterministic arbitration and returns the
+selected `pipeline`, `objective`, semantic scores, and decision trace in the
+action/status packet.
+
+An older `aik_autoplay_*` native ABI prototype is kept only as experimental
+reference code and is intentionally excluded from `aik_doom_abi.h`, the
+Emscripten build scripts, and production exports. Do not reintroduce dynamic
+control logic into the external Doom engine assembly.
+
 ## Source And WAD Policy
 
 The selected DOOM source base is `ozkl/doomgeneric`:

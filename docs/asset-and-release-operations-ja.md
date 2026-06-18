@@ -6,7 +6,7 @@ AIKernel.Doom は source-only のサンプルとして公開します。第三�
 
 ## バージョン
 
-このデモの公開準備バージョンは `0.1.1.1-dev1` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。次の公式 canonical package line は v0.1.2 です。
+このデモの公開準備バージョンは `0.1.2` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。AIKernel 関連ライブラリは、公式 NuGet の canonical package line v0.1.2 を参照します。
 
 ## コミットするもの
 
@@ -84,4 +84,4 @@ source location、patch file、overlay files、生成済み wasm の size/checks
 3. Source-only policy に反する大きな第三者 asset が含まれていない。
 4. `docs/README.md` と `docs/README-ja.md` から開発者向け文書へ到達できる。
 5. Web runtime の consent、license、checksum 表示が最新である。
-6. `0.1.1.1-dev1` の位置づけが README とドキュメントに反映されている。
+6. AIKernel 関連 package reference が公式 NuGet の canonical v0.1.2 から解決される。

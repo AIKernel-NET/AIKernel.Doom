@@ -4,6 +4,28 @@
 
 AutoPlay engine は、観測された DOOM の状態を bounded input action に変換するブラウザ側 Operator です。初期のルール集合は、検知が未確定のまま戦闘、ドア、壁回避が競合する問題を起こしたため、現在は phase routed pipeline と action arbiter に寄せています。
 
+## Dynamic Pipeline DSL
+
+tuning 可能な policy surface は versioned profile DSL に移行しています。Web profile は調整値をすべて `parameters` に置き、必要に応じて `pipeline.stages[]` を定義します。各 stage は deterministic な `when` 条件式と `action` 式 map を持ちます。
+
+C# strategy はこの DSL を有限な dynamic pipeline に compile し、WASM controller ABI も同じ parameter 名を読むため、browser JavaScript は長期的には policy 本体ではなく state/action bridge に寄せられます。
+
+最初の DSL version は次の通りです。
+
+```text
+aikernel.doom.autoplay.pipeline/v1
+```
+
+式は `health < $lowHealthThreshold`、`context == wall`、`depthSig <= $doorUseDepth` のような小さな deterministic expression に限定します。AutoPlayAI の追加 tuning parameter は bridge shape を変えずに `parameters` 配下へ追加できます。
+
+DSL は次の 3 つの control surface を持ちます。
+
+- `semanticMemory`: `door`、`corridor`、`enemy`、`safe-zone`、`bridge`、`computer-room` などの安定した記号入力。
+- `objectives`: `open-door`、`reach-bridge`、`avoid-enemy`、`enter-computer-room` など、目的から手段へ routing するための定義。
+- `arbitration`: final action を deterministic に選ぶための evidence weight、threshold、priority。
+
+`AIKernel.Control -> AIKernel.Wasm` adapter には state packet 経由で semantic score を渡し、返却値には選択された pipeline stage と objective を含めます。JavaScript は download/UI/state bridge を担当し、deterministic control policy は共有 Control/WASM runtime 側へ移せる構成にします。
+
 ## 目的
 
 パイプラインの目的は、低レベル入力を直接積み上げることではなく、「今どの意味的フェーズにいるか」を先に確定し、そのフェーズで許可された検知器と行動だけを実行することです。

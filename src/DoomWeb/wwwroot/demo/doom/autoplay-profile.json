@@ -49,7 +49,7 @@
     "darkZoneConfirmFrames": 5,
     "doorTransitionArmedFrames": 720,
     "combatFireConfidence": 0.5,
-    "combatCloseDepth": 1.0,
+    "combatCloseDepth": 1,
     "combatYawDegrees": 12,
     "lowHealthThreshold": 18,
     "emergencyEscapeYawDegrees": 34,
@@ -110,22 +110,76 @@
     "semanticFinalImpSuppressFrames": 90,
     "e1m1ThingCounts": {
       "skill12": {
-        "monsters": { "imps": 2, "sergeants": 0, "troopers": 2 },
-        "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 12, "medikits": 3, "stimpacks": 1 },
-        "weapons": { "shotguns": 1 },
-        "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
+        "monsters": {
+          "imps": 2,
+          "sergeants": 0,
+          "troopers": 2
+        },
+        "powerups": {
+          "armorBonuses": 25,
+          "blueArmors": 1,
+          "greenArmors": 1,
+          "healthBonuses": 12,
+          "medikits": 3,
+          "stimpacks": 1
+        },
+        "weapons": {
+          "shotguns": 1
+        },
+        "ammunition": {
+          "ammoClips": 2,
+          "bulletBoxes": 1,
+          "shells": 3,
+          "shellBoxes": 3
+        }
       },
       "skill3": {
-        "monsters": { "imps": 2, "sergeants": 0, "troopers": 4 },
-        "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 12, "medikits": 3, "stimpacks": 1 },
-        "weapons": { "shotguns": 1 },
-        "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
+        "monsters": {
+          "imps": 2,
+          "sergeants": 0,
+          "troopers": 4
+        },
+        "powerups": {
+          "armorBonuses": 25,
+          "blueArmors": 1,
+          "greenArmors": 1,
+          "healthBonuses": 12,
+          "medikits": 3,
+          "stimpacks": 1
+        },
+        "weapons": {
+          "shotguns": 1
+        },
+        "ammunition": {
+          "ammoClips": 2,
+          "bulletBoxes": 1,
+          "shells": 3,
+          "shellBoxes": 3
+        }
       },
       "skill45": {
-        "monsters": { "imps": 4, "sergeants": 16, "troopers": 9 },
-        "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 13, "medikits": 3, "stimpacks": 1 },
-        "weapons": { "shotguns": 1 },
-        "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
+        "monsters": {
+          "imps": 4,
+          "sergeants": 16,
+          "troopers": 9
+        },
+        "powerups": {
+          "armorBonuses": 25,
+          "blueArmors": 1,
+          "greenArmors": 1,
+          "healthBonuses": 13,
+          "medikits": 3,
+          "stimpacks": 1
+        },
+        "weapons": {
+          "shotguns": 1
+        },
+        "ammunition": {
+          "ammoClips": 2,
+          "bulletBoxes": 1,
+          "shells": 3,
+          "shellBoxes": 3
+        }
       }
     },
     "combatTactics": {
@@ -146,127 +200,232 @@
     "openStallBackFrames": 7,
     "openStallTurnFrames": 18
   },
-  "doorAimToleranceDegrees": 10,
-  "doorSoftAimToleranceDegrees": 24,
-  "doorAimYawDegrees": 8,
-  "doorAimFrames": 7,
-  "doorApproachFrames": 8,
-  "doorSettleFrames": 3,
-  "doorUseHoldFrames": 18,
-  "emergencyStuckTicks": 54,
-  "doorProbeStuckTicks": 8,
-  "doorUseDepth": 0.72,
-  "doorApproachDepth": 0.94,
-  "firstDoorUseDepth": 0.72,
-  "firstDoorApproachDepth": 0.94,
-  "firstDoorSettleFrames": 6,
-  "firstDoorNoTurnUseFrames": 22,
-  "blockedDepth": 0.28,
-  "combatFaceThreshold": 0.35,
-  "combatAlertFrames": 46,
-  "combatAlertPeakConfidence": 0.62,
-  "combatAlertMaxDepth": 0.85,
-  "combatBurstFrames": 32,
-  "combatBurstShots": 2,
-  "darkZoneScoreThreshold": 0.3,
-  "darkZoneLumaThreshold": 78,
-  "darkZoneConfirmFrames": 5,
-  "doorTransitionArmedFrames": 720,
-  "combatFireConfidence": 0.5,
-  "combatCloseDepth": 1.0,
-  "combatYawDegrees": 12,
-  "lowHealthThreshold": 18,
-  "emergencyEscapeYawDegrees": 34,
-  "wallAwayYawDegrees": 6,
-  "openCruiseYawDegrees": 7,
-  "enableStrafeRun": false,
-  "openCruiseWallVectorDeadZone": 0.08,
-  "firstDoorRushFrames": 2400,
-  "firstDoorRushDepth": 0.58,
-  "firstDoorRushWallVectorLimit": 0.22,
-  "firstDoorBearingFrames": 220,
-  "firstDoorCorridorSearchFrames": 96,
-  "firstDoorCorridorBackFrames": 8,
-  "firstDoorCorridorTurnFrames": 30,
-  "firstDoorProbeMinFrames": 520,
-  "firstDoorSearchIntervalFrames": 320,
-  "firstDoorSpawnRouteFrames": 720,
-  "firstDoorSpawnScanFrames": 36,
-  "firstDoorOpeningLockFrames": 820,
-  "firstDoorOpeningForwardLockFrames": 210,
-  "firstDoorRightWallRunFrames": 230,
-  "firstDoorCorridorTransitFrames": 360,
-  "firstDoorCorridorTurnDepth": 0.24,
-  "firstDoorCorridorTurnStuckFrames": 14,
-  "firstDoorCorridorSkirtFrames": 18,
-  "motionForwardProgressThreshold": 0.16,
-  "motionObstacleThreshold": 0.42,
-  "motionTurnSweepThreshold": 0.34,
-  "motionEntranceThreshold": 0.22,
-  "firstDoorCorridorConfirmFrames": 8,
-  "blueFloorHomeThreshold": 0.18,
-  "firstDoorCorridorSignatureThreshold": 0.52,
-  "firstDoorUseSignatureThreshold": 0.54,
-  "firstDoorPressFrames": 14,
-  "firstDoorUseSweepFrames": 0,
-  "firstDoorUseHoldFrames": 42,
-  "firstDoorRetryUseFrames": 148,
-  "firstDoorRetrySignatureTolerance": 0.08,
-  "computerRoomAdvanceFrames": 220,
-  "exitSwitchUseFrames": 140,
-  "lateDoorUseFrames": 120,
-  "computerRoomConfirmFrames": 6,
-  "courtyardRescueThreshold": 0.3,
-  "courtyardRescueFrames": 78,
-  "courtyardRescueBackFrames": 10,
-  "courtyardRescueTurnFrames": 22,
-  "firstDoorDeadEndTurnFrames": 30,
-  "firstDoorDeadEndDepth": 0.5,
-  "spawnCorridorGapThreshold": 0.28,
-  "spawnCorridorGapFrames": 92,
-  "spawnCorridorGapAlignFrames": 7,
-  "bridgeBrownThreshold": 0.24,
-  "bridgeGreenHazardThreshold": 0.18,
-  "bridgeDoorPanelThreshold": 0.32,
-  "semanticRouteLockFrames": 660,
-  "semanticCorridorConfidenceThreshold": 0.62,
-  "semanticBridgeStraightFrames": 96,
-  "semanticFinalImpSuppressFrames": 90,
-  "e1m1ThingCounts": {
-    "skill12": {
-      "monsters": { "imps": 2, "sergeants": 0, "troopers": 2 },
-      "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 12, "medikits": 3, "stimpacks": 1 },
-      "weapons": { "shotguns": 1 },
-      "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
+  "pipeline": {
+    "dsl": "aikernel.doom.autoplay.pipeline/v1",
+    "name": "SeparatedDoorProbeStrafeRunnerV4",
+    "semanticMemory": [
+      { "id": "door", "kind": "navigation-target" },
+      { "id": "corridor", "kind": "route" },
+      { "id": "enemy", "kind": "threat" },
+      { "id": "safe-zone", "kind": "safety" },
+      { "id": "bridge", "kind": "route" },
+      { "id": "computer-room", "kind": "route" }
+    ],
+    "objectives": [
+      { "id": "open-door", "intent": "door", "means": "align-approach-use", "priority": 70 },
+      { "id": "reach-bridge", "intent": "bridge", "means": "advance-route", "priority": 45 },
+      { "id": "avoid-enemy", "intent": "enemy", "means": "kite-or-fire", "priority": 80 },
+      { "id": "enter-computer-room", "intent": "computer-room", "means": "advance-route", "priority": 40 },
+      { "id": "stabilize-safe-zone", "intent": "safe-zone", "means": "recover-and-relocalize", "priority": 90 }
+    ],
+    "arbitration": {
+      "mode": "deterministic-weighted-priority",
+      "defaultThreshold": 0
     },
-    "skill3": {
-      "monsters": { "imps": 2, "sergeants": 0, "troopers": 4 },
-      "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 12, "medikits": 3, "stimpacks": 1 },
-      "weapons": { "shotguns": 1 },
-      "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
-    },
-    "skill45": {
-      "monsters": { "imps": 4, "sergeants": 16, "troopers": 9 },
-      "powerups": { "armorBonuses": 25, "blueArmors": 1, "greenArmors": 1, "healthBonuses": 13, "medikits": 3, "stimpacks": 1 },
-      "weapons": { "shotguns": 1 },
-      "ammunition": { "ammoClips": 2, "bulletBoxes": 1, "shells": 3, "shellBoxes": 3 }
-    }
-  },
-  "combatTactics": {
-    "openArea": "circle-strafe while keeping enemy near center and firing controlled bursts",
-    "narrowArea": "kite backward and sideways to stack enemies for infighting before committing shots",
-    "crowdArea": "prioritize explosive barrels; barrel hit points are treated as 20 and blast damage falls off across roughly 0-128 map units"
-  },
-  "mapRushLookoutFrames": 66,
-  "mapRushBackoffFrames": 7,
-  "mapRushOpenWallVectorLimit": 0.14,
-  "mapRushOpenDelta": 1.85,
-  "mapDoorSweepFrames": 72,
-  "hardStuckEscapeFrames": 28,
-  "hardStuckBackFrames": 7,
-  "hardStuckTurnFrames": 17,
-  "openAdvanceStallFrames": 6,
-  "openStallEscapeFrames": 30,
-  "openStallBackFrames": 7,
-  "openStallTurnFrames": 18
+    "stages": [
+      {
+        "id": "low-health-escape",
+        "objective": "stabilize-safe-zone",
+        "priority": 100,
+        "threshold": 0.1,
+        "evidence": {
+          "safe-zone": 0.45,
+          "enemy": 0.2
+        },
+        "when": "health > 0 && health < $lowHealthThreshold",
+        "action": {
+          "moveForward": "depthSig > 0.42",
+          "moveBackward": "depthSig <= $blockedDepth",
+          "strafeLeft": "wallVector >= 0",
+          "strafeRight": "wallVector < 0",
+          "turnYaw": "escapeYaw"
+        }
+      },
+      {
+        "id": "recovery-escape",
+        "objective": "stabilize-safe-zone",
+        "priority": 90,
+        "threshold": 0,
+        "evidence": {
+          "safe-zone": 0.5
+        },
+        "when": "recoveryFrames > 0",
+        "action": {
+          "moveForward": "depthSig > $blockedDepth",
+          "moveBackward": "depthSig <= $blockedDepth",
+          "strafeLeft": "$enableStrafeRun && wallVector >= 0",
+          "strafeRight": "$enableStrafeRun && wallVector < 0",
+          "turnYaw": "escapeYaw",
+          "useKey": "context == wall && depthSig <= $doorUseDepth"
+        }
+      },
+      {
+        "id": "stuck-escape",
+        "objective": "stabilize-safe-zone",
+        "priority": 89,
+        "threshold": 0,
+        "evidence": {
+          "safe-zone": 0.4,
+          "corridor": 0.2
+        },
+        "when": "stuckTicks >= $emergencyStuckTicks",
+        "action": {
+          "moveForward": "depthSig > $blockedDepth",
+          "moveBackward": "depthSig <= $blockedDepth",
+          "strafeLeft": "$enableStrafeRun && wallVector >= 0",
+          "strafeRight": "$enableStrafeRun && wallVector < 0",
+          "turnYaw": "escapeYaw",
+          "useKey": "context == wall && depthSig <= $doorUseDepth"
+        }
+      },
+      {
+        "id": "combat-auditory",
+        "objective": "avoid-enemy",
+        "priority": 80,
+        "threshold": 0.35,
+        "evidence": {
+          "enemy": 1
+        },
+        "when": "soundEvent",
+        "action": {
+          "moveForward": "depthSig > 0.5",
+          "strafeLeft": "$enableStrafeRun && combatYaw > 0",
+          "strafeRight": "$enableStrafeRun && combatYaw < 0",
+          "turnYaw": "combatYaw",
+          "attackKey": "depthSig < 0.82 || soundEvent"
+        }
+      },
+      {
+        "id": "combat-visual",
+        "objective": "avoid-enemy",
+        "priority": 79,
+        "threshold": 0.35,
+        "evidence": {
+          "enemy": 1
+        },
+        "when": "absFaceSig >= $combatFaceThreshold",
+        "action": {
+          "moveForward": "depthSig > 0.5",
+          "strafeLeft": "$enableStrafeRun && combatYaw > 0",
+          "strafeRight": "$enableStrafeRun && combatYaw < 0",
+          "turnYaw": "combatYaw",
+          "attackKey": "depthSig < 0.82 || soundEvent"
+        }
+      },
+      {
+        "id": "door-corner-probe",
+        "objective": "open-door",
+        "priority": 70,
+        "threshold": 0.2,
+        "evidence": {
+          "door": 0.7,
+          "corridor": 0.25
+        },
+        "when": "context == corner",
+        "action": {
+          "moveForward": "absQDelta <= $doorAimToleranceDegrees && depthSig > $doorUseDepth",
+          "turnYaw": "doorProbeYaw",
+          "useKey": "absQDelta <= $doorAimToleranceDegrees && depthSig <= $doorUseDepth"
+        }
+      },
+      {
+        "id": "door-wall-probe",
+        "objective": "open-door",
+        "priority": 69,
+        "threshold": 0.2,
+        "evidence": {
+          "door": 0.7,
+          "corridor": 0.2
+        },
+        "when": "context == wall && stuckTicks >= $doorProbeStuckTicks",
+        "action": {
+          "moveForward": "absQDelta <= $doorAimToleranceDegrees && depthSig > $doorUseDepth",
+          "turnYaw": "doorProbeYaw",
+          "useKey": "absQDelta <= $doorAimToleranceDegrees && depthSig <= $doorUseDepth"
+        }
+      },
+      {
+        "id": "door-corridor-probe",
+        "objective": "open-door",
+        "priority": 68,
+        "threshold": 0.2,
+        "evidence": {
+          "door": 0.6,
+          "corridor": 0.35
+        },
+        "when": "context == corridor && stuckTicks >= 24 && depthSig <= 0.68",
+        "action": {
+          "moveForward": "absQDelta <= $doorAimToleranceDegrees && depthSig > $doorUseDepth",
+          "turnYaw": "doorProbeYaw",
+          "useKey": "absQDelta <= $doorAimToleranceDegrees && depthSig <= $doorUseDepth"
+        }
+      },
+      {
+        "id": "bridge-route-cruise",
+        "objective": "reach-bridge",
+        "priority": 45,
+        "threshold": 0.35,
+        "evidence": {
+          "bridge": 1
+        },
+        "when": "context == bridge",
+        "action": {
+          "moveForward": "true",
+          "strafeLeft": "$enableStrafeRun && openCruiseYaw >= 0",
+          "strafeRight": "$enableStrafeRun && openCruiseYaw < 0",
+          "turnYaw": "openCruiseYaw"
+        }
+      },
+      {
+        "id": "computer-room-route-cruise",
+        "objective": "enter-computer-room",
+        "priority": 40,
+        "threshold": 0.35,
+        "evidence": {
+          "computer-room": 1
+        },
+        "when": "context == computer-room",
+        "action": {
+          "moveForward": "true",
+          "strafeLeft": "$enableStrafeRun && openCruiseYaw >= 0",
+          "strafeRight": "$enableStrafeRun && openCruiseYaw < 0",
+          "turnYaw": "openCruiseYaw"
+        }
+      },
+      {
+        "id": "open-space-cruise",
+        "objective": "reach-bridge",
+        "priority": 20,
+        "threshold": 0,
+        "evidence": {
+          "safe-zone": 0.2,
+          "bridge": 0.25
+        },
+        "when": "context == open-space",
+        "action": {
+          "moveForward": "true",
+          "strafeLeft": "$enableStrafeRun && openCruiseYaw >= 0",
+          "strafeRight": "$enableStrafeRun && openCruiseYaw < 0",
+          "turnYaw": "openCruiseYaw"
+        }
+      },
+      {
+        "id": "wall-follow-fallback",
+        "objective": "open-door",
+        "priority": 0,
+        "threshold": 0,
+        "evidence": {
+          "corridor": 0.3,
+          "door": 0.2
+        },
+        "when": "true",
+        "action": {
+          "moveForward": "true",
+          "strafeLeft": "wallVector >= 0",
+          "strafeRight": "wallVector < 0",
+          "turnYaw": "wallAwayYaw"
+        }
+      }
+    ]
+  }
 }

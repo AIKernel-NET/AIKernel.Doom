@@ -1,7 +1,7 @@
 namespace AIKernel.Doom.Architecture.Tests;
 
-using AIKernel.Core.Sdk.Runtime;
 using AIKernel.Doom.Provider;
+using AIKernel.Doom.Provider.Autoplay;
 using AIKernel.Enums.Perception;
 
 /// <summary>

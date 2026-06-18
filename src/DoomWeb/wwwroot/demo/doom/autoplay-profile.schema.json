@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aikernel.net/schemas/doom/autoplay-profile.schema.json",
+  "title": "AIKernel Doom Autoplay Profile",
+  "type": "object",
+  "required": ["version", "strategyName", "parameters"],
+  "properties": {
+    "version": { "type": "string", "minLength": 1 },
+    "strategyName": { "type": "string", "minLength": 1 },
+    "source": { "type": "string" },
+    "observerRom": { "type": "object" },
+    "parameters": {
+      "type": "object",
+      "required": [
+        "doorAimToleranceDegrees",
+        "doorUseDepth",
+        "doorApproachDepth",
+        "combatFaceThreshold",
+        "emergencyStuckTicks",
+        "enableStrafeRun"
+      ],
+      "properties": {
+        "doorAimToleranceDegrees": { "type": "integer", "minimum": 0 },
+        "doorSoftAimToleranceDegrees": { "type": "integer", "minimum": 0 },
+        "doorAimYawDegrees": { "type": "integer" },
+        "doorAimFrames": { "type": "integer", "minimum": 0 },
+        "doorApproachFrames": { "type": "integer", "minimum": 0 },
+        "doorSettleFrames": { "type": "integer", "minimum": 0 },
+        "doorUseHoldFrames": { "type": "integer", "minimum": 0 },
+        "emergencyStuckTicks": { "type": "integer", "minimum": 0 },
+        "doorProbeStuckTicks": { "type": "integer", "minimum": 0 },
+        "doorUseDepth": { "type": "number", "minimum": 0, "maximum": 1.5 },
+        "doorApproachDepth": { "type": "number", "minimum": 0, "maximum": 1.5 },
+        "blockedDepth": { "type": "number", "minimum": 0, "maximum": 1.5 },
+        "combatFaceThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "combatAlertFrames": { "type": "integer", "minimum": 0 },
+        "combatAlertPeakConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "combatAlertMaxDepth": { "type": "number", "minimum": 0, "maximum": 1.5 },
+        "darkZoneScoreThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "darkZoneLumaThreshold": { "type": "number", "minimum": 0, "maximum": 255 },
+        "darkZoneConfirmFrames": { "type": "integer", "minimum": 0 },
+        "doorTransitionArmedFrames": { "type": "integer", "minimum": 0 },
+        "combatYawDegrees": { "type": "integer" },
+        "lowHealthThreshold": { "type": "integer", "minimum": 0 },
+        "emergencyEscapeYawDegrees": { "type": "integer" },
+        "wallAwayYawDegrees": { "type": "integer" },
+        "openCruiseYawDegrees": { "type": "integer" },
+        "enableStrafeRun": { "type": "boolean" },
+        "openCruiseWallVectorDeadZone": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "pipeline": {
+      "type": "object",
+      "required": ["dsl", "name", "stages"],
+      "properties": {
+        "dsl": { "const": "aikernel.doom.autoplay.pipeline/v1" },
+        "name": { "type": "string", "minLength": 1 },
+        "semanticMemory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room"]
+              },
+              "kind": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "intent", "means", "priority"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "intent": { "type": "string", "minLength": 1 },
+              "means": { "type": "string", "minLength": 1 },
+              "priority": { "type": "integer" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "arbitration": {
+          "type": "object",
+          "required": ["mode"],
+          "properties": {
+            "mode": { "const": "deterministic-weighted-priority" },
+            "defaultThreshold": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "priority", "when", "action"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "objective": { "type": "string", "minLength": 1 },
+              "priority": { "type": "integer" },
+              "threshold": { "type": "number", "minimum": 0 },
+              "evidence": {
+                "type": "object",
+                "propertyNames": {
+                  "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room"]
+                },
+                "additionalProperties": { "type": "number" }
+              },
+              "when": { "type": "string", "minLength": 1 },
+              "action": {
+                "type": "object",
+                "properties": {
+                  "moveForward": { "type": "string" },
+                  "moveBackward": { "type": "string" },
+                  "strafeLeft": { "type": "string" },
+                  "strafeRight": { "type": "string" },
+                  "turnYaw": { "type": "string" },
+                  "useKey": { "type": "string" },
+                  "attackKey": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

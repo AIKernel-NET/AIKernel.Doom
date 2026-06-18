@@ -12,9 +12,38 @@
   };
 
   importScripts(
-    "/demo/doom/js/webgpu-provider.js?v=20260613-doomweb86",
-    "/demo/doom/js/bonsai.js?v=20260616-precision153",
-    "/demo/doom/js/doom.js?v=20260616-precision153"
+    "/demo/doom/js/autoplay-profile.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/webgpu-provider.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/semantics.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/routing.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/topos.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/ctg.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/sensory.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/vision-palette.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/nous.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/phantasia.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/cognition/kinesis.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/sensor-tensor.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/objective-routing.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/expression-dsl.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/doom-context.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/evidence.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/arbitration.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/decision-trace.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control/runtime-packets.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/wasm-state.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/control-runtime.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/doom-sensor-inputs.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/doom-action-adapter.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/doom-retry-dispatch.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/autoplay/doom-binary-assets.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom-wasm-imports.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom-native-audio.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom-auditory-runtime.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom-wad-metadata.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/bonsai.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom-debug-audio.js?v=20260618-auditoryruntime1",
+    "/demo/doom/js/doom.js?v=20260618-auditoryruntime1"
   );
 
   let runtime = null;

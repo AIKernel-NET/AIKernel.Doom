@@ -14,12 +14,12 @@ must remain auditable without embedding large or third-party binary payloads.
 Current demo version:
 
 ```text
-0.1.1.1-dev1
+0.1.2
 ```
 
-The version is aligned with the AIKernel 0.1.1.1 local validation line while
-keeping a development suffix because this is a demo program and active research
-surface. The next official canonical package line is v0.1.2.
+The demo remains source-only, but its AIKernel package references are aligned
+with the official NuGet canonical package line v0.1.2. Local development
+package paths should not be used by default in this repository.
 
 ## Source Assets
 

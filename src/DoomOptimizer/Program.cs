@@ -2,7 +2,6 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AIKernel.Core.Sdk.Runtime;
 using AIKernel.Doom.Provider.Autoplay;
 
 var repoRoot = FindRepoRoot(AppContext.BaseDirectory);
@@ -124,87 +123,14 @@ static void WriteProfile(string path, AutoplayOptimizationProfile profile, Optim
             generatedAt = DateTimeOffset.UtcNow
         },
         parameters = ProfileParameters(profile),
-        profile.DoorAimToleranceDegrees,
-        profile.DoorSoftAimToleranceDegrees,
-        profile.DoorAimYawDegrees,
-        profile.DoorAimFrames,
-        profile.DoorApproachFrames,
-        profile.DoorSettleFrames,
-        profile.DoorUseHoldFrames,
-        profile.EmergencyStuckTicks,
-        profile.DoorProbeStuckTicks,
-        profile.DoorUseDepth,
-        profile.DoorApproachDepth,
-        profile.BlockedDepth,
-        profile.CombatFaceThreshold,
-        profile.CombatAlertFrames,
-        profile.CombatAlertPeakConfidence,
-        profile.CombatAlertMaxDepth,
-        profile.DarkZoneScoreThreshold,
-        profile.DarkZoneLumaThreshold,
-        profile.DarkZoneConfirmFrames,
-        profile.DoorTransitionArmedFrames,
-        profile.CombatYawDegrees,
-        profile.LowHealthThreshold,
-        profile.EmergencyEscapeYawDegrees,
-        profile.WallAwayYawDegrees,
-        profile.OpenCruiseYawDegrees,
-        profile.EnableStrafeRun,
-        profile.OpenCruiseWallVectorDeadZone,
-        profile.FirstDoorRushFrames,
-        profile.FirstDoorRushDepth,
-        profile.FirstDoorRushWallVectorLimit,
-        profile.FirstDoorBearingFrames,
-        profile.MapRushLookoutFrames,
-        profile.MapRushBackoffFrames,
-        profile.MapRushOpenWallVectorLimit,
-        profile.MapRushOpenDelta,
-        profile.MapDoorSweepFrames
+        pipeline = profile.Pipeline ?? AutoplayPipelineDefinition.Default
     };
 
     File.WriteAllText(path, JsonSerializer.Serialize(payload, OptimizerJson.Options));
 }
 
 static object ProfileParameters(AutoplayOptimizationProfile profile)
-    => new
-    {
-        profile.DoorAimToleranceDegrees,
-        profile.DoorSoftAimToleranceDegrees,
-        profile.DoorAimYawDegrees,
-        profile.DoorAimFrames,
-        profile.DoorApproachFrames,
-        profile.DoorSettleFrames,
-        profile.DoorUseHoldFrames,
-        profile.EmergencyStuckTicks,
-        profile.DoorProbeStuckTicks,
-        profile.DoorUseDepth,
-        profile.DoorApproachDepth,
-        profile.BlockedDepth,
-        profile.CombatFaceThreshold,
-        profile.CombatAlertFrames,
-        profile.CombatAlertPeakConfidence,
-        profile.CombatAlertMaxDepth,
-        profile.DarkZoneScoreThreshold,
-        profile.DarkZoneLumaThreshold,
-        profile.DarkZoneConfirmFrames,
-        profile.DoorTransitionArmedFrames,
-        profile.CombatYawDegrees,
-        profile.LowHealthThreshold,
-        profile.EmergencyEscapeYawDegrees,
-        profile.WallAwayYawDegrees,
-        profile.OpenCruiseYawDegrees,
-        profile.EnableStrafeRun,
-        profile.OpenCruiseWallVectorDeadZone,
-        profile.FirstDoorRushFrames,
-        profile.FirstDoorRushDepth,
-        profile.FirstDoorRushWallVectorLimit,
-        profile.FirstDoorBearingFrames,
-        profile.MapRushLookoutFrames,
-        profile.MapRushBackoffFrames,
-        profile.MapRushOpenWallVectorLimit,
-        profile.MapRushOpenDelta,
-        profile.MapDoorSweepFrames
-    };
+    => profile.ToParameterDictionary();
 
 internal sealed class ObserverRomOptimizer
 {

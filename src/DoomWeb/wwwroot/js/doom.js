@@ -32,8 +32,81 @@
   const AUTOPLAY_RETRY_TAP_FRAMES = 8;
   const IS_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
   const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+  const DOOM_BINARY_ASSET_CACHE = "aikernel-doom-binary-assets-v1";
 
   ensureBrowserWebGpuComputeProvider();
+
+  function requireDoomWasmState(name) {
+    const fn = self.AIKernelDoomWasmState?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomWasmState.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomActionAdapter(name) {
+    const fn = self.AIKernelDoomActionAdapter?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomActionAdapter.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomRetryDispatch(name) {
+    const fn = self.AIKernelDoomRetryDispatch?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomRetryDispatch.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomSensorInputs(name) {
+    const fn = self.AIKernelDoomSensorInputs?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomSensorInputs.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomBinaryAssets(name) {
+    const fn = self.AIKernelDoomBinaryAssets?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomBinaryAssets.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomWasmImports(name) {
+    const fn = self.AIKernelDoomWasmImports?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomWasmImports.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomNativeAudio(name) {
+    const fn = self.AIKernelDoomNativeAudio?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomNativeAudio.${name} is not available.`);
+    }
+
+    return fn;
+  }
+
+  function requireDoomAuditoryRuntime(name) {
+    const fn = self.AIKernelDoomAuditoryRuntime?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomAuditoryRuntime.${name} is not available.`);
+    }
+
+    return fn;
+  }
 
   class AIKernelDoomRuntime {
     constructor(options) {
@@ -70,6 +143,11 @@
       this.moduleConfig = null;
       this.modelManifest = null;
       this.autoplayProfile = null;
+      this.autoplayControllerKind = "bonsai";
+      this.controlRuntime = null;
+      this.wasmAutoplayReady = false;
+      this.wasmAutoplayLastError = "";
+      this.lastAutoplayStatus = null;
       this.wadMapHints = null;
       this.instance = null;
       this.exports = null;
@@ -79,16 +157,25 @@
       this.initialized = false;
       this.modelLoaded = false;
       this.loadPromise = null;
+      this.downloadAssets = new Map();
+      this.downloadProgress = {
+        active: false,
+        phase: "idle",
+        label: "",
+        asset: "",
+        loadedBytes: 0,
+        totalBytes: 0,
+        percent: null,
+        assets: [],
+        updatedAt: 0
+      };
+      this.downloadLastStatusAt = 0;
       this.pendingInputEvents = [];
       this.inputState = new Map();
       this.manualInputUntil = new Map();
       this.autoplayUsePulseFrames = 0;
       this.autoplayUsePulseSpacingFrames = 0;
-      this.autoplayRetrySequence = [];
-      this.autoplayRetryWaitFrames = 0;
-      this.autoplayRetryCooldownFrames = 0;
-      this.autoplayRetryReason = "none";
-      this.autoplayHealthRetryFrames = 0;
+      this.autoplayRetryDispatch = requireDoomRetryDispatch("createState")();
       this.palette = defaultPalette();
       this.paletteCache = buildPaletteCache(this.palette);
       this.frameImage = null;
@@ -143,7 +230,6 @@
       this.previousVisionMotionSignature = "";
       this.lastVisualMotionVector = null;
       this.compassLandmarks = new Map();
-      this.lastDebugAudioAt = 0;
       this.autoplayAuditorySnapshot = null;
       this.autoplaySpatialSnapshot = null;
       this.autoplayVisionSensor = null;
@@ -206,6 +292,10 @@
       this.autoplayStrategyName = "SensorFusionStrafeProbeV3";
       this.autoplayStrategyContext = "unknown";
       this.autoplayStrategyPriority = 0;
+      this.autoplayDecisionStage = "Idle";
+      this.autoplayEvidenceScore = 0;
+      this.autoplaySemanticScores = null;
+      this.autoplayDecisionTrace = null;
       this.autoplayControlPipeline = "Idle";
       this.autoplayObjective = "disabled";
       this.autoplayActiveDetections = ["objective", "hud"];
@@ -238,6 +328,7 @@
         gpuFlushCount: this.gpuFlushCount,
         lastGpuWaitMs: this.lastGpuWaitMs,
         gpuWaitTimeouts: this.gpuWaitTimeouts,
+        hudFlowControl: this.createHudFlowControlStatus(),
         watchdogRestarting: this.watchdogRestarting,
         watchdogRestarts: this.watchdogRestarts,
         watchdogLastStallMs: this.watchdogLastStallMs,
@@ -247,6 +338,8 @@
           enabled: this.autoplayEnabled,
           manualMove: this.autoplayManualMove,
           senseOnly: this.autoplaySenseOnly,
+          controller: this.autoplayControllerKind,
+          controlReady: this.wasmAutoplayReady,
           mode: this.autoplayMode,
           predictions: this.autoplayPredictions,
           reused: this.autoplayReused,
@@ -281,11 +374,7 @@
           toposDecisionCarrier: this.autoplayToposDecisionCarrier,
           nousCarrier: this.autoplayNousCarrier,
           nousDetectorResult: this.autoplayNousDetectorResult,
-          retryDispatch: {
-            active: this.autoplayRetrySequence.length > 0 || this.autoplayRetryWaitFrames > 0,
-            cooldownFrames: this.autoplayRetryCooldownFrames,
-            reason: this.autoplayRetryReason
-          },
+          retryDispatch: requireDoomRetryDispatch("snapshot")(this.autoplayRetryDispatch),
           audioPlayback: {
             muted: this.audioPlaybackMuted,
             enabled: !this.audioPlaybackMuted,
@@ -364,6 +453,10 @@
           strategyName: this.autoplayStrategyName,
           strategyContext: this.autoplayStrategyContext,
           strategyPriority: this.autoplayStrategyPriority,
+          decisionStage: this.autoplayDecisionStage,
+          evidenceScore: this.autoplayEvidenceScore,
+          semanticScores: this.autoplaySemanticScores,
+          decisionTrace: this.autoplayDecisionTrace,
           controlPipeline: this.autoplayControlPipeline,
           objective: this.autoplayObjective,
           activeDetections: this.autoplayActiveDetections,
@@ -409,8 +502,35 @@
           doorTextures: this.wadMapHints.doorTextures || [],
           switchTextures: this.wadMapHints.switchTextures || []
         } : null,
+        downloadProgress: this.cloneDownloadProgress(),
         framebuffer: `${WIDTH}x${HEIGHT} paletted-8bit`,
         lastError: this.lastError
+      };
+    }
+
+    createHudFlowControlStatus() {
+      const fps = Number.isFinite(this.fps) ? this.fps : 0;
+      const targetFps = Math.max(MIN_TARGET_FPS, this.targetFps || MAX_TARGET_FPS);
+      const workMs = Math.max(0, Number(this.lastFrameWorkMs || 0));
+      const gpuWaitMs = Math.max(0, Number(this.lastGpuWaitMs || 0));
+      const overloaded = this.watchdogRestarting
+        || this.gpuWaitTimeouts > 0
+        || workMs >= LONG_FRAME_MS
+        || fps < targetFps * 0.55;
+      const constrained = overloaded
+        || workMs >= 32
+        || gpuWaitMs >= 24
+        || fps < targetFps * 0.78;
+
+      return {
+        source: "runtime-fps-control",
+        mode: overloaded ? "minimal" : (constrained ? "reduced" : "full"),
+        minIntervalMs: overloaded ? 250 : (constrained ? 125 : 66),
+        dropPolicy: "latest-only",
+        fps,
+        targetFps,
+        workMs,
+        gpuWaitMs
       };
     }
 
@@ -429,18 +549,21 @@
 
       this.state = "loading";
       this.lastError = "";
+      this.beginDownloadProgress();
       this.emitStatus("loading");
       this.loadPromise = (async () => {
         try {
           await this.loadRuntime();
           await this.loadModel();
           this.state = "ready";
+          this.completeDownloadProgress();
           this.log("[ LOAD ]", "log-ok", "download/load complete: doom.wasm, DOOM1.WAD, and Bonsai model are validated.");
           this.emitStatus("ready");
           return this.status();
         } catch (error) {
           this.state = "failed";
           this.lastError = error instanceof Error ? error.message : String(error);
+          this.failDownloadProgress(this.lastError);
           this.log("[ FAIL ]", "log-fail", this.lastError);
           this.emitStatus("failed");
           throw error;
@@ -450,6 +573,146 @@
       })();
 
       return this.loadPromise;
+    }
+
+    beginDownloadProgress() {
+      this.downloadAssets = new Map();
+      this.downloadProgress = {
+        active: true,
+        phase: "starting",
+        label: "Preparing hosted runtime assets",
+        asset: "",
+        loadedBytes: 0,
+        totalBytes: 0,
+        percent: null,
+        assets: [],
+        updatedAt: Date.now()
+      };
+      this.downloadLastStatusAt = 0;
+      this.emitStatus("download-start");
+    }
+
+    setDownloadPhase(phase, label) {
+      this.downloadProgress = Object.assign({}, this.downloadProgress, {
+        active: true,
+        phase,
+        label,
+        updatedAt: Date.now()
+      });
+      this.emitStatus(`download-${phase}`);
+    }
+
+    registerDownloadAsset(key, label, totalBytes = 0) {
+      const existing = this.downloadAssets.get(key);
+      const asset = Object.assign(existing || {}, {
+        key,
+        label,
+        loadedBytes: existing?.loadedBytes || 0,
+        totalBytes: Math.max(normalizeByteCount(totalBytes), existing?.totalBytes || 0),
+        percent: null,
+        phase: "queued",
+        source: existing?.source || "",
+        cacheHit: Boolean(existing?.cacheHit),
+        done: false
+      });
+      this.downloadAssets.set(key, asset);
+      this.refreshDownloadProgress("download-asset");
+      return asset;
+    }
+
+    updateDownloadAsset(key, label, progress) {
+      const asset = this.downloadAssets.get(key) || this.registerDownloadAsset(key, label, progress?.totalBytes || 0);
+      const totalBytes = normalizeByteCount(progress?.totalBytes);
+      if (totalBytes > 0) {
+        asset.totalBytes = Math.max(asset.totalBytes || 0, totalBytes);
+      }
+
+      asset.loadedBytes = Math.max(asset.loadedBytes || 0, normalizeByteCount(progress?.loadedBytes));
+      asset.phase = progress?.phase || (progress?.done ? "complete" : "downloading");
+      asset.source = progress?.source || asset.source || "";
+      asset.cacheHit = Boolean(progress?.cacheHit || asset.cacheHit);
+      asset.done = Boolean(progress?.done);
+      asset.percent = asset.totalBytes > 0
+        ? Math.max(0, Math.min(100, (asset.loadedBytes / asset.totalBytes) * 100))
+        : null;
+      this.downloadAssets.set(key, asset);
+      this.refreshDownloadProgress(progress?.done ? "download-complete" : "download-progress");
+    }
+
+    completeDownloadProgress() {
+      for (const asset of this.downloadAssets.values()) {
+        asset.done = true;
+        asset.phase = "complete";
+        if (asset.totalBytes > 0) {
+          asset.loadedBytes = Math.max(asset.loadedBytes || 0, asset.totalBytes);
+          asset.percent = 100;
+        }
+      }
+
+      this.refreshDownloadProgress("download-complete", {
+        active: false,
+        phase: "complete",
+        label: "Hosted runtime assets validated"
+      });
+    }
+
+    failDownloadProgress(message) {
+      this.refreshDownloadProgress("download-failed", {
+        active: false,
+        phase: "failed",
+        label: message || "Hosted runtime asset download failed"
+      });
+    }
+
+    refreshDownloadProgress(reason, overrides = {}) {
+      const assets = Array.from(this.downloadAssets.values()).map(asset => ({
+        key: asset.key,
+        label: asset.label,
+        loadedBytes: normalizeByteCount(asset.loadedBytes),
+        totalBytes: normalizeByteCount(asset.totalBytes),
+        percent: Number.isFinite(asset.percent) ? asset.percent : null,
+        phase: asset.phase || "queued",
+        source: asset.source || "",
+        cacheHit: Boolean(asset.cacheHit),
+        done: Boolean(asset.done)
+      }));
+      const loadedBytes = assets.reduce((sum, asset) => sum + Math.min(asset.loadedBytes, asset.totalBytes || asset.loadedBytes), 0);
+      const totalBytes = assets.reduce((sum, asset) => sum + asset.totalBytes, 0);
+      const activeAsset = assets.find(asset => !asset.done) || assets[assets.length - 1] || null;
+      this.downloadProgress = Object.assign({
+        active: assets.some(asset => !asset.done),
+        phase: activeAsset?.phase || "idle",
+        label: activeAsset?.label || this.downloadProgress?.label || "",
+        asset: activeAsset?.label || "",
+        loadedBytes,
+        totalBytes,
+        percent: totalBytes > 0 ? Math.max(0, Math.min(100, (loadedBytes / totalBytes) * 100)) : null,
+        assets,
+        updatedAt: Date.now()
+      }, overrides);
+
+      const now = Date.now();
+      if (reason !== "download-progress" || now - this.downloadLastStatusAt >= 120) {
+        this.downloadLastStatusAt = now;
+        this.emitStatus(reason);
+      }
+    }
+
+    cloneDownloadProgress() {
+      const progress = this.downloadProgress || {};
+      return {
+        active: Boolean(progress.active),
+        phase: progress.phase || "idle",
+        label: progress.label || "",
+        asset: progress.asset || "",
+        loadedBytes: normalizeByteCount(progress.loadedBytes),
+        totalBytes: normalizeByteCount(progress.totalBytes),
+        percent: Number.isFinite(progress.percent) ? progress.percent : null,
+        assets: Array.isArray(progress.assets)
+          ? progress.assets.map(asset => Object.assign({}, asset))
+          : [],
+        updatedAt: progress.updatedAt || 0
+      };
     }
 
     async start() {
@@ -523,23 +786,27 @@
         return;
       }
 
+      this.setDownloadPhase("metadata", "Fetching DOOM runtime manifest");
       this.moduleConfig = await fetchJson(this.moduleUrl);
       const baseUrl = new URL(this.moduleUrl, window.location.href);
       const moduleDir = new URL(".", baseUrl);
       const wasmPath = new URL(this.moduleConfig.entry, moduleDir).pathname;
       const wadPath = this.moduleConfig.wad?.hostedPath || new URL(this.moduleConfig.wad?.hostedFile || "DOOM1.WAD", moduleDir).pathname;
 
+      this.registerDownloadAsset("doom-wasm", "doom.wasm", this.moduleConfig.wasm?.sizeBytes);
       const wasmBytes = await fetchBinary(wasmPath, {
         label: "doom.wasm",
         sizeBytes: this.moduleConfig.wasm?.sizeBytes,
         sha256: this.moduleConfig.wasm?.sha256
-      });
+      }, progress => this.updateDownloadAsset("doom-wasm", "doom.wasm", progress));
 
+      this.registerDownloadAsset("doom-wad", "DOOM1.WAD", this.moduleConfig.wad?.sizeBytes);
       this.wadBytes = await fetchBinary(wadPath, {
         label: "DOOM1.WAD",
         sizeBytes: this.moduleConfig.wad?.sizeBytes,
-        sha256: this.moduleConfig.wad?.sha256
-      });
+        sha256: this.moduleConfig.wad?.sha256,
+        cacheName: DOOM_BINARY_ASSET_CACHE
+      }, progress => this.updateDownloadAsset("doom-wad", "DOOM1.WAD", progress));
       this.palette = parsePlaypal(this.wadBytes) || this.palette;
       this.paletteCache = buildPaletteCache(this.palette);
       this.wadMapHints = parseWadMapHints(this.wadBytes, "E1M1");
@@ -565,19 +832,26 @@
         return;
       }
 
+      this.setDownloadPhase("metadata", "Fetching Bonsai model manifest");
       this.modelManifest = await fetchJson(this.modelManifestUrl);
+      this.setDownloadPhase("metadata", "Fetching AutoPlay profile");
       this.autoplayProfile = await fetchJson(this.autoplayProfileUrl).catch(error => {
         this.log("[AUTOPLAY]", "log-warn", `autoplay profile unavailable: ${error instanceof Error ? error.message : String(error)}; using built-in defaults.`);
         return null;
       });
+      this.setDownloadPhase("provider", "Initializing WebGPU provider");
       await initializeWebGpuProvider();
+      const modelLabel = this.modelManifest.name || this.modelManifest.upstreamFilename || "Bonsai-1.7B model";
+      this.registerDownloadAsset("bonsai-model", modelLabel, this.modelManifest.sizeBytes);
       await fetchBinary(this.modelManifest.hostedFile, {
-        label: this.modelManifest.name || this.modelManifest.upstreamFilename || "Bonsai-1.7B model",
+        label: modelLabel,
         sizeBytes: this.modelManifest.sizeBytes,
-        sha256: this.modelManifest.sha256
-      });
+        sha256: this.modelManifest.sha256,
+        cacheName: DOOM_BINARY_ASSET_CACHE
+      }, progress => this.updateDownloadAsset("bonsai-model", modelLabel, progress));
       this.modelLoaded = true;
       this.bonsaiSupervisor?.configure(this.modelManifest, this.autoplayProfile);
+      this.initializeWasmAutoplayController();
       this.log("[MODEL]", "log-ok", `${this.modelManifest.name || "Bonsai-1.7B"} downloaded and validated.`);
       this.log("[ GPU ]", "log-ok", `Bonsai supervisor GPU delegate active: ${resolveGpuDelegateName()}.`);
       this.emitStatus("model-ready");
@@ -591,36 +865,46 @@
       }
     }
 
+    initializeWasmAutoplayController() {
+      const controlRuntimeFactory = self.AIKernelDoomControlRuntime?.create;
+      if (typeof controlRuntimeFactory === "function") {
+        this.controlRuntime = controlRuntimeFactory(this.autoplayProfile || {});
+        this.wasmAutoplayReady = true;
+        this.autoplayControllerKind = "control-runtime-shim";
+        this.wasmAutoplayLastError = "";
+        this.log("[AUTOPLAY]", "log-ok", "Doom-scoped Control runtime shim active; native doom.wasm remains engine/I/O only.");
+        return true;
+      }
+
+      this.controlRuntime = null;
+      this.autoplayControllerKind = this.bonsaiSupervisor ? "bonsai" : "fallback";
+      this.wasmAutoplayReady = false;
+      this.wasmAutoplayLastError = "AIKernel.Control runtime shim is unavailable.";
+      return false;
+    }
+
+    readWasmAutoplayStatus() {
+      if (this.controlRuntime && typeof this.controlRuntime.status === "function") {
+        return this.controlRuntime.status();
+      }
+
+      return null;
+    }
+
     isNativeAudioAvailable() {
-      return Boolean(
-        this.exports
-        && typeof this.exports.doom_audio_status === "function"
-        && typeof this.exports.doom_audio_sample_rate === "function"
-        && typeof this.exports.doom_audio_channels === "function"
-        && typeof this.exports.doom_audio_buffer === "function"
-        && typeof this.exports.doom_audio_capacity_frames === "function"
-        && typeof this.exports.doom_audio_read_offset_frames === "function"
-        && typeof this.exports.doom_audio_available_frames === "function"
-        && typeof this.exports.doom_audio_consume_frames === "function"
-      );
+      return requireDoomNativeAudio("isAvailable")(this.exports);
     }
 
     nativeAudioStatus() {
-      return this.isNativeAudioAvailable() && typeof this.exports.doom_audio_status === "function"
-        ? this.exports.doom_audio_status()
-        : 0;
+      return requireDoomNativeAudio("status")(this.exports);
     }
 
     nativeAudioEventCount() {
-      return this.isNativeAudioAvailable() && typeof this.exports.doom_audio_event_count === "function"
-        ? this.exports.doom_audio_event_count()
-        : 0;
+      return requireDoomNativeAudio("eventCount")(this.exports);
     }
 
     nativeAudioAvailableFrames() {
-      return this.isNativeAudioAvailable()
-        ? this.exports.doom_audio_available_frames()
-        : 0;
+      return requireDoomNativeAudio("availableFrames")(this.exports);
     }
 
     sendInput(keycode, pressed) {
@@ -634,8 +918,8 @@
 
     setAutoplay(enabled) {
       const requested = Boolean(enabled);
-      if (requested && !this.bonsaiSupervisor) {
-        this.autoplayLastError = "Bonsai supervisor script is unavailable.";
+      if (requested && !this.bonsaiSupervisor && !this.wasmAutoplayReady) {
+        this.autoplayLastError = "AutoPlay controller is unavailable.";
         this.log("[AUTOPLAY]", "log-fail", this.autoplayLastError);
         this.emitStatus("autoplay-error");
         return this.status();
@@ -659,7 +943,10 @@
       this.syncAutoplaySupervisorStatus();
 
       if (requested) {
-        this.log("[AUTOPLAY]", "log-ok", "Bonsai active: predicting next move...");
+        const controllerLabel = this.autoplayControllerKind === "control-runtime-shim"
+          ? "Control runtime shim"
+          : "Bonsai supervisor";
+        this.log("[AUTOPLAY]", "log-ok", `${controllerLabel} active: predicting next move...`);
       } else {
         this.releaseAutoplayInputs();
         this.autoplayLastAction = self.AIKernelBonsai?.neutralAction?.() || this.autoplayLastAction;
@@ -716,6 +1003,7 @@
         this.autoplayObjective = "disabled";
         this.autoplayActiveDetections = ["objective", "hud"];
         this.autoplaySemanticMemory = null;
+        this.updateGpuHudOverlayState(null);
         this.log("[AUTOPLAY]", "log-info", "Bonsai idle: manual control restored.");
       }
 
@@ -786,88 +1074,27 @@
     }
 
     createSensorInputMap() {
-      return {
-        visual: this.createSensorState("visual", "Aisthesis", "visual", "primary", true),
-        audio: this.createSensorState("audio", "Aisthesis", "audio", "primary", true),
-        motor: this.createSensorState("motor", "Kinesis", "motor", "primary", true),
-        movement: this.createSensorState("movement", "Kinesis", "movement", "derived", true),
-        compass: this.createSensorState("compass", "Hodos", "compass", "primary", true),
-        spatial: this.createSensorState("spatial", "Topos", "spatial", "derived", true),
-        health: this.createSensorState("health", "Zoe", "health", "primary", true)
-      };
+      return requireDoomSensorInputs("createMap")();
     }
 
     createSensorState(name, conceptName, englishName, category, enabled, observed = false, metadata = {}) {
-      return {
-        name,
-        conceptName,
-        englishName,
-        category,
-        enabled: Boolean(enabled),
-        observed: Boolean(observed),
-        metadata: Object.assign({}, metadata)
-      };
+      return requireDoomSensorInputs("createState")(name, conceptName, englishName, category, enabled, observed, metadata);
     }
 
     createSensorStatusMap() {
-      const clone = {};
-      const keys = Object.keys(this.sensorInputs).sort();
-      for (let index = 0; index < keys.length; index += 1) {
-        const key = keys[index];
-        const sensor = this.sensorInputs[key];
-        if (sensor && typeof sensor === "object") {
-          clone[key] = {
-            name: sensor.name || key,
-            conceptName: sensor.conceptName || this.sensorConceptName(key),
-            englishName: sensor.englishName || key,
-            category: sensor.category || this.sensorCategory(key),
-            enabled: sensor.enabled !== false,
-            observed: Boolean(sensor.observed),
-            metadata: Object.assign({}, sensor.metadata || {})
-          };
-        } else {
-          clone[key] = this.createSensorState(
-            key,
-            this.sensorConceptName(key),
-            key,
-            this.sensorCategory(key),
-            sensor !== false);
-        }
-      }
-
-      return clone;
+      return requireDoomSensorInputs("statusMap")(this.sensorInputs);
     }
 
     sensorConceptName(kind) {
-      if (kind === "visual" || kind === "audio") {
-        return "Aisthesis";
-      }
-
-      if (kind === "motor" || kind === "movement") {
-        return "Kinesis";
-      }
-
-      if (kind === "compass") {
-        return "Hodos";
-      }
-
-      if (kind === "health") {
-        return "Zoe";
-      }
-
-      return kind === "spatial" ? "Topos" : "";
+      return requireDoomSensorInputs("conceptName")(kind);
     }
 
     sensorCategory(kind) {
-      return kind === "movement" || kind === "spatial" ? "derived" : "primary";
+      return requireDoomSensorInputs("category")(kind);
     }
 
     isSensorEnabled(kind) {
-      const normalized = this.normalizeSensorKind(kind);
-      const sensor = this.sensorInputs[normalized];
-      return sensor && typeof sensor === "object"
-        ? sensor.enabled !== false
-        : sensor !== false;
+      return requireDoomSensorInputs("isEnabled")(this.sensorInputs, kind);
     }
 
     syncSensorFlagsFromMap() {
@@ -881,54 +1108,21 @@
     }
 
     attachSensorObservation(sensors, key, observed, metadata = {}) {
-      const current = sensors[key] || this.createSensorState(
-        key,
-          this.sensorConceptName(key),
-          key,
-          this.sensorCategory(key),
-          true);
-      sensors[key] = {
-        ...current,
-        observed: Boolean(observed),
-        metadata: Object.assign({}, current.metadata || {}, metadata)
-      };
+      return requireDoomSensorInputs("attachObservation")(sensors, key, observed, metadata);
     }
 
     setSensorInput(kind, enabled) {
-      const normalized = this.normalizeSensorKind(kind);
-      const next = Boolean(enabled);
-      const current = this.sensorInputs[normalized];
-      this.sensorInputs[normalized] = current && typeof current === "object"
-        ? {
-          ...current,
-          enabled: next
-        }
-        : this.createSensorState(
-          normalized,
-          this.sensorConceptName(normalized),
-          normalized,
-          this.sensorCategory(normalized),
-          next);
+      const result = requireDoomSensorInputs("setEnabled")(this.sensorInputs, kind, enabled);
+      const normalized = result.normalized;
+      const next = result.enabled;
 
       this.syncSensorFlagsFromMap();
-      if (normalized === "visual") {
-        this.visualSensorEnabled = this.isSensorEnabled("visual");
-      } else if (normalized === "audio") {
-        this.audioSensorEnabled = this.isSensorEnabled("audio");
+      if (normalized === "audio") {
         if (!this.audioSensorEnabled) {
           this.autoplaySoundCueActive = false;
           this.autoplayAuditorySnapshot = this.createNeutralAuditoryRuntimeSnapshot();
         }
-      } else if (normalized === "motor") {
-        this.motorSensorEnabled = this.isSensorEnabled("motor");
-      } else if (normalized === "movement") {
-        this.movementSensorEnabled = this.isSensorEnabled("movement");
-      } else if (normalized === "compass") {
-        this.compassSensorEnabled = this.isSensorEnabled("compass");
-      } else if (normalized === "spatial") {
-        this.spatialSensorEnabled = this.isSensorEnabled("spatial");
       } else if (normalized === "health") {
-        this.healthSensorEnabled = this.isSensorEnabled("health");
         if (!this.healthSensorEnabled) {
           this.autoplayHealthSensor = {
             active: false,
@@ -944,24 +1138,7 @@
     }
 
     normalizeSensorKind(kind) {
-      const normalized = String(kind || "").toLowerCase();
-      if (normalized === "vision") {
-        return "visual";
-      }
-
-      if (normalized === "auditory") {
-        return "audio";
-      }
-
-      if (normalized === "move" || normalized === "movement-vector") {
-        return "movement";
-      }
-
-      if (normalized === "heading" || normalized === "bearing") {
-        return "compass";
-      }
-
-      return normalized || "unknown";
+      return requireDoomSensorInputs("normalizeKind")(kind);
     }
 
     queueInput(keycode, pressed) {
@@ -1218,7 +1395,7 @@
     }
 
     runAutoplay(renderResult) {
-      if (!this.autoplayEnabled || !this.bonsaiSupervisor) {
+      if (!this.autoplayEnabled || (!this.bonsaiSupervisor && !this.wasmAutoplayReady)) {
         return;
       }
 
@@ -1233,92 +1410,19 @@
       this.logAutoplayVisionPath();
       if (!this.autoplayPending) {
         const state = this.createAutoplayState(this.visualSensorEnabled ? frameIndices : null, useGpuVision ? gpuVision : null);
+        this.updateGpuHudOverlayState(state);
         this.autoplayPending = true;
         this.autoplayMode = "predicting";
-        this.bonsaiSupervisor.predict(state).then(action => {
+        if (this.tryRunWasmAutoplay(state)) {
+          this.autoplayMode = "idle";
+          this.autoplayPending = false;
+          this.emitStatus("autoplay-predicted");
+        } else if (this.bonsaiSupervisor) {
+          this.bonsaiSupervisor.predict(state).then(action => {
           this.autoplayLastAction = self.AIKernelBonsai?.normalizeAction?.(action, this.autoplayLastAction) || action;
           const status = this.bonsaiSupervisor.status();
-          this.autoplayPredictions = status.predictions;
-          this.autoplayLastLatencyMs = status.lastLatencyMs;
-          this.autoplayLastError = status.lastError || "";
-          this.autoplaySafetyReason = status.safetyReason || "none";
-          this.autoplayStuckFrames = status.stuckFrames || 0;
-          this.autoplayRecoveryFrames = status.recoveryFrames || 0;
-          this.autoplayMobilityMode = status.mobilityMode || "none";
-          this.autoplayLoopEscapeFrames = status.loopEscapeFrames || 0;
-          this.autoplayWallHugSide = status.wallHugSide || "left";
-          this.autoplayTargetConfidence = status.targetConfidence || 0;
-          this.autoplaySoundCueActive = Boolean(status.soundCueActive);
-          this.autoplayAuditorySnapshot = status.auditorySnapshot || null;
-          this.autoplaySpatialSnapshot = status.spatialSnapshot || null;
-          this.autoplayVisionSensor = status.visionSensor || null;
-          this.autoplayMotorSensor = status.motorSensor || null;
-          this.autoplayMovementSensor = status.movementSensor || null;
-          this.autoplayCompassSensor = status.compassSensor || null;
-          this.autoplaySpatialSensor = status.spatialSensor || null;
-          this.autoplayHealthSensor = status.healthSensor || this.autoplayHealthSensor;
-          this.autoplayCtgCarrier = status.ctgCarrier || null;
-          this.autoplayCtgObservedScores = status.ctgObservedScores || null;
-          this.autoplayToposDecisionCarrier = status.toposDecisionCarrier || null;
-          this.autoplayNousCarrier = status.nousCarrier || null;
-          this.autoplayNousDetectorResult = status.nousDetectorResult || status.nousCarrier?.cognitionHints?.nousDetectorResult || null;
-          this.autoplayRepeatActionFrames = status.repeatActionFrames || 0;
-          this.autoplayRepeatTurnFrames = status.repeatTurnFrames || 0;
-          this.autoplayQuantizedStallFrames = status.quantizedStallFrames || 0;
-          this.autoplayQuantizedFrameChange = status.quantizedFrameChange ?? 255;
-          this.autoplayRegionQuantizedFrameChange = status.regionQuantizedFrameChange ?? 255;
-          this.autoplayStatusBarQuantizedFrameChange = status.statusBarQuantizedFrameChange ?? 255;
-          this.autoplayRegionSignature = status.regionSignature || "000000";
-          this.autoplayRegion9Signature = status.region9Signature || "000000000";
-          this.autoplayVision9x9Signature = status.vision9x9Signature || "0".repeat(81);
-          this.autoplayMotion9Signature = status.motion9Signature || "000000000";
-          this.autoplayMotion9Delta = status.motion9Delta ?? 255;
-          this.autoplayMotionForwardProgress = status.motionForwardProgress || 0;
-          this.autoplayMotionObstacleScore = status.motionObstacleScore || 0;
-          this.autoplayMotionTurnScore = status.motionTurnScore || 0;
-          this.autoplayMotionEntranceScore = status.motionEntranceScore || 0;
-          this.autoplayMotionStallScore = status.motionStallScore || 0;
-          this.autoplayMotionIntent = status.motionIntent || "idle";
-          this.autoplayDepthSignature = status.depthSignature || "0000";
-          this.autoplayDepthEstimate = status.depthEstimate ?? 1;
-          this.autoplayFaceSignature = status.faceSignature || "0000000000000000";
-          this.autoplayFaceQuantizedFrameChange = status.faceQuantizedFrameChange ?? 255;
-          this.autoplayCornerSignal = status.cornerSignal || 0;
-          this.autoplaySignatureMatchKind = status.signatureMatchKind || "none";
-          this.autoplaySignatureMatchDistance = status.signatureMatchDistance ?? 255;
-          this.autoplayWallSignatureCount = status.wallSignatureCount || 0;
-          this.autoplayCornerSignatureCount = status.cornerSignatureCount || 0;
-          this.autoplayDepthSignatureCount = status.depthSignatureCount || 0;
-          this.autoplayDepthSignatureDistance = status.depthSignatureDistance ?? 255;
-          this.autoplayWallUseProbeFrames = status.wallUseProbeFrames || 0;
-          this.autoplayWallUseProbeStage = status.wallUseProbeStage || 0;
-          this.autoplayWallUseProbeTurn = status.wallUseProbeTurn || "left";
-          this.autoplayCornerSuppressFrames = status.cornerSuppressFrames || 0;
-          this.autoplayWallDetachFrames = status.wallDetachFrames || 0;
-          this.autoplayWallDetachTurn = status.wallDetachTurn || "left";
-          this.autoplayWallSurveyFrames = status.wallSurveyFrames || 0;
-          this.autoplayWallSurveyTurn = status.wallSurveyTurn || "left";
-          this.autoplayWallSurveyDecisionFrames = status.wallSurveyDecisionFrames || 0;
-          this.autoplayMapRushCorrectionFrames = status.mapRushCorrectionFrames || 0;
-          this.autoplayMapRushCorrectionBackFrames = status.mapRushCorrectionBackFrames || 0;
-          this.autoplayMapRushCorrectionTurn = status.mapRushCorrectionTurn || "left";
-          this.autoplayMapRushCorrectionReversals = status.mapRushCorrectionReversals || 0;
-          this.autoplayMapDoorSweepFrames = status.mapDoorSweepFrames || 0;
-          this.autoplayMapDoorSweepTurn = status.mapDoorSweepTurn || "left";
-          this.autoplayEnemyConfidence = status.enemyConfidence || 0;
-          this.autoplayEnemyTurn = status.enemyTurn || "none";
-          this.autoplayEnemyDistance = status.enemyDistance ?? 1;
-          this.autoplayEnemyCluster = status.enemyCluster || "none";
-          this.autoplayEnemyFireReady = Boolean(status.enemyFireReady);
-          this.autoplayEnemyAllRegionPeak = status.enemyAllRegionPeak || 0;
-          this.autoplayEnemyLateralBias = status.enemyLateralBias || 0;
-          this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
-          this.autoplayStrategyContext = status.strategyContext || "unknown";
-          this.autoplayStrategyPriority = status.strategyPriority || 0;
-          this.autoplayControlPipeline = status.controlPipeline || "Idle";
-          this.autoplayObjective = status.objective || "disabled";
-          this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
-          this.autoplaySemanticMemory = status.semanticMemory || null;
+          this.applyAutoplaySupervisorStatus(status);
+          this.updateGpuHudOverlayState(state);
           this.scheduleAutoplayRetryDispatch(status);
           this.handleDebugAudioPlayback();
           this.autoplayMode = "idle";
@@ -1331,6 +1435,12 @@
           this.log("[AUTOPLAY]", "log-fail", this.autoplayLastError);
           this.emitStatus("autoplay-error");
         });
+        } else {
+          this.autoplayLastError = "No AutoPlay controller accepted the frame.";
+          this.autoplayMode = "error";
+          this.autoplayPending = false;
+          this.emitStatus("autoplay-error");
+        }
       } else {
         this.autoplayReused += 1;
       }
@@ -1342,32 +1452,160 @@
       this.applyAutoplayAction(this.autoplayLastAction);
     }
 
+    tryRunWasmAutoplay(state) {
+      if (!this.wasmAutoplayReady) {
+        return false;
+      }
+
+      try {
+        const wasmState = this.createWasmAutoplayState(state);
+        if (!this.controlRuntime || typeof this.controlRuntime.predict !== "function") {
+          throw new Error("AIKernel.Control runtime shim is unavailable.");
+        }
+
+        const rawAction = this.controlRuntime.predict(wasmState);
+        this.autoplayLastAction = self.AIKernelBonsai?.normalizeAction?.(rawAction, this.autoplayLastAction) || rawAction;
+        const wasmStatus = this.readWasmAutoplayStatus() || {};
+        const status = Object.assign({}, wasmStatus, {
+          controller: wasmStatus.controller || "control-runtime-shim",
+          controlPipeline: rawAction.pipeline,
+          stage: rawAction.stage || rawAction.pipeline,
+          objective: rawAction.objective,
+          strategyPriority: rawAction.strategyPriority,
+          evidenceScore: rawAction.evidenceScore,
+          semanticScores: rawAction.semanticScores,
+          decisionTrace: wasmStatus.decisionTrace || rawAction.decisionTrace || null,
+          ctgCarrier: rawAction.ctgCarrier || wasmStatus.ctgCarrier,
+          depthEstimate: wasmState.depthSig,
+          stuckFrames: wasmState.stuckTicks,
+          recoveryFrames: wasmState.recoveryFrames,
+          activeDetections: wasmState.activeDetections,
+          semanticMemory: wasmState.semanticMemory,
+          action: this.autoplayLastAction
+        });
+        this.applyAutoplaySupervisorStatus(status);
+        this.updateGpuHudOverlayState(state);
+        this.scheduleAutoplayRetryDispatch(status);
+        this.handleDebugAudioPlayback();
+        return true;
+      } catch (error) {
+        this.wasmAutoplayReady = false;
+        this.autoplayControllerKind = this.bonsaiSupervisor ? "bonsai" : "fallback";
+        this.wasmAutoplayLastError = error instanceof Error ? error.message : String(error);
+        this.log("[AUTOPLAY]", "log-warn", `Control runtime shim disabled: ${this.wasmAutoplayLastError}; using Bonsai supervisor fallback.`);
+        return false;
+      }
+    }
+
+    createWasmAutoplayState(state) {
+      return requireDoomWasmState("createState")(this, state);
+    }
+
+    resolveWasmAutoplayObjective(signals) {
+      return requireDoomWasmState("resolveObjective")(signals);
+    }
+
+    applyAutoplaySupervisorStatus(status) {
+      if (!status) {
+        return;
+      }
+
+      this.lastAutoplayStatus = status;
+      this.autoplayControllerKind = status.controller || this.autoplayControllerKind;
+      this.autoplayPredictions = status.predictions ?? this.autoplayPredictions;
+      this.autoplayLastLatencyMs = status.lastLatencyMs ?? this.autoplayLastLatencyMs;
+      this.autoplayLastError = status.lastError || "";
+      this.autoplaySafetyReason = status.safetyReason || "none";
+      this.autoplayStuckFrames = status.stuckFrames || 0;
+      this.autoplayRecoveryFrames = status.recoveryFrames || 0;
+      this.autoplayMobilityMode = status.mobilityMode || "none";
+      this.autoplayLoopEscapeFrames = status.loopEscapeFrames || 0;
+      this.autoplayWallHugSide = status.wallHugSide || "left";
+      this.autoplayTargetConfidence = status.targetConfidence || 0;
+      this.autoplaySoundCueActive = Boolean(status.soundCueActive);
+      this.autoplayAuditorySnapshot = status.auditorySnapshot || this.autoplayAuditorySnapshot || null;
+      this.autoplaySpatialSnapshot = status.spatialSnapshot || this.autoplaySpatialSnapshot || null;
+      this.autoplayVisionSensor = status.visionSensor || this.autoplayVisionSensor || null;
+      this.autoplayMotorSensor = status.motorSensor || this.autoplayMotorSensor || null;
+      this.autoplayMovementSensor = status.movementSensor || this.autoplayMovementSensor || null;
+      this.autoplayCompassSensor = status.compassSensor || this.autoplayCompassSensor || null;
+      this.autoplaySpatialSensor = status.spatialSensor || this.autoplaySpatialSensor || null;
+      this.autoplayHealthSensor = status.healthSensor || this.autoplayHealthSensor;
+      this.autoplayCtgCarrier = status.ctgCarrier || this.autoplayCtgCarrier || null;
+      this.autoplayCtgObservedScores = status.ctgObservedScores || this.autoplayCtgObservedScores || null;
+      this.autoplayToposDecisionCarrier = status.toposDecisionCarrier || this.autoplayToposDecisionCarrier || null;
+      this.autoplayNousCarrier = status.nousCarrier || this.autoplayNousCarrier || null;
+      this.autoplayNousDetectorResult = status.nousDetectorResult || status.nousCarrier?.cognitionHints?.nousDetectorResult || this.autoplayNousDetectorResult || null;
+      this.autoplayRepeatActionFrames = status.repeatActionFrames || 0;
+      this.autoplayRepeatTurnFrames = status.repeatTurnFrames || 0;
+      this.autoplayQuantizedStallFrames = status.quantizedStallFrames || 0;
+      this.autoplayQuantizedFrameChange = status.quantizedFrameChange ?? 255;
+      this.autoplayRegionQuantizedFrameChange = status.regionQuantizedFrameChange ?? 255;
+      this.autoplayStatusBarQuantizedFrameChange = status.statusBarQuantizedFrameChange ?? 255;
+      this.autoplayRegionSignature = status.regionSignature || this.autoplayRegionSignature || "000000";
+      this.autoplayRegion9Signature = status.region9Signature || this.autoplayRegion9Signature || "000000000";
+      this.autoplayVision9x9Signature = status.vision9x9Signature || this.autoplayVision9x9Signature || "0".repeat(81);
+      this.autoplayMotion9Signature = status.motion9Signature || this.autoplayMotion9Signature || "000000000";
+      this.autoplayMotion9Delta = status.motion9Delta ?? 255;
+      this.autoplayMotionForwardProgress = status.motionForwardProgress || 0;
+      this.autoplayMotionObstacleScore = status.motionObstacleScore || 0;
+      this.autoplayMotionTurnScore = status.motionTurnScore || 0;
+      this.autoplayMotionEntranceScore = status.motionEntranceScore || 0;
+      this.autoplayMotionStallScore = status.motionStallScore || 0;
+      this.autoplayMotionIntent = status.motionIntent || "idle";
+      this.autoplayDepthSignature = status.depthSignature || this.autoplayDepthSignature || "0000";
+      this.autoplayDepthEstimate = status.depthEstimate ?? this.autoplayDepthEstimate ?? 1;
+      this.autoplayFaceSignature = status.faceSignature || this.autoplayFaceSignature || "0000000000000000";
+      this.autoplayFaceQuantizedFrameChange = status.faceQuantizedFrameChange ?? 255;
+      this.autoplayCornerSignal = status.cornerSignal || 0;
+      this.autoplaySignatureMatchKind = status.signatureMatchKind || "none";
+      this.autoplaySignatureMatchDistance = status.signatureMatchDistance ?? 255;
+      this.autoplayWallSignatureCount = status.wallSignatureCount || 0;
+      this.autoplayCornerSignatureCount = status.cornerSignatureCount || 0;
+      this.autoplayDepthSignatureCount = status.depthSignatureCount || 0;
+      this.autoplayDepthSignatureDistance = status.depthSignatureDistance ?? 255;
+      this.autoplayWallUseProbeFrames = status.wallUseProbeFrames || 0;
+      this.autoplayWallUseProbeStage = status.wallUseProbeStage || 0;
+      this.autoplayWallUseProbeTurn = status.wallUseProbeTurn || "left";
+      this.autoplayCornerSuppressFrames = status.cornerSuppressFrames || 0;
+      this.autoplayWallDetachFrames = status.wallDetachFrames || 0;
+      this.autoplayWallDetachTurn = status.wallDetachTurn || "left";
+      this.autoplayWallSurveyFrames = status.wallSurveyFrames || 0;
+      this.autoplayWallSurveyTurn = status.wallSurveyTurn || "left";
+      this.autoplayWallSurveyDecisionFrames = status.wallSurveyDecisionFrames || 0;
+      this.autoplayMapRushCorrectionFrames = status.mapRushCorrectionFrames || 0;
+      this.autoplayMapRushCorrectionBackFrames = status.mapRushCorrectionBackFrames || 0;
+      this.autoplayMapRushCorrectionTurn = status.mapRushCorrectionTurn || "left";
+      this.autoplayMapRushCorrectionReversals = status.mapRushCorrectionReversals || 0;
+      this.autoplayMapDoorSweepFrames = status.mapDoorSweepFrames || 0;
+      this.autoplayMapDoorSweepTurn = status.mapDoorSweepTurn || "left";
+      this.autoplayEnemyConfidence = status.enemyConfidence || 0;
+      this.autoplayEnemyTurn = status.enemyTurn || "none";
+      this.autoplayEnemyDistance = status.enemyDistance ?? 1;
+      this.autoplayEnemyCluster = status.enemyCluster || "none";
+      this.autoplayEnemyFireReady = Boolean(status.enemyFireReady);
+      this.autoplayEnemyAllRegionPeak = status.enemyAllRegionPeak || 0;
+      this.autoplayEnemyLateralBias = status.enemyLateralBias || 0;
+      this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
+      this.autoplayStrategyContext = status.strategyContext || this.autoplayStrategyContext || "unknown";
+      this.autoplayStrategyPriority = status.strategyPriority || 0;
+      this.autoplayDecisionStage = status.stage || status.controlPipeline || "Idle";
+      this.autoplayEvidenceScore = Number.isFinite(Number(status.evidenceScore)) ? Number(status.evidenceScore) : 0;
+      this.autoplaySemanticScores = status.semanticScores || status.semanticMemory?.symbols || this.autoplaySemanticScores || null;
+      this.autoplayDecisionTrace = status.decisionTrace || this.autoplayDecisionTrace || null;
+      this.autoplayControlPipeline = status.controlPipeline || "Idle";
+      this.autoplayObjective = status.objective || this.autoplayObjective || "disabled";
+      this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
+      this.autoplaySemanticMemory = status.semanticMemory || this.autoplaySemanticMemory || null;
+    }
+
     syncAutoplaySupervisorStatus() {
       const status = this.bonsaiSupervisor?.status?.();
       if (!status) {
         return;
       }
 
-      this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
-      this.autoplayStrategyContext = status.strategyContext || this.autoplayStrategyContext;
-      this.autoplayStrategyPriority = status.strategyPriority || this.autoplayStrategyPriority;
-      this.autoplayControlPipeline = status.controlPipeline || this.autoplayControlPipeline;
-      this.autoplayObjective = status.objective || this.autoplayObjective;
-      this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
-      this.autoplaySemanticMemory = status.semanticMemory || this.autoplaySemanticMemory;
-      this.autoplayAuditorySnapshot = status.auditorySnapshot || this.autoplayAuditorySnapshot;
-      this.autoplaySpatialSnapshot = status.spatialSnapshot || this.autoplaySpatialSnapshot;
-      this.autoplayVisionSensor = status.visionSensor || this.autoplayVisionSensor;
-      this.autoplayMotorSensor = status.motorSensor || this.autoplayMotorSensor;
-      this.autoplayMovementSensor = status.movementSensor || this.autoplayMovementSensor;
-      this.autoplayCompassSensor = status.compassSensor || this.autoplayCompassSensor;
-      this.autoplaySpatialSensor = status.spatialSensor || this.autoplaySpatialSensor;
-      this.autoplayHealthSensor = status.healthSensor || this.autoplayHealthSensor;
-      this.autoplayCtgCarrier = status.ctgCarrier || this.autoplayCtgCarrier;
-      this.autoplayCtgObservedScores = status.ctgObservedScores || this.autoplayCtgObservedScores;
-      this.autoplayToposDecisionCarrier = status.toposDecisionCarrier || this.autoplayToposDecisionCarrier;
-      this.autoplayNousCarrier = status.nousCarrier || this.autoplayNousCarrier;
-      this.autoplayNousDetectorResult = status.nousDetectorResult || status.nousCarrier?.cognitionHints?.nousDetectorResult || this.autoplayNousDetectorResult;
+      this.applyAutoplaySupervisorStatus(status);
       this.scheduleAutoplayRetryDispatch(status);
     }
 
@@ -1390,6 +1628,83 @@
         bytes: FRAME_BYTES,
         zeroCopy: Boolean(texture) && status?.usingCpuFallback === false
       });
+    }
+
+    updateGpuHudOverlayState(state) {
+      const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
+      if (typeof provider?.setHudOverlayState !== "function") {
+        return;
+      }
+
+      const frame = state?.framebuffer || {};
+      const probeTurn = this.resolveGpuHudProbeTurn();
+      const kairos = Math.max(
+        Number(this.autoplayTargetConfidence || 0),
+        Number(this.autoplayCornerSignal || 0),
+        this.autoplayWallUseProbeFrames > 0 ? 1 : 0,
+        this.autoplayUsePulseFrames > 0 ? 0.9 : 0,
+        this.autoplayRecoveryFrames > 0 ? 0.7 : 0
+      );
+      provider.setHudOverlayState({
+        enabled: Boolean(this.autoplayEnabled && this.visualSensorEnabled && state),
+        heatmapEnabled: Boolean(this.visualSensorEnabled),
+        cells: this.createGpuHudCells(frame),
+        kairos: this.clampHudUnit(kairos),
+        useProbeTurn: probeTurn,
+        enemyConfidence: this.clampHudUnit(Number(frame.enemyConfidence ?? this.autoplayEnemyConfidence ?? 0)),
+        depthEstimate: Math.max(0, Math.min(1.5, Number(frame.depthEstimate ?? this.autoplayDepthEstimate ?? 1)))
+      });
+    }
+
+    resolveGpuHudProbeTurn() {
+      if ((this.autoplayWallUseProbeFrames || 0) > 0 || (this.autoplayWallUseProbeStage || 0) > 0) {
+        return this.autoplayWallUseProbeTurn === "right" ? 1 : -1;
+      }
+
+      if ((this.autoplayMapDoorSweepFrames || 0) > 0) {
+        return this.autoplayMapDoorSweepTurn === "right" ? 1 : -1;
+      }
+
+      if ((this.autoplayWallDetachFrames || 0) > 0) {
+        return this.autoplayWallDetachTurn === "right" ? 1 : -1;
+      }
+
+      return 0;
+    }
+
+    createGpuHudCells(frame) {
+      const cells = new Array(81).fill(0);
+      if (!frame || typeof frame !== "object") {
+        return cells;
+      }
+
+      const vision = Array.isArray(frame.vision9x9Sample) ? frame.vision9x9Sample : [];
+      const door = Array.isArray(frame.firstDoorVision9x9Heatmap) ? frame.firstDoorVision9x9Heatmap : [];
+      const projectile = Array.isArray(frame.projectileVision9x9Sample) ? frame.projectileVision9x9Sample : [];
+      const resource = Array.isArray(frame.resourceVision9x9Sample) ? frame.resourceVision9x9Sample : [];
+      const enemy9 = Array.isArray(frame.enemyRegion9Sample) ? frame.enemyRegion9Sample : [];
+      for (let index = 0; index < cells.length; index += 1) {
+        const row = Math.floor(index / 9);
+        const column = index % 9;
+        const region = Math.floor(row / 3) * 3 + Math.floor(column / 3);
+        const base = vision.length > index ? this.clampHudUnit(Number(vision[index] || 0) / 255) * 0.18 : 0;
+        const doorScore = door.length > index ? this.clampHudUnit(door[index]) * 0.95 : 0;
+        const projectileScore = projectile.length > index ? this.clampHudUnit(projectile[index]) : 0;
+        const resourceScore = resource.length > index ? this.clampHudUnit(resource[index]) * 0.44 : 0;
+        const enemyScore = enemy9.length > region ? this.clampHudUnit(enemy9[region]) * 0.86 : 0;
+        cells[index] = this.clampHudUnit(Math.max(base, doorScore, projectileScore, resourceScore, enemyScore));
+      }
+
+      return cells;
+    }
+
+    clampHudUnit(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number)) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(1, number));
     }
 
     createAutoplayState(indices, gpuVision) {
@@ -2410,340 +2725,96 @@
     }
 
     createNeutralAuditoryRuntimeSnapshot() {
-      return {
-        active: false,
-        leftEnergy: 0,
-        rightEnergy: 0,
-        balance: 0,
-        dominantFreq: 0,
-        lowEnergy: 0,
-        midEnergy: 0,
-        highEnergy: 0,
-        dominantBand: "none",
-        eventDetected: false,
-        eventType: "none",
-        timestamp: DEFAULT_SNAPSHOT_TIMESTAMP
-      };
+      return requireDoomAuditoryRuntime("createNeutralSnapshot")(DEFAULT_SNAPSHOT_TIMESTAMP);
     }
 
     readBridgeAuditorySnapshot() {
-      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
-      const status = typeof bridge?.status === "function" ? bridge.status() : null;
-      return status?.lastSnapshot || null;
+      return requireDoomAuditoryRuntime("readBridgeSnapshot")(self);
     }
 
     audioSnapshotAgeMs(snapshot) {
-      if (!snapshot) {
-        return Number.POSITIVE_INFINITY;
-      }
-
-      if (Number.isFinite(Number(snapshot.timestampMs)) && Number(snapshot.timestampMs) > 0) {
-        return Date.now() - Number(snapshot.timestampMs);
-      }
-
-      const timestampMs = Date.parse(snapshot.timestamp || "");
-      return Number.isFinite(timestampMs) && timestampMs > 0
-        ? Date.now() - timestampMs
-        : Number.POSITIVE_INFINITY;
+      return requireDoomAuditoryRuntime("snapshotAgeMs")(snapshot);
     }
 
     audioSnapshotEnergy(snapshot) {
-      return Math.max(
-        Number(snapshot?.leftEnergy || 0),
-        Number(snapshot?.rightEnergy || 0),
-        Number(snapshot?.lowEnergy || 0),
-        Number(snapshot?.midEnergy || 0),
-        Number(snapshot?.highEnergy || 0));
+      return requireDoomAuditoryRuntime("snapshotEnergy")(snapshot);
     }
 
     createAuditoryRuntimeSnapshot() {
-      const runtimeSnapshot = this.autoplayAuditorySnapshot || {};
-      const bridgeSnapshot = this.readBridgeAuditorySnapshot();
-      const runtimeFresh = this.audioSnapshotAgeMs(runtimeSnapshot) <= 1200;
-      const bridgeFresh = this.audioSnapshotAgeMs(bridgeSnapshot) <= 1400;
-      const runtimeEnergy = this.audioSnapshotEnergy(runtimeSnapshot);
-      const bridgeEnergy = this.audioSnapshotEnergy(bridgeSnapshot);
-      const snapshot = bridgeFresh && bridgeEnergy > Math.max(0.002, runtimeEnergy)
-        ? bridgeSnapshot
-        : runtimeSnapshot;
-      const fresh = snapshot === bridgeSnapshot ? bridgeFresh : runtimeFresh;
-      if (!fresh) {
-        return this.createNeutralAuditoryRuntimeSnapshot();
-      }
-
-      return {
-        active: Boolean(snapshot.eventDetected) || this.audioSnapshotEnergy(snapshot) > 0.002,
-        leftEnergy: Number(snapshot.leftEnergy || 0),
-        rightEnergy: Number(snapshot.rightEnergy || 0),
-        balance: Number(snapshot.balance || 0),
-        dominantFreq: Number(snapshot.dominantFreq || 0),
-        lowEnergy: Number(snapshot.lowEnergy || 0),
-        midEnergy: Number(snapshot.midEnergy || 0),
-        highEnergy: Number(snapshot.highEnergy || 0),
-        dominantBand: snapshot.dominantBand || "none",
-        eventDetected: Boolean(snapshot.eventDetected),
-        eventType: snapshot.eventType || "none",
-        timestamp: snapshot.timestamp || (snapshot.timestampMs ? new Date(Number(snapshot.timestampMs)).toISOString() : DEFAULT_SNAPSHOT_TIMESTAMP)
-      };
+      return requireDoomAuditoryRuntime("createRuntimeSnapshot")(this, {
+        defaultTimestamp: DEFAULT_SNAPSHOT_TIMESTAMP,
+        global: self
+      });
     }
 
     attachAudioRuntimeSource(audio) {
-      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
-      if (typeof bridge?.uploadGpuAudioSnapshot === "function") {
-        return bridge.uploadGpuAudioSnapshot("doom.audio", audio);
-      }
-
-      return {
-        kind: "audio-state-buffer",
-        zeroCopy: false,
-        backend: "runtime-status"
-      };
+      return requireDoomAuditoryRuntime("attachRuntimeSource")(audio, {
+        global: self,
+        label: "doom.audio"
+      });
     }
 
     drainNativeAudio() {
-      if (!this.isNativeAudioAvailable() || !this.nativeAudioStatus()) {
-        return;
-      }
-
-      const available = Math.max(0, Math.floor(Number(this.exports.doom_audio_available_frames() || 0)));
-      if (available <= 0) {
-        return;
-      }
-
-      const bufferPtr = Number(this.exports.doom_audio_buffer() || 0);
-      const capacity = Math.max(0, Math.floor(Number(this.exports.doom_audio_capacity_frames() || 0)));
-      const readOffset = Math.max(0, Math.floor(Number(this.exports.doom_audio_read_offset_frames() || 0)));
-      const sampleRate = Math.max(8000, Math.floor(Number(this.exports.doom_audio_sample_rate() || 44100)));
-      const channels = Math.max(1, Math.min(2, Math.floor(Number(this.exports.doom_audio_channels() || 2))));
-      const contiguous = Math.max(0, capacity - readOffset);
-      const frames = Math.min(available, contiguous, 4096);
-
-      if (!bufferPtr || !capacity || frames <= 0) {
-        return;
-      }
-
-      const sampleCount = frames * channels;
-      const byteOffset = bufferPtr + (readOffset * channels * 2);
-      const source = new Int16Array(this.exports.memory.buffer, byteOffset, sampleCount);
-      const samples = new Float32Array(sampleCount);
-      let leftEnergy = 0;
-      let rightEnergy = 0;
-
-      for (let i = 0, j = 0; i < frames; i += 1, j += channels) {
-        const left = source[j] / 32768;
-        const right = channels > 1 ? source[j + 1] / 32768 : left;
-        samples[j] = left;
-        if (channels > 1) {
-          samples[j + 1] = right;
-        }
-        leftEnergy += Math.abs(left);
-        rightEnergy += Math.abs(right);
-      }
-
-      const consumed = this.exports.doom_audio_consume_frames(frames);
-      if (consumed <= 0) {
-        return;
-      }
-
-      leftEnergy = Math.min(1, leftEnergy / consumed);
-      rightEnergy = Math.min(1, rightEnergy / consumed);
-      const denominator = Math.max(0.0001, leftEnergy + rightEnergy);
-      const balance = Math.max(-1, Math.min(1, (rightEnergy - leftEnergy) / denominator));
-      const eventCount = this.nativeAudioEventCount();
-      const snapshot = {
-        active: true,
-        leftEnergy: Math.round(leftEnergy * 1000) / 1000,
-        rightEnergy: Math.round(rightEnergy * 1000) / 1000,
-        balance: Math.round(balance * 1000) / 1000,
-        dominantFreq: 0,
-        lowEnergy: Math.round(Math.max(leftEnergy, rightEnergy) * 0.38 * 1000) / 1000,
-        midEnergy: Math.round(Math.max(leftEnergy, rightEnergy) * 0.72 * 1000) / 1000,
-        highEnergy: Math.round(Math.max(leftEnergy, rightEnergy) * 0.28 * 1000) / 1000,
-        dominantBand: "mid",
-        eventDetected: eventCount !== this.nativeAudioLastEventCount || Math.max(leftEnergy, rightEnergy) > 0.01,
-        eventType: "native-sfx",
-        timestamp: new Date().toISOString()
-      };
-
-      this.nativeAudioLastEventCount = eventCount;
-      this.nativeAudioFramesDrained += consumed;
-      this.nativeAudioLastSnapshot = snapshot;
-      this.autoplayAuditorySnapshot = snapshot;
-
-      if (!this.nativeAudioLogged) {
-        this.nativeAudioLogged = true;
-        this.log("[AUDIO]", "log-ok", `native SFX bridge active: ${sampleRate}Hz/${channels}ch ring buffer.`);
-      }
-
-      if (this.audioPlaybackMuted) {
-        return;
-      }
-
-      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
-      if (typeof bridge?.playPcm === "function") {
-        bridge.playPcm({
-          samples,
-          frames: consumed,
-          channels,
-          sampleRate,
-          snapshot
-        });
-      }
+      return requireDoomNativeAudio("drain")(this);
     }
 
     scheduleAutoplayRetryDispatch(status) {
-      if (this.autoplaySenseOnly || this.state !== "running") {
-        return;
-      }
-
-      if (this.autoplayRetryCooldownFrames > 0) {
-        this.autoplayRetryCooldownFrames -= 1;
-      }
-
-      const healthRetryRequested = Boolean(
-        status?.healthSensor?.retryRequested &&
-        (status?.healthSensor?.likelyDead || status?.healthSensor?.retryReason !== "none"));
-      this.autoplayHealthRetryFrames = healthRetryRequested
-        ? Math.min(12, Number(this.autoplayHealthRetryFrames || 0) + 1)
-        : 0;
-      const retryRequested = healthRetryRequested;
-      if (!retryRequested) {
-        if (this.autoplayRetrySequence.length > 0 || this.autoplayRetryWaitFrames > 0) {
-          this.clearAutoplayRetryDispatch();
+      requireDoomRetryDispatch("schedule")(this.autoplayRetryDispatch, status, {
+        keys: AUTOPLAY_KEYS,
+        enterKey: AUTOPLAY_RETRY_ENTER_KEY,
+        tapFrames: AUTOPLAY_RETRY_TAP_FRAMES,
+        runtimeState: this.state,
+        senseOnly: this.autoplaySenseOnly,
+        releaseInputs: () => this.releaseAutoplayInputs(),
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
+        logQueued: reason => {
+          this.log("[AUTOPLAY]", "log-warn", `retry dispatch queued: reason=${reason}.`);
+          this.emitStatus("autoplay-retry-dispatch");
         }
-        return;
-      }
-      if (this.autoplayHealthRetryFrames < 3) {
-        return;
-      }
-      if (!retryRequested || this.autoplayRetrySequence.length > 0 || this.autoplayRetryWaitFrames > 0 || this.autoplayRetryCooldownFrames > 0) {
-        return;
-      }
-
-      this.autoplayRetryReason = status?.healthSensor?.retryReason || "health-death";
-      this.releaseAutoplayInputs();
-      this.autoplayRetrySequence = [];
-      for (let index = 0; index < 3; index += 1) {
-        this.autoplayRetrySequence.push(
-          { keycode: AUTOPLAY_KEYS.use, pressed: true },
-          { waitFrames: AUTOPLAY_RETRY_TAP_FRAMES },
-          { keycode: AUTOPLAY_KEYS.use, pressed: false },
-          { waitFrames: AUTOPLAY_RETRY_TAP_FRAMES },
-          { keycode: AUTOPLAY_RETRY_ENTER_KEY, pressed: true },
-          { waitFrames: AUTOPLAY_RETRY_TAP_FRAMES },
-          { keycode: AUTOPLAY_RETRY_ENTER_KEY, pressed: false },
-          { waitFrames: AUTOPLAY_RETRY_TAP_FRAMES });
-      }
-
-      this.log("[AUTOPLAY]", "log-warn", `retry dispatch queued: reason=${this.autoplayRetryReason}.`);
-      this.emitStatus("autoplay-retry-dispatch");
+      });
     }
 
     processAutoplayRetryDispatch() {
-      if (this.autoplayRetryWaitFrames > 0) {
-        this.autoplayRetryWaitFrames -= 1;
-        this.releaseAutoplayMoveInputs();
-        return true;
-      }
-
-      if (this.autoplayRetrySequence.length <= 0) {
-        return false;
-      }
-
-      const step = this.autoplayRetrySequence.shift();
-      if (step.waitFrames) {
-        this.autoplayRetryWaitFrames = step.waitFrames;
-        this.releaseAutoplayMoveInputs();
-        return true;
-      }
-
-      this.queueInput(step.keycode, step.pressed);
-      if (this.autoplayRetrySequence.length <= 0) {
-        this.autoplayRetryCooldownFrames = AUTOPLAY_RETRY_COOLDOWN_FRAMES;
-        this.log("[AUTOPLAY]", "log-info", `retry dispatch completed: reason=${this.autoplayRetryReason}.`);
-      }
-
-      return true;
+      return requireDoomRetryDispatch("process")(this.autoplayRetryDispatch, {
+        cooldownFrames: AUTOPLAY_RETRY_COOLDOWN_FRAMES,
+        releaseMoveInputs: () => this.releaseAutoplayMoveInputs(),
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
+        logCompleted: reason => this.log("[AUTOPLAY]", "log-info", `retry dispatch completed: reason=${reason}.`)
+      });
     }
 
     clearAutoplayRetryDispatch() {
-      this.autoplayRetrySequence = [];
-      this.autoplayRetryWaitFrames = 0;
-      this.autoplayRetryCooldownFrames = 0;
-      this.autoplayRetryReason = "none";
-      this.queueInput(AUTOPLAY_KEYS.use, false);
-      this.queueInput(AUTOPLAY_RETRY_ENTER_KEY, false);
+      return requireDoomRetryDispatch("clear")(this.autoplayRetryDispatch, {
+        keys: AUTOPLAY_KEYS,
+        enterKey: AUTOPLAY_RETRY_ENTER_KEY,
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed)
+      });
     }
 
     applyAutoplayAction(action) {
-      const normalized = self.AIKernelBonsai?.normalizeAction?.(action, this.autoplayLastAction) || action || {};
-      if (this.autoplaySenseOnly) {
-        this.clearAutoplayRetryDispatch();
-        this.releaseAutoplayInputs();
-        return;
-      }
-
-      const move = normalized.move === "forward" ? 1 : (normalized.move === "back" ? -1 : 0);
-      const turn = normalized.turn === "right" ? 1 : (normalized.turn === "left" ? -1 : 0);
-      const aiMoveAllowed = !this.autoplayManualMove;
-      const usePressed = this.resolveAutoplayUsePulse(Boolean(normalized.use));
-      const desired = {
-        forward: aiMoveAllowed && normalized.move === "forward",
-        back: aiMoveAllowed && normalized.move === "back",
-        left: aiMoveAllowed && normalized.turn === "left",
-        right: aiMoveAllowed && normalized.turn === "right",
-        fire: Boolean(normalized.fire),
-        strafe: aiMoveAllowed && Boolean(normalized.strafe),
-        use: usePressed,
-        run: Boolean(normalized.run)
-      };
-
-      if (typeof this.exports?.doom_input_action === "function" && aiMoveAllowed) {
-        const result = this.exports.doom_input_action(move, turn, normalized.fire ? 1 : 0, normalized.strafe ? 1 : 0);
-        if (result === OK) {
-          if (!this.isManualInputActive(AUTOPLAY_KEYS.use)) {
-            this.queueInput(AUTOPLAY_KEYS.use, desired.use);
-          }
-          if (!this.isManualInputActive(AUTOPLAY_KEYS.run)) {
-            this.queueInput(AUTOPLAY_KEYS.run, desired.run);
-          }
-          this.handleDebugAudioPlayback();
-          return;
-        }
-      }
-
-      for (const [name, keycode] of Object.entries(AUTOPLAY_KEYS)) {
-        if (this.autoplayManualMove && (name === "forward" || name === "back" || name === "left" || name === "right" || name === "strafe")) {
-          continue;
-        }
-        if (this.isManualInputActive(keycode)) {
-          continue;
-        }
-        this.queueInput(keycode, desired[name]);
-      }
-      this.handleDebugAudioPlayback();
+      requireDoomActionAdapter("applyAction")(action, {
+        keys: AUTOPLAY_KEYS,
+        ok: OK,
+        previousAction: this.autoplayLastAction,
+        normalizeAction: self.AIKernelBonsai?.normalizeAction,
+        senseOnly: this.autoplaySenseOnly,
+        manualMove: this.autoplayManualMove,
+        nativeAction: typeof this.exports?.doom_input_action === "function"
+          ? (move, turn, fire, strafe) => this.exports.doom_input_action(move, turn, fire, strafe)
+          : null,
+        resolveUsePulse: wantsUse => this.resolveAutoplayUsePulse(wantsUse),
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
+        isManualInputActive: keycode => this.isManualInputActive(keycode),
+        clearRetry: () => this.clearAutoplayRetryDispatch(),
+        releaseInputs: () => this.releaseAutoplayInputs(),
+        playDebugAudio: () => this.handleDebugAudioPlayback()
+      });
     }
 
     handleDebugAudioPlayback() {
-      if (this.audioPlaybackMuted) {
-        return;
-      }
-
-      const snapshot = this.autoplayAuditorySnapshot;
-      if (!snapshot?.eventDetected || Math.max(Number(snapshot.leftEnergy || 0), Number(snapshot.rightEnergy || 0)) < 0.08) {
-        return;
-      }
-
-      const now = self.performance?.now?.() || Date.now();
-      if (this.lastDebugAudioAt && now - this.lastDebugAudioAt < 160) {
-        return;
-      }
-
-      this.lastDebugAudioAt = now;
-      const bridge = self.AIKernelWasmAudioProvider || self.aikernelWasmAudioProvider;
-      if (typeof bridge?.playSpatialCue === "function") {
-        bridge.playSpatialCue(snapshot);
-      }
+      self.AIKernelDoomDebugAudio?.play?.(this.autoplayAuditorySnapshot, {
+        muted: this.audioPlaybackMuted
+      });
     }
 
     resolveAutoplayUsePulse(wantsUse) {
@@ -2769,25 +2840,25 @@
     }
 
     releaseAutoplayMoveInputs() {
-      if (typeof this.exports?.doom_input_action === "function") {
-        this.exports.doom_input_action(0, 0, 0, 0);
-      }
-
-      for (const name of ["forward", "back", "left", "right", "strafe"]) {
-        this.queueInput(AUTOPLAY_KEYS[name], false);
-      }
+      return requireDoomActionAdapter("releaseMoveInputs")({
+        keys: AUTOPLAY_KEYS,
+        nativeAction: typeof this.exports?.doom_input_action === "function"
+          ? (move, turn, fire, strafe) => this.exports.doom_input_action(move, turn, fire, strafe)
+          : null,
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed)
+      });
     }
 
     releaseAutoplayInputs() {
-      if (typeof this.exports?.doom_input_action === "function") {
-        this.exports.doom_input_action(0, 0, 0, 0);
-      }
-
       this.autoplayUsePulseFrames = 0;
       this.autoplayUsePulseSpacingFrames = 0;
-      for (const keycode of Object.values(AUTOPLAY_KEYS)) {
-        this.queueInput(keycode, false);
-      }
+      return requireDoomActionAdapter("releaseInputs")({
+        keys: AUTOPLAY_KEYS,
+        nativeAction: typeof this.exports?.doom_input_action === "function"
+          ? (move, turn, fire, strafe) => this.exports.doom_input_action(move, turn, fire, strafe)
+          : null,
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed)
+      });
     }
 
     logAutoplayVisionPath() {
@@ -2950,569 +3021,45 @@
     }
 
     createImports() {
-      const runtime = this;
-
-      function memoryView() {
-        return new DataView(runtime.exports.memory.buffer);
-      }
-
-      function writeU32(ptr, value) {
-        memoryView().setUint32(ptr, value, true);
-      }
-
-      function writeU64(ptr, value) {
-        memoryView().setBigUint64(ptr, BigInt(value), true);
-      }
-
-      function fdWrite(fd, iovs, iovsLen, nwritten) {
-        let written = 0;
-        const memory = new Uint8Array(runtime.exports.memory.buffer);
-        const view = memoryView();
-        const chunks = [];
-        let captured = 0;
-        for (let index = 0; index < iovsLen; index += 1) {
-          const iov = iovs + index * 8;
-          const ptr = view.getUint32(iov, true);
-          const len = view.getUint32(iov + 4, true);
-          written += len;
-          if (captured < 2048) {
-            const take = Math.min(len, 2048 - captured);
-            chunks.push(memory.slice(ptr, ptr + take));
-            captured += take;
-          }
-        }
-
-        if (chunks.length) {
-          const text = new TextDecoder().decode(concatBytes(chunks)).trim();
-          if (text) {
-            console[fd === 2 ? "warn" : "log"](text);
-          }
-        }
-
-        writeU32(nwritten, written);
-        return 0;
-      }
-
-      return {
-        env: {
-          emscripten_sleep: () => 0,
-          emscripten_notify_memory_growth: () => {},
-          __syscall_unlinkat: () => 0,
-          __syscall_rmdir: () => 0,
-          __syscall_renameat: () => 0,
-          _emscripten_system: () => 0
-        },
-        wasi_snapshot_preview1: {
-          args_sizes_get: (argc, argvBufSize) => {
-            writeU32(argc, 0);
-            writeU32(argvBufSize, 0);
-            return 0;
-          },
-          args_get: () => 0,
-          proc_exit: (code) => {
-            throw new Error(`WASI proc_exit(${code})`);
-          },
-          clock_time_get: (_clockId, _precision, timePtr) => {
-            writeU64(timePtr, BigInt(Date.now()) * 1000000n);
-            return 0;
-          },
-          fd_write: fdWrite,
-          fd_read: (_fd, _iovs, _iovsLen, nread) => {
-            writeU32(nread, 0);
-            return 0;
-          },
-          fd_close: () => 0,
-          fd_seek: (_fd, _offset, _whence, newOffset) => {
-            writeU64(newOffset, 0);
-            return 0;
-          }
-        }
-      };
+      return requireDoomWasmImports("createImports")(this);
     }
   }
 
   async function fetchJson(url) {
-    const response = await fetch(url, { cache: "no-cache" });
-    if (!response.ok) {
-      throw new Error(`failed to fetch ${url}: ${response.status}`);
-    }
-    return response.json();
+    return requireDoomBinaryAssets("fetchJson")(url);
   }
 
-  async function fetchBinary(url, expected) {
-    const response = await fetch(url, { cache: "no-cache" });
-    if (!response.ok) {
-      throw new Error(`failed to fetch ${expected.label}: ${response.status}`);
-    }
-
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (expected.sizeBytes && bytes.length !== expected.sizeBytes) {
-      throw new Error(`${expected.label} size mismatch: got ${bytes.length}, expected ${expected.sizeBytes}`);
-    }
-
-    if (expected.sha256) {
-      const actual = await sha256(bytes);
-      if (actual !== expected.sha256.toLowerCase()) {
-        throw new Error(`${expected.label} sha256 mismatch: got ${actual}, expected ${expected.sha256}`);
-      }
-    }
-
-    return bytes;
+  async function fetchBinary(url, expected, onProgress = null) {
+    return requireDoomBinaryAssets("fetchBinary")(url, expected, onProgress);
   }
 
-  async function sha256(bytes) {
-    if (!window.crypto?.subtle) {
-      throw new Error("WebCrypto SHA-256 is unavailable; hosted asset validation cannot proceed.");
+  function normalizeByteCount(value) {
+    return requireDoomBinaryAssets("normalizeByteCount")(value);
+  }
+
+  function requireDoomWadMetadata(name) {
+    const fn = self.AIKernelDoomWadMetadata?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomWadMetadata.${name} is unavailable.`);
     }
 
-    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+    return fn;
   }
 
   function parseWadMapHints(wadBytes, mapName) {
-    const directory = readWadDirectory(wadBytes);
-    if (!directory?.length) {
-      return null;
-    }
-
-    const mapIndex = directory.findIndex(entry => entry.name === mapName);
-    if (mapIndex < 0) {
-      return null;
-    }
-
-    const lumps = new Map();
-    for (let index = mapIndex + 1; index < directory.length; index += 1) {
-      const entry = directory[index];
-      if (/^E\dM\d$/.test(entry.name) || /^MAP\d\d$/.test(entry.name)) {
-        break;
-      }
-
-      lumps.set(entry.name, entry);
-    }
-
-    const linedefs = parseLinedefs(wadBytes, lumps.get("LINEDEFS"));
-    const vertexes = parseVertexes(wadBytes, lumps.get("VERTEXES"));
-    const sidedefs = parseSidedefs(wadBytes, lumps.get("SIDEDEFS"));
-    const sectors = parseSectors(wadBytes, lumps.get("SECTORS"));
-    const things = parseThings(wadBytes, lumps.get("THINGS"));
-    const textureRoles = buildTextureRoles(linedefs, sidedefs, sectors);
-    const doorLines = linedefs.filter(line => isDoorSpecial(line.special));
-    const switchLines = linedefs.filter(line => isSwitchSpecial(line.special));
-    const exitLines = linedefs.filter(line => isExitSpecial(line.special));
-
-    return {
-      map: mapName,
-      source: "DOOM1.WAD static lump analysis",
-      lumps: Array.from(lumps.keys()),
-      counts: {
-        things: things.length,
-        linedefs: linedefs.length,
-        vertexes: vertexes.length,
-        sidedefs: sidedefs.length,
-        sectors: sectors.length
-      },
-      playerStart: summarizePlayerStart(things),
-      firstDoor: summarizeNearestDoor(doorLines, sidedefs, vertexes, summarizePlayerStart(things)),
-      darkSectors: summarizeDarkSectors(sectors),
-      enemyThings: summarizeEnemyThings(things),
-      doorLines: doorLines.length,
-      switchLines: switchLines.length,
-      exitLines: exitLines.length,
-      doorSpecials: summarizeSpecials(doorLines),
-      switchSpecials: summarizeSpecials(switchLines),
-      exitSpecials: summarizeSpecials(exitLines),
-      thingTypes: summarizeThings(things),
-      textureRoles,
-      doorTextures: textureRoles.filter(role => role.role === "door").map(role => role.texture),
-      switchTextures: textureRoles.filter(role => role.role === "switch").map(role => role.texture),
-      generatedAt: new Date().toISOString()
-    };
-  }
-
-  function readWadDirectory(wadBytes) {
-    if (wadBytes.length < 12) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset, wadBytes.byteLength);
-    const lumpCount = view.getInt32(4, true);
-    const directoryOffset = view.getInt32(8, true);
-    if (lumpCount <= 0 || directoryOffset <= 0 || directoryOffset + lumpCount * 16 > wadBytes.length) {
-      return [];
-    }
-
-    const directory = [];
-    for (let index = 0; index < lumpCount; index += 1) {
-      const entry = directoryOffset + index * 16;
-      directory.push({
-        name: readWadName(wadBytes, entry + 8),
-        offset: view.getInt32(entry, true),
-        size: view.getInt32(entry + 4, true)
-      });
-    }
-
-    return directory;
-  }
-
-  function parseLinedefs(wadBytes, lump) {
-    if (!isValidLump(wadBytes, lump, 14)) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
-    const lines = [];
-    for (let offset = 0; offset + 14 <= lump.size; offset += 14) {
-      lines.push({
-        startVertex: view.getInt16(offset, true),
-        endVertex: view.getInt16(offset + 2, true),
-        flags: view.getInt16(offset + 4, true),
-        special: view.getInt16(offset + 6, true),
-        tag: view.getInt16(offset + 8, true),
-        rightSidedef: view.getInt16(offset + 10, true),
-        leftSidedef: view.getInt16(offset + 12, true)
-      });
-    }
-
-    return lines;
-  }
-
-  function parseVertexes(wadBytes, lump) {
-    if (!isValidLump(wadBytes, lump, 4)) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
-    const vertexes = [];
-    for (let offset = 0; offset + 4 <= lump.size; offset += 4) {
-      vertexes.push({
-        x: view.getInt16(offset, true),
-        y: view.getInt16(offset + 2, true)
-      });
-    }
-
-    return vertexes;
-  }
-
-  function parseSidedefs(wadBytes, lump) {
-    if (!isValidLump(wadBytes, lump, 30)) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
-    const sides = [];
-    for (let offset = 0; offset + 30 <= lump.size; offset += 30) {
-      sides.push({
-        xOffset: view.getInt16(offset, true),
-        yOffset: view.getInt16(offset + 2, true),
-        upper: readWadName(wadBytes, lump.offset + offset + 4),
-        lower: readWadName(wadBytes, lump.offset + offset + 12),
-        middle: readWadName(wadBytes, lump.offset + offset + 20),
-        sector: view.getInt16(offset + 28, true)
-      });
-    }
-
-    return sides;
-  }
-
-  function parseSectors(wadBytes, lump) {
-    if (!isValidLump(wadBytes, lump, 26)) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
-    const sectors = [];
-    for (let offset = 0; offset + 26 <= lump.size; offset += 26) {
-      sectors.push({
-        floorHeight: view.getInt16(offset, true),
-        ceilingHeight: view.getInt16(offset + 2, true),
-        floorTexture: readWadName(wadBytes, lump.offset + offset + 4),
-        ceilingTexture: readWadName(wadBytes, lump.offset + offset + 12),
-        lightLevel: view.getInt16(offset + 20, true),
-        special: view.getInt16(offset + 22, true),
-        tag: view.getInt16(offset + 24, true)
-      });
-    }
-
-    return sectors;
-  }
-
-  function parseThings(wadBytes, lump) {
-    if (!isValidLump(wadBytes, lump, 10)) {
-      return [];
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset + lump.offset, lump.size);
-    const things = [];
-    for (let offset = 0; offset + 10 <= lump.size; offset += 10) {
-      things.push({
-        x: view.getInt16(offset, true),
-        y: view.getInt16(offset + 2, true),
-        angle: view.getInt16(offset + 4, true),
-        type: view.getInt16(offset + 6, true),
-        flags: view.getInt16(offset + 8, true)
-      });
-    }
-
-    return things;
-  }
-
-  function buildTextureRoles(linedefs, sidedefs, sectors) {
-    const roleByTexture = new Map();
-    const remember = (texture, role, weight) => {
-      if (!texture || texture === "-") {
-        return;
-      }
-
-      const current = roleByTexture.get(texture) || { texture, role, door: 0, switch: 0, exit: 0, wall: 0, sector: 0 };
-      current[role] += weight;
-      if (current.door >= current.switch && current.door >= current.exit && current.door >= current.wall) {
-        current.role = "door";
-      } else if (current.switch >= current.exit && current.switch >= current.wall) {
-        current.role = "switch";
-      } else if (current.exit >= current.wall) {
-        current.role = "exit";
-      } else {
-        current.role = "wall";
-      }
-      roleByTexture.set(texture, current);
-    };
-
-    for (const line of linedefs) {
-      const role = isDoorSpecial(line.special)
-        ? "door"
-        : (isSwitchSpecial(line.special) ? "switch" : (isExitSpecial(line.special) ? "exit" : "wall"));
-      const weight = role === "wall" ? 1 : 8;
-      for (const sideIndex of [line.rightSidedef, line.leftSidedef]) {
-        if (sideIndex < 0 || sideIndex >= sidedefs.length) {
-          continue;
-        }
-
-        const side = sidedefs[sideIndex];
-        remember(side.upper, role, weight);
-        remember(side.lower, role, weight);
-        remember(side.middle, role, weight);
-      }
-    }
-
-    for (const sector of sectors) {
-      remember(sector.floorTexture, "sector", 1);
-      remember(sector.ceilingTexture, "sector", 1);
-    }
-
-    return Array.from(roleByTexture.values())
-      .sort((left, right) => roleRank(left.role) - roleRank(right.role) || right.door + right.switch + right.exit - (left.door + left.switch + left.exit))
-      .slice(0, 96);
-  }
-
-  function isValidLump(wadBytes, lump, recordSize) {
-    return Boolean(lump)
-      && lump.size >= recordSize
-      && lump.offset >= 0
-      && lump.offset + lump.size <= wadBytes.length;
-  }
-
-  function isDoorSpecial(special) {
-    return new Set([1, 26, 27, 28, 31, 32, 33, 34, 46, 61, 63, 86, 90, 103, 106, 108, 109, 117, 118]).has(Number(special));
-  }
-
-  function isSwitchSpecial(special) {
-    return new Set([7, 9, 11, 14, 15, 18, 20, 21, 23, 29, 41, 42, 43, 45, 49, 50, 51, 55, 71, 101, 102, 103, 111, 112, 113, 114, 115, 116, 122, 123]).has(Number(special));
-  }
-
-  function isExitSpecial(special) {
-    return new Set([11, 51, 52, 124]).has(Number(special));
-  }
-
-  function summarizeSpecials(lines) {
-    const counts = new Map();
-    for (const line of lines) {
-      counts.set(line.special, (counts.get(line.special) || 0) + 1);
-    }
-
-    return Array.from(counts.entries())
-      .sort((left, right) => Number(left[0]) - Number(right[0]))
-      .map(([special, count]) => ({ special: Number(special), count }));
-  }
-
-  function summarizeThings(things) {
-    const counts = new Map();
-    for (const thing of things) {
-      counts.set(thing.type, (counts.get(thing.type) || 0) + 1);
-    }
-
-    return Array.from(counts.entries())
-      .sort((left, right) => Number(left[0]) - Number(right[0]))
-      .map(([type, count]) => ({ type: Number(type), count }));
-  }
-
-  function summarizeDarkSectors(sectors) {
-    return sectors
-      .map((sector, index) => ({
-        id: index,
-        lightLevel: sector.lightLevel,
-        floorTexture: sector.floorTexture,
-        ceilingTexture: sector.ceilingTexture
-      }))
-      .filter(sector => sector.lightLevel <= 128)
-      .sort((left, right) => left.lightLevel - right.lightLevel)
-      .slice(0, 16);
-  }
-
-  function summarizeEnemyThings(things) {
-    return things
-      .filter(thing => isEnemyThingType(thing.type))
-      .map(thing => ({
-        x: thing.x,
-        y: thing.y,
-        angle: thing.angle,
-        type: thing.type,
-        flags: thing.flags
-      }))
-      .slice(0, 64);
-  }
-
-  function isEnemyThingType(type) {
-    return new Set([9, 16, 58, 3001, 3002, 3003, 3004, 3005, 3006]).has(Number(type));
-  }
-
-  function summarizePlayerStart(things) {
-    const start = things.find(thing => thing.type === 1);
-    return start ? {
-      x: start.x,
-      y: start.y,
-      angle: start.angle
-    } : null;
-  }
-
-  function summarizeNearestDoor(doorLines, sidedefs, vertexes, playerStart) {
-    if (!playerStart || !doorLines.length || !vertexes.length) {
-      return null;
-    }
-
-    let best = null;
-    for (const line of doorLines) {
-      const start = vertexes[line.startVertex];
-      const end = vertexes[line.endVertex];
-      if (!start || !end) {
-        continue;
-      }
-
-      const centerX = (start.x + end.x) / 2;
-      const centerY = (start.y + end.y) / 2;
-      const distance = Math.hypot(centerX - playerStart.x, centerY - playerStart.y);
-      const angle = normalizeDegrees(Math.atan2(centerY - playerStart.y, centerX - playerStart.x) * 180 / Math.PI);
-      const relativeAngle = normalizeSignedDegrees(angle - Number(playerStart.angle || 0));
-      const side = sidedefs[line.rightSidedef] || null;
-      const candidate = {
-        distance: round2(distance),
-        angle: round2(angle),
-        relativeAngle: round2(relativeAngle),
-        special: line.special,
-        tag: line.tag,
-        texture: side?.middle || "",
-        center: { x: round2(centerX), y: round2(centerY) }
-      };
-      if (!best || candidate.distance < best.distance) {
-        best = candidate;
-      }
-    }
-
-    return best;
-  }
-
-  function normalizeDegrees(value) {
-    return ((Number(value || 0) % 360) + 360) % 360;
-  }
-
-  function normalizeSignedDegrees(value) {
-    return ((Number(value || 0) + 540) % 360) - 180;
-  }
-
-  function round2(value) {
-    return Math.round(Number(value || 0) * 100) / 100;
-  }
-
-  function roleRank(role) {
-    return role === "door" ? 0 : (role === "switch" ? 1 : (role === "exit" ? 2 : 3));
+    return requireDoomWadMetadata("parseMapHints")(wadBytes, mapName);
   }
 
   function parsePlaypal(wadBytes) {
-    if (wadBytes.length < 12) {
-      return null;
-    }
-
-    const view = new DataView(wadBytes.buffer, wadBytes.byteOffset, wadBytes.byteLength);
-    const lumpCount = view.getInt32(4, true);
-    const directoryOffset = view.getInt32(8, true);
-    if (lumpCount <= 0 || directoryOffset <= 0 || directoryOffset + lumpCount * 16 > wadBytes.length) {
-      return null;
-    }
-
-    for (let index = 0; index < lumpCount; index += 1) {
-      const entry = directoryOffset + index * 16;
-      const offset = view.getInt32(entry, true);
-      const size = view.getInt32(entry + 4, true);
-      const name = readWadName(wadBytes, entry + 8);
-      if (name === "PLAYPAL" && size >= 768 && offset + 768 <= wadBytes.length) {
-        return wadBytes.slice(offset, offset + 768);
-      }
-    }
-
-    return null;
-  }
-
-  function readWadName(bytes, offset) {
-    let name = "";
-    for (let index = 0; index < 8; index += 1) {
-      const byte = bytes[offset + index];
-      if (!byte) {
-        break;
-      }
-      name += String.fromCharCode(byte);
-    }
-    return name;
+    return requireDoomWadMetadata("parsePlaypal")(wadBytes);
   }
 
   function defaultPalette() {
-    const palette = new Uint8Array(256 * 3);
-    for (let index = 0; index < 256; index += 1) {
-      palette[index * 3] = index;
-      palette[index * 3 + 1] = index;
-      palette[index * 3 + 2] = index;
-    }
-    return palette;
+    return requireDoomWadMetadata("defaultPalette")();
   }
 
   function buildPaletteCache(palette) {
-    const rgba32 = new Uint32Array(256);
-    const rgbaBytes = new Uint8ClampedArray(256 * 4);
-
-    for (let index = 0; index < 256; index += 1) {
-      const source = index * 3;
-      const target = index * 4;
-      const red = palette[source] || 0;
-      const green = palette[source + 1] || 0;
-      const blue = palette[source + 2] || 0;
-
-      rgbaBytes[target] = red;
-      rgbaBytes[target + 1] = green;
-      rgbaBytes[target + 2] = blue;
-      rgbaBytes[target + 3] = 255;
-      rgba32[index] = 0xff000000 | (blue << 16) | (green << 8) | red;
-    }
-
-    return { rgba32, rgbaBytes };
-  }
-
-  function concatBytes(chunks) {
-    const size = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const result = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return result;
+    return requireDoomWadMetadata("buildPaletteCache")(palette);
   }
 
   function delay(milliseconds) {
@@ -3539,7 +3086,7 @@
     }
 
     if (typeof document !== "undefined") {
-      rendererProviderScriptLoading ||= loadScript("/demo/doom/js/webgpu-provider.js?v=20260612-doomweb3")
+      rendererProviderScriptLoading ||= loadScript("/demo/doom/js/webgpu-provider.js?v=20260618-auditoryruntime1")
         .catch(error => {
           rendererProviderScriptLoading = null;
           if (typeof log === "function") {
@@ -3732,4 +3279,5 @@
   }
 
   window.AIKernelDoomRuntime = AIKernelDoomRuntime;
+  window.createAIKernelDoomRuntime = options => new AIKernelDoomRuntime(options);
 })();

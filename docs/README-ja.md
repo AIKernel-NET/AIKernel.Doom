@@ -19,13 +19,12 @@ DOOM の配布パッケージではありません。`DOOM1.WAD`、Bonsai GGUF �
 
 ## リポジトリ横断整合
 
-共有の repository boundary、0.1.1.1 local NuGet versioning、この検証ラインでの
-NuGet-only / no-PyPI rule、v0.1.2 の NuGet + PyPI release assumption は
-[AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1-ja.md)
+共有の repository boundary、v0.1.2 canonical NuGet reference、package family の
+version alignment は
+[Package Release Alignment v0.1.2](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/package-release-alignment-v0.1.2-ja.md)
 で定義します。
-複数 repository をまたぐ変更を行う場合は、まず
-[リポジトリ横断開発者ガイド v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/cross-repository-developer-guide-v0.1.1.1-ja.md)
-を読んでください。
+複数 repository をまたぐ変更では、v0.1.2 package family に揃え、AIKernel.Doom が
+既定で local package path を参照しないようにしてください。
 
 Doom はこの sample の scenario-specific な visual、audio、HUD、input mapping を
 所有します。Shared contract、generic WASM semantics、Core/Control gate logic は

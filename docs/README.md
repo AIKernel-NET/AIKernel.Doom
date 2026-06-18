@@ -19,12 +19,11 @@ DOOM distribution. It does not commit third-party runtime artifacts such as
 
 ## Cross-Repository Alignment
 
-Shared repository boundaries, 0.1.1.1 local NuGet versioning, the
-NuGet-only / no-PyPI rule for this validation line, and the v0.1.2
-NuGet + PyPI release assumption are defined by
-[AIKernel Repository Alignment v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/repository-alignment-v0.1.1.1.md).
-When a change crosses repositories, start with the
-[Cross-Repository Developer Guide v0.1.1.1](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/cross-repository-developer-guide-v0.1.1.1.md).
+Shared repository boundaries, v0.1.2 canonical NuGet references, and
+cross-package version alignment are defined by
+[Package Release Alignment v0.1.2](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/package-release-alignment-v0.1.2.md).
+When a change crosses repositories, use the matching v0.1.2 package family
+and avoid defaulting AIKernel.Doom to local package paths.
 
 Doom owns scenario-specific visual, audio, HUD, and input mappings for this
 sample. It must not define shared contracts, generic WASM semantics, or

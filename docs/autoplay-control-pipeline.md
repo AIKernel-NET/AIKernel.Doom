@@ -14,6 +14,41 @@ This document describes the Operator side of the demo. It follows the
 development guideline principle that execution should be represented as an
 explicit Skeleton/DAG instead of an implicit tangle of branches.
 
+## Dynamic Pipeline DSL
+
+The tunable policy surface is now a versioned profile DSL. The Web profile keeps
+all tuning values under `parameters` and may define `pipeline.stages[]`, where
+each stage has a deterministic `when` expression and an `action` expression map.
+The C# strategy compiles this DSL into a finite dynamic pipeline, and the
+Control runtime adapter consumes the same profile names so browser JavaScript
+can become a state/action bridge instead of the long-term policy owner.
+
+The first supported DSL version is:
+
+```text
+aikernel.doom.autoplay.pipeline/v1
+```
+
+Expressions are intentionally small and deterministic: examples include
+`health < $lowHealthThreshold`, `context == wall`, and
+`depthSig <= $doorUseDepth`. Additional AutoPlayAI tuning parameters can be
+added under `parameters` without changing the bridge shape.
+
+The DSL now carries three control surfaces:
+
+- `semanticMemory`: stable symbolic inputs such as `door`, `corridor`,
+  `enemy`, `safe-zone`, `bridge`, and `computer-room`,
+- `objectives`: purpose-level routing such as `open-door`, `reach-bridge`,
+  `avoid-enemy`, and `enter-computer-room`,
+- `arbitration`: deterministic evidence weights, thresholds, and priorities
+  for deciding which stage may emit the final action.
+
+The `AIKernel.Control -> AIKernel.Wasm` adapter receives those semantic scores
+in the state packet and returns both the selected pipeline stage and objective.
+JavaScript keeps the download/UI/state bridge, while the deterministic control
+policy can move into the shared Control/WASM runtime without closing off future
+profile tuning.
+
 ## Phase Model
 
 Current phases:

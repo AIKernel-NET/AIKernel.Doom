@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aikernel.net/schemas/doom/autoplay-sensor-tensor.schema.json",
+  "title": "AIKernel Doom Autoplay Sensor Tensor",
+  "type": "object",
+  "required": ["version", "shape", "data"],
+  "properties": {
+    "version": { "const": "doom-sensor-tensor-v1" },
+    "shape": {
+      "type": "array",
+      "prefixItems": [
+        { "const": 4 },
+        { "const": 8 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "data": {
+      "type": "array",
+      "minItems": 32,
+      "maxItems": 32,
+      "items": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "channels": {
+      "type": "object",
+      "properties": {
+        "vision.depth": { "type": "number", "minimum": 0, "maximum": 1 },
+        "vision.enemy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "vision.open": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic.door": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic.corridor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic.computer": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic.bridge": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic.mapEnemy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "system.health": { "type": "number", "minimum": 0, "maximum": 1 },
+        "system.combat": { "type": "number", "minimum": 0, "maximum": 1 },
+        "system.enabled": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "semantic": {
+      "type": "object",
+      "properties": {
+        "door": { "type": "number", "minimum": 0, "maximum": 1 },
+        "corridor": { "type": "number", "minimum": 0, "maximum": 1 },
+        "enemy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bridge": { "type": "number", "minimum": 0, "maximum": 1 },
+        "computerRoom": { "type": "number", "minimum": 0, "maximum": 1 },
+        "combat": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

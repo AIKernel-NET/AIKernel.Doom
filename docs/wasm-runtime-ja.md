@@ -67,6 +67,16 @@ DOOM の基本操作は key event として注入します。
 
 AutoPlay も手動操作も同じ `doom_input` 経路を使います。これにより、手動で効く Use が AutoPlay でも同じ ABI で検証できます。
 
+## Control Runtime Boundary
+
+native overlay は AutoPlay policy execution を所有しません。本番の `doom.wasm` 境界は engine compatibility、framebuffer/audio access、WAD mount、input adaptation までに限定します。Dynamic control policy は `AIKernel.Control -> AIKernel.Wasm -> AIKernel.Doom` の経路に置きます。
+
+browser runtime は現在、暫定 adapter として Doom-scoped `AIKernelDoomControlRuntime` shim を使用します。JavaScript は `autoplay-state.schema.json` packet を作り、Control runtime adapter を呼び、返ってきた `autoplay-action.schema.json` packet を既存の DOOM input bridge に流します。adapter が存在しない、または error を返した場合は Web runtime が Bonsai supervisor に fallback します。
+
+state packet には `objective`、`semanticMemory`、`sensorTensor`、および `door`、`corridor`、`enemy`、`safe-zone`、`bridge`、`computer-room` などの stable symbol を含めます。Control runtime adapter はこれらを deterministic arbitration に使い、action/status packet に選択した `pipeline`、`objective`、semantic score、decision trace を返します。
+
+古い `aik_autoplay_*` native ABI prototype は experimental reference code としてのみ残し、`aik_doom_abi.h`、Emscripten build script、本番 export からは意図的に除外します。外部 Doom engine assembly に dynamic control logic を再導入しないでください。
+
 ## ライセンス
 
 doomgeneric は GPL-2.0 として扱います。`doom.wasm` を配布する場合、対応する source、patch、build script、license notice を提供する必要があります。

@@ -111,6 +111,22 @@ The web runtime can present it through:
   texture binding is unavailable,
 - Canvas-only fallback for non-WebGPU browsers.
 
+When the texture path is active, `webgpu-provider.js` also owns a fragment
+shader HUD compositor. The present pass samples the DOOM framebuffer texture
+and blends debug evidence in VRAM:
+
+- 9x9 detector heatmap values are uploaded as an 81-float storage buffer and
+  drawn in one full-screen draw call,
+- Kairos pulse timing is driven by shader time rather than DOM/CSS blinking,
+- probe arrows, center enemy rings, and near-wall foot glow are generated in
+  the fragment shader,
+- `doom-prompt.js` hides the DOM detection overlay only while the GPU HUD is
+  active; Canvas/CPU fallback keeps the existing DOM/CSS overlay.
+
+AutoPlay tuning remains outside the shader. `doom.js` converts the current
+perception/DSL control state into a compact HUD state buffer, so controller
+logic can keep evolving without recompiling the presentation shader.
+
 The perception path records whether the frame stayed on the WebGPU surface:
 
 ```text
@@ -130,6 +146,11 @@ After approval, the runtime may download/cache/load:
 - related runtime metadata.
 
 No large protected runtime asset is loaded before approval.
+
+The runtime reports approval-time download progress through
+`status.downloadProgress`. Each asset has `receivedBytes`, `totalBytes`,
+`percent`, and a phase label, so prompt UI can show useful progress during the
+multi-second `doom.wasm`/WAD/model fetch window instead of appearing stalled.
 
 This is the public demo's most visible fail-closed boundary. Consent failure,
 closed prompt, or any non-accepted input leaves the runtime suspended.

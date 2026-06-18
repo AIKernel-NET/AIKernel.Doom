@@ -163,6 +163,23 @@
   const BRIDGE_GREEN_HAZARD_THRESHOLD = 0.18;
   const BRIDGE_DOOR_PANEL_THRESHOLD = 0.32;
   const STRATEGY_NAME = "SeparatedDoorProbeStrafeRunnerV4";
+  const AUTOPLAY_PROFILE = self.AIKernelDoomAutoplayProfile || {
+    normalize(profile, defaults) {
+      const parameters = profile?.parameters && typeof profile.parameters === "object"
+        ? profile.parameters
+        : {};
+      return profile && typeof profile === "object"
+        ? Object.assign({}, defaults, profile, parameters, { parameters, pipeline: profile.pipeline || null })
+        : Object.assign({}, defaults);
+    },
+    number(profile, key, fallback) {
+      const value = Number(profile?.parameters?.[key] ?? profile?.[key]);
+      return Number.isFinite(value) ? value : fallback;
+    },
+    validate() {
+      return { valid: true, errors: [] };
+    }
+  };
   const DEFAULT_AUTOPLAY_PROFILE = {
     version: "0.1.1-dev1",
     strategyName: STRATEGY_NAME,
@@ -284,12 +301,6 @@
   };
   const EMERGENCY_STUCK_TICKS = 54;
   const BACKSTEP_DEPTH_GUARD = 0.66;
-  const ENEMY_COLOR_CLUSTERS = [
-    { name: "red", r: 176, g: 38, b: 32 },
-    { name: "brown", r: 135, g: 82, b: 48 },
-    { name: "gray", r: 142, g: 142, b: 132 },
-    { name: "pink", r: 184, g: 92, b: 92 }
-  ];
   const CTG_ROM_CANON_ID = "Canon.CTG.Monolith";
   const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.1";
   const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
@@ -522,6 +533,10 @@
       this.modelManifest = manifest || null;
       this.profile = normalizeAutoplayProfile(profile);
       this.strategyName = this.profile.strategyName || STRATEGY_NAME;
+      const validation = AUTOPLAY_PROFILE.validate(profile || this.profile);
+      if (!validation.valid) {
+        this.log("[AUTOPLAY]", "log-warn", `autoplay profile validation warnings: ${validation.errors.join("; ")}`);
+      }
       this.log("[AUTOPLAY]", "log-info", `Bonsai supervisor configured: ${manifest?.name || "Bonsai-1.7B"} (${manifest?.quantization || "Q1_0"}); strategy=${this.strategyName}; profile=${this.profile.version || "unknown"}.`);
     }
 
@@ -771,6 +786,7 @@
         compassSensor: this.compassSensorSnapshot,
         spatialSensor: this.spatialSensorSnapshot,
         healthSensor: this.healthSensorSnapshot,
+        sensorTensor: serializeSensorTensorPacket(this.sensorTensorPacket),
         ctgCarrier: this.ctgCarrier,
         ctgObservedScores: this.ctgObservedScores,
         toposDecisionCarrier: this.toposDecisionCarrier,
@@ -970,61 +986,53 @@
     }
 
     updateSemanticMemory(frame, context) {
-      const memory = this.semanticMemory || createE1M1SemanticMemory();
       const depthEstimate = Number(context?.depthEstimate ?? this.depthEstimate ?? 1);
-      const blueFloorHomeThreshold = Number(context?.blueFloorHomeThreshold ?? BLUE_FLOOR_HOME_THRESHOLD);
-      const bridgeLaneVisible = Boolean(context?.bridgeLaneVisible);
-      const corridorConfidence = clamp01(
-        (Number(this.firstDoorCorridorSignature || 0) * 0.46)
-        + (Number(this.spawnCorridorGapScore || 0) * 0.24)
-        + (Number(this.motionEntranceScore || 0) * 0.14)
-        + (Number(this.motionForwardProgress || 0) * 0.08)
-        + (Number(this.blueFloorScore || 0) < blueFloorHomeThreshold ? 0.08 : 0));
-      const firstDoorConfidence = clamp01(
-        (Number(this.firstDoorUseSignature || 0) * 0.38)
-        + (Number(this.firstDoorCorridorSignature || 0) * 0.22)
-        + ((this.mapDoorSectorMatch || this.wallUseProbeFrames > 0 || this.firstDoorUseAttempted) ? 0.24 : 0)
-        + (depthEstimate <= profileNumber(this.profile, "doorApproachDepth", 0.86) ? 0.16 : 0));
-      const computerRoomConfidence = clamp01(
-        (Number(this.computerRoomScore || 0) * 0.55)
-        + (Number(this.darkAreaScore || 0) * 0.2)
-        + ((this.darkZoneEntered || this.doorOpenedCount > 0) ? 0.25 : 0));
-      const bridgeConfidence = clamp01(
-        (Number(this.bridgeBrownScore || 0) * 0.48)
-        + (Math.max(Number(this.bridgeGreenLeft || 0), Number(this.bridgeGreenCenter || 0), Number(this.bridgeGreenRight || 0)) * 0.26)
-        + (bridgeLaneVisible ? 0.26 : 0));
-      const finalRoomConfidence = clamp01(
-        (this.finalRoomEntered ? 0.62 : 0)
-        + (Number(this.bridgeDoorScore || 0) * 0.22)
-        + (this.exitSwitchUseFrames > 0 ? 0.16 : 0));
-
-      memory.phase = inferControlPipeline(this);
-      memory.objective = inferObjective(this);
-      memory.spawn.blueFloorScore = round2(this.blueFloorScore);
-      memory.spawn.courtyardScore = round2(this.courtyardScore);
-      memory.spawn.courtyardTurn = this.courtyardTurn;
-      memory.spawn.secretDoorScore = round2(this.spawnSecretDoorScore);
-      memory.spawn.secretDoorTurn = this.spawnSecretDoorTurn;
-      memory.spawn.westStairScore = round2(this.spawnWestStairScore);
-      memory.spawn.westStairTurn = this.spawnWestStairTurn;
-      memory.firstDoor.corridorConfidence = round2(corridorConfidence);
-      memory.firstDoor.corridorBearing = this.spawnCorridorGapTurn !== "none" ? this.spawnCorridorGapTurn : "right";
-      memory.firstDoor.doorConfidence = round2(firstDoorConfidence);
-      memory.firstDoor.distance = round2(depthEstimate);
-      memory.firstDoor.opened = this.doorOpenedCount > 0 || Boolean(context?.firstDoorLikelyOpened);
-      memory.computerRoom.confidence = round2(computerRoomConfidence);
-      memory.computerRoom.darkAreaScore = round2(this.darkAreaScore);
-      memory.computerRoom.enemyZoneMatch = Boolean(this.mapEnemyZoneMatch);
-      memory.bridge.confidence = round2(bridgeConfidence);
-      memory.bridge.laneTurn = this.bridgeLaneTurn;
-      memory.bridge.greenHazard = round2(Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight));
-      memory.finalRoom.confidence = round2(finalRoomConfidence);
-      memory.finalRoom.exitSwitchArmed = this.exitSwitchUseFrames > 0 || this.exitSwitchPressed;
-      memory.motion.forwardProgress = round2(this.motionForwardProgress);
-      memory.motion.turning = round2(this.motionTurnScore);
-      memory.motion.obstacle = round2(this.motionObstacleScore);
-      memory.lastUpdatedFrame = this.predictions;
-      this.semanticMemory = memory;
+      this.semanticMemory = updateE1M1SemanticMemory(this.semanticMemory, {
+        phase: inferControlPipeline(this),
+        objective: inferObjective(this),
+        predictions: this.predictions,
+        depthEstimate,
+        blueFloorHomeThreshold: Number(context?.blueFloorHomeThreshold ?? BLUE_FLOOR_HOME_THRESHOLD),
+        bridgeLaneVisible: Boolean(context?.bridgeLaneVisible),
+        firstDoorLikelyOpened: Boolean(context?.firstDoorLikelyOpened),
+        doorApproachDepth: profileNumber(this.profile, "doorApproachDepth", 0.86),
+        firstDoorCorridorSignature: this.firstDoorCorridorSignature,
+        firstDoorUseSignature: this.firstDoorUseSignature,
+        firstDoorUseAttempted: this.firstDoorUseAttempted,
+        spawnCorridorGapScore: this.spawnCorridorGapScore,
+        spawnCorridorGapTurn: this.spawnCorridorGapTurn,
+        motionEntranceScore: this.motionEntranceScore,
+        motionForwardProgress: this.motionForwardProgress,
+        motionTurnScore: this.motionTurnScore,
+        motionObstacleScore: this.motionObstacleScore,
+        blueFloorScore: this.blueFloorScore,
+        courtyardScore: this.courtyardScore,
+        courtyardTurn: this.courtyardTurn,
+        spawnSecretDoorScore: this.spawnSecretDoorScore,
+        spawnSecretDoorTurn: this.spawnSecretDoorTurn,
+        spawnWestStairScore: this.spawnWestStairScore,
+        spawnWestStairTurn: this.spawnWestStairTurn,
+        mapDoorSectorMatch: this.mapDoorSectorMatch,
+        mapEnemyZoneMatch: this.mapEnemyZoneMatch,
+        wallUseProbeFrames: this.wallUseProbeFrames,
+        doorOpenedCount: this.doorOpenedCount,
+        computerRoomScore: this.computerRoomScore,
+        darkAreaScore: this.darkAreaScore,
+        darkZoneEntered: this.darkZoneEntered,
+        bridgeBrownScore: this.bridgeBrownScore,
+        bridgeGreenLeft: this.bridgeGreenLeft,
+        bridgeGreenCenter: this.bridgeGreenCenter,
+        bridgeGreenRight: this.bridgeGreenRight,
+        bridgeLaneTurn: this.bridgeLaneTurn,
+        bridgeDoorScore: this.bridgeDoorScore,
+        finalRoomEntered: this.finalRoomEntered,
+        exitSwitchUseFrames: this.exitSwitchUseFrames,
+        exitSwitchPressed: this.exitSwitchPressed,
+        enemyConfidence: this.enemyConfidence,
+        enemyConfidencePeak: this.enemyConfidencePeak,
+        enemyAlertTurn: this.enemyAlertTurn,
+        healthLikelyDead: this.healthLikelyDead
+      });
     }
 
     async predict(state) {
@@ -1056,249 +1064,56 @@
     applyControlRules(action, state) {
       const frame = state?.framebuffer || {};
       const normalized = normalizeAction(action, this.lastAction);
-      const quantizedSample = quantizeFrameSample(frame.sample);
-      const quantizedRegions = quantizeFrameSample(frame.regionSample);
-      const quantizedRegion9 = quantizeFrameSample(frame.region9Sample);
-      const quantizedVision9x9 = quantizeFrameSample(frame.vision9x9Sample);
-      const previous = selectBobFilteredPreviousFrame(this.frameHistory, quantizedRegion9) || this.previousFrame;
-      const frameChange = previous ? averageSampleDelta(previous.sample, frame.sample) : 255;
-      const quantizedFrameChange = previous?.quantizedSample ? averageSampleDelta(previous.quantizedSample, quantizedSample) : 255;
-      const regionQuantizedFrameChange = previous?.quantizedRegions ? averageSampleDelta(previous.quantizedRegions, quantizedRegions) : 255;
-      const region9QuantizedFrameChange = previous?.quantizedRegion9 ? averageSampleDelta(previous.quantizedRegion9, quantizedRegion9) : 255;
-      const motion = analyzeRegion9Motion(previous?.quantizedRegion9, quantizedRegion9, this.lastAction);
-      const quantizedStatusBar = quantizeFrameSample(frame.statusSample);
-      const statusBarQuantizedFrameChange = previous?.quantizedStatusBar ? averageSampleDelta(previous.quantizedStatusBar, quantizedStatusBar) : 255;
-      const quantizedDepth = quantizeFrameSample(frame.depthSample);
-      const depthSignatureDistance = nearestSignatureDistance(quantizedDepth, this.depthSignatureMemory);
-      const depthEstimate = estimateDepthDistance(frame.depthSample);
-      const mapHints = state?.mapHints || null;
-      const quantizedFace = quantizeFrameSample(frame.faceSample);
-      const quantizedAmmo = quantizeFrameSample(frame.ammoSample);
-      const ammoState = estimateAmmoState(frame.ammoSample, quantizedAmmo);
-      const quantizedHealth = quantizeFrameSample(frame.healthSample);
-      const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
-      const rawHealthState = estimateHealthState(frame.healthSample, quantizedHealth);
-      const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
-      const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
-      const visualStallDelta = Math.min(quantizedFrameChange, regionQuantizedFrameChange, region9QuantizedFrameChange);
-      const faceDeathScore = healthSensorEnabled ? estimateFaceDeathScore(quantizedFace) : 0;
-      const healthState = healthSensorEnabled
-        ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
-        : createDisabledHealthState(rawHealthState.signature);
-      const wallPressure = Math.abs((frame.left || 0) - (frame.right || 0)) + Math.max(0, (frame.lowerCenter || 0) - (frame.topCenter || 0));
-      const preDoorPhase = this.doorOpenedCount <= 0;
-      const targetConfidence = preDoorPhase ? 0 : estimateTargetConfidence(frame);
-      let enemy = estimateEnemyPresence(frame);
-      if (preDoorPhase) {
-        enemy = {
-          confidence: 0,
-          turn: "none",
-          centered: false,
-          distance: 1,
-          cluster: "none",
-          centerCellConfidence: 0,
-          fireReady: false
-        };
-      }
-      const quantizedStable = visualStallDelta <= QUANTIZED_STALL_THRESHOLD;
-      const wallLike = looksLikeWall(frame);
-      const signatureMatch = this.matchVisualSignature(quantizedSample);
-      const knownDepth = depthSignatureDistance <= SIGNATURE_DEPTH_MATCH_THRESHOLD;
-      const movementIntent = normalized.move !== "none" || normalized.turn !== "none" || normalized.strafe || normalized.run;
-      const rawCornerSignal = estimateCornerSignal(frame, frameChange, visualStallDelta, wallPressure, wallLike);
-      const navigableView = looksLikeNavigableView(frame, depthEstimate, rawCornerSignal);
-      const openView = looksLikeOpenView(frame, depthEstimate, targetConfidence) || navigableView;
-      let effectiveTargetConfidence = navigableView ? Math.min(targetConfidence, 0.35) : targetConfidence;
-      const dictionarySuppressed = this.cornerSuppressFrames > 0 || openView;
-      const doorApproachDepth = profileNumber(this.profile, "doorApproachDepth", Math.max(DOOR_USE_DEPTH_THRESHOLD, 0.86));
-      const knownWall = !dictionarySuppressed
-        && (((signatureMatch.kind === "wall" || signatureMatch.kind === "corner") && depthEstimate <= doorApproachDepth)
-          || (knownDepth && depthEstimate <= DOOR_USE_DEPTH_THRESHOLD));
-      const knownCorner = !dictionarySuppressed && signatureMatch.kind === "corner";
-      const cornerSignal = dictionarySuppressed ? Math.min(rawCornerSignal, 0.35) : rawCornerSignal;
-      const cornerTrap = !dictionarySuppressed && cornerSignal >= CORNER_SIGNAL_THRESHOLD;
-      const pinnedWall = movementIntent && (quantizedStable || knownWall) && (wallPressure > STUCK_WALL_THRESHOLD * 0.35 || wallLike || cornerTrap || knownWall);
-      const cornered = looksLikeCorner(frame, Math.min(frameChange, visualStallDelta)) || cornerTrap || knownCorner;
-      const looped = this.updateBreadcrumbTrail(state, frame);
-      const soundCue = resolveSoundCue(state);
-      let auditorySnapshot = buildAuditorySnapshot(state);
-      auditorySnapshot = classifyUseAuditoryResponse(this, auditorySnapshot, {
+      const features = buildAutoplayFrameFeatures(this, normalized, state, frame);
+      const {
+        quantizedSample,
+        quantizedRegions,
+        quantizedRegion9,
+        quantizedVision9x9,
+        previous,
+        frameChange,
         quantizedFrameChange,
         regionQuantizedFrameChange,
-        visualStallDelta,
-        depthEstimate
-      });
-      const staticMapDoorBias = Boolean(mapHints?.doorLines || mapHints?.switchLines);
-      const staticGateCandidate = !soundCue
-        && !openView
-        && depthEstimate <= (staticMapDoorBias ? Math.max(doorApproachDepth, 0.9) : doorApproachDepth)
-        && visualStallDelta <= QUANTIZED_STALL_THRESHOLD + (staticMapDoorBias ? 0.75 : 0.45)
-        && faceQuantizedFrameChange <= COMBAT_FACE_DANGER_DELTA
-        && (wallLike || knownWall || signatureMatch.kind === "wall" || signatureMatch.kind === "corner")
-        && (enemy.cluster === "brown" || enemy.cluster === "gray" || enemy.distance >= 0.76);
-      if (staticGateCandidate) {
-        enemy = Object.assign({}, enemy, {
-          confidence: Math.min(enemy.confidence, 0.24),
-          turn: "none",
-          fireReady: false,
-          cluster: enemy.cluster === "none" ? "gate" : `gate-${enemy.cluster}`
-        });
-        effectiveTargetConfidence = Math.min(effectiveTargetConfidence, 0.28);
-      }
-      const sensor = buildSensorFusionPacket({
-        frame,
+        region9QuantizedFrameChange,
+        motion,
+        quantizedStatusBar,
+        statusBarQuantizedFrameChange,
+        quantizedDepth,
+        depthSignatureDistance,
         depthEstimate,
+        mapHints,
+        quantizedFace,
+        quantizedAmmo,
+        ammoState,
+        quantizedHealth,
+        healthSensorEnabled,
         faceQuantizedFrameChange,
+        visualStallDelta,
+        faceDeathScore,
+        healthState,
+        wallPressure,
+        quantizedStable,
+        wallLike,
+        signatureMatch,
         knownWall,
         knownCorner,
-        cornered,
-        cornerTrap,
-        wallLike,
-        openView,
+        movementIntent,
         navigableView,
+        openView,
+        dictionarySuppressed,
+        doorApproachDepth,
+        cornerSignal,
+        cornerTrap,
+        pinnedWall,
+        cornered,
+        looped,
         soundCue,
-        stuckFrames: this.stuckFrames,
-        quantizedStallFrames: this.quantizedStallFrames,
-        quantizedFrameChange,
-        regionQuantizedFrameChange,
-        motion
-      });
-      this.targetConfidence = clamp01(Math.max(effectiveTargetConfidence, enemy.confidence));
-      this.soundCueActive = Boolean(soundCue);
-      this.quantizedFrameChange = quantizedFrameChange;
-      this.regionQuantizedFrameChange = regionQuantizedFrameChange;
-      this.statusBarQuantizedFrameChange = statusBarQuantizedFrameChange;
-      this.regionSignature = regionSignature(quantizedRegions);
-      this.region9Signature = regionSignature(quantizedRegion9);
-      this.vision9x9Signature = regionSignature(quantizedVision9x9).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
-      this.motion9Signature = motion.signature;
-      this.motion9Delta = motion.delta;
-      this.motionForwardProgress = motion.forwardProgress;
-      this.motionObstacleScore = motion.obstacleScore;
-      this.motionTurnScore = motion.turnScore;
-      this.motionEntranceScore = motion.entranceScore;
-      this.motionStallScore = motion.stallScore;
-      const footObstacleScore = clamp01(Number(frame.footObstacleScore || 0));
-      this.footObstacleScore = footObstacleScore;
-      const footObstacleBandDelta = previous?.footObstacleBandSample
-        ? averageSampleDelta(previous.footObstacleBandSample, frame.footObstacleBandSample || [])
-        : 0;
-      this.footObstacleBandDelta = footObstacleBandDelta;
-      const footObstacleMemory = Math.max(footObstacleScore, this.priorFootObstacleScore * 0.82);
-      this.priorFootObstacleScore = footObstacleMemory;
-      const lastForwardIntent = this.lastAction?.move === "forward" || this.lastAction?.moveForward === true;
-      const footObstacleFlicker = clamp01((footObstacleBandDelta / 7.5) * 0.7 + footObstacleMemory * 0.35);
-      const footBounceStallEvidence = lastForwardIntent
-        && footObstacleFlicker >= 0.42
-        && this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.9;
-      this.footObstacleFlickerScore = footObstacleFlicker;
-      if (footBounceStallEvidence) {
-        this.footObstacleBounceFrames = Math.min(MAX_STUCK_COUNTER, Number(this.footObstacleBounceFrames || 0) + 1);
-      } else {
-        this.footObstacleBounceFrames = Math.max(0, Number(this.footObstacleBounceFrames || 0) - 1);
-      }
-      if (lastForwardIntent
-        && ((this.motionForwardProgress <= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.55
-          && this.regionQuantizedFrameChange <= QUANTIZED_STALL_THRESHOLD + 0.08)
-          || this.footObstacleBounceFrames >= 2)) {
-        this.inputStallFrames = Math.min(MAX_STUCK_COUNTER, this.inputStallFrames + 1);
-      } else {
-        this.inputStallFrames = Math.max(0, this.inputStallFrames - 1);
-      }
-      this.motionIntent = motion.intent;
-      this.depthSignature = regionSignature(quantizedDepth);
-      this.depthEstimate = depthEstimate;
-      this.faceSignature = regionSignature(quantizedFace);
-      this.faceQuantizedFrameChange = faceQuantizedFrameChange;
-      this.cornerSignal = cornerSignal;
-      this.signatureMatchKind = signatureMatch.kind;
-      this.signatureMatchDistance = signatureMatch.distance;
-      this.depthSignatureDistance = depthSignatureDistance;
-      this.enemyConfidence = enemy.confidence;
-      this.enemyTurn = enemy.turn;
-      this.enemyDistance = enemy.distance;
-      this.enemyCluster = enemy.cluster;
-      this.enemyFireReady = enemy.fireReady;
-      this.enemyCenterCellConfidence = enemy.centerCellConfidence || 0;
-      this.enemyAllRegionPeak = enemy.allRegionPeak || 0;
-      this.enemyLateralBias = enemy.lateralBias || 0;
-      this.darkAreaScore = clamp01(Number(frame.darkAreaScore || 0));
-      this.gameplayLuma = Number(frame.gameplayLuma || 0);
-      this.blueFloorScore = clamp01(Number(frame.blueFloorScore || 0));
-      this.courtyardScore = clamp01(Number(frame.courtyardScore || 0));
-      this.courtyardTurn = frame.courtyardTurn === "left" || frame.courtyardTurn === "right" ? frame.courtyardTurn : "none";
-      this.spawnSecretDoorScore = clamp01(Number(frame.spawnSecretDoorScore || 0));
-      this.spawnSecretDoorTurn = frame.spawnSecretDoorTurn === "left" || frame.spawnSecretDoorTurn === "right" ? frame.spawnSecretDoorTurn : "none";
-      this.spawnWestStairScore = clamp01(Number(frame.spawnWestStairScore || 0));
-      this.spawnWestStairTurn = frame.spawnWestStairTurn === "left" || frame.spawnWestStairTurn === "right" ? frame.spawnWestStairTurn : "none";
-      this.spawnCorridorGapScore = clamp01(Number(frame.spawnCorridorGapScore || 0));
-      this.spawnCorridorGapTurn = frame.spawnCorridorGapTurn === "left" || frame.spawnCorridorGapTurn === "right" ? frame.spawnCorridorGapTurn : "none";
-      this.bridgeBrownScore = clamp01(Number(frame.bridgeBrownScore || 0));
-      this.bridgeGreenLeft = clamp01(Number(frame.bridgeGreenLeft || 0));
-      this.bridgeGreenCenter = clamp01(Number(frame.bridgeGreenCenter || 0));
-      this.bridgeGreenRight = clamp01(Number(frame.bridgeGreenRight || 0));
-      this.bridgeLaneTurn = frame.bridgeLaneTurn === "left" || frame.bridgeLaneTurn === "right" ? frame.bridgeLaneTurn : "none";
-      this.bridgeDoorScore = clamp01(Number(frame.bridgeDoorScore || 0));
-      this.computerBlueScore = clamp01(Number(frame.computerBlueScore || 0));
-      this.computerRedLightScore = clamp01(Number(frame.computerRedLightScore || 0));
-      this.computerDarkPanelScore = clamp01(Number(frame.computerDarkPanelScore || 0));
-      this.computerPanelScore = clamp01(Number(frame.computerPanelScore || 0));
-      this.computerRoomScore = clamp01(Number(frame.computerRoomScore || 0));
-      if (this.doorOpenedCount > 0 && !ammoState.likelyEmpty) {
-        const alertConfidence = Math.max(enemy.confidence, effectiveTargetConfidence);
-        const alertPeakThreshold = profileNumber(this.profile, "combatAlertPeakConfidence", COMBAT_ALERT_PEAK_CONFIDENCE);
-        const alertFrames = profileNumber(this.profile, "combatAlertFrames", COMBAT_ALERT_FRAMES);
-        const trustedEnemyAlert = isTrustedEnemyCluster(enemy.cluster, enemy.distance)
-          && isTrustedEnemyDepth(enemy.cluster, enemy.distance, alertConfidence, enemy.centerCellConfidence);
-        if (trustedEnemyAlert
-          && ((alertConfidence >= 0.46 || this.enemyConfidencePeak >= alertPeakThreshold)
-            || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA)) {
-          const previousAlertActive = this.enemyAlertFrames > 0;
-          this.enemyAlertFrames = alertFrames;
-          this.enemyAlertTurn = enemy.turn !== "none" ? enemy.turn : (decodeFaceDirection(frame.faceSample, faceQuantizedFrameChange) < 0 ? "left" : "right");
-          this.enemyAlertCluster = enemy.cluster || "none";
-          this.enemyAlertDepth = previousAlertActive
-            ? Math.min(Number(this.enemyAlertDepth || 1), Number(enemy.distance ?? 1))
-            : Number(enemy.distance ?? 1);
-          this.enemyAlertPeakConfidence = Math.max(this.enemyAlertPeakConfidence, alertConfidence, this.enemyConfidencePeak);
-        } else {
-          this.enemyAlertFrames = Math.max(0, this.enemyAlertFrames - 1);
-        }
-      } else {
-        this.enemyAlertFrames = 0;
-        this.enemyAlertCluster = "none";
-        this.enemyAlertDepth = 1;
-        this.enemyAlertPeakConfidence = 0;
-      }
-      this.ammoSignature = ammoState.signature;
-      this.ammoLikelyEmpty = ammoState.likelyEmpty;
-      this.healthSignature = healthState.signature;
-      this.healthLikelyDead = healthState.likelyDead;
-      this.healthZeroScore = healthState.zeroScore || 0;
-      this.healthActiveColumns = healthState.activeColumns || 0;
-      this.healthActiveCells = healthState.activeCells || 0;
-      this.healthSensorSnapshot = createHealthSensorSnapshot({
-        active: healthSensorEnabled,
-        likelyDead: this.healthLikelyDead,
-        zeroScore: this.healthZeroScore,
-        activeColumns: this.healthActiveColumns,
-        activeCells: this.healthActiveCells,
-        signature: this.healthSignature,
-        faceSignature: this.faceSignature,
-        faceDeathScore,
-        faceQuantizedFrameChange,
-        freezeScore: healthState.freezeScore,
-        retryReason: healthState.retryReason,
-        timestamp: state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-      });
-      this.auditorySnapshot = auditorySnapshot;
-      this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
-      refreshSensorCognition(this, state, frame, {
-        quantizedVision9x9,
-        motion,
-        auditorySnapshot,
-        action: normalized
-      });
+        sensor
+      } = features;
+      let enemy = features.enemy;
+      let effectiveTargetConfidence = features.effectiveTargetConfidence;
+      let auditorySnapshot = features.auditorySnapshot;
+      updateAutoplaySensorState(this, features, state, frame, normalized);
       if (this.doorTransitionArmedFrames > 0) {
         this.doorTransitionArmedFrames -= 1;
       }
@@ -1323,359 +1138,8 @@
         }
       }
 
-      const darkZoneScoreThreshold = profileNumber(this.profile, "darkZoneScoreThreshold", DARK_ZONE_SCORE_THRESHOLD);
-      const darkZoneLumaThreshold = profileNumber(this.profile, "darkZoneLumaThreshold", DARK_ZONE_LUMA_THRESHOLD);
-      const darkZoneConfirmFrames = profileNumber(this.profile, "darkZoneConfirmFrames", DARK_ZONE_CONFIRM_FRAMES);
-      const corridorSignatureThreshold = profileNumber(this.profile, "firstDoorCorridorSignatureThreshold", FIRST_DOOR_CORRIDOR_SIGNATURE_THRESHOLD);
-      const corridorConfirmFrames = Math.max(8, Math.min(MAX_STUCK_COUNTER, Math.round(profileNumber(this.profile, "firstDoorCorridorConfirmFrames", FIRST_DOOR_CORRIDOR_CONFIRM_FRAMES))));
-      const firstDoorUseSignatureThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
-      const firstDoorSpawnScanFrames = profileNumber(this.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES);
-      const blueFloorHomeThreshold = profileNumber(this.profile, "blueFloorHomeThreshold", BLUE_FLOOR_HOME_THRESHOLD);
-      const spawnCorridorGapThreshold = profileNumber(this.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
-      this.firstDoorVision9x9Score = clamp01(Number(frame.firstDoorVision9x9Score || 0));
-      this.firstDoorVision9x9Box = frame.firstDoorVision9x9Box || null;
-      this.firstDoorVision9x9Heatmap = Array.isArray(frame.firstDoorVision9x9Heatmap) ? frame.firstDoorVision9x9Heatmap : [];
-      this.firstDoorVision9x9RedScore = clamp01(Number(frame.firstDoorVision9x9RedScore || 0));
-      const firstDoorUse3x3 = scoreFirstDoorUseAlignment3x3(frame, this.spawnCorridorGapScore, this.spawnCorridorGapTurn);
-      this.firstDoorUse3x3Score = firstDoorUse3x3.score;
-      this.firstDoorUse3x3Turn = firstDoorUse3x3.turn;
-      this.firstDoorUse3x3Reason = firstDoorUse3x3.reason;
-      if (this.firstDoorCorridorSuppressFrames > 0) {
-        this.firstDoorCorridorSuppressFrames -= 1;
-      }
-      const baseFirstDoorCorridorSignature = scoreFirstDoorCorridorSignature(frame, depthEstimate, this.blueFloorScore, this.spawnCorridorGapScore);
-      this.firstDoorCorridorSignature = clamp01(
-        (baseFirstDoorCorridorSignature * 0.84)
-        + (this.firstDoorVision9x9Score * 0.24));
-      const darkZoneCandidate = this.gameplayLuma > 0
-        && this.gameplayLuma <= darkZoneLumaThreshold
-        && (this.darkAreaScore >= darkZoneScoreThreshold || this.gameplayLuma <= 56);
-      const hostileZoneSignal = enemy.confidence >= 0.28
-        || effectiveTargetConfidence >= 0.42
-        || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA
-        || this.enemyAlertFrames > 0
-        || this.enemyConfidencePeak >= 0.62;
-      const combatContextActive = this.resolveCombatContext(enemy, effectiveTargetConfidence, hostileZoneSignal);
-      this.combatContextActive = combatContextActive;
-      const staticDoorKnown = Boolean(mapHints?.firstDoor || mapHints?.doorLines || mapHints?.switchLines);
-      const staticDarkKnown = Boolean(mapHints?.darkSectors?.length);
-      const staticEnemyZoneKnown = Boolean(mapHints?.enemyThings?.length || mapHints?.thingTypes?.some?.(thing => isEnemyThingType(thing.type)));
-      const corridorCandidateFrame = this.predictions >= firstDoorSpawnScanFrames + 90;
-      const corridorGapGate = this.spawnCorridorGapScore >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
-      const motionEntranceGate = this.motionEntranceScore >= profileNumber(this.profile, "motionEntranceThreshold", 0.22)
-        && this.motionForwardProgress >= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
-        && this.motionTurnScore < profileNumber(this.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD)
-        && this.blueFloorScore < blueFloorHomeThreshold
-        && this.spawnCorridorGapScore >= Math.max(0.14, spawnCorridorGapThreshold - 0.12);
-      const motionForwardGate = this.motionForwardProgress >= profileNumber(this.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
-        && this.motionStallScore <= 0.7
-        && this.motionTurnScore < profileNumber(this.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD);
-      const blueFloorExitedGate = this.predictions >= 300
-        && this.blueFloorScore < blueFloorHomeThreshold
-        && depthEstimate >= 0.7
-        && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.08;
-      const lateCorridorRecoveryGate = this.predictions >= 420
-        && this.firstDoorCorridorSuppressFrames <= 0
-        && this.blueFloorScore < blueFloorHomeThreshold + 0.08
-        && depthEstimate >= 0.65
-        && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.04
-        && this.spawnCorridorGapScore >= Math.max(0.20, spawnCorridorGapThreshold - 0.20);
-      const wallContactBeforeCorridor = !this.firstDoorCorridorLocated
-        && !this.firstDoorUseAttempted
-        && depthEstimate <= 0.22;
-      const spawnLandmarkConflict = this.doorOpenedCount <= 0
-        && !this.firstDoorUseAttempted
-        && (this.spawnSecretDoorScore >= Math.max(0.18, profileNumber(this.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD) - 0.08)
-          || this.spawnWestStairScore >= Math.max(0.16, profileNumber(this.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD) - 0.04))
-        && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
-        && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
-        && this.courtyardScore < Math.max(0.12, COURTYARD_RESCUE_THRESHOLD - 0.20);
-      const firstDoorCorridorCandidate = this.doorOpenedCount <= 0
-        && this.firstDoorCorridorSuppressFrames <= 0
-        && !wallContactBeforeCorridor
-        && !spawnLandmarkConflict
-        && this.firstDoorCorridorSignature >= corridorSignatureThreshold
-        && corridorCandidateFrame
-        && (corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || motionEntranceGate || this.firstDoorUseAttempted)
-        && (motionForwardGate || corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || this.firstDoorUseAttempted)
-        && (this.predictions >= profileNumber(this.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES) || this.firstDoorUseAttempted);
-      if (wallContactBeforeCorridor || spawnLandmarkConflict) {
-        this.firstDoorCorridorFrames = 0;
-        if (spawnLandmarkConflict && this.firstDoorCorridorLocated && !this.firstDoorUseAttempted) {
-          this.firstDoorCorridorLocated = false;
-          this.firstDoorCorridorSuppressFrames = Math.max(this.firstDoorCorridorSuppressFrames, 18);
-        }
-      } else if (firstDoorCorridorCandidate) {
-        this.firstDoorCorridorFrames = Math.min(MAX_STUCK_COUNTER, this.firstDoorCorridorFrames + 1);
-      } else {
-        this.firstDoorCorridorFrames = Math.max(0, this.firstDoorCorridorFrames - 1);
-      }
-      if (!this.firstDoorCorridorLocated
-        && !wallContactBeforeCorridor
-        && !spawnLandmarkConflict
-        && (this.firstDoorCorridorFrames >= corridorConfirmFrames
-          || lateCorridorRecoveryGate
-          || (this.predictions >= 300
-            && (corridorGapGate || blueFloorExitedGate)
-            && this.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.16))) {
-        this.firstDoorCorridorLocated = true;
-      }
-
-      this.mapDoorSectorMatch = staticDoorKnown
-        && this.firstDoorCorridorLocated
-        && this.firstDoorUseAttempted
-        && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold
-        && (this.doorTransitionArmedFrames > 0 || (this.darkZoneFrames > 0 && darkZoneCandidate));
-      this.mapDarkSectorMatch = staticDarkKnown && darkZoneCandidate;
-      this.mapEnemyZoneMatch = staticEnemyZoneKnown && hostileZoneSignal;
-      this.mapSectorId = this.mapDarkSectorMatch ? "visual-dark-zone" : (this.mapDoorSectorMatch ? "door-transition" : "unknown");
-      this.updateSemanticMemory(frame, {
-        depthEstimate,
-        corridorSignatureThreshold,
-        spawnCorridorGapThreshold,
-        blueFloorHomeThreshold,
-        darkZoneCandidate,
-        firstDoorLikelyOpened: this.firstDoorTransitionFrames >= 10,
-        bridgeLaneVisible: isBridgeLaneVisible(
-          this.bridgeBrownScore,
-          this.bridgeGreenLeft,
-          this.bridgeGreenCenter,
-          this.bridgeGreenRight,
-          profileNumber(this.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD),
-          profileNumber(this.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD)),
-        enemy
-      });
-      if (this.mapDoorSectorMatch && this.mapDarkSectorMatch && this.mapEnemyZoneMatch) {
-        this.darkZoneFrames = Math.min(MAX_STUCK_COUNTER, this.darkZoneFrames + 1);
-      } else {
-        this.darkZoneFrames = Math.max(0, this.darkZoneFrames - 1);
-      }
-
-      const firstDoorTransitionCandidate = this.doorOpenedCount === 0
-        && this.firstDoorCorridorLocated
-        && this.firstDoorUseAttempted
-        && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold
-        && this.mapDoorSectorMatch
-        && (this.doorTransitionArmedFrames > 0 || darkZoneCandidate || this.mapDarkSectorMatch);
-      if (firstDoorTransitionCandidate) {
-        this.firstDoorTransitionFrames = Math.min(MAX_STUCK_COUNTER, this.firstDoorTransitionFrames + 1);
-      } else {
-        this.firstDoorTransitionFrames = Math.max(0, this.firstDoorTransitionFrames - 1);
-      }
-
-      const computerRoomConfirmFrames = Math.max(4, Math.round(profileNumber(this.profile, "computerRoomConfirmFrames", COMPUTER_ROOM_CONFIRM_FRAMES)));
-      const computerRoomVisualAfterDoor = this.computerRoomScore >= 0.24
-        && (this.computerBlueScore >= 0.14
-          || this.computerRedLightScore >= 0.08
-          || (this.computerDarkPanelScore >= 0.30 && this.computerPanelScore >= 0.16))
-        && this.gameplayLuma > 0
-        && this.gameplayLuma <= 108;
-      const computerRoomPanelAfterDoor = this.doorOpenedCount > 0
-        && this.darkZoneEntered
-        && this.computerRoomScore >= 0.14
-        && this.computerPanelScore >= 0.54
-        && this.gameplayLuma > 0
-        && this.gameplayLuma <= 108;
-      const postDoorBridgeCue = Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight);
-      const computerRoomRouteAfterDoor = this.doorOpenedCount > 0
-        && depthEstimate >= 0.72
-        && this.gameplayLuma > 0
-        && (this.firstDoorCorridorLocated || this.spawnCorridorGapScore >= 0.24 || this.corridorConfidence >= 0.58)
-        && (this.bridgeBrownScore >= 0.22
-          || postDoorBridgeCue >= 0.30
-          || this.bridgeDoorScore >= 0.10
-          || this.darkAreaScore >= 0.05)
-        && !this.healthLikelyDead;
-      const visualPostDoorRecovery = this.doorOpenedCount === 0
-        && this.firstDoorCorridorLocated
-        && !this.firstDoorUseAttempted
-        && computerRoomVisualAfterDoor
-        && this.blueFloorScore < blueFloorHomeThreshold
-        && this.predictions >= firstDoorSpawnScanFrames + 120;
-      const firstDoorLikelyOpened = this.firstDoorTransitionFrames >= 10
-        || visualPostDoorRecovery
-        || (this.firstDoorCorridorLocated
-          && this.firstDoorUseAttempted
-          && this.mapDoorSectorMatch
-          && this.mapDarkSectorMatch
-          && this.darkZoneFrames >= darkZoneConfirmFrames)
-        || (this.firstDoorCorridorLocated
-          && this.firstDoorUseAttempted
-          && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold
-          && this.doorTransitionArmedFrames > 0
-          && computerRoomVisualAfterDoor);
-      const firstDoorAudioSuccess = this.auditorySnapshot?.eventType === "use-success-gate"
-        || auditorySnapshot?.eventType === "use-success-gate";
-      const firstDoorAudioFailure = this.auditorySnapshot?.eventType === "use-failed-voice"
-        || auditorySnapshot?.eventType === "use-failed-voice";
-      const firstDoorOpeningConfirmed = this.doorOpenedCount === 0
-        && this.firstDoorCorridorLocated
-        && firstDoorAudioSuccess
-        && !firstDoorAudioFailure
-        && ((this.firstDoorUseAttempted
-            && this.firstDoorUseSignature >= firstDoorUseSignatureThreshold)
-          || visualPostDoorRecovery)
-        && (this.firstDoorTransitionFrames >= 8
-          || this.darkZoneFrames >= Math.max(2, Math.floor(darkZoneConfirmFrames * 0.5))
-          || (this.mapDoorSectorMatch && (this.mapDarkSectorMatch || darkZoneCandidate || computerRoomVisualAfterDoor))
-          || (this.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal)
-          || visualPostDoorRecovery);
-      if (firstDoorOpeningConfirmed) {
-        this.doorOpenedCount = 1;
-        this.darkZoneEntered = true;
-        this.computerRoomAdvanceFrames = Math.max(
-          this.computerRoomAdvanceFrames,
-          Math.round(profileNumber(this.profile, "computerRoomAdvanceFrames", COMPUTER_ROOM_ADVANCE_FRAMES)));
-        this.doorTransitionArmedFrames = Math.max(
-          this.doorTransitionArmedFrames,
-          Math.round(profileNumber(this.profile, "doorTransitionArmedFrames", DOOR_TRANSITION_ARMED_FRAMES)));
-        this.useCooldown = Math.max(
-          this.useCooldown,
-          Math.round(profileNumber(this.profile, "firstDoorShutterUseLockFrames", USE_COOLDOWN_FRAMES * 3)));
-        this.pendingUseResponseFrames = 0;
-        this.lastUseWasBlocked = false;
-        this.wallUseProbeFrames = 0;
-        this.wallUseProbeStage = 0;
-        this.firstDoorUseLatchFrames = 0;
-        this.firstDoorUsePulsed = false;
-        this.firstDoorUseAttempted = false;
-        this.firstDoorUseSignature = 0;
-        this.cornerExitCommitFrames = 0;
-        this.hardStuckEscapeFrames = 0;
-        this.openStallEscapeFrames = 0;
-        this.loopEscapeFrames = 0;
-        this.mapSectorId = "door-open-transition";
-        this.safetyReason = "first-door-open-confirmed";
-      }
-      const computerRoomCombatAfterDoor = this.doorOpenedCount > 0
-        && this.darkZoneEntered
-        && this.mapEnemyZoneMatch
-        && this.gameplayLuma > 0
-        && this.gameplayLuma <= 80
-        && this.enemyAlertFrames >= 4
-        && isTrustedEnemyCluster(this.enemyAlertCluster, this.enemyAlertDepth)
-        && isTrustedEnemyDepth(this.enemyAlertCluster, this.enemyAlertDepth, this.enemyAlertPeakConfidence);
-      const firstDoorTopologyAllowsComputerRoom = this.doorOpenedCount > 0
-        || this.darkZoneEntered
-        || this.firstDoorTransitionFrames >= 10
-        || (this.firstDoorUseAttempted && this.doorTransitionArmedFrames > 0);
-      const combatTransitionStable = !combatContextActive
-        || this.doorOpenedCount > 0
-        || this.darkZoneFrames >= Math.max(3, Math.floor(darkZoneConfirmFrames * 0.6))
-        || this.firstDoorTransitionFrames >= 12;
-      this.topologicalTransitionBlocked = Boolean(computerRoomVisualAfterDoor && (!firstDoorTopologyAllowsComputerRoom || !combatTransitionStable));
-      const postDoorTopologyStable = this.doorOpenedCount > 0 && this.darkZoneEntered;
-      const computerRoomCandidate = !this.topologicalTransitionBlocked
-        && (((firstDoorLikelyOpened || postDoorTopologyStable) && (computerRoomVisualAfterDoor || computerRoomPanelAfterDoor))
-          || computerRoomCombatAfterDoor
-          || computerRoomRouteAfterDoor);
-      if (computerRoomCandidate) {
-        this.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, this.computerRoomFrames + 1);
-      } else {
-        this.computerRoomFrames = Math.max(0, this.computerRoomFrames - 1);
-      }
-
-      if (!this.computerRoomEntered && this.computerRoomFrames >= computerRoomConfirmFrames) {
-        this.doorOpenedCount = Math.max(this.doorOpenedCount, 1);
-        this.darkZoneEntered = true;
-        this.computerRoomAdvanceFrames = Math.max(
-          this.computerRoomAdvanceFrames,
-          Math.max(36, Math.round(profileNumber(this.profile, "computerRoomIngressFrames", COMPUTER_ROOM_ADVANCE_FRAMES * 0.35))));
-        this.wallUseProbeFrames = 0;
-        this.wallUseProbeStage = 0;
-        this.cornerExitCommitFrames = 0;
-        this.hardStuckEscapeFrames = 0;
-        this.openStallEscapeFrames = 0;
-        this.loopEscapeFrames = 0;
-        this.firstDoorUseLatchFrames = 0;
-        this.firstDoorUsePulsed = false;
-        this.firstDoorUseAttempted = false;
-        this.firstDoorUseSignature = 0;
-        this.computerRoomEntered = true;
-        this.mapSectorId = "visual-computer-room";
-        this.safetyReason = "computer-room-confirmed";
-      }
-
-      const centralHallFrame = Number(state?.frame || 0);
-      const centralHallLateralBalance = Math.abs(Number(frame.left || 0) - Number(frame.right || 0));
-      const computerPanelStillVisible = this.computerRoomScore >= 0.12
-        || this.computerPanelScore >= 0.34
-        || this.computerDarkPanelScore >= 0.16
-        || this.computerRedLightScore >= 0.05;
-      const bridgeExitCandidate = this.computerRoomEntered
-        && this.doorOpenedCount >= 1
-        && centralHallFrame >= 420
-        && depthEstimate >= 0.9
-        && this.bridgeBrownScore >= 0.38
-        && (this.bridgeBrownScore >= 0.48
-          || this.bridgeDoorScore >= 0.16
-          || Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight) >= 0.08)
-        && this.computerRoomFrames >= 48
-        && !cornered
-        && !knownCorner
-        && !cornerTrap;
-      const centralHallVisualCandidate = this.computerRoomEntered
-        && this.doorOpenedCount >= 1
-        && centralHallFrame >= 900
-        && this.gameplayLuma >= 82
-        && this.darkAreaScore <= 0.1
-        && depthEstimate >= 0.78
-        && openView
-        && wallPressure <= 22
-        && centralHallLateralBalance <= 36
-        && !computerPanelStillVisible
-        && !cornered
-        && !knownCorner
-        && !cornerTrap;
-      const centralHallCandidate = bridgeExitCandidate || centralHallVisualCandidate;
-      if (centralHallCandidate) {
-        this.centralHallFrames = Math.min(MAX_STUCK_COUNTER, this.centralHallFrames + 1);
-      } else {
-        this.centralHallFrames = Math.max(0, this.centralHallFrames - 1);
-      }
-
-      if (!this.centralHallEntered && this.centralHallFrames >= 8) {
-        this.centralHallEntered = true;
-        this.mapSectorId = "visual-central-hall";
-        this.safetyReason = "central-hall-confirmed";
-      }
-
-      const stairsCandidate = this.computerRoomEntered
-        && this.centralHallEntered
-        && depthEstimate >= 0.62
-        && this.gameplayLuma >= 70
-        && wallPressure >= 18
-        && regionQuantizedFrameChange >= 0.08;
-      if (stairsCandidate) {
-        this.stairsCandidateFrames = Math.min(MAX_STUCK_COUNTER, this.stairsCandidateFrames + 1);
-      } else {
-        this.stairsCandidateFrames = Math.max(0, this.stairsCandidateFrames - 1);
-      }
-
-      if (!this.stairsEntered && this.stairsCandidateFrames >= 12) {
-        this.stairsEntered = true;
-        this.mapSectorId = "visual-stairs";
-      }
-
-      const finalRoomCandidate = this.computerRoomEntered
-        && this.stairsEntered
-        && this.gameplayLuma >= 82
-        && this.darkAreaScore <= 0.08
-        && depthEstimate >= 0.82
-        && openView
-        && Boolean(mapHints?.exitLines || mapHints?.switchLines);
-      if (finalRoomCandidate) {
-        this.finalRoomCandidateFrames = Math.min(MAX_STUCK_COUNTER, this.finalRoomCandidateFrames + 1);
-      } else {
-        this.finalRoomCandidateFrames = Math.max(0, this.finalRoomCandidateFrames - 1);
-      }
-
-      if (!this.finalRoomEntered && this.finalRoomCandidateFrames >= 14) {
-        this.finalRoomEntered = true;
-        this.mapSectorId = "visual-final-room";
-      }
-
-      this.updateCombatMilestones(enemy);
+      const routeState = updateAutoplaySemanticRouteState(this, features, state, frame, enemy, effectiveTargetConfidence, auditorySnapshot);
+      const combatContextActive = routeState.combatContextActive;
       if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
         this.stairsEntered = false;
         this.stairsCandidateFrames = 0;
@@ -2116,6 +1580,7 @@
         kairos: this.toposDecisionCarrier?.kairos,
         ethosTarget: this.toposDecisionCarrier?.ethosTarget,
         feedbackApplied: Boolean(this.toposDecisionCarrier?.feedbackApplied),
+        gateExecuted: false,
         ternaryTrace: this.nousCarrier?.bonsaiTernary || {}
       });
       this.nousCarrier = buildNousCarrier(this, state, this.spatialSnapshot.timestamp);
@@ -5599,6 +5064,744 @@
     }
   }
 
+  function buildAutoplayFrameFeatures(controller, normalized, state, frame) {
+    const quantizedSample = quantizeFrameSample(frame.sample);
+    const quantizedRegions = quantizeFrameSample(frame.regionSample);
+    const quantizedRegion9 = quantizeFrameSample(frame.region9Sample);
+    const quantizedVision9x9 = quantizeFrameSample(frame.vision9x9Sample);
+    const previous = selectBobFilteredPreviousFrame(controller.frameHistory, quantizedRegion9) || controller.previousFrame;
+    const frameChange = previous ? averageSampleDelta(previous.sample, frame.sample) : 255;
+    const quantizedFrameChange = previous?.quantizedSample ? averageSampleDelta(previous.quantizedSample, quantizedSample) : 255;
+    const regionQuantizedFrameChange = previous?.quantizedRegions ? averageSampleDelta(previous.quantizedRegions, quantizedRegions) : 255;
+    const region9QuantizedFrameChange = previous?.quantizedRegion9 ? averageSampleDelta(previous.quantizedRegion9, quantizedRegion9) : 255;
+    const motion = analyzeRegion9Motion(previous?.quantizedRegion9, quantizedRegion9, controller.lastAction);
+    const quantizedStatusBar = quantizeFrameSample(frame.statusSample);
+    const statusBarQuantizedFrameChange = previous?.quantizedStatusBar ? averageSampleDelta(previous.quantizedStatusBar, quantizedStatusBar) : 255;
+    const quantizedDepth = quantizeFrameSample(frame.depthSample);
+    const depthSignatureDistance = nearestSignatureDistance(quantizedDepth, controller.depthSignatureMemory);
+    const depthEstimate = estimateDepthDistance(frame.depthSample);
+    const mapHints = state?.mapHints || null;
+    const quantizedFace = quantizeFrameSample(frame.faceSample);
+    const quantizedAmmo = quantizeFrameSample(frame.ammoSample);
+    const ammoState = estimateAmmoState(frame.ammoSample, quantizedAmmo);
+    const quantizedHealth = quantizeFrameSample(frame.healthSample);
+    const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
+    const rawHealthState = estimateHealthState(frame.healthSample, quantizedHealth);
+    const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
+    const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
+    const visualStallDelta = Math.min(quantizedFrameChange, regionQuantizedFrameChange, region9QuantizedFrameChange);
+    const faceDeathScore = healthSensorEnabled ? estimateFaceDeathScore(quantizedFace) : 0;
+    const healthState = healthSensorEnabled
+      ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
+      : createDisabledHealthState(rawHealthState.signature);
+    const wallPressure = Math.abs((frame.left || 0) - (frame.right || 0)) + Math.max(0, (frame.lowerCenter || 0) - (frame.topCenter || 0));
+    const preDoorPhase = controller.doorOpenedCount <= 0;
+    const targetConfidence = preDoorPhase ? 0 : estimateTargetConfidence(frame);
+    let enemy = estimateEnemyPresence(frame);
+    if (preDoorPhase) {
+      enemy = {
+        confidence: 0,
+        turn: "none",
+        centered: false,
+        distance: 1,
+        cluster: "none",
+        centerCellConfidence: 0,
+        fireReady: false
+      };
+    }
+
+    const quantizedStable = visualStallDelta <= QUANTIZED_STALL_THRESHOLD;
+    const wallLike = looksLikeWall(frame);
+    const signatureMatch = controller.matchVisualSignature(quantizedSample);
+    const knownDepth = depthSignatureDistance <= SIGNATURE_DEPTH_MATCH_THRESHOLD;
+    const movementIntent = normalized.move !== "none" || normalized.turn !== "none" || normalized.strafe || normalized.run;
+    const rawCornerSignal = estimateCornerSignal(frame, frameChange, visualStallDelta, wallPressure, wallLike);
+    const navigableView = looksLikeNavigableView(frame, depthEstimate, rawCornerSignal);
+    const openView = looksLikeOpenView(frame, depthEstimate, targetConfidence) || navigableView;
+    let effectiveTargetConfidence = navigableView ? Math.min(targetConfidence, 0.35) : targetConfidence;
+    const dictionarySuppressed = controller.cornerSuppressFrames > 0 || openView;
+    const doorApproachDepth = profileNumber(controller.profile, "doorApproachDepth", Math.max(DOOR_USE_DEPTH_THRESHOLD, 0.86));
+    const knownWall = !dictionarySuppressed
+      && (((signatureMatch.kind === "wall" || signatureMatch.kind === "corner") && depthEstimate <= doorApproachDepth)
+        || (knownDepth && depthEstimate <= DOOR_USE_DEPTH_THRESHOLD));
+    const knownCorner = !dictionarySuppressed && signatureMatch.kind === "corner";
+    const cornerSignal = dictionarySuppressed ? Math.min(rawCornerSignal, 0.35) : rawCornerSignal;
+    const cornerTrap = !dictionarySuppressed && cornerSignal >= CORNER_SIGNAL_THRESHOLD;
+    const pinnedWall = movementIntent && (quantizedStable || knownWall) && (wallPressure > STUCK_WALL_THRESHOLD * 0.35 || wallLike || cornerTrap || knownWall);
+    const cornered = looksLikeCorner(frame, Math.min(frameChange, visualStallDelta)) || cornerTrap || knownCorner;
+    const looped = controller.updateBreadcrumbTrail(state, frame);
+    const soundCue = resolveSoundCue(state);
+    let auditorySnapshot = buildAuditorySnapshot(state);
+    auditorySnapshot = classifyUseAuditoryResponse(controller, auditorySnapshot, {
+      quantizedFrameChange,
+      regionQuantizedFrameChange,
+      visualStallDelta,
+      depthEstimate
+    });
+    const staticMapDoorBias = Boolean(mapHints?.doorLines || mapHints?.switchLines);
+    const staticGateCandidate = !soundCue
+      && !openView
+      && depthEstimate <= (staticMapDoorBias ? Math.max(doorApproachDepth, 0.9) : doorApproachDepth)
+      && visualStallDelta <= QUANTIZED_STALL_THRESHOLD + (staticMapDoorBias ? 0.75 : 0.45)
+      && faceQuantizedFrameChange <= COMBAT_FACE_DANGER_DELTA
+      && (wallLike || knownWall || signatureMatch.kind === "wall" || signatureMatch.kind === "corner")
+      && (enemy.cluster === "brown" || enemy.cluster === "gray" || enemy.distance >= 0.76);
+    if (staticGateCandidate) {
+      enemy = Object.assign({}, enemy, {
+        confidence: Math.min(enemy.confidence, 0.24),
+        turn: "none",
+        fireReady: false,
+        cluster: enemy.cluster === "none" ? "gate" : `gate-${enemy.cluster}`
+      });
+      effectiveTargetConfidence = Math.min(effectiveTargetConfidence, 0.28);
+    }
+
+    const sensor = buildSensorFusionPacket({
+      frame,
+      depthEstimate,
+      faceQuantizedFrameChange,
+      knownWall,
+      knownCorner,
+      cornered,
+      cornerTrap,
+      wallLike,
+      openView,
+      navigableView,
+      soundCue,
+      stuckFrames: controller.stuckFrames,
+      quantizedStallFrames: controller.quantizedStallFrames,
+      quantizedFrameChange,
+      regionQuantizedFrameChange,
+      motion
+    });
+
+    return {
+      quantizedSample,
+      quantizedRegions,
+      quantizedRegion9,
+      quantizedVision9x9,
+      previous,
+      frameChange,
+      quantizedFrameChange,
+      regionQuantizedFrameChange,
+      region9QuantizedFrameChange,
+      motion,
+      quantizedStatusBar,
+      statusBarQuantizedFrameChange,
+      quantizedDepth,
+      depthSignatureDistance,
+      depthEstimate,
+      mapHints,
+      quantizedFace,
+      quantizedAmmo,
+      ammoState,
+      quantizedHealth,
+      healthSensorEnabled,
+      faceQuantizedFrameChange,
+      visualStallDelta,
+      faceDeathScore,
+      healthState,
+      wallPressure,
+      targetConfidence,
+      enemy,
+      quantizedStable,
+      wallLike,
+      signatureMatch,
+      knownDepth,
+      knownWall,
+      knownCorner,
+      movementIntent,
+      rawCornerSignal,
+      navigableView,
+      openView,
+      effectiveTargetConfidence,
+      dictionarySuppressed,
+      doorApproachDepth,
+      cornerSignal,
+      cornerTrap,
+      pinnedWall,
+      cornered,
+      looped,
+      soundCue,
+      auditorySnapshot,
+      sensor
+    };
+  }
+
+  function updateAutoplaySensorState(controller, features, state, frame, action) {
+    const {
+      quantizedRegions,
+      quantizedRegion9,
+      quantizedVision9x9,
+      previous,
+      quantizedFrameChange,
+      regionQuantizedFrameChange,
+      motion,
+      quantizedDepth,
+      depthSignatureDistance,
+      depthEstimate,
+      quantizedFace,
+      ammoState,
+      healthSensorEnabled,
+      faceQuantizedFrameChange,
+      faceDeathScore,
+      healthState,
+      cornerSignal,
+      signatureMatch,
+      soundCue,
+      enemy,
+      effectiveTargetConfidence,
+      auditorySnapshot
+    } = features;
+
+    controller.targetConfidence = clamp01(Math.max(effectiveTargetConfidence, enemy.confidence));
+    controller.soundCueActive = Boolean(soundCue);
+    controller.quantizedFrameChange = quantizedFrameChange;
+    controller.regionQuantizedFrameChange = regionQuantizedFrameChange;
+    controller.statusBarQuantizedFrameChange = features.statusBarQuantizedFrameChange;
+    controller.regionSignature = regionSignature(quantizedRegions);
+    controller.region9Signature = regionSignature(quantizedRegion9);
+    controller.vision9x9Signature = regionSignature(quantizedVision9x9).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
+    controller.motion9Signature = motion.signature;
+    controller.motion9Delta = motion.delta;
+    controller.motionForwardProgress = motion.forwardProgress;
+    controller.motionObstacleScore = motion.obstacleScore;
+    controller.motionTurnScore = motion.turnScore;
+    controller.motionEntranceScore = motion.entranceScore;
+    controller.motionStallScore = motion.stallScore;
+
+    const footObstacleScore = clamp01(Number(frame.footObstacleScore || 0));
+    controller.footObstacleScore = footObstacleScore;
+    const footObstacleBandDelta = previous?.footObstacleBandSample
+      ? averageSampleDelta(previous.footObstacleBandSample, frame.footObstacleBandSample || [])
+      : 0;
+    controller.footObstacleBandDelta = footObstacleBandDelta;
+    const footObstacleMemory = Math.max(footObstacleScore, controller.priorFootObstacleScore * 0.82);
+    controller.priorFootObstacleScore = footObstacleMemory;
+    const lastForwardIntent = controller.lastAction?.move === "forward" || controller.lastAction?.moveForward === true;
+    const footObstacleFlicker = clamp01((footObstacleBandDelta / 7.5) * 0.7 + footObstacleMemory * 0.35);
+    const footBounceStallEvidence = lastForwardIntent
+      && footObstacleFlicker >= 0.42
+      && controller.motionForwardProgress <= profileNumber(controller.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.9;
+    controller.footObstacleFlickerScore = footObstacleFlicker;
+    if (footBounceStallEvidence) {
+      controller.footObstacleBounceFrames = Math.min(MAX_STUCK_COUNTER, Number(controller.footObstacleBounceFrames || 0) + 1);
+    } else {
+      controller.footObstacleBounceFrames = Math.max(0, Number(controller.footObstacleBounceFrames || 0) - 1);
+    }
+
+    if (lastForwardIntent
+      && ((controller.motionForwardProgress <= profileNumber(controller.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD) * 0.55
+        && controller.regionQuantizedFrameChange <= QUANTIZED_STALL_THRESHOLD + 0.08)
+        || controller.footObstacleBounceFrames >= 2)) {
+      controller.inputStallFrames = Math.min(MAX_STUCK_COUNTER, controller.inputStallFrames + 1);
+    } else {
+      controller.inputStallFrames = Math.max(0, controller.inputStallFrames - 1);
+    }
+
+    controller.motionIntent = motion.intent;
+    controller.depthSignature = regionSignature(quantizedDepth);
+    controller.depthEstimate = depthEstimate;
+    controller.faceSignature = regionSignature(quantizedFace);
+    controller.faceQuantizedFrameChange = faceQuantizedFrameChange;
+    controller.cornerSignal = cornerSignal;
+    controller.signatureMatchKind = signatureMatch.kind;
+    controller.signatureMatchDistance = signatureMatch.distance;
+    controller.depthSignatureDistance = depthSignatureDistance;
+    controller.enemyConfidence = enemy.confidence;
+    controller.enemyTurn = enemy.turn;
+    controller.enemyDistance = enemy.distance;
+    controller.enemyCluster = enemy.cluster;
+    controller.enemyFireReady = enemy.fireReady;
+    controller.enemyCenterCellConfidence = enemy.centerCellConfidence || 0;
+    controller.enemyAllRegionPeak = enemy.allRegionPeak || 0;
+    controller.enemyLateralBias = enemy.lateralBias || 0;
+    controller.darkAreaScore = clamp01(Number(frame.darkAreaScore || 0));
+    controller.gameplayLuma = Number(frame.gameplayLuma || 0);
+    controller.blueFloorScore = clamp01(Number(frame.blueFloorScore || 0));
+    controller.courtyardScore = clamp01(Number(frame.courtyardScore || 0));
+    controller.courtyardTurn = frame.courtyardTurn === "left" || frame.courtyardTurn === "right" ? frame.courtyardTurn : "none";
+    controller.spawnSecretDoorScore = clamp01(Number(frame.spawnSecretDoorScore || 0));
+    controller.spawnSecretDoorTurn = frame.spawnSecretDoorTurn === "left" || frame.spawnSecretDoorTurn === "right" ? frame.spawnSecretDoorTurn : "none";
+    controller.spawnWestStairScore = clamp01(Number(frame.spawnWestStairScore || 0));
+    controller.spawnWestStairTurn = frame.spawnWestStairTurn === "left" || frame.spawnWestStairTurn === "right" ? frame.spawnWestStairTurn : "none";
+    controller.spawnCorridorGapScore = clamp01(Number(frame.spawnCorridorGapScore || 0));
+    controller.spawnCorridorGapTurn = frame.spawnCorridorGapTurn === "left" || frame.spawnCorridorGapTurn === "right" ? frame.spawnCorridorGapTurn : "none";
+    controller.bridgeBrownScore = clamp01(Number(frame.bridgeBrownScore || 0));
+    controller.bridgeGreenLeft = clamp01(Number(frame.bridgeGreenLeft || 0));
+    controller.bridgeGreenCenter = clamp01(Number(frame.bridgeGreenCenter || 0));
+    controller.bridgeGreenRight = clamp01(Number(frame.bridgeGreenRight || 0));
+    controller.bridgeLaneTurn = frame.bridgeLaneTurn === "left" || frame.bridgeLaneTurn === "right" ? frame.bridgeLaneTurn : "none";
+    controller.bridgeDoorScore = clamp01(Number(frame.bridgeDoorScore || 0));
+    controller.computerBlueScore = clamp01(Number(frame.computerBlueScore || 0));
+    controller.computerRedLightScore = clamp01(Number(frame.computerRedLightScore || 0));
+    controller.computerDarkPanelScore = clamp01(Number(frame.computerDarkPanelScore || 0));
+    controller.computerPanelScore = clamp01(Number(frame.computerPanelScore || 0));
+    controller.computerRoomScore = clamp01(Number(frame.computerRoomScore || 0));
+
+    updateEnemyAlertState(controller, frame, enemy, effectiveTargetConfidence, ammoState, faceQuantizedFrameChange);
+
+    controller.ammoSignature = ammoState.signature;
+    controller.ammoLikelyEmpty = ammoState.likelyEmpty;
+    controller.healthSignature = healthState.signature;
+    controller.healthLikelyDead = healthState.likelyDead;
+    controller.healthZeroScore = healthState.zeroScore || 0;
+    controller.healthActiveColumns = healthState.activeColumns || 0;
+    controller.healthActiveCells = healthState.activeCells || 0;
+    controller.healthSensorSnapshot = createHealthSensorSnapshot({
+      active: healthSensorEnabled,
+      likelyDead: controller.healthLikelyDead,
+      zeroScore: controller.healthZeroScore,
+      activeColumns: controller.healthActiveColumns,
+      activeCells: controller.healthActiveCells,
+      signature: controller.healthSignature,
+      faceSignature: controller.faceSignature,
+      faceDeathScore,
+      faceQuantizedFrameChange,
+      freezeScore: healthState.freezeScore,
+      retryReason: healthState.retryReason,
+      timestamp: state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+    });
+    controller.auditorySnapshot = auditorySnapshot;
+    controller.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+    refreshSensorCognition(controller, state, frame, {
+      quantizedVision9x9,
+      motion,
+      auditorySnapshot,
+      action
+    });
+  }
+
+  function updateEnemyAlertState(controller, frame, enemy, effectiveTargetConfidence, ammoState, faceQuantizedFrameChange) {
+    if (controller.doorOpenedCount > 0 && !ammoState.likelyEmpty) {
+      const alertConfidence = Math.max(enemy.confidence, effectiveTargetConfidence);
+      const alertPeakThreshold = profileNumber(controller.profile, "combatAlertPeakConfidence", COMBAT_ALERT_PEAK_CONFIDENCE);
+      const alertFrames = profileNumber(controller.profile, "combatAlertFrames", COMBAT_ALERT_FRAMES);
+      const trustedEnemyAlert = isTrustedEnemyCluster(enemy.cluster, enemy.distance)
+        && isTrustedEnemyDepth(enemy.cluster, enemy.distance, alertConfidence, enemy.centerCellConfidence);
+      if (trustedEnemyAlert
+        && ((alertConfidence >= 0.46 || controller.enemyConfidencePeak >= alertPeakThreshold)
+          || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA)) {
+        const previousAlertActive = controller.enemyAlertFrames > 0;
+        controller.enemyAlertFrames = alertFrames;
+        controller.enemyAlertTurn = enemy.turn !== "none" ? enemy.turn : (decodeFaceDirection(frame.faceSample, faceQuantizedFrameChange) < 0 ? "left" : "right");
+        controller.enemyAlertCluster = enemy.cluster || "none";
+        controller.enemyAlertDepth = previousAlertActive
+          ? Math.min(Number(controller.enemyAlertDepth || 1), Number(enemy.distance ?? 1))
+          : Number(enemy.distance ?? 1);
+        controller.enemyAlertPeakConfidence = Math.max(controller.enemyAlertPeakConfidence, alertConfidence, controller.enemyConfidencePeak);
+      } else {
+        controller.enemyAlertFrames = Math.max(0, controller.enemyAlertFrames - 1);
+      }
+    } else {
+      controller.enemyAlertFrames = 0;
+      controller.enemyAlertCluster = "none";
+      controller.enemyAlertDepth = 1;
+      controller.enemyAlertPeakConfidence = 0;
+    }
+  }
+
+  function updateAutoplaySemanticRouteState(controller, features, state, frame, enemy, effectiveTargetConfidence, auditorySnapshot) {
+    const {
+      depthEstimate,
+      mapHints,
+      faceQuantizedFrameChange,
+      regionQuantizedFrameChange,
+      wallPressure,
+      cornered,
+      knownCorner,
+      cornerTrap,
+      openView
+    } = features;
+    const darkZoneScoreThreshold = profileNumber(controller.profile, "darkZoneScoreThreshold", DARK_ZONE_SCORE_THRESHOLD);
+    const darkZoneLumaThreshold = profileNumber(controller.profile, "darkZoneLumaThreshold", DARK_ZONE_LUMA_THRESHOLD);
+    const darkZoneConfirmFrames = profileNumber(controller.profile, "darkZoneConfirmFrames", DARK_ZONE_CONFIRM_FRAMES);
+    const corridorSignatureThreshold = profileNumber(controller.profile, "firstDoorCorridorSignatureThreshold", FIRST_DOOR_CORRIDOR_SIGNATURE_THRESHOLD);
+    const corridorConfirmFrames = Math.max(8, Math.min(MAX_STUCK_COUNTER, Math.round(profileNumber(controller.profile, "firstDoorCorridorConfirmFrames", FIRST_DOOR_CORRIDOR_CONFIRM_FRAMES))));
+    const firstDoorUseSignatureThreshold = profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+    const firstDoorSpawnScanFrames = profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES);
+    const blueFloorHomeThreshold = profileNumber(controller.profile, "blueFloorHomeThreshold", BLUE_FLOOR_HOME_THRESHOLD);
+    const spawnCorridorGapThreshold = profileNumber(controller.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
+
+    controller.firstDoorVision9x9Score = clamp01(Number(frame.firstDoorVision9x9Score || 0));
+    controller.firstDoorVision9x9Box = frame.firstDoorVision9x9Box || null;
+    controller.firstDoorVision9x9Heatmap = Array.isArray(frame.firstDoorVision9x9Heatmap) ? frame.firstDoorVision9x9Heatmap : [];
+    controller.firstDoorVision9x9RedScore = clamp01(Number(frame.firstDoorVision9x9RedScore || 0));
+    const firstDoorUse3x3 = scoreFirstDoorUseAlignment3x3(frame, controller.spawnCorridorGapScore, controller.spawnCorridorGapTurn);
+    controller.firstDoorUse3x3Score = firstDoorUse3x3.score;
+    controller.firstDoorUse3x3Turn = firstDoorUse3x3.turn;
+    controller.firstDoorUse3x3Reason = firstDoorUse3x3.reason;
+    if (controller.firstDoorCorridorSuppressFrames > 0) {
+      controller.firstDoorCorridorSuppressFrames -= 1;
+    }
+
+    const baseFirstDoorCorridorSignature = scoreFirstDoorCorridorSignature(frame, depthEstimate, controller.blueFloorScore, controller.spawnCorridorGapScore);
+    controller.firstDoorCorridorSignature = clamp01(
+      (baseFirstDoorCorridorSignature * 0.84)
+      + (controller.firstDoorVision9x9Score * 0.24));
+    const darkZoneCandidate = controller.gameplayLuma > 0
+      && controller.gameplayLuma <= darkZoneLumaThreshold
+      && (controller.darkAreaScore >= darkZoneScoreThreshold || controller.gameplayLuma <= 56);
+    const hostileZoneSignal = enemy.confidence >= 0.28
+      || effectiveTargetConfidence >= 0.42
+      || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA
+      || controller.enemyAlertFrames > 0
+      || controller.enemyConfidencePeak >= 0.62;
+    const combatContextActive = controller.resolveCombatContext(enemy, effectiveTargetConfidence, hostileZoneSignal);
+    controller.combatContextActive = combatContextActive;
+    const staticDoorKnown = Boolean(mapHints?.firstDoor || mapHints?.doorLines || mapHints?.switchLines);
+    const staticDarkKnown = Boolean(mapHints?.darkSectors?.length);
+    const staticEnemyZoneKnown = Boolean(mapHints?.enemyThings?.length || mapHints?.thingTypes?.some?.(thing => isEnemyThingType(thing.type)));
+    const corridorCandidateFrame = controller.predictions >= firstDoorSpawnScanFrames + 90;
+    const corridorGapGate = controller.spawnCorridorGapScore >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
+    const motionEntranceGate = controller.motionEntranceScore >= profileNumber(controller.profile, "motionEntranceThreshold", 0.22)
+      && controller.motionForwardProgress >= profileNumber(controller.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
+      && controller.motionTurnScore < profileNumber(controller.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD)
+      && controller.blueFloorScore < blueFloorHomeThreshold
+      && controller.spawnCorridorGapScore >= Math.max(0.14, spawnCorridorGapThreshold - 0.12);
+    const motionForwardGate = controller.motionForwardProgress >= profileNumber(controller.profile, "motionForwardProgressThreshold", MOTION_FORWARD_PROGRESS_THRESHOLD)
+      && controller.motionStallScore <= 0.7
+      && controller.motionTurnScore < profileNumber(controller.profile, "motionTurnSweepThreshold", MOTION_TURN_SWEEP_THRESHOLD);
+    const blueFloorExitedGate = controller.predictions >= 300
+      && controller.blueFloorScore < blueFloorHomeThreshold
+      && depthEstimate >= 0.7
+      && controller.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.08;
+    const lateCorridorRecoveryGate = controller.predictions >= 420
+      && controller.firstDoorCorridorSuppressFrames <= 0
+      && controller.blueFloorScore < blueFloorHomeThreshold + 0.08
+      && depthEstimate >= 0.65
+      && controller.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.04
+      && controller.spawnCorridorGapScore >= Math.max(0.20, spawnCorridorGapThreshold - 0.20);
+    const wallContactBeforeCorridor = !controller.firstDoorCorridorLocated
+      && !controller.firstDoorUseAttempted
+      && depthEstimate <= 0.22;
+    const spawnLandmarkConflict = controller.doorOpenedCount <= 0
+      && !controller.firstDoorUseAttempted
+      && (controller.spawnSecretDoorScore >= Math.max(0.18, profileNumber(controller.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD) - 0.08)
+        || controller.spawnWestStairScore >= Math.max(0.16, profileNumber(controller.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD) - 0.04))
+      && controller.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
+      && controller.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
+      && controller.courtyardScore < Math.max(0.12, COURTYARD_RESCUE_THRESHOLD - 0.20);
+    const firstDoorCorridorCandidate = controller.doorOpenedCount <= 0
+      && controller.firstDoorCorridorSuppressFrames <= 0
+      && !wallContactBeforeCorridor
+      && !spawnLandmarkConflict
+      && controller.firstDoorCorridorSignature >= corridorSignatureThreshold
+      && corridorCandidateFrame
+      && (corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || motionEntranceGate || controller.firstDoorUseAttempted)
+      && (motionForwardGate || corridorGapGate || blueFloorExitedGate || lateCorridorRecoveryGate || controller.firstDoorUseAttempted)
+      && (controller.predictions >= profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES) || controller.firstDoorUseAttempted);
+    if (wallContactBeforeCorridor || spawnLandmarkConflict) {
+      controller.firstDoorCorridorFrames = 0;
+      if (spawnLandmarkConflict && controller.firstDoorCorridorLocated && !controller.firstDoorUseAttempted) {
+        controller.firstDoorCorridorLocated = false;
+        controller.firstDoorCorridorSuppressFrames = Math.max(controller.firstDoorCorridorSuppressFrames, 18);
+      }
+    } else if (firstDoorCorridorCandidate) {
+      controller.firstDoorCorridorFrames = Math.min(MAX_STUCK_COUNTER, controller.firstDoorCorridorFrames + 1);
+    } else {
+      controller.firstDoorCorridorFrames = Math.max(0, controller.firstDoorCorridorFrames - 1);
+    }
+    if (!controller.firstDoorCorridorLocated
+      && !wallContactBeforeCorridor
+      && !spawnLandmarkConflict
+      && (controller.firstDoorCorridorFrames >= corridorConfirmFrames
+        || lateCorridorRecoveryGate
+        || (controller.predictions >= 300
+          && (corridorGapGate || blueFloorExitedGate)
+          && controller.firstDoorCorridorSignature >= corridorSignatureThreshold + 0.16))) {
+      controller.firstDoorCorridorLocated = true;
+    }
+
+    controller.mapDoorSectorMatch = staticDoorKnown
+      && controller.firstDoorCorridorLocated
+      && controller.firstDoorUseAttempted
+      && controller.firstDoorUseSignature >= firstDoorUseSignatureThreshold
+      && (controller.doorTransitionArmedFrames > 0 || (controller.darkZoneFrames > 0 && darkZoneCandidate));
+    controller.mapDarkSectorMatch = staticDarkKnown && darkZoneCandidate;
+    controller.mapEnemyZoneMatch = staticEnemyZoneKnown && hostileZoneSignal;
+    controller.mapSectorId = controller.mapDarkSectorMatch ? "visual-dark-zone" : (controller.mapDoorSectorMatch ? "door-transition" : "unknown");
+    controller.updateSemanticMemory(frame, {
+      depthEstimate,
+      corridorSignatureThreshold,
+      spawnCorridorGapThreshold,
+      blueFloorHomeThreshold,
+      darkZoneCandidate,
+      firstDoorLikelyOpened: controller.firstDoorTransitionFrames >= 10,
+      bridgeLaneVisible: isBridgeLaneVisible(
+        controller.bridgeBrownScore,
+        controller.bridgeGreenLeft,
+        controller.bridgeGreenCenter,
+        controller.bridgeGreenRight,
+        profileNumber(controller.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD),
+        profileNumber(controller.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD)),
+      enemy
+    });
+    if (controller.mapDoorSectorMatch && controller.mapDarkSectorMatch && controller.mapEnemyZoneMatch) {
+      controller.darkZoneFrames = Math.min(MAX_STUCK_COUNTER, controller.darkZoneFrames + 1);
+    } else {
+      controller.darkZoneFrames = Math.max(0, controller.darkZoneFrames - 1);
+    }
+
+    const firstDoorTransitionCandidate = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && controller.firstDoorUseAttempted
+      && controller.firstDoorUseSignature >= firstDoorUseSignatureThreshold
+      && controller.mapDoorSectorMatch
+      && (controller.doorTransitionArmedFrames > 0 || darkZoneCandidate || controller.mapDarkSectorMatch);
+    if (firstDoorTransitionCandidate) {
+      controller.firstDoorTransitionFrames = Math.min(MAX_STUCK_COUNTER, controller.firstDoorTransitionFrames + 1);
+    } else {
+      controller.firstDoorTransitionFrames = Math.max(0, controller.firstDoorTransitionFrames - 1);
+    }
+
+    const computerRoomConfirmFrames = Math.max(4, Math.round(profileNumber(controller.profile, "computerRoomConfirmFrames", COMPUTER_ROOM_CONFIRM_FRAMES)));
+    const computerRoomVisualAfterDoor = controller.computerRoomScore >= 0.24
+      && (controller.computerBlueScore >= 0.14
+        || controller.computerRedLightScore >= 0.08
+        || (controller.computerDarkPanelScore >= 0.30 && controller.computerPanelScore >= 0.16))
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 108;
+    const computerRoomPanelAfterDoor = controller.doorOpenedCount > 0
+      && controller.darkZoneEntered
+      && controller.computerRoomScore >= 0.14
+      && controller.computerPanelScore >= 0.54
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 108;
+    const postDoorBridgeCue = Math.max(controller.bridgeGreenLeft, controller.bridgeGreenCenter, controller.bridgeGreenRight);
+    const computerRoomRouteAfterDoor = controller.doorOpenedCount > 0
+      && depthEstimate >= 0.72
+      && controller.gameplayLuma > 0
+      && (controller.firstDoorCorridorLocated || controller.spawnCorridorGapScore >= 0.24 || controller.corridorConfidence >= 0.58)
+      && (controller.bridgeBrownScore >= 0.22
+        || postDoorBridgeCue >= 0.30
+        || controller.bridgeDoorScore >= 0.10
+        || controller.darkAreaScore >= 0.05)
+      && !controller.healthLikelyDead;
+    const visualPostDoorRecovery = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && !controller.firstDoorUseAttempted
+      && computerRoomVisualAfterDoor
+      && controller.blueFloorScore < blueFloorHomeThreshold
+      && controller.predictions >= firstDoorSpawnScanFrames + 120;
+    const firstDoorLikelyOpened = controller.firstDoorTransitionFrames >= 10
+      || visualPostDoorRecovery
+      || (controller.firstDoorCorridorLocated
+        && controller.firstDoorUseAttempted
+        && controller.mapDoorSectorMatch
+        && controller.mapDarkSectorMatch
+        && controller.darkZoneFrames >= darkZoneConfirmFrames)
+      || (controller.firstDoorCorridorLocated
+        && controller.firstDoorUseAttempted
+        && controller.firstDoorUseSignature >= firstDoorUseSignatureThreshold
+        && controller.doorTransitionArmedFrames > 0
+        && computerRoomVisualAfterDoor);
+    const firstDoorAudioSuccess = controller.auditorySnapshot?.eventType === "use-success-gate"
+      || auditorySnapshot?.eventType === "use-success-gate";
+    const firstDoorAudioFailure = controller.auditorySnapshot?.eventType === "use-failed-voice"
+      || auditorySnapshot?.eventType === "use-failed-voice";
+    const firstDoorOpeningConfirmed = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && firstDoorAudioSuccess
+      && !firstDoorAudioFailure
+      && ((controller.firstDoorUseAttempted
+          && controller.firstDoorUseSignature >= firstDoorUseSignatureThreshold)
+        || visualPostDoorRecovery)
+      && (controller.firstDoorTransitionFrames >= 8
+        || controller.darkZoneFrames >= Math.max(2, Math.floor(darkZoneConfirmFrames * 0.5))
+        || (controller.mapDoorSectorMatch && (controller.mapDarkSectorMatch || darkZoneCandidate || computerRoomVisualAfterDoor))
+        || (controller.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal)
+        || visualPostDoorRecovery);
+    if (firstDoorOpeningConfirmed) {
+      controller.doorOpenedCount = 1;
+      controller.darkZoneEntered = true;
+      controller.computerRoomAdvanceFrames = Math.max(
+        controller.computerRoomAdvanceFrames,
+        Math.round(profileNumber(controller.profile, "computerRoomAdvanceFrames", COMPUTER_ROOM_ADVANCE_FRAMES)));
+      controller.doorTransitionArmedFrames = Math.max(
+        controller.doorTransitionArmedFrames,
+        Math.round(profileNumber(controller.profile, "doorTransitionArmedFrames", DOOR_TRANSITION_ARMED_FRAMES)));
+      controller.useCooldown = Math.max(
+        controller.useCooldown,
+        Math.round(profileNumber(controller.profile, "firstDoorShutterUseLockFrames", USE_COOLDOWN_FRAMES * 3)));
+      controller.pendingUseResponseFrames = 0;
+      controller.lastUseWasBlocked = false;
+      controller.wallUseProbeFrames = 0;
+      controller.wallUseProbeStage = 0;
+      controller.firstDoorUseLatchFrames = 0;
+      controller.firstDoorUsePulsed = false;
+      controller.firstDoorUseAttempted = false;
+      controller.firstDoorUseSignature = 0;
+      controller.cornerExitCommitFrames = 0;
+      controller.hardStuckEscapeFrames = 0;
+      controller.openStallEscapeFrames = 0;
+      controller.loopEscapeFrames = 0;
+      controller.mapSectorId = "door-open-transition";
+      controller.safetyReason = "first-door-open-confirmed";
+    }
+
+    const computerRoomCombatAfterDoor = controller.doorOpenedCount > 0
+      && controller.darkZoneEntered
+      && controller.mapEnemyZoneMatch
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 80
+      && controller.enemyAlertFrames >= 4
+      && isTrustedEnemyCluster(controller.enemyAlertCluster, controller.enemyAlertDepth)
+      && isTrustedEnemyDepth(controller.enemyAlertCluster, controller.enemyAlertDepth, controller.enemyAlertPeakConfidence);
+    const firstDoorTopologyAllowsComputerRoom = controller.doorOpenedCount > 0
+      || controller.darkZoneEntered
+      || controller.firstDoorTransitionFrames >= 10
+      || (controller.firstDoorUseAttempted && controller.doorTransitionArmedFrames > 0);
+    const combatTransitionStable = !combatContextActive
+      || controller.doorOpenedCount > 0
+      || controller.darkZoneFrames >= Math.max(3, Math.floor(darkZoneConfirmFrames * 0.6))
+      || controller.firstDoorTransitionFrames >= 12;
+    controller.topologicalTransitionBlocked = Boolean(computerRoomVisualAfterDoor && (!firstDoorTopologyAllowsComputerRoom || !combatTransitionStable));
+    const postDoorTopologyStable = controller.doorOpenedCount > 0 && controller.darkZoneEntered;
+    const computerRoomCandidate = !controller.topologicalTransitionBlocked
+      && (((firstDoorLikelyOpened || postDoorTopologyStable) && (computerRoomVisualAfterDoor || computerRoomPanelAfterDoor))
+        || computerRoomCombatAfterDoor
+        || computerRoomRouteAfterDoor);
+    if (computerRoomCandidate) {
+      controller.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, controller.computerRoomFrames + 1);
+    } else {
+      controller.computerRoomFrames = Math.max(0, controller.computerRoomFrames - 1);
+    }
+
+    if (!controller.computerRoomEntered && controller.computerRoomFrames >= computerRoomConfirmFrames) {
+      controller.doorOpenedCount = Math.max(controller.doorOpenedCount, 1);
+      controller.darkZoneEntered = true;
+      controller.computerRoomAdvanceFrames = Math.max(
+        controller.computerRoomAdvanceFrames,
+        Math.max(36, Math.round(profileNumber(controller.profile, "computerRoomIngressFrames", COMPUTER_ROOM_ADVANCE_FRAMES * 0.35))));
+      controller.wallUseProbeFrames = 0;
+      controller.wallUseProbeStage = 0;
+      controller.cornerExitCommitFrames = 0;
+      controller.hardStuckEscapeFrames = 0;
+      controller.openStallEscapeFrames = 0;
+      controller.loopEscapeFrames = 0;
+      controller.firstDoorUseLatchFrames = 0;
+      controller.firstDoorUsePulsed = false;
+      controller.firstDoorUseAttempted = false;
+      controller.firstDoorUseSignature = 0;
+      controller.computerRoomEntered = true;
+      controller.mapSectorId = "visual-computer-room";
+      controller.safetyReason = "computer-room-confirmed";
+    }
+
+    const centralHallFrame = Number(state?.frame || 0);
+    const centralHallLateralBalance = Math.abs(Number(frame.left || 0) - Number(frame.right || 0));
+    const computerPanelStillVisible = controller.computerRoomScore >= 0.12
+      || controller.computerPanelScore >= 0.34
+      || controller.computerDarkPanelScore >= 0.16
+      || controller.computerRedLightScore >= 0.05;
+    const bridgeExitCandidate = controller.computerRoomEntered
+      && controller.doorOpenedCount >= 1
+      && centralHallFrame >= 420
+      && depthEstimate >= 0.9
+      && controller.bridgeBrownScore >= 0.38
+      && (controller.bridgeBrownScore >= 0.48
+        || controller.bridgeDoorScore >= 0.16
+        || Math.max(controller.bridgeGreenLeft, controller.bridgeGreenCenter, controller.bridgeGreenRight) >= 0.08)
+      && controller.computerRoomFrames >= 48
+      && !cornered
+      && !knownCorner
+      && !cornerTrap;
+    const centralHallVisualCandidate = controller.computerRoomEntered
+      && controller.doorOpenedCount >= 1
+      && centralHallFrame >= 900
+      && controller.gameplayLuma >= 82
+      && controller.darkAreaScore <= 0.1
+      && depthEstimate >= 0.78
+      && openView
+      && wallPressure <= 22
+      && centralHallLateralBalance <= 36
+      && !computerPanelStillVisible
+      && !cornered
+      && !knownCorner
+      && !cornerTrap;
+    const centralHallCandidate = bridgeExitCandidate || centralHallVisualCandidate;
+    if (centralHallCandidate) {
+      controller.centralHallFrames = Math.min(MAX_STUCK_COUNTER, controller.centralHallFrames + 1);
+    } else {
+      controller.centralHallFrames = Math.max(0, controller.centralHallFrames - 1);
+    }
+
+    if (!controller.centralHallEntered && controller.centralHallFrames >= 8) {
+      controller.centralHallEntered = true;
+      controller.mapSectorId = "visual-central-hall";
+      controller.safetyReason = "central-hall-confirmed";
+    }
+
+    const stairsCandidate = controller.computerRoomEntered
+      && controller.centralHallEntered
+      && depthEstimate >= 0.62
+      && controller.gameplayLuma >= 70
+      && wallPressure >= 18
+      && regionQuantizedFrameChange >= 0.08;
+    if (stairsCandidate) {
+      controller.stairsCandidateFrames = Math.min(MAX_STUCK_COUNTER, controller.stairsCandidateFrames + 1);
+    } else {
+      controller.stairsCandidateFrames = Math.max(0, controller.stairsCandidateFrames - 1);
+    }
+
+    if (!controller.stairsEntered && controller.stairsCandidateFrames >= 12) {
+      controller.stairsEntered = true;
+      controller.mapSectorId = "visual-stairs";
+    }
+
+    const finalRoomCandidate = controller.computerRoomEntered
+      && controller.stairsEntered
+      && controller.gameplayLuma >= 82
+      && controller.darkAreaScore <= 0.08
+      && depthEstimate >= 0.82
+      && openView
+      && Boolean(mapHints?.exitLines || mapHints?.switchLines);
+    if (finalRoomCandidate) {
+      controller.finalRoomCandidateFrames = Math.min(MAX_STUCK_COUNTER, controller.finalRoomCandidateFrames + 1);
+    } else {
+      controller.finalRoomCandidateFrames = Math.max(0, controller.finalRoomCandidateFrames - 1);
+    }
+
+    if (!controller.finalRoomEntered && controller.finalRoomCandidateFrames >= 14) {
+      controller.finalRoomEntered = true;
+      controller.mapSectorId = "visual-final-room";
+    }
+
+    controller.updateCombatMilestones(enemy);
+    controller.sensorTensorPacket = buildSensorTensorPacket(controller, features);
+    return {
+      combatContextActive,
+      darkZoneCandidate,
+      firstDoorLikelyOpened
+    };
+  }
+
+  function buildSensorTensorPacket(controller, features = {}) {
+    return requireSensorTensor("buildPacket")(controller, features);
+  }
+
+  function readSensorTensorChannel(packet, channel) {
+    return requireSensorTensor("readChannel")(packet, channel);
+  }
+
+  function readSensorTensorEvidence(controller) {
+    return requireSensorTensor("readEvidence")(controller);
+  }
+
+  function serializeSensorTensorPacket(packet) {
+    return requireSensorTensor("serializePacket")(packet);
+  }
+
+  function requireSensorTensor(name) {
+    const fn = self.AIKernelDoomSensorTensor?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernelDoomSensorTensor.${name} is not loaded.`);
+    }
+
+    return fn;
+  }
+
   function resolveExternalPredictor() {
     const candidates = [
       self.BonsaiRuntime,
@@ -6242,92 +6445,23 @@
   }
 
   function scoreEnemyPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return { score: 0, name: "none" };
-    }
-
-    const offset = index * 4;
-    return scoreEnemyRgb(rgbaBytes[offset] || 0, rgbaBytes[offset + 1] || 0, rgbaBytes[offset + 2] || 0);
+    return requireVisionPalette("scoreEnemyPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreProjectilePaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const hsv = rgbToHsv(red, green, blue);
-    const brightness = (red + green + blue) / 3;
-    const warmHue = hueInRange(hsv.hue, 8, 54) || hueInRange(hsv.hue, 350, 360);
-    const warm = warmHue && hsv.saturation >= 0.36 && hsv.value >= 0.18;
-    const redDominance = red - Math.max(green * 0.72, blue * 1.4);
-    const orangeBalance = green > blue ? clamp01((green - blue) / 128) : 0;
-    const hueScore = warmHue ? 0.44 : 0;
-    return warm
-      ? clamp01(hueScore + (hsv.saturation * 0.22) + (redDominance / 180) * 0.22 + orangeBalance * 0.08 + clamp01((brightness - 38) / 160) * 0.04)
-      : 0;
+    return requireVisionPalette("scoreProjectilePaletteIndex")(index, rgbaBytes);
   }
 
   function scoreResourcePaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const hsv = rgbToHsv(red, green, blue);
-    const brightness = (red + green + blue) / 3;
-    const blueResource = hueInRange(hsv.hue, 178, 250) && hsv.saturation >= 0.28 && hsv.value >= 0.2;
-    const greenResource = hueInRange(hsv.hue, 78, 158) && hsv.saturation >= 0.26 && hsv.value >= 0.2;
-    const brightPickup = brightness > 164 && Math.max(red, green, blue) - Math.min(red, green, blue) < 78;
-    return blueResource || greenResource || brightPickup
-      ? clamp01((hsv.saturation * 0.44) + clamp01((brightness - 42) / 180) * 0.36 + (brightPickup ? 0.2 : 0))
-      : 0;
+    return requireVisionPalette("scoreResourcePaletteIndex")(index, rgbaBytes);
   }
 
   function rgbToHsv(red, green, blue) {
-    const r = clamp01(Number(red || 0) / 255);
-    const g = clamp01(Number(green || 0) / 255);
-    const b = clamp01(Number(blue || 0) / 255);
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-    let hue = 0;
-    if (delta > 0) {
-      if (max === r) {
-        hue = 60 * (((g - b) / delta) % 6);
-      } else if (max === g) {
-        hue = 60 * (((b - r) / delta) + 2);
-      } else {
-        hue = 60 * (((r - g) / delta) + 4);
-      }
-    }
-
-    if (hue < 0) {
-      hue += 360;
-    }
-
-    return {
-      hue,
-      saturation: max === 0 ? 0 : delta / max,
-      value: max
-    };
+    return requireVisionPalette("rgbToHsv")(red, green, blue);
   }
 
   function hueInRange(hue, min, max) {
-    const value = ((Number(hue || 0) % 360) + 360) % 360;
-    const lower = ((Number(min || 0) % 360) + 360) % 360;
-    const upper = ((Number(max || 0) % 360) + 360) % 360;
-    if (lower <= upper) {
-      return value >= lower && value <= upper;
-    }
-
-    return value >= lower || value <= upper;
+    return requireVisionPalette("hueInRange")(hue, min, max);
   }
 
   function applyMorphologyMask(values, columns, rows, operation, iterations) {
@@ -6390,316 +6524,75 @@
   }
 
   function scoreDarkPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return { score: 0, luma: 0 };
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const max = Math.max(red, green, blue);
-    const min = Math.min(red, green, blue);
-    const saturation = max - min;
-    const dark = luma <= DARK_ZONE_LUMA_THRESHOLD && saturation >= 8;
-    return {
-      score: dark ? clamp01((DARK_ZONE_LUMA_THRESHOLD - luma) / DARK_ZONE_LUMA_THRESHOLD) : 0,
-      luma
-    };
+    return requireVisionPalette("scoreDarkPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreBlueFloorPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const brightness = (red + green + blue) / 3;
-    const blueDominance = blue - Math.max(red, green);
-    const mutedBlue = blue >= 44 && blue <= 190 && brightness >= 24 && brightness <= 150;
-    return mutedBlue && blueDominance >= 10
-      ? clamp01((blueDominance - 10) / 64)
-      : 0;
+    return requireVisionPalette("scoreBlueFloorPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreCourtyardLowerPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const brightness = (red + green + blue) / 3;
-    const greenDominance = green - Math.max(red, blue);
-    const nukageLike = green >= 34 && green <= 190 && brightness >= 18 && brightness <= 150;
-    return nukageLike && greenDominance >= 8
-      ? clamp01((greenDominance - 8) / 72)
-      : 0;
+    return requireVisionPalette("scoreCourtyardLowerPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreCourtyardUpperPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const max = Math.max(red, green, blue);
-    const min = Math.min(red, green, blue);
-    const saturation = max - min;
-    const darkGreen = green >= Math.max(red, blue) - 2 && luma <= 72 && saturation >= 8;
-    const paleGray = luma >= 88 && luma <= 196 && saturation <= 24;
-    return darkGreen
-      ? clamp01((72 - luma) / 72)
-      : (paleGray ? clamp01((196 - Math.abs(luma - 142)) / 196) : 0);
+    return requireVisionPalette("scoreCourtyardUpperPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreSpawnSecretDoorPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const brightWhite = luma >= 148 && saturation <= 42;
-    const washedGray = luma >= 118 && saturation <= 30;
-    return brightWhite
-      ? clamp01((luma - 122) / 104)
-      : (washedGray ? clamp01((luma - 106) / 104) * 0.42 : 0);
+    return requireVisionPalette("scoreSpawnSecretDoorPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreSpawnWestStairDarkPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const darkOpening = luma >= 8 && luma <= 72 && saturation <= 58;
-    return darkOpening ? clamp01((76 - luma) / 68) : 0;
+    return requireVisionPalette("scoreSpawnWestStairDarkPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreSpawnWestStairLampPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const hsv = rgbToHsv(red, green, blue);
-    const warmLamp = red >= 82 && green >= 44 && red >= blue + 30 && green >= blue + 12 && luma >= 44;
-    const paleTip = luma >= 132 && hsv.saturation >= 0.18 && hueInRange(hsv.hue, 16, 58);
-    return warmLamp
-      ? clamp01(((red - blue) / 150) * 0.56 + hsv.saturation * 0.26 + clamp01((luma - 40) / 154) * 0.18)
-      : (paleTip ? clamp01((luma - 110) / 118) * 0.74 : 0);
+    return requireVisionPalette("scoreSpawnWestStairLampPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreSpawnCorridorGapPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const panelDark = luma >= 18 && luma <= 92 && saturation <= 48;
-    return panelDark ? clamp01((92 - luma) / 74) : 0;
+    return requireVisionPalette("scoreSpawnCorridorGapPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreSpawnCorridorPillarPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const brown = red >= green + 6 && green >= blue - 4 && luma >= 42 && luma <= 154;
-    const gray = Math.max(red, green, blue) - Math.min(red, green, blue) <= 28 && luma >= 54 && luma <= 178;
-    return brown || gray ? clamp01((luma - 32) / 108) : 0;
+    return requireVisionPalette("scoreSpawnCorridorPillarPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreBridgeBrownPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const brown = red >= green - 2 && green >= blue + 4 && luma >= 38 && luma <= 156 && saturation >= 10;
-    return brown ? clamp01((saturation - 8) / 74) : 0;
+    return requireVisionPalette("scoreBridgeBrownPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreBridgeGreenPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const greenDominance = green - Math.max(red, blue);
-    const darkGreenWall = green >= Math.max(red, blue) - 1 && luma >= 18 && luma <= 116;
-    const nukage = green >= 28 && greenDominance >= 5 && luma >= 18 && luma <= 158;
-    return nukage
-      ? clamp01((greenDominance + 12) / 86)
-      : (darkGreenWall ? clamp01((116 - luma) / 108) * 0.7 : 0);
+    return requireVisionPalette("scoreBridgeGreenPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreBridgeDoorPanelPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const darkDoorBrown = red >= green - 4 && green >= blue - 2 && luma >= 18 && luma <= 96 && saturation >= 10;
-    const blackPanel = luma >= 8 && luma <= 42 && saturation <= 36;
-    return darkDoorBrown
-      ? clamp01((96 - luma) / 78)
-      : (blackPanel ? clamp01((42 - luma) / 34) * 0.68 : 0);
+    return requireVisionPalette("scoreBridgeDoorPanelPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreFirstDoorRedAccentPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const hsv = rgbToHsv(red, green, blue);
-    const brightness = (red + green + blue) / 3;
-    const redHue = hueInRange(hsv.hue, 348, 18);
-    const redDominance = red - Math.max(green * 1.08, blue * 1.18);
-    const orangeLeak = green > blue + 8 && green >= red * 0.54;
-    if (!redHue || orangeLeak || redDominance < 16 || hsv.saturation < 0.34 || hsv.value < 0.14) {
-      return 0;
-    }
-
-    return clamp01(
-      (redDominance / 148) * 0.48
-      + hsv.saturation * 0.28
-      + clamp01((brightness - 28) / 156) * 0.24);
+    return requireVisionPalette("scoreFirstDoorRedAccentPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreComputerRoomBluePaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const blueDominance = blue - Math.max(red, green);
-    const darkPanelBlue = blue >= 34 && blueDominance >= 6 && luma >= 14 && luma <= 116;
-    return darkPanelBlue ? clamp01((blueDominance + 18) / 88) : 0;
+    return requireVisionPalette("scoreComputerRoomBluePaletteIndex")(index, rgbaBytes);
   }
 
   function scoreComputerRoomRedLightPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const redDominance = red - Math.max(green, blue);
-    const redLamp = red >= 72 && redDominance >= 24 && luma >= 22 && luma <= 172;
-    return redLamp ? clamp01((redDominance - 8) / 120) : 0;
+    return requireVisionPalette("scoreComputerRoomRedLightPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreComputerRoomDarkPanelPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const blueFloor = blue >= Math.max(red, green) + 18 && luma >= 28;
-    const nukageGreen = green >= Math.max(red, blue) + 18 && luma >= 34;
-    const darkConsole = luma >= 8 && luma <= 86 && saturation <= 78 && !blueFloor && !nukageGreen;
-    return darkConsole ? clamp01((92 - luma) / 84) : 0;
+    return requireVisionPalette("scoreComputerRoomDarkPanelPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreComputerRoomPanelPaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const greenLed = green >= 42 && green >= red + 4 && green >= blue + 8 && luma >= 18 && luma <= 128;
-    const amberLed = red >= 48 && green >= 28 && red >= blue + 14 && green >= blue + 8 && luma >= 22 && luma <= 142;
-    const grayConsole = Math.abs(red - green) <= 24 && Math.abs(green - blue) <= 28 && luma >= 34 && luma <= 126;
-    return greenLed
-      ? clamp01((green - blue + 16) / 92)
-      : (amberLed ? clamp01((red + green - blue) / 210) : (grayConsole ? 0.28 : 0));
+    return requireVisionPalette("scoreComputerRoomPanelPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreFootObstaclePaletteIndex(index, rgbaBytes) {
-    if (!rgbaBytes || index < 0 || index > 255) {
-      return 0;
-    }
-
-    const offset = index * 4;
-    const red = rgbaBytes[offset] || 0;
-    const green = rgbaBytes[offset + 1] || 0;
-    const blue = rgbaBytes[offset + 2] || 0;
-    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    const barrelBrown = red >= green - 2 && green >= blue + 2 && luma >= 34 && luma <= 134 && saturation >= 12;
-    const metalGray = saturation <= 30 && luma >= 52 && luma <= 162;
-    return barrelBrown
-      ? clamp01((saturation - 8) / 78)
-      : (metalGray ? clamp01((162 - Math.abs(luma - 96)) / 162) * 0.42 : 0);
+    return requireVisionPalette("scoreFootObstaclePaletteIndex")(index, rgbaBytes);
   }
 
   function chooseBridgeLaneTurn(left, center, right) {
@@ -6780,26 +6673,7 @@
   }
 
   function scoreEnemyRgb(red, green, blue) {
-    let best = { score: 0, name: "none" };
-    const brightness = (red + green + blue) / 3;
-    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
-    if (brightness < 24 || brightness > 226 || saturation < 18) {
-      return best;
-    }
-
-    for (let index = 0; index < ENEMY_COLOR_CLUSTERS.length; index += 1) {
-      const cluster = ENEMY_COLOR_CLUSTERS[index];
-      const dr = red - cluster.r;
-      const dg = green - cluster.g;
-      const db = blue - cluster.b;
-      const distance = Math.sqrt((dr * dr) + (dg * dg) + (db * db));
-      const score = Math.max(0, 1 - (distance / 128));
-      if (score > best.score) {
-        best = { score, name: cluster.name };
-      }
-    }
-
-    return best.score >= 0.18 ? best : { score: 0, name: "none" };
+    return requireVisionPalette("scoreEnemyRgb")(red, green, blue);
   }
 
   function isEnemyThingType(type) {
@@ -7054,76 +6928,19 @@
   }
 
   function refineHealthState(healthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta) {
-    const zeroScore = clamp01(Number(healthState?.zeroScore || 0));
-    const faceScore = clamp01(Number(faceDeathScore || 0));
-    const activeCells = Number(healthState?.activeCells || 0);
-    const activeColumns = Number(healthState?.activeColumns || 0);
-    const faceStable = Number(faceQuantizedFrameChange ?? 255) <= 0.08;
-    const visualStable = Number(visualStallDelta ?? 255) <= 0.08;
-    const freezeScore = clamp01((faceStable ? 0.5 : 0) + (visualStable ? 0.5 : 0));
-    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
-    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
-    const faceDeath = (sparseHealthDigits && zeroScore >= 0.44 && faceScore >= 0.24)
-      || (severeHealthDigits && faceScore >= 0.22);
-    const frozenDeath = sparseHealthDigits && zeroScore >= 0.52 && faceScore >= 0.14 && freezeScore >= 0.75;
-    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath;
-    return Object.assign({}, healthState || {}, {
-      likelyDead,
-      faceDeathScore: faceScore,
-      freezeScore,
-      retryReason: likelyDead
-        ? (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score"))
-        : "none"
-    });
+    return requireSensoryCognition("refineHealthState")(healthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta);
   }
 
   function estimateFaceDeathScore(quantizedFace) {
-    if (!Array.isArray(quantizedFace) || quantizedFace.length === 0) {
-      return 0;
-    }
-
-    let danger = 0;
-    let critical = 0;
-    const length = quantizedFace.length;
-    for (let index = 0; index < length; index += 1) {
-      const value = Number(quantizedFace[index] || 0);
-      if (value >= 5) {
-        danger += 1;
-      }
-      if (value >= 7) {
-        critical += 1;
-      }
-    }
-
-    return clamp01((danger / length) * 2.4 + (critical / length) * 1.2);
+    return requireSensoryCognition("estimateFaceDeathScore")(quantizedFace);
   }
 
   function createDisabledHealthState(signature) {
-    return {
-      signature: signature || "000000000000000000000000",
-      likelyDead: false,
-      zeroScore: 0,
-      activeColumns: 0,
-      activeCells: 0,
-      faceDeathScore: 0,
-      freezeScore: 0,
-      retryReason: "sensor-cutoff"
-    };
+    return requireSensoryCognition("createDisabledHealthState")(signature);
   }
 
   function countActiveColumns(sample, columns) {
-    if (!sample?.length || columns <= 0) {
-      return 0;
-    }
-
-    const active = new Set();
-    for (let index = 0; index < sample.length; index += 1) {
-      if (Number(sample[index] || 0) > 0) {
-        active.add(index % columns);
-      }
-    }
-
-    return active.size;
+    return requireSensoryCognition("countActiveColumns")(sample, columns);
   }
 
   function round2(value) {
@@ -7135,17 +6952,7 @@
   }
 
   function averageSampleDelta(previous, current) {
-    if (!previous?.length || !current?.length) {
-      return 255;
-    }
-
-    const count = Math.min(previous.length, current.length);
-    let total = 0;
-    for (let index = 0; index < count; index += 1) {
-      total += Math.abs((previous[index] || 0) - (current[index] || 0));
-    }
-
-    return total / count;
+    return requireSensorTensor("averageSampleDelta")(previous, current);
   }
 
   function selectBobFilteredPreviousFrame(history, currentRegion9) {
@@ -7174,58 +6981,7 @@
   }
 
   function analyzeRegion9Motion(previous, current, action) {
-    const safe = normalizeAction(action);
-    const fallback = {
-      signature: "000000000",
-      delta: 255,
-      forwardProgress: 0,
-      obstacleScore: 0,
-      turnScore: 0,
-      entranceScore: 0,
-      stallScore: 0,
-      intent: resolveMotionIntent(safe)
-    };
-    if (!previous?.length || !current?.length) {
-      return fallback;
-    }
-
-    const count = Math.min(REGION9_COLUMNS * REGION9_ROWS, previous.length, current.length);
-    const motion = new Array(REGION9_COLUMNS * REGION9_ROWS).fill(0);
-    let total = 0;
-    for (let index = 0; index < count; index += 1) {
-      const value = Math.abs((current[index] || 0) - (previous[index] || 0));
-      motion[index] = value;
-      total += value;
-    }
-
-    const top = averageValues(motion[0], motion[1], motion[2]);
-    const middle = averageValues(motion[3], motion[4], motion[5]);
-    const bottom = averageValues(motion[6], motion[7], motion[8]);
-    const left = averageValues(motion[0], motion[3], motion[6]);
-    const center = averageValues(motion[1], motion[4], motion[7]);
-    const right = averageValues(motion[2], motion[5], motion[8]);
-    const centerObstacle = averageValues(motion[4], motion[7]);
-    const sideMotion = averageValues(left, right);
-    const delta = count ? total / count : 255;
-    const forwardProgress = clamp01((center * 0.55 + top * 0.25 + middle * 0.2) / 4);
-    const obstacleScore = clamp01((centerObstacle - sideMotion * 0.35 + bottom * 0.12) / 4);
-    const turnScore = clamp01(Math.abs(left - right) / 4);
-    const entranceScore = clamp01(right / 4);
-    const stallScore = clamp01(1 - (delta / 2.2));
-    const signature = motion
-      .map(value => Math.max(0, Math.min(15, Math.round(value))).toString(16))
-      .join("");
-
-    return {
-      signature,
-      delta: round2(delta),
-      forwardProgress: round2(forwardProgress),
-      obstacleScore: round2(obstacleScore),
-      turnScore: round2(turnScore),
-      entranceScore: round2(entranceScore),
-      stallScore: round2(stallScore),
-      intent: resolveMotionIntent(safe)
-    };
+    return requireKinesisCognition("analyzeRegion9Motion")(previous, current, action);
   }
 
   function averageValues(...values) {
@@ -7242,32 +6998,15 @@
   }
 
   function resolveMotionIntent(action) {
-    const move = action?.move === "forward" ? "forward" : (action?.move === "back" ? "back" : "");
-    const turn = action?.turn === "left" || action?.turn === "right" ? "turn" : "";
-    const strafe = action?.strafe ? "strafe" : "";
-    const parts = [move, turn, strafe].filter(Boolean);
-    return parts.length ? parts.join("-") : "idle";
+    return requireKinesisCognition("resolveMotionIntent")(action);
   }
 
   function quantizeFrameSample(sample) {
-    if (!sample?.length) {
-      return [];
-    }
-
-    const quantized = new Array(sample.length);
-    for (let index = 0; index < sample.length; index += 1) {
-      quantized[index] = Math.round((sample[index] || 0) / WALL_QUANTIZATION_STEP);
-    }
-
-    return quantized;
+    return requireSensorTensor("quantizeFrameSample")(sample, WALL_QUANTIZATION_STEP);
   }
 
   function regionSignature(sample) {
-    if (!sample?.length) {
-      return "000000";
-    }
-
-    return sample.map(value => Math.max(0, Math.min(15, value || 0)).toString(16)).join("");
+    return requireSensorTensor("regionSignature")(sample, "000000");
   }
 
   function estimateDepthDistance(depthSample) {
@@ -7732,106 +7471,19 @@
   }
 
   function createAuditorySnapshot(overrides = {}) {
-    const leftEnergy = clamp01(Number(overrides.leftEnergy ?? 0));
-    const rightEnergy = clamp01(Number(overrides.rightEnergy ?? 0));
-    const balance = Math.max(-1, Math.min(1, Number(overrides.balance ?? 0) || 0));
-    const lowEnergy = clamp01(Number(overrides.lowEnergy ?? 0));
-    const midEnergy = clamp01(Number(overrides.midEnergy ?? 0));
-    const highEnergy = clamp01(Number(overrides.highEnergy ?? 0));
-    return {
-      leftEnergy: round2(leftEnergy),
-      rightEnergy: round2(rightEnergy),
-      balance: round2(balance),
-      dominantFreq: round2(Number(overrides.dominantFreq ?? 0)),
-      lowEnergy: round2(lowEnergy),
-      midEnergy: round2(midEnergy),
-      highEnergy: round2(highEnergy),
-      dominantBand: overrides.dominantBand || "none",
-      eventDetected: Boolean(overrides.eventDetected),
-      eventType: normalizeAuditoryEventType(overrides.eventType),
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireSensoryCognition("createAuditorySnapshot")(overrides);
   }
 
   function buildAuditorySnapshot(state) {
-    const source = state?.auditorySnapshot || state?.audio || {};
-    const leftEnergy = clamp01(Number(source.leftEnergy ?? source.leftLevel ?? source.left ?? 0));
-    const rightEnergy = clamp01(Number(source.rightEnergy ?? source.rightLevel ?? source.right ?? 0));
-    const balance = Math.max(-1, Math.min(1, Number(source.balance ?? 0) || 0));
-    const dominantFreq = Number(source.dominantFreq ?? source.frequency ?? source.dominantFrequency ?? 0);
-    const eventDetected = Boolean(source.eventDetected ?? source.active);
-    const bandEnergy = buildAudioBandEnergy(source, dominantFreq, Math.max(leftEnergy, rightEnergy));
-    return createAuditorySnapshot({
-      leftEnergy,
-      rightEnergy,
-      balance,
-      dominantFreq,
-      lowEnergy: bandEnergy.lowEnergy,
-      midEnergy: bandEnergy.midEnergy,
-      highEnergy: bandEnergy.highEnergy,
-      dominantBand: bandEnergy.dominantBand,
-      eventDetected,
-      eventType: eventDetected ? normalizeAuditoryEventType(source.eventType) : "none",
-      timestamp: source.timestamp || state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    });
+    return requireSensoryCognition("buildAuditorySnapshot")(state);
   }
 
   function buildAudioBandEnergy(source, dominantFreq, totalEnergy) {
-    const low = source?.lowEnergy ?? source?.lowBandEnergy ?? source?.bands?.low;
-    const mid = source?.midEnergy ?? source?.middleEnergy ?? source?.midBandEnergy ?? source?.bands?.mid;
-    const high = source?.highEnergy ?? source?.highBandEnergy ?? source?.bands?.high;
-    if (Number.isFinite(Number(low)) || Number.isFinite(Number(mid)) || Number.isFinite(Number(high))) {
-      const lowEnergy = clamp01(Number(low || 0));
-      const midEnergy = clamp01(Number(mid || 0));
-      const highEnergy = clamp01(Number(high || 0));
-      return {
-        lowEnergy,
-        midEnergy,
-        highEnergy,
-        dominantBand: chooseDominantAudioBand(lowEnergy, midEnergy, highEnergy)
-      };
-    }
-
-    const energy = clamp01(Number(totalEnergy || 0));
-    const frequency = Number(dominantFreq || 0);
-    if (energy <= 0) {
-      return { lowEnergy: 0, midEnergy: 0, highEnergy: 0, dominantBand: "none" };
-    }
-
-    if (frequency <= 0) {
-      return {
-        lowEnergy: round2(energy * 0.38),
-        midEnergy: round2(energy * 0.72),
-        highEnergy: round2(energy * 0.28),
-        dominantBand: "mid"
-      };
-    }
-
-    if (frequency < 280) {
-      return { lowEnergy: energy, midEnergy: round2(energy * 0.32), highEnergy: 0, dominantBand: "low" };
-    }
-
-    if (frequency < 2100) {
-      return { lowEnergy: round2(energy * 0.24), midEnergy: energy, highEnergy: round2(energy * 0.18), dominantBand: "mid" };
-    }
-
-    return { lowEnergy: 0, midEnergy: round2(energy * 0.28), highEnergy: energy, dominantBand: "high" };
+    return requireSensoryCognition("buildAudioBandEnergy")(source, dominantFreq, totalEnergy);
   }
 
   function chooseDominantAudioBand(lowEnergy, midEnergy, highEnergy) {
-    const low = Number(lowEnergy || 0);
-    const mid = Number(midEnergy || 0);
-    const high = Number(highEnergy || 0);
-    const peak = Math.max(low, mid, high);
-    if (peak <= 0.02) {
-      return "none";
-    }
-
-    if (high >= mid && high >= low) {
-      return "high";
-    }
-
-    return mid >= low ? "mid" : "low";
+    return requireSensoryCognition("chooseDominantAudioBand")(lowEnergy, midEnergy, highEnergy);
   }
 
   function classifyUseAuditoryResponse(controller, auditory, context) {
@@ -7890,21 +7542,7 @@
   }
 
   function createSpatialSnapshot(overrides = {}) {
-    const visualDirection = Number(overrides.visualDirection ?? 0);
-    const auditoryCorrection = Number(overrides.auditoryCorrection ?? 0);
-    const fusedDirection = Number(overrides.fusedDirection ?? 0);
-    return {
-      visualDirection: round2(visualDirection),
-      auditoryCorrection: round2(auditoryCorrection),
-      fusedDirection: round2(fusedDirection),
-      hudX: round2(clamp01(Number(overrides.hudX ?? 0.5))),
-      hudY: round2(clamp01(Number(overrides.hudY ?? 0.45))),
-      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
-      eventDetected: Boolean(overrides.eventDetected),
-      eventType: normalizeAuditoryEventType(overrides.eventType),
-      gain: Number(overrides.gain ?? 0)
-    };
+    return requireSensoryCognition("createSpatialSnapshot")(overrides);
   }
 
   function buildSpatialSnapshot(state, auditory) {
@@ -7925,231 +7563,39 @@
   }
 
   function createVisionSensorSnapshot(overrides = {}) {
-    const quantized = normalizeVision9x9(overrides.quantized);
-    const signature = overrides.signature || regionSignature(quantized).padEnd(VISION_GRID_COLUMNS * VISION_GRID_ROWS, "0").slice(0, VISION_GRID_COLUMNS * VISION_GRID_ROWS);
-    const confidence = clamp01(Number(overrides.confidence ?? 0));
-    return {
-      active: Boolean(overrides.active),
-      gridColumns: VISION_GRID_COLUMNS,
-      gridRows: VISION_GRID_ROWS,
-      quantized,
-      signature,
-      left: Number(overrides.left || 0),
-      center: Number(overrides.center || 0),
-      right: Number(overrides.right || 0),
-      confidence: round2(confidence),
-      eventDetected: Boolean(overrides.eventDetected ?? confidence >= 0.62),
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireSensoryCognition("createVisionSensorSnapshot")(overrides);
   }
 
   function createMotorSensorSnapshot(overrides = {}) {
-    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
-    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
-    return {
-      active: Boolean(overrides.active),
-      move: overrides.move || "none",
-      turn: overrides.turn || "none",
-      strafe: Boolean(overrides.strafe),
-      run: Boolean(overrides.run),
-      use: Boolean(overrides.use),
-      fire: Boolean(overrides.fire),
-      vectorX: round2(vectorX),
-      vectorY: round2(vectorY),
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireKinesisCognition("createMotorSensorSnapshot")(overrides);
   }
 
   function createMovementSensorSnapshot(overrides = {}) {
-    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
-    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
-    const speed = clamp01(Number(overrides.speed ?? Math.sqrt((vectorX * vectorX) + (vectorY * vectorY))));
-    const confidence = clamp01(Number(overrides.confidence ?? speed));
-    return {
-      active: Boolean(overrides.active),
-      vectorX: round2(vectorX),
-      vectorY: round2(vectorY),
-      speed: round2(speed),
-      turn: ternarySigned(vectorX),
-      advance: ternarySigned(vectorY),
-      confidence: round2(confidence),
-      eventDetected: Boolean(overrides.eventDetected ?? confidence >= 0.42),
-      eventType: overrides.eventType || "movement",
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireKinesisCognition("createMovementSensorSnapshot")(overrides);
   }
 
   function createCompassSensorSnapshot(overrides = {}) {
-    const heading = ((Number(overrides.heading ?? 0) % 360) + 360) % 360;
-    const baseHeading = ((Number(overrides.baseHeading ?? heading) % 360) + 360) % 360;
-    const vectorX = clampSigned(Number(overrides.vectorX ?? 0));
-    const vectorY = clampSigned(Number(overrides.vectorY ?? 0));
-    const active = Boolean(overrides.active);
-    const confidence = round2(clamp01(Number(overrides.confidence ?? 0)));
-    const headingUsable = overrides.headingUsable == null
-      ? active && confidence >= 0.05 && !overrides.headingUncertain
-      : overrides.headingUsable !== false && !overrides.headingUncertain;
-    return {
-      active,
-      heading: round2(heading),
-      origin: overrides.origin || "N=0deg",
-      baseHeading: round2(baseHeading),
-      vectorX: round2(vectorX),
-      vectorY: round2(vectorY),
-      visualBias: round2(clampSigned(Number(overrides.visualBias || 0))),
-      visualFlowBias: round2(clampSigned(Number(overrides.visualFlowBias || 0))),
-      baseFlowBias: round2(clampSigned(Number(overrides.baseFlowBias || 0))),
-      motorBias: round2(clampSigned(Number(overrides.motorBias || 0))),
-      audioBias: round2(clampSigned(Number(overrides.audioBias || 0))),
-      movementBias: round2(clampSigned(Number(overrides.movementBias || 0))),
-      visualBiasDelta: round2(Number(overrides.visualBiasDelta || 0)),
-      visualFlowDelta: round2(Number(overrides.visualFlowDelta || 0)),
-      baseFlowDelta: round2(Number(overrides.baseFlowDelta || 0)),
-      motorDelta: round2(Number(overrides.motorDelta || 0)),
-      audioDelta: round2(Number(overrides.audioDelta || 0)),
-      movementDelta: round2(Number(overrides.movementDelta || 0)),
-      landmarkDelta: round2(Number(overrides.landmarkDelta || 0)),
-      motorHeading: overrides.motorHeading == null ? null : round2(Number(overrides.motorHeading)),
-      visualFlowHeading: overrides.visualFlowHeading == null ? null : round2(Number(overrides.visualFlowHeading)),
-      rotationInstructionDelta: round2(Number(overrides.rotationInstructionDelta || 0)),
-      frameBufferVectorDelta: round2(Number(overrides.frameBufferVectorDelta || 0)),
-      edgeSnapDelta: round2(Number(overrides.edgeSnapDelta || 0)),
-      edgeSnapHeading: overrides.edgeSnapHeading == null ? null : round2(Number(overrides.edgeSnapHeading)),
-      edgeSnapConfidence: round2(clamp01(Number(overrides.edgeSnapConfidence || 0))),
-      edgeSnapWeight: round2(clamp01(Number(overrides.edgeSnapWeight || 0))),
-      correctionDegrees: round2(Number(overrides.correctionDegrees || 0)),
-      correctionSource: overrides.correctionSource || "relative-sensor-fusion",
-      landmark: overrides.landmark || "",
-      landmarkKind: overrides.landmarkKind || "",
-      landmarkLabel: overrides.landmarkLabel || "",
-      landmarkHeading: overrides.landmarkHeading == null ? null : round2(Number(overrides.landmarkHeading)),
-      landmarkConfidence: round2(clamp01(Number(overrides.landmarkConfidence || 0))),
-      landmarkForced: Boolean(overrides.landmarkForced),
-      evidence: round2(clamp01(Number(overrides.evidence || 0))),
-      confidence,
-      headingUsable,
-      headingUncertain: !headingUsable,
-      headingReliability: overrides.headingReliability || (headingUsable ? "relative-stable" : "relative-uncertain"),
-      useCompassForRouting: headingUsable && overrides.useCompassForRouting !== false,
-      contextResetActive: Boolean(overrides.contextResetActive),
-      wallFollowActive: Boolean(overrides.wallFollowActive),
-      wallOnlyView: Boolean(overrides.wallOnlyView),
-      corridorOnlyView: Boolean(overrides.corridorOnlyView),
-      source: overrides.source || "relative-sensor-fusion",
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireKinesisCognition("createCompassSensorSnapshot")(overrides);
   }
 
   function createSpatialSensorSnapshot(overrides = {}) {
-    return {
-      active: Boolean(overrides.active),
-      vectorX: round2(clampSigned(Number(overrides.vectorX ?? 0))),
-      vectorY: round2(clampSigned(Number(overrides.vectorY ?? 0))),
-      fusedDirection: round2(Number(overrides.fusedDirection ?? 0)),
-      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
-      historyFrames: Number(overrides.historyFrames || 0),
-      eventDetected: Boolean(overrides.eventDetected),
-      eventType: overrides.eventType || "none",
-      hudX: round2(clamp01(Number(overrides.hudX ?? 0.5))),
-      hudY: round2(clamp01(Number(overrides.hudY ?? 0.45))),
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireKinesisCognition("createSpatialSensorSnapshot")(overrides);
   }
 
   function createNousCarrier(overrides = {}) {
-    return {
-      normalizedSensorMap: overrides.normalizedSensorMap || {},
-      spatial9x9: overrides.spatial9x9 || {
-        baseColumns: REGION9_COLUMNS,
-        baseRows: REGION9_ROWS,
-        baseSignature: "000000000",
-        baseFeatures: [],
-        columns: VISION_GRID_COLUMNS,
-        rows: VISION_GRID_ROWS,
-        signature: "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS),
-        features: []
-      },
-      movementEnvelope: overrides.movementEnvelope || {
-        x: "neutral",
-        y: "neutral",
-        rotation: "neutral"
-      },
-      healthEnvelope: overrides.healthEnvelope || {
-        life: "neutral",
-        retry: "neutral"
-      },
-      bonsaiTernary: overrides.bonsaiTernary || {
-        aisthesis: "neutral",
-        kinesis: "neutral",
-        phantasia: "neutral"
-      },
-      ctgTrace: overrides.ctgTrace || {
-        canonId: CTG_ROM_CANON_ID,
-        policyId: CTG_ROM_POLICY_ID,
-        gateExecuted: false,
-        ternaryTrace: {}
-      },
-      cognitionHints: overrides.cognitionHints || {},
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireNousCognition("createNousCarrier")(overrides);
   }
 
   function createChronosWindow(overrides = {}) {
-    const frames = Array.isArray(overrides.frames) ? overrides.frames.slice(-CHRONOS_WINDOW_LIMIT) : [];
-    return { frames };
+    return requirePhantasiaCognition("createChronosWindow")(overrides);
   }
 
   function createPhantasiaSnapshot(overrides = {}) {
-    return {
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP,
-      signature: overrides.signature || "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS),
-      base3x3Signature: overrides.base3x3Signature || "000000000",
-      base3x3: overrides.base3x3 || [],
-      spatial9x9: overrides.spatial9x9 || [],
-      rawSpatial9x9: overrides.rawSpatial9x9 || overrides.spatial9x9 || [],
-      dynamicMask9x9: overrides.dynamicMask9x9 || [],
-      dynamicMaskCells: Number(overrides.dynamicMaskCells || 0),
-      baseDirection: normalizeRelativeDirection(overrides.baseDirection),
-      projectile9x9: overrides.projectile9x9 || [],
-      projectileScore: round2(clamp01(Number(overrides.projectileScore ?? 0))),
-      projectileDirection: normalizeRelativeDirection(overrides.projectileDirection),
-      resource9x9: overrides.resource9x9 || [],
-      resourceScore: round2(clamp01(Number(overrides.resourceScore ?? 0))),
-      resourceDirection: normalizeRelativeDirection(overrides.resourceDirection),
-      enemyConfidence: round2(clamp01(Number(overrides.enemyConfidence ?? 0))),
-      audioBalance: round2(clampSigned(Number(overrides.audioBalance ?? 0))),
-      audioEnergy: round2(clamp01(Number(overrides.audioEnergy ?? 0))),
-      audioLowEnergy: round2(clamp01(Number(overrides.audioLowEnergy ?? 0))),
-      audioMidEnergy: round2(clamp01(Number(overrides.audioMidEnergy ?? 0))),
-      audioHighEnergy: round2(clamp01(Number(overrides.audioHighEnergy ?? 0))),
-      audioDominantBand: overrides.audioDominantBand || "none",
-      movementSpeed: round2(clamp01(Number(overrides.movementSpeed ?? 0))),
-      motorForward: round2(clampSigned(Number(overrides.motorForward ?? 0))),
-      temporalDelta: round2(clamp01(Number(overrides.temporalDelta ?? 0))),
-      flowX: round2(clampSigned(Number(overrides.flowX ?? 0))),
-      flowY: round2(clampSigned(Number(overrides.flowY ?? 0))),
-      dynamicObjectScore: round2(clamp01(Number(overrides.dynamicObjectScore ?? 0))),
-      spatialConfidence: round2(clamp01(Number(overrides.spatialConfidence ?? 0))),
-      spatialEvent: Boolean(overrides.spatialEvent),
-      healthActiveCells: Number(overrides.healthActiveCells || 0),
-      healthZeroScore: round2(clamp01(Number(overrides.healthZeroScore ?? 0))),
-      faceDelta: round2(Number(overrides.faceDelta ?? 255)),
-      narrowness: round2(clamp01(Number(overrides.narrowness ?? 0))),
-      stuckFrames: Number(overrides.stuckFrames || 0),
-      inputStallFrames: Number(overrides.inputStallFrames || 0)
-    };
+    return requirePhantasiaCognition("createPhantasiaSnapshot")(overrides);
   }
 
   function createNousDetectorResult(overrides = {}) {
-    return {
-      looming: Object.assign({ active: false, direction: null }, overrides.looming || {}),
-      damageLocalization: Object.assign({ active: false, direction: null }, overrides.damageLocalization || {}),
-      trap: Object.assign({ active: false, kind: null }, overrides.trap || {}),
-      stuck: Object.assign({ active: false }, overrides.stuck || {}),
-      explorationEntropy: Object.assign({ high: false }, overrides.explorationEntropy || {}),
-      itemBacktrack: Object.assign({ suggested: false, targetKind: null }, overrides.itemBacktrack || {}),
-      sensorRecovery: Object.assign({ needed: false, reason: null }, overrides.sensorRecovery || {})
-    };
+    return requireNousCognition("createNousDetectorResult")(overrides);
   }
 
   function buildPhantasiaSnapshot(controller, frame, timestamp) {
@@ -9283,23 +8729,7 @@
   }
 
   function normalizeNousSensorMap(sensors) {
-    const normalized = {};
-    const keys = Object.keys(sensors || {}).sort();
-    for (let index = 0; index < keys.length; index += 1) {
-      const key = keys[index];
-      const sensor = sensors[key] || {};
-      normalized[key] = {
-        name: sensor.name || key,
-        conceptName: sensor.conceptName || "",
-        englishName: sensor.englishName || key,
-        category: sensor.category || (key === "movement" || key === "spatial" ? "derived" : "primary"),
-        enabled: sensor.enabled !== false,
-        observed: Boolean(sensor.observed),
-        metadata: Object.assign({}, sensor.metadata || {})
-      };
-    }
-
-    return normalized;
+    return requireNousCognition("normalizeNousSensorMap")(sensors);
   }
 
   function sensorEnabled(sensors, name) {
@@ -9365,48 +8795,13 @@
   }
 
   function createHealthSensorSnapshot(overrides = {}) {
-    const zeroScore = clamp01(Number(overrides.zeroScore ?? 0));
-    const faceDeathScore = clamp01(Number(overrides.faceDeathScore ?? 0));
-    const freezeScore = clamp01(Number(overrides.freezeScore ?? 0));
-    const activeCells = Number(overrides.activeCells || 0);
-    const activeColumns = Number(overrides.activeColumns || 0);
-    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
-    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
-    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, freezeScore * 0.55)));
-    const likelyDead = Boolean(overrides.likelyDead)
-      || (sparseHealthDigits && zeroScore >= 0.44 && faceDeathScore >= 0.24)
-      || (severeHealthDigits && faceDeathScore >= 0.22)
-      || (sparseHealthDigits && zeroScore >= 0.52 && faceDeathScore >= 0.14 && freezeScore >= 0.75);
-    const retryReason = overrides.retryReason || (likelyDead ? "health-death" : "none");
-    const retryRequested = Boolean(overrides.retryRequested ?? (Boolean(overrides.active) && (likelyDead || zeroScore >= 0.78)));
-    return {
-      active: Boolean(overrides.active),
-      signature: overrides.signature || "000000000000000000000000",
-      faceSignature: overrides.faceSignature || "0000000000000000",
-      faceQuantizedFrameChange: round2(Number(overrides.faceQuantizedFrameChange ?? 255)),
-      faceDeathScore: round2(faceDeathScore),
-      freezeScore: round2(freezeScore),
-      zeroScore: round2(zeroScore),
-      activeColumns,
-      activeCells,
-      likelyDead,
-      confidence: round2(confidence),
-      retryRequested,
-      retryReason,
-      retryPipeline: retryRequested ? "Retry" : "none",
-      retryPriority: retryRequested ? Number(overrides.retryPriority ?? 100) : 0,
-      source: overrides.source || "status-health-face-quantized",
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireSensoryCognition("createHealthSensorSnapshot")(overrides);
   }
 
   function buildCtgObservedScores(controller, action, sensor, frame, state) {
+    const tensorEvidence = readSensorTensorEvidence(controller);
     const compass = controller.compassSensorSnapshot || createCompassSensorSnapshot();
-    const headingConfidence = clamp01(Number(compass.confidence || 0));
-    const headingRel = compass.headingUsable === false || compass.headingUncertain
-      ? Math.min(headingConfidence, 0.34)
-      : Math.max(headingConfidence, compass.headingReliability === "absolute-landmark" || compass.headingReliability === "absolute-forced-landmark" ? 0.82 : 0.48);
-    const routeEvidence = clamp01(Math.max(
+    const directRouteEvidence = clamp01(Math.max(
       Number(controller.firstDoorVision9x9Score || 0),
       Number(controller.firstDoorCorridorSignature || 0),
       Number(controller.computerRoomScore || 0),
@@ -9414,12 +8809,10 @@
       Number(controller.spawnCorridorGapScore || 0),
       Number(controller.bridgeDoorScore || 0),
       Number(controller.bridgeBrownScore || 0)));
-    const corridorConfidence = clamp01(Math.max(
+    const directCorridorConfidence = clamp01(Math.max(
       Number(controller.spawnCorridorGapScore || 0),
       Number(controller.firstDoorCorridorLocated ? 0.82 : 0),
       compass.headingReliability === "corridor-ambiguous" ? 0.72 : 0));
-    const corridorPenalty = corridorConfidence >= 0.7 && headingRel < 0.56 ? 0.12 : 0;
-    const logos = clamp01((headingRel * 0.36) + (routeEvidence * 0.48) + (controller.controlPipeline ? 0.12 : 0.04) - corridorPenalty);
     const projectileRaw = clamp01(Number(controller.projectileScore || controller.phantasiaSnapshot?.projectileScore || 0));
     const enemy = getTrustedEnemyThreat(controller);
     const dynamicObjectRaw = clamp01(Number(controller.phantasiaSnapshot?.dynamicObjectScore || controller.dynamicObjectScore || 0));
@@ -9430,21 +8823,11 @@
     const dynamicThreatContext = enemy > 0.35
       || Boolean(controller.nousDetectorResult?.looming?.active)
       || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
-    const dynamicObject = dynamicThreatContext
-      ? dynamicObjectRaw
-      : dynamicObjectRaw * 0.18;
-    const health = controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested ? 1 : 0;
     const terminalUseFocus = controller.exitSwitchPressed
       || controller.finalRoomEntered
       || Number(controller.exitSwitchUseFrames || 0) > 0
       || String(controller.safetyReason || "") === "exit-switch-use";
     const doorTransitionGraceActive = isDoorTransitionGraceActive(controller, state);
-    const nonTerminalDanger = terminalUseFocus
-      ? Math.max(projectile * 0.28, enemy * 0.24, dynamicObject * 0.18)
-      : (doorTransitionGraceActive
-        ? Math.max(projectile * 0.22, enemy * 0.2, dynamicObject * 0.14)
-        : Math.max(projectile, enemy, dynamicObject));
-    const danger = clamp01(Math.max(nonTerminalDanger, health));
     const footBounceConfirmed = Number(controller.footObstacleBounceFrames || 0) >= 3
       && Number(controller.footObstacleFlickerScore || 0) >= 0.42;
     const stuckRaw = clamp01(Math.max(
@@ -9462,85 +8845,69 @@
       && controller.doorOpenedCount <= 0
       && Number(controller.depthEstimate || 1) > 0.48
       && !controller.firstDoorUseAttempted;
-    let stuck = firstRouteWarmup
-      ? Math.min(stuckRaw, 0.34)
-      : (stuckConfirmed ? stuckRaw : Math.min(stuckRaw, 0.34));
     const movingEvidence = Math.max(
       Number(controller.motionForwardProgress || 0),
       Number(controller.motionTurnScore || 0),
       Number(controller.motionEntranceScore || 0));
-    const routeStillViable = controller.doorOpenedCount <= 0
-      && Number(controller.depthEstimate || 1) >= 0.55
-      && routeEvidence >= 0.46
-      && movingEvidence >= 0.08
-      && danger < 0.32;
-    if (routeStillViable) {
-      stuck = Math.min(stuck, 0.54);
-    }
-    const firstDoorUseWindow = controller.doorOpenedCount <= 0
-      && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor")
-      && Number(controller.depthEstimate || 1) >= 0.18
-      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18
-      && (routeEvidence >= 0.38
-        || Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
-        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE))
-      && danger < 0.32
-      && !Boolean(controller.nousDetectorResult?.looming?.active)
-      && !Boolean(controller.nousDetectorResult?.damageLocalization?.active);
-    if (firstDoorUseWindow) {
-      stuck = Math.min(stuck, 0.42);
-    }
-    if (doorTransitionGraceActive && danger < 0.32) {
-      stuck = Math.min(stuck, 0.28);
-    }
-    const postDoorRouteStillViable = controller.doorOpenedCount > 0
-      && controller.computerRoomEntered
-      && !controller.finalRoomEntered
-      && Number(controller.depthEstimate || 1) >= 0.46
-      && routeEvidence >= 0.28
-      && movingEvidence >= 0.05
-      && danger < 0.32
-      && !Boolean(controller.nousDetectorResult?.stuck?.active);
-    if (postDoorRouteStillViable) {
-      stuck = Math.min(stuck, 0.42);
-    }
-    const postDoorTransitionStillViable = controller.doorOpenedCount > 0
-      && !controller.finalRoomEntered
-      && Number(controller.depthEstimate || 1) >= 0.46
-      && danger < 0.32
-      && !Boolean(controller.nousDetectorResult?.stuck?.active)
-      && (controller.darkZoneEntered
-        || controller.controlPipeline === "ComputerRoom"
-        || Number(controller.computerRoomAdvanceFrames || 0) > 0
-        || routeEvidence >= 0.18);
-    if (postDoorTransitionStillViable) {
-      stuck = Math.min(stuck, 0.42);
-    }
-    const kairos = resolveToposKairosCarrier(controller, danger, stuck);
-    const pathosBase = clamp01(Math.max(danger, stuck));
+    const firstDoorUseSignatureThreshold = profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
+    const firstDoorRetrySignatureTolerance = profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
+    const observedSignals = composeCtgObservedSignals({
+      tensorEvidence,
+      headingConfidence: compass.confidence,
+      headingUnavailable: compass.headingUsable === false || compass.headingUncertain,
+      headingAbsolute: compass.headingReliability === "absolute-landmark" || compass.headingReliability === "absolute-forced-landmark",
+      directRouteEvidence,
+      directCorridorConfidence,
+      hasControlPipeline: Boolean(controller.controlPipeline),
+      projectileRaw,
+      enemy,
+      dynamicObjectRaw,
+      projectileContext,
+      dynamicThreatContext,
+      healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
+      terminalUseFocus,
+      doorTransitionGraceActive,
+      stuckRaw,
+      stuckConfirmed,
+      firstRouteWarmup,
+      firstDoorClosed: controller.doorOpenedCount <= 0,
+      firstDoorContext: controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor",
+      firstDoorUseDepthLimit: profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18,
+      firstDoorUseEvidence: Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
+        || Number(controller.firstDoorCorridorSignature || 0) >= firstDoorUseSignatureThreshold - firstDoorRetrySignatureTolerance,
+      firstDoorUseBlockedByThreat: Boolean(controller.nousDetectorResult?.looming?.active)
+        || Boolean(controller.nousDetectorResult?.damageLocalization?.active),
+      firstDoorUseAttempted: Boolean(controller.firstDoorUseAttempted),
+      depthEstimate: controller.depthEstimate,
+      movingEvidence,
+      doorOpened: controller.doorOpenedCount > 0,
+      computerRoomEntered: Boolean(controller.computerRoomEntered),
+      finalRoomEntered: Boolean(controller.finalRoomEntered),
+      nousStuckActive: Boolean(controller.nousDetectorResult?.stuck?.active),
+      darkZoneEntered: Boolean(controller.darkZoneEntered),
+      controlPipeline: controller.controlPipeline,
+      computerRoomAdvanceActive: Number(controller.computerRoomAdvanceFrames || 0) > 0
+    });
+    const kairos = resolveToposKairosCarrier(controller, observedSignals.danger, observedSignals.stuck);
+    const pathosBase = clamp01(Math.max(observedSignals.danger, observedSignals.stuck));
     const nonlinearPathos = kairos.active
       ? clamp01(Math.pow(Math.max(pathosBase, 0.32), 2) * 3.4 + kairos.boost * 0.42)
       : clamp01(Math.pow(pathosBase, 2) * 1.12);
     const pathos = clamp01(Math.max(pathosBase, nonlinearPathos));
-    const ethos = terminalUseFocus
+    const ethos = observedSignals.terminalUseFocus
       ? Math.max(resolveToposEthosScore(controller), 0.92)
       : resolveToposEthosScore(controller);
-    const dangerKind = health > 0
-      ? "health"
-      : (projectile >= Math.max(enemy, dynamicObject) && projectile > 0.18
-        ? "projectile"
-        : (enemy >= Math.max(dynamicObject, 0.18) ? "enemy" : (dynamicObject > 0.18 ? "dynamic" : "none")));
     return createCtgObservedScores({
-      logos,
+      logos: observedSignals.logos,
       pathos,
       ethos,
-      headingRel,
-      routeEvidence,
-      corridorConfidence,
-      corridorPenalty,
-      danger,
-      dangerKind,
-      stuck,
+      headingRel: observedSignals.headingRel,
+      routeEvidence: observedSignals.routeEvidence,
+      corridorConfidence: observedSignals.corridorConfidence,
+      corridorPenalty: observedSignals.corridorPenalty,
+      danger: observedSignals.danger,
+      dangerKind: observedSignals.dangerKind,
+      stuck: observedSignals.stuck,
       kairosBoost: kairos.boost,
       kairosState: kairos.state,
       kairosTrigger: kairos.trigger,
@@ -9551,455 +8918,229 @@
   }
 
   function buildToposDecisionCarrier(controller, action, observedScores, sensor, frame, state) {
-    const logosVector = getToposLogosVector(controller, action, sensor, frame, state);
-    const pathosVector = getToposPathosVector(controller, action, sensor, frame, state);
-    const ethosVector = getToposEthosVector(controller, action, sensor, frame, state);
-    const weights = observedScores.weights || normalizeToposWeights(observedScores.logos, observedScores.pathos, observedScores.ethos);
-    const rawX = (weights.logos * logosVector.x) + (weights.pathos * pathosVector.x) + (weights.ethos * ethosVector.x);
-    const rawY = (weights.logos * logosVector.y) + (weights.pathos * pathosVector.y) + (weights.ethos * ethosVector.y);
-    const decisionVector = normalizeToposVector({ x: rawX, y: rawY });
-    return createToposDecisionCarrier({
-      source: "vector-superposition",
-      logosVector,
-      pathosVector,
-      ethosVector,
-      weights,
-      decisionVector,
-      confidence: Math.max(observedScores.logos, observedScores.pathos, observedScores.ethos),
-      dominantAxis: observedScores.dominant,
-      kairos: {
-        active: observedScores.kairosBoost > 0,
-        state: observedScores.kairosState,
-        trigger: observedScores.kairosTrigger,
-        boost: observedScores.kairosBoost
-      },
-      ethosTarget: {
-        objective: observedScores.objective,
-        phase: observedScores.phase,
-        stableFrames: Number(controller.toposEthosFrames || 0)
-      },
-      timestamp: observedScores.timestamp
+    return requireToposCognition("composeDecisionCarrier")({
+      logosVector: getToposLogosVector(controller, action, sensor, frame, state),
+      pathosVector: getToposPathosVector(controller, action, sensor, frame, state),
+      ethosVector: getToposEthosVector(controller, action, sensor, frame, state),
+      observed: observedScores,
+      stableFrames: controller.toposEthosFrames
     });
   }
 
   function getToposLogosVector(controller, action, sensor, frame, state) {
-    let x = actionTurnToX(controller.firstDoorUse3x3Turn);
-    let y = 0.62;
     const patch = controller.firstDoorVision9x9Box || null;
-    if (patch && controller.doorOpenedCount <= 0) {
-      const center = (Number(patch.column || 0) + (Number(patch.columns || 1) * 0.5)) / VISION_GRID_COLUMNS;
-      const patchBias = clampSigned((center - 0.5) * 2.4);
-      const patchScore = clamp01(Number(patch.score || controller.firstDoorVision9x9Score || 0));
-      x = clampSigned((x * 0.35) + (patchBias * patchScore * 0.65));
-      y = clampSigned(0.32 + patchScore * 0.68);
-    } else if (controller.doorOpenedCount > 0 && controller.computerRoomEntered) {
-      x = actionTurnToX(controller.bridgeLaneTurn) || actionTurnToX(action.turn);
-      y = controller.bridgeBrownScore >= 0.35 ? 0.86 : 0.58;
-    } else if (controller.spawnCorridorGapTurn === "left" || controller.spawnCorridorGapTurn === "right") {
-      x = actionTurnToX(controller.spawnCorridorGapTurn);
-      y = 0.78;
-    } else if (!x) {
-      x = actionTurnToX(action.turn);
-    }
-
-    if (Number(controller.depthEstimate || 1) <= 0.24 && controller.doorOpenedCount <= 0) {
-      y = Math.min(y, 0.22);
-    }
-
-    return normalizeToposVector({
-      x,
-      y,
-      source: controller.doorOpenedCount <= 0 ? "local-door-landmark" : "local-route-landmark"
+    return requireToposCognition("resolveLogosVector")({
+      firstDoorUseTurn: controller.firstDoorUse3x3Turn,
+      patchVisible: Boolean(patch),
+      patchColumn: patch?.column,
+      patchColumns: patch?.columns,
+      patchScore: patch?.score || controller.firstDoorVision9x9Score,
+      gridColumns: VISION_GRID_COLUMNS,
+      doorOpened: controller.doorOpenedCount > 0,
+      computerRoomEntered: Boolean(controller.computerRoomEntered),
+      bridgeLaneTurn: controller.bridgeLaneTurn,
+      actionTurn: action.turn,
+      bridgeBrownScore: controller.bridgeBrownScore,
+      spawnCorridorGapTurn: controller.spawnCorridorGapTurn,
+      depthEstimate: controller.depthEstimate
     });
   }
 
   function getToposPathosVector(controller, action, sensor, frame, state) {
-    const stuck = clamp01(Math.max(
-      Number(controller.motionStallScore || 0),
-      Number(controller.stuckFrames || 0) / 12,
-      Number(controller.quantizedStallFrames || 0) / 10,
-      Number(controller.footObstacleBounceFrames || 0) >= 3 ? Number(controller.footObstacleFlickerScore || 0) : 0));
-    const projectileRaw = clamp01(Number(controller.projectileScore || controller.phantasiaSnapshot?.projectileScore || 0));
     const enemy = getTrustedEnemyThreat(controller);
-    const dynamicRaw = clamp01(Number(controller.phantasiaSnapshot?.dynamicObjectScore || 0));
-    const dynamicThreatContext = enemy > 0.35
-      || Boolean(controller.nousDetectorResult?.looming?.active)
-      || Boolean(controller.nousDetectorResult?.damageLocalization?.active);
-    const danger = clamp01(Math.max(
-      dynamicThreatContext ? projectileRaw : projectileRaw * 0.22,
+    return requireToposCognition("resolvePathosVector")({
+      motionStallScore: controller.motionStallScore,
+      stuckFrames: controller.stuckFrames,
+      quantizedStallFrames: controller.quantizedStallFrames,
+      footObstacleBounceFrames: controller.footObstacleBounceFrames,
+      footObstacleFlickerScore: controller.footObstacleFlickerScore,
+      projectileRaw: controller.projectileScore || controller.phantasiaSnapshot?.projectileScore,
       enemy,
-      dynamicThreatContext ? dynamicRaw : dynamicRaw * 0.18,
-      controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested ? 1 : 0));
-    const enemyBias = clampSigned(Number(controller.enemyLateralBias || 0));
-    const closeWall = Number(controller.depthEstimate || 1) <= 0.34 || stuck >= 0.52;
-    let x = enemyBias ? -enemyBias : 0;
-    if (!x && (action.turn === "left" || action.turn === "right")) {
-      x = actionTurnToX(oppositeTurn(action.turn)) * Math.max(0.28, stuck);
-    }
-    if (!x && controller.wallHugSide === "left") {
-      x = 0.42;
-    } else if (!x && controller.wallHugSide === "right") {
-      x = -0.42;
-    }
-
-    const y = closeWall || danger >= 0.42 ? -Math.max(0.42, stuck, danger) : -Math.max(0.12, danger * 0.72);
-    return normalizeToposVector({
-      x,
-      y,
-      source: danger >= stuck ? "danger-repulsion" : "stall-repulsion"
+      dynamicRaw: controller.phantasiaSnapshot?.dynamicObjectScore,
+      dynamicThreatContext: enemy > 0.35
+        || Boolean(controller.nousDetectorResult?.looming?.active)
+        || Boolean(controller.nousDetectorResult?.damageLocalization?.active),
+      healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
+      enemyLateralBias: controller.enemyLateralBias,
+      depthEstimate: controller.depthEstimate,
+      actionTurn: action.turn,
+      wallHugSide: controller.wallHugSide
     });
   }
 
   function getToposEthosVector(controller, action, sensor, frame, state) {
     const objective = inferObjective(controller);
-    let x = 0;
-    let y = 0.72;
-    if (objective === "find-corridor-to-first-door"
-      || objective === "follow-demo-route-to-first-door"
-      || objective === "recover-via-east-window"
-      || objective === "locate-first-door-corridor"
-      || objective === "enter-first-door-corridor") {
-      x = actionTurnToX(controller.spawnCorridorGapTurn) || actionTurnToX(controller.firstDoorCorridorSearchTurn) || 0.34;
-      y = objective === "enter-first-door-corridor" || objective === "recover-via-east-window" ? 0.88 : 0.76;
-    } else if (objective === "align-first-door" || objective === "approach-first-door" || objective === "open-first-door" || objective === "find-and-open-first-door") {
-      x = actionTurnToX(controller.firstDoorUse3x3Turn) || actionTurnToX(controller.spawnCorridorGapTurn) || actionTurnToX(controller.firstDoorCorridorSearchTurn) || 0.18;
-      y = objective === "open-first-door" ? 0.42 : 0.68;
-    } else if (objective === "enter-computer-control-room") {
-      x = actionTurnToX(controller.bridgeLaneTurn) || 0;
-      y = 0.92;
-    } else if (objective === "reach-central-hall" || objective === "cross-bridge") {
-      x = actionTurnToX(controller.bridgeLaneTurn) || 0;
-      y = 0.9;
-    } else if (objective === "retry-after-death") {
-      x = 0;
-      y = 0;
-    } else if (objective === "restore-relative-motion") {
-      x = actionTurnToX(controller.wallHugSide === "left" ? "right" : "left");
-      y = -0.24;
-    }
-
-    const stability = clamp01(Number(controller.toposEthosFrames || 0) / 18);
-    return normalizeToposVector({
-      x: x * (0.58 + stability * 0.42),
-      y,
-      source: `telos-${objective}`
+    return requireToposCognition("resolveEthosVector")({
+      objective,
+      spawnCorridorGapTurn: controller.spawnCorridorGapTurn,
+      firstDoorCorridorSearchTurn: controller.firstDoorCorridorSearchTurn,
+      firstDoorUseTurn: controller.firstDoorUse3x3Turn,
+      bridgeLaneTurn: controller.bridgeLaneTurn,
+      wallHugSide: controller.wallHugSide,
+      stableFrames: controller.toposEthosFrames
     });
   }
 
   function mapToposDecisionToKinesis(controller, action, carrier, observedScores, sensor, frame, state) {
     const safe = normalizeAction(action);
-    if (!controller.enabled || safe.fire || controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
-      return { action: safe, applied: false, reason: "guarded" };
-    }
-
     const vector = carrier.decisionVector || normalizeToposVector();
     const weights = carrier.weights || {};
-    const pathosDominant = carrier.dominantAxis === "PATHOS" || Number(weights.pathos || 0) >= 0.58;
-    const firstDoorContext = controller.doorOpenedCount <= 0 && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor");
-    let next = { ...safe };
-    let applied = false;
-    let reason = "none";
+    const firstDoorKinesisContext = composeKinesisFirstDoorContext({
+      firstDoorContext: controller.doorOpenedCount <= 0 && (controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor"),
+      firstDoorUseDepth: profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH),
+      firstDoorUseSignatureThreshold: profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD),
+      firstDoorRetrySignatureTolerance: profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE),
+      firstDoorAlignmentScore: FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE,
+      firstDoorUse3x3Score: controller.firstDoorUse3x3Score,
+      firstDoorCorridorSignature: controller.firstDoorCorridorSignature,
+      firstDoorVision9x9Score: controller.firstDoorVision9x9Score,
+      spawnCorridorGapScore: controller.spawnCorridorGapScore,
+      routeEvidence: observedScores.routeEvidence,
+      danger: observedScores.danger,
+      pathos: observedScores.pathos,
+      depthEstimate: controller.depthEstimate,
+      wallHugSide: controller.wallHugSide,
+      useCooldown: controller.useCooldown,
+      firstDoorUseAttempted: controller.firstDoorUseAttempted
+    });
+    const feedback = mapKinesisToposDecision({
+      action: safe,
+      enabled: controller.enabled,
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      vector,
+      weights,
+      dominantAxis: carrier.dominantAxis,
+      observed: observedScores,
+      ...firstDoorKinesisContext,
+      safetyReason: controller.safetyReason
+    });
 
-    if (safe.use) {
-      next.run = false;
-      return { action: normalizeAction(next), applied: false, reason: "use-preserved" };
-    }
-
-    const firstDoorAlignmentWindow = firstDoorContext
-      && Number(controller.depthEstimate || 1) >= 0.18
-      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18
-      && Number(observedScores.danger || 0) < 0.32
-      && (Number(observedScores.routeEvidence || 0) >= 0.38
-        || Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
-        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE));
-    if (pathosDominant && Number(observedScores.pathos || 0) >= 0.62 && !firstDoorAlignmentWindow) {
-      const stallOnly = Number(observedScores.danger || 0) < 0.32
-        && Number(observedScores.stuck || 0) >= 0.58
-        && Number(controller.depthEstimate || 1) > 0.46;
-      if (stallOnly) {
-        next.move = "forward";
-        next.run = false;
-        next.turn = Math.abs(vector.x) >= 0.18
-          ? (vector.x > 0 ? "right" : "left")
-          : (controller.wallHugSide === "left" ? "right" : "left");
-        applied = true;
-        reason = "pathos-stall-wall-follow";
-      } else if (vector.y < -0.28) {
-        next.move = "back";
-        next.run = false;
-        applied = true;
-        reason = "pathos-repulsion";
-      }
-      if (!stallOnly && Math.abs(vector.x) >= 0.22) {
-        next.turn = vector.x > 0 ? "right" : "left";
-        applied = true;
-        reason = reason === "none" ? "pathos-turn-away" : reason;
-      }
-    } else {
-      const shouldAdvanceFirstDoor = firstDoorContext
-        && Number(observedScores.logos || 0) + Number(observedScores.ethos || 0) >= Number(observedScores.pathos || 0) + 0.16
-        && Number(controller.depthEstimate || 1) >= 0.34
-        && Math.max(Number(controller.firstDoorCorridorSignature || 0), Number(controller.firstDoorVision9x9Score || 0), Number(controller.spawnCorridorGapScore || 0)) >= 0.48;
-      if ((next.move === "none" || String(controller.safetyReason || "").startsWith("first-door-reprobe")) && vector.y >= 0.34 && shouldAdvanceFirstDoor) {
-        next.move = "forward";
-        next.run = Number(observedScores.pathos || 0) < 0.42;
-        applied = true;
-        reason = "logos-ethos-door-approach";
-      } else if (next.move === "none" && vector.y >= 0.52) {
-        next.move = "forward";
-        applied = true;
-        reason = `${carrier.dominantAxis.toLowerCase()}-forward`;
-      } else if (next.move === "forward" && Number(observedScores.pathos || 0) >= 0.48) {
-        next.run = false;
-        applied = true;
-        reason = carrier.dominantAxis === "PATHOS" ? "pathos-run-suppression" : `${carrier.dominantAxis.toLowerCase()}-run-suppression`;
-      }
-
-      if (next.turn === "none" && Math.abs(vector.x) >= 0.26) {
-        next.turn = vector.x > 0 ? "right" : "left";
-        applied = true;
-        reason = reason === "none" ? `${carrier.dominantAxis.toLowerCase()}-turn` : reason;
-      }
-    }
-
-    const contactUseReady = firstDoorContext
-      && Number(controller.depthEstimate || 1) <= profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.06
-      && Number(observedScores.pathos || 0) < 0.58
-      && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
-        || Number(controller.firstDoorCorridorSignature || 0) >= profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD) - profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE))
-      && controller.useCooldown === 0
-      && !controller.firstDoorUseAttempted;
-    if (contactUseReady && Math.abs(vector.x) <= 0.44) {
-      next.move = "none";
-      next.turn = vector.x > 0.18 ? "right" : (vector.x < -0.18 ? "left" : "none");
-      next.use = true;
-      next.run = false;
-      applied = true;
-      reason = "logos-ethos-contact-use";
-    }
-
-    if (applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
-      controller.safetyReason = `ctg-topos-${reason}`;
+    if (feedback.applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
+      controller.safetyReason = `ctg-topos-${feedback.reason}`;
       controller.mobilityMode = `ctg-topos-${carrier.dominantAxis.toLowerCase()}`;
     }
 
-    return { action: normalizeAction(next), applied, reason };
+    return feedback;
   }
 
   function createCtgObservedScores(overrides = {}) {
-    const logos = clamp01(Number(overrides.logos ?? 0));
-    const pathos = clamp01(Number(overrides.pathos ?? 0));
-    const ethos = clamp01(Number(overrides.ethos ?? 0));
-    const weights = normalizeToposWeights(logos, pathos, ethos);
-    const dominant = pathos >= Math.max(logos, ethos)
-      ? "PATHOS"
-      : (ethos >= Math.max(logos, pathos) ? "ETHOS" : "LOGOS");
-    return {
-      logos: round2(logos),
-      pathos: round2(pathos),
-      ethos: round2(ethos),
-      weights,
-      dominant,
-      headingRel: round2(clamp01(Number(overrides.headingRel ?? 0))),
-      routeEvidence: round2(clamp01(Number(overrides.routeEvidence ?? 0))),
-      corridorConfidence: round2(clamp01(Number(overrides.corridorConfidence ?? 0))),
-      corridorPenalty: round2(clamp01(Number(overrides.corridorPenalty ?? 0))),
-      danger: round2(clamp01(Number(overrides.danger ?? 0))),
-      dangerKind: overrides.dangerKind || "none",
-      stuck: round2(clamp01(Number(overrides.stuck ?? 0))),
-      kairosBoost: round2(clamp01(Number(overrides.kairosBoost ?? 0))),
-      kairosState: overrides.kairosState || "Monitor",
-      kairosTrigger: overrides.kairosTrigger || "none",
-      objective: overrides.objective || "disabled",
-      phase: overrides.phase || "Idle",
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireCtgCognition("createObservedScores")(overrides);
+  }
+
+  function composeCtgObservedSignals(input = {}) {
+    return requireCtgCognition("composeObservedSignals")(input);
   }
 
   function createToposDecisionCarrier(overrides = {}) {
-    const weights = overrides.weights || normalizeToposWeights(0, 0, 0);
-    const decisionVector = normalizeToposVector(overrides.decisionVector);
-    return {
-      source: overrides.source || "vector-superposition",
-      logosVector: normalizeToposVector(overrides.logosVector),
-      pathosVector: normalizeToposVector(overrides.pathosVector),
-      ethosVector: normalizeToposVector(overrides.ethosVector),
-      weights,
-      decisionVector,
-      dominantAxis: overrides.dominantAxis || "LOGOS",
-      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
-      kairos: overrides.kairos || { active: false, state: "Monitor", trigger: "none", boost: 0 },
-      ethosTarget: overrides.ethosTarget || { objective: "disabled", phase: "Idle", stableFrames: 0 },
-      feedbackApplied: Boolean(overrides.feedbackApplied),
-      feedbackReason: overrides.feedbackReason || "none",
-      mappedAction: overrides.mappedAction || "-",
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireToposCognition("createDecisionCarrier")(overrides);
   }
 
   function createCtgCarrier(overrides = {}) {
-    return {
-      canonId: CTG_ROM_CANON_ID,
-      policyId: CTG_ROM_POLICY_ID,
-      phase: overrides.phase || "Idle",
-      pipeline: overrides.pipeline || "Idle",
-      lastDecision: overrides.lastDecision || "none",
-      confidence: round2(clamp01(Number(overrides.confidence ?? 0))),
-      retryRequested: Boolean(overrides.retryRequested),
-      retryReason: overrides.retryReason || "none",
-      retryPriority: Number(overrides.retryPriority || 0),
-      gateExecuted: false,
-      observedScores: overrides.observedScores || createCtgObservedScores(),
-      toposDecision: overrides.toposDecision || createToposDecisionCarrier(),
-      decisionVector: overrides.decisionVector || normalizeToposVector(),
-      kairos: overrides.kairos || { active: false, state: "Monitor", trigger: "none", boost: 0 },
-      ethosTarget: overrides.ethosTarget || { objective: "disabled", phase: "Idle", stableFrames: 0 },
-      feedbackApplied: Boolean(overrides.feedbackApplied),
-      ternaryTrace: overrides.ternaryTrace || {},
-      timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
-    };
+    return requireCtgCognition("createCarrier")(overrides);
+  }
+
+  function mapKinesisToposDecision(input = {}) {
+    return requireKinesisCognition("mapToposDecision")(input);
+  }
+
+  function composeKinesisFirstDoorContext(input = {}) {
+    return requireKinesisCognition("composeFirstDoorContext")(input);
   }
 
   function resolveToposKairosCarrier(controller, danger, stuck) {
     const reason = String(controller?.safetyReason || "none");
     const doorTransitionGraceActive = isDoorTransitionGraceActive(controller);
-    const contextReset = Number(controller?.contextResetFrames || 0) > 0 || reason.indexOf("relocalization") >= 0;
-    const recovery = Number(controller?.recoveryFrames || 0) > 0 || Number(controller?.loopEscapeFrames || 0) > 0;
-    const useProbe = !doorTransitionGraceActive
-      && (Number(controller?.pendingUseResponseFrames || 0) > 0 || Number(controller?.wallUseProbeFrames || 0) > 0);
-    const threatEvidence = Math.max(
-      getTrustedEnemyThreat(controller),
-      clamp01(Number(controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0)),
-      Boolean(controller?.nousDetectorResult?.looming?.active) ? 0.72 : 0,
-      Boolean(controller?.nousDetectorResult?.damageLocalization?.active) ? 0.72 : 0);
-    const combatEvidence = hasTrustedCombatEvidence(controller);
-    const combat = Boolean(combatEvidence
-      && (controller?.combatContextActive || controller?.enemyAlertFrames > 0 || reason.indexOf("combat") >= 0)
-      && threatEvidence >= 0.34);
-    const abnormal = contextReset || recovery || useProbe || combat || (!doorTransitionGraceActive && Number(stuck || 0) >= 0.58) || Number(danger || 0) >= 0.55;
-    let state = "Monitor";
-    let trigger = reason || "none";
-    if (contextReset) {
-      state = "Survey";
-      trigger = controller?.contextResetReason || reason || "visual-discontinuity";
-    } else if (combat) {
-      state = "CombatWatch";
-      trigger = reason || "dynamic-mask";
-    } else if (useProbe) {
-      state = "UseProbe";
-      trigger = reason || "use-response";
-    } else if (recovery || Number(stuck || 0) >= 0.58) {
-      state = "Recovery";
-      trigger = reason || "motion-stall";
-    } else if (Number(danger || 0) >= 0.55) {
-      state = "Caution";
-      trigger = reason || "danger";
-    }
-
-    const boost = abnormal ? clamp01(Math.max(Number(danger || 0), Number(stuck || 0), contextReset ? 0.74 : 0, combat ? 0.62 : 0, useProbe ? 0.48 : 0)) : 0;
-    return { active: abnormal, state, trigger, boost: round2(boost) };
+    return requireToposCognition("resolveKairos")({
+      reason,
+      doorTransitionGraceActive,
+      contextResetActive: Number(controller?.contextResetFrames || 0) > 0,
+      contextResetReason: controller?.contextResetReason,
+      recoveryActive: Number(controller?.recoveryFrames || 0) > 0 || Number(controller?.loopEscapeFrames || 0) > 0,
+      useProbeActive: Number(controller?.pendingUseResponseFrames || 0) > 0 || Number(controller?.wallUseProbeFrames || 0) > 0,
+      trustedEnemyThreat: getTrustedEnemyThreat(controller),
+      projectileScore: controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0,
+      loomingActive: Boolean(controller?.nousDetectorResult?.looming?.active),
+      damageLocalizationActive: Boolean(controller?.nousDetectorResult?.damageLocalization?.active),
+      combatEvidence: hasTrustedCombatEvidence(controller),
+      combatContextActive: Boolean(controller?.combatContextActive),
+      enemyAlertActive: Number(controller?.enemyAlertFrames || 0) > 0,
+      danger,
+      stuck
+    });
   }
 
   function resolveToposEthosScore(controller) {
     const objective = inferObjective(controller);
-    let score = 0.44;
-    if (objective === "retry-after-death") {
-      score = 1;
-    } else if (objective === "find-corridor-to-first-door"
-      || objective === "follow-demo-route-to-first-door"
-      || objective === "recover-via-east-window"
-      || objective === "locate-first-door-corridor") {
-      score = 0.68;
-    } else if (objective === "enter-first-door-corridor") {
-      score = 0.74;
-    } else if (objective === "align-first-door" || objective === "approach-first-door" || objective === "open-first-door" || objective === "find-and-open-first-door") {
-      score = 0.78;
-    } else if (objective === "enter-computer-control-room") {
-      score = 0.82;
-    } else if (objective === "reach-central-hall") {
-      score = 0.76;
-    } else if (objective === "cross-bridge" || objective === "reach-final-room") {
-      score = 0.8;
-    } else if (objective === "restore-relative-motion") {
-      score = 0.66;
-    } else if (objective === "press-exit-switch" || objective === "level-clear") {
-      score = 0.92;
-    }
-
-    const stability = clamp01(Number(controller?.toposEthosFrames || 0) / 18);
     const memory = controller?.semanticMemory || {};
-    const phaseConfidence = clamp01(Math.max(
-      Number(memory.firstDoor?.doorConfidence || 0),
-      Number(memory.firstDoor?.corridorConfidence || 0),
-      Number(memory.computerRoom?.confidence || 0),
-      Number(memory.bridge?.confidence || 0),
-      Number(memory.finalRoom?.confidence || 0),
-      controller?.controlPipeline ? 0.42 : 0));
-    const milestoneBonus = controller?.doorOpenedCount > 0 || controller?.computerRoomEntered ? 0.08 : 0;
-    return clamp01(score * (0.72 + stability * 0.16 + phaseConfidence * 0.12) + milestoneBonus);
-  }
-
-  function normalizeToposWeights(logos, pathos, ethos) {
-    const l = clamp01(Number(logos || 0));
-    const p = clamp01(Number(pathos || 0));
-    const e = clamp01(Number(ethos || 0));
-    const total = Math.max(0.0001, l + p + e);
-    return {
-      logos: round2(l / total),
-      pathos: round2(p / total),
-      ethos: round2(e / total)
-    };
+    return requireToposCognition("resolveEthosScore")({
+      objective,
+      stableFrames: controller?.toposEthosFrames,
+      firstDoorDoorConfidence: memory.firstDoor?.doorConfidence,
+      firstDoorCorridorConfidence: memory.firstDoor?.corridorConfidence,
+      computerRoomConfidence: memory.computerRoom?.confidence,
+      bridgeConfidence: memory.bridge?.confidence,
+      finalRoomConfidence: memory.finalRoom?.confidence,
+      hasControlPipeline: Boolean(controller?.controlPipeline),
+      milestoneReached: controller?.doorOpenedCount > 0 || controller?.computerRoomEntered
+    });
   }
 
   function normalizeToposVector(vector = {}) {
-    const rawX = clampSigned(Number(vector?.x ?? 0));
-    const rawY = clampSigned(Number(vector?.y ?? 0));
-    const magnitude = Math.hypot(rawX, rawY);
-    const x = magnitude > 0.0001 ? clampSigned(rawX / magnitude) : 0;
-    const y = magnitude > 0.0001 ? clampSigned(rawY / magnitude) : 0;
-    return {
-      x: round2(x),
-      y: round2(y),
-      magnitude: round2(Math.min(1, magnitude)),
-      turn: x > 0.18 ? "right" : (x < -0.18 ? "left" : "none"),
-      move: y > 0.24 ? "forward" : (y < -0.24 ? "back" : "none"),
-      arrow: vectorArrow(x, y),
-      source: vector?.source || "none"
-    };
+    return requireToposCognition("normalizeVector")(vector);
   }
 
-  function vectorArrow(x, y) {
-    if (Math.abs(x) < 0.18 && Math.abs(y) < 0.18) {
-      return "-";
+  function requireToposCognition(name) {
+    const fn = self.AIKernelDoomTopos?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Topos cognition module is missing: ${name}`);
     }
 
-    if (Math.abs(x) < 0.22) {
-      return y >= 0 ? "^" : "v";
+    return fn;
+  }
+
+  function requireCtgCognition(name) {
+    const fn = self.AIKernelDoomCtg?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom CTG cognition module is missing: ${name}`);
     }
 
-    if (Math.abs(y) < 0.22) {
-      return x >= 0 ? ">" : "<";
+    return fn;
+  }
+
+  function requireKinesisCognition(name) {
+    const fn = self.AIKernelDoomKinesis?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Kinesis cognition module is missing: ${name}`);
     }
 
-    if (x >= 0 && y >= 0) {
-      return "^>";
+    return fn;
+  }
+
+  function requireNousCognition(name) {
+    const fn = self.AIKernelDoomNous?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Nous cognition module is missing: ${name}`);
     }
-    if (x < 0 && y >= 0) {
-      return "<^";
+
+    return fn;
+  }
+
+  function requirePhantasiaCognition(name) {
+    const fn = self.AIKernelDoomPhantasia?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom Phantasia cognition module is missing: ${name}`);
     }
-    if (x >= 0) {
-      return "v>";
-    }
-    return "<v";
+
+    return fn;
   }
 
   function actionTurnToX(turn) {
-    return turn === "right" ? 1 : (turn === "left" ? -1 : 0);
+    return requireKinesisCognition("actionTurnToX")(turn);
   }
 
   function describeActionVector(action) {
-    const safe = normalizeAction(action);
-    return `${safe.turn || "none"}:${safe.move || "none"}${safe.use ? ":use" : ""}${safe.fire ? ":fire" : ""}`;
+    return requireKinesisCognition("describeActionVector")(action);
   }
 
   function clampSigned(value) {
@@ -10007,56 +9148,37 @@
   }
 
   function ternarySigned(value, threshold = 0.22) {
-    const number = Number(value) || 0;
-    if (number >= threshold) {
-      return "positive";
-    }
-
-    if (number <= -threshold) {
-      return "negative";
-    }
-
-    return "neutral";
+    return requireKinesisCognition("ternarySigned")(value, threshold);
   }
 
   function ternaryScore(value, low = 0.25, high = 0.62) {
-    const number = clamp01(Number(value) || 0);
-    if (number >= high) {
-      return "positive";
-    }
-
-    if (number <= low) {
-      return "negative";
-    }
-
-    return "neutral";
+    return requireKinesisCognition("ternaryScore")(value, low, high);
   }
 
   function normalizeVision9x9(values) {
-    const length = VISION_GRID_COLUMNS * VISION_GRID_ROWS;
-    const output = new Array(length);
-    for (let index = 0; index < length; index += 1) {
-      output[index] = Math.max(0, Math.min(15, Math.round(Number(values?.[index] || 0))));
-    }
-
-    return output;
+    return requireSensoryCognition("normalizeVision9x9")(values);
   }
 
   function normalizeAuditoryEventType(value) {
-    const text = String(value || "spatial-event").toLowerCase();
-    if (text === "motion"
-      || text === "contact"
-      || text === "attention"
-      || text === "spatial-event"
-      || text === "native-sfx"
-      || text === "doom-native-sfx"
-      || text === "use-response"
-      || text === "use-success-gate"
-      || text === "use-failed-voice") {
-      return text;
+    return requireSensoryCognition("normalizeAuditoryEventType")(value);
+  }
+
+  function requireSensoryCognition(name) {
+    const fn = self.AIKernelDoomSensory?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom sensory cognition module is missing: ${name}`);
     }
 
-    return text === "none" ? "none" : "spatial-event";
+    return fn;
+  }
+
+  function requireVisionPalette(name) {
+    const fn = self.AIKernelDoomVisionPalette?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom vision palette module is missing: ${name}`);
+    }
+
+    return fn;
   }
 
   function breadcrumbPoint(state, frame) {
@@ -10080,15 +9202,7 @@
   }
 
   function actionSignature(action) {
-    const safe = normalizeAction(action);
-    return [
-      safe.move,
-      safe.turn,
-      safe.fire ? "f" : "-",
-      safe.strafe ? "s" : "-",
-      safe.use ? "u" : "-",
-      safe.run ? "r" : "-"
-    ].join(":");
+    return requireKinesisCognition("actionSignature")(action);
   }
 
   function oppositeTurn(turn) {
@@ -10150,16 +9264,11 @@
   }
 
   function normalizeAutoplayProfile(profile) {
-    if (!profile || typeof profile !== "object") {
-      return Object.assign({}, DEFAULT_AUTOPLAY_PROFILE);
-    }
-
-    return Object.assign({}, DEFAULT_AUTOPLAY_PROFILE, profile);
+    return AUTOPLAY_PROFILE.normalize(profile, DEFAULT_AUTOPLAY_PROFILE);
   }
 
   function profileNumber(profile, key, fallback) {
-    const value = Number(profile?.[key]);
-    return Number.isFinite(value) ? value : fallback;
+    return AUTOPLAY_PROFILE.number(profile, key, fallback);
   }
 
   function resolveContextDict(context, depthSig) {
@@ -10179,19 +9288,11 @@
   }
 
   function normalizeScreenRegions(regions) {
-    const result = new Array(REGION_COLUMNS * REGION_ROWS);
-    for (let index = 0; index < result.length; index += 1) {
-      result[index] = clamp01((regions[index] || 0) / 255);
-    }
-    return result;
+    return requireSensorTensor("normalizeScreenRegions")(regions, REGION_COLUMNS, REGION_ROWS);
   }
 
   function normalizeRegion9(regions) {
-    const result = new Array(REGION9_COLUMNS * REGION9_ROWS);
-    for (let index = 0; index < result.length; index += 1) {
-      result[index] = clamp01((regions[index] || 0) / 255);
-    }
-    return result;
+    return requireSensorTensor("normalizeRegion9")(regions, REGION9_COLUMNS, REGION9_ROWS);
   }
 
   function decodeFaceDirection(faceSample, faceDelta) {
@@ -10219,19 +9320,7 @@
   }
 
   function commandPriority(reason) {
-    if (reason === "loop-escape" || reason === "breadcrumb-loop" || reason === "sensor-emergency") {
-      return 3;
-    }
-
-    if (String(reason || "").startsWith("door-probe") || reason === "wall-survey" || reason === "combat") {
-      return 2;
-    }
-
-    if (reason && reason !== "clear" && reason !== "none") {
-      return 1;
-    }
-
-    return 0;
+    return requireKinesisCognition("commandPriority")(reason);
   }
 
   function relativeCorridorAlignment(controller, turn) {
@@ -10284,414 +9373,186 @@
   }
 
   function firstDoorDemoObjectiveRank(objective) {
-    switch (objective) {
-      case "find-corridor-to-first-door":
-      case "follow-demo-route-to-first-door":
-      case "locate-first-door-corridor":
-        return 1;
-      case "recover-via-east-window":
-      case "enter-first-door-corridor":
-      case "approach-first-door":
-        return 2;
-      case "align-first-door":
-      case "open-first-door":
-        return 3;
-      case "enter-computer-control-room":
-        return 4;
-      case "reach-central-hall":
-        return 5;
-      default:
-        return 0;
-    }
+    return requireRoutingCognition("rankFirstDoorObjective")(objective);
   }
 
   function stabilizeFirstDoorDemoObjective(controller, candidate) {
-    if (!controller || !candidate || controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested) {
-      return candidate;
-    }
-
-    const previous = controller.objective || "";
-    const previousRank = firstDoorDemoObjectiveRank(previous);
-    const candidateRank = firstDoorDemoObjectiveRank(candidate);
-    const staleDoorProgress = controller.doorOpenedCount <= 0
-      && !controller.firstDoorCorridorLocated
-      && !controller.firstDoorUseAttempted
-      && Number(controller.firstDoorUseLatchFrames || 0) <= 0
-      && Number(controller.wallUseProbeFrames || 0) <= 0
-      && (candidate === "follow-demo-route-to-first-door"
-        || candidate === "recover-via-east-window"
-        || candidate === "find-corridor-to-first-door"
-        || candidate === "locate-first-door-corridor");
-    if (staleDoorProgress) {
-      return candidate;
-    }
-
-    if (previousRank > candidateRank && previousRank < 4 && controller.doorOpenedCount <= 0) {
-      return previous;
-    }
-
-    return candidate;
+    return requireRoutingCognition("stabilizeFirstDoorObjective")({
+      candidate,
+      previousObjective: controller?.objective,
+      healthLikelyDead: Boolean(controller?.healthLikelyDead),
+      healthRetryRequested: Boolean(controller?.healthSensorSnapshot?.retryRequested),
+      doorOpenedCount: controller?.doorOpenedCount,
+      firstDoorCorridorLocated: Boolean(controller?.firstDoorCorridorLocated),
+      firstDoorUseAttempted: Boolean(controller?.firstDoorUseAttempted),
+      firstDoorUseLatchFrames: controller?.firstDoorUseLatchFrames,
+      wallUseProbeFrames: controller?.wallUseProbeFrames
+    });
   }
 
   function inferFirstDoorDemoObjective(controller) {
     if (!controller) {
-      return "find-corridor-to-first-door";
-    }
-
-    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
-      return "enter-computer-control-room";
-    }
-
-    if (controller.doorOpenedCount > 0) {
-      return null;
+      return requireRoutingCognition("inferFirstDoorObjective")({ hasController: false });
     }
 
     const firstDoorUseThreshold = profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
     const firstDoorRetryTolerance = profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
     const firstDoorUseDepth = profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH);
-    const nearDoor = Number(controller.depthEstimate || 1) <= firstDoorUseDepth + 0.08;
-    const corridorEstablished = Boolean(controller.firstDoorCorridorLocated)
-      || Number(controller.firstDoorCorridorFrames || 0) >= 4;
-    const eastWindowRecovery = Number(controller.courtyardRescueFrames || 0) > 0
-      && controller.courtyardRescueMode === "east-window-wall-left";
-    const activeUseProbe = controller.firstDoorUseAttempted
-      || Number(controller.firstDoorUseLatchFrames || 0) > 0;
-    const alignedUseProbe = Number(controller.wallUseProbeFrames || 0) > 0
-      && nearDoor
-      && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
-        || Number(controller.firstDoorUseSignature || 0) >= firstDoorUseThreshold - firstDoorRetryTolerance);
-    const useEvidence = activeUseProbe
-      || alignedUseProbe
-      || (corridorEstablished
-        && nearDoor
-        && (Number(controller.firstDoorUse3x3Score || 0) >= FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE - 0.08
-          || (Number(controller.firstDoorUseSignature || 0) >= firstDoorUseThreshold + 0.06
-            && Number(controller.firstDoorVision9x9Score || 0) >= 0.46)));
-    if (useEvidence) {
-      return stabilizeFirstDoorDemoObjective(controller, "open-first-door");
-    }
-
-    const recenterNeeded = corridorEstablished
-      && nearDoor
-      && (controller.firstDoorUse3x3Turn === "left" || controller.firstDoorUse3x3Turn === "right")
-      && Number(controller.firstDoorUse3x3Score || 0) < FIRST_DOOR_USE_ALIGNMENT_SCORE;
-    if (recenterNeeded) {
-      return stabilizeFirstDoorDemoObjective(controller, "align-first-door");
-    }
-
-    if (corridorEstablished) {
-      return stabilizeFirstDoorDemoObjective(controller, "approach-first-door");
-    }
-
-    if (eastWindowRecovery) {
-      return stabilizeFirstDoorDemoObjective(controller, "recover-via-east-window");
-    }
-
     const spawnCorridorGapThreshold = profileNumber(controller.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
     const gapTurn = controller.spawnCorridorGapTurn === "left" || controller.spawnCorridorGapTurn === "right"
       ? controller.spawnCorridorGapTurn
       : "none";
-    const relativeAlignment = relativeCorridorAlignment(controller, gapTurn);
-    const visualGap = Number(controller.spawnCorridorGapScore || 0) >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
-    const motionEntrance = Number(controller.motionEntranceScore || 0) >= profileNumber(controller.profile, "motionEntranceThreshold", 0.22);
-    const alignmentStarted = Number(controller.spawnCorridorGapFrames || 0) > 0
-      || (gapTurn !== "none"
-        && visualGap
-        && !relativeAlignment.conflict
-        && (relativeAlignment.aligned || motionEntrance || Number(controller.predictions || 0) >= profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES)));
-    const demoRouteActive = controller.controlPipeline === "OpeningHome"
-      || /^opening-map/.test(String(controller.mobilityMode || ""))
-      || Number(controller.predictions || 0) < profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES);
-    return stabilizeFirstDoorDemoObjective(controller, alignmentStarted
-      ? "locate-first-door-corridor"
-      : (demoRouteActive ? "follow-demo-route-to-first-door" : "find-corridor-to-first-door"));
+    return requireRoutingCognition("inferFirstDoorObjective")({
+      previousObjective: controller.objective,
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      doorOpenedCount: controller.doorOpenedCount,
+      computerRoomEntered: Boolean(controller.computerRoomEntered),
+      firstDoorUseThreshold,
+      firstDoorRetryTolerance,
+      firstDoorUseDepth,
+      firstDoorDarkPanelUseAlignmentScore: FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE,
+      firstDoorAlignmentScore: FIRST_DOOR_USE_ALIGNMENT_SCORE,
+      depthEstimate: Number(controller.depthEstimate || 1),
+      firstDoorCorridorLocated: Boolean(controller.firstDoorCorridorLocated),
+      firstDoorCorridorFrames: controller.firstDoorCorridorFrames,
+      courtyardRescueFrames: controller.courtyardRescueFrames,
+      courtyardRescueMode: controller.courtyardRescueMode,
+      firstDoorUseAttempted: Boolean(controller.firstDoorUseAttempted),
+      firstDoorUseLatchFrames: controller.firstDoorUseLatchFrames,
+      wallUseProbeFrames: controller.wallUseProbeFrames,
+      firstDoorUse3x3Score: controller.firstDoorUse3x3Score,
+      firstDoorUseSignature: controller.firstDoorUseSignature,
+      firstDoorVision9x9Score: controller.firstDoorVision9x9Score,
+      firstDoorUse3x3Turn: controller.firstDoorUse3x3Turn,
+      spawnCorridorGapThreshold,
+      spawnCorridorGapTurn: gapTurn,
+      spawnCorridorGapScore: controller.spawnCorridorGapScore,
+      spawnCorridorGapFrames: controller.spawnCorridorGapFrames,
+      motionEntranceScore: controller.motionEntranceScore,
+      motionEntranceThreshold: profileNumber(controller.profile, "motionEntranceThreshold", 0.22),
+      relativeAlignment: relativeCorridorAlignment(controller, gapTurn),
+      predictions: controller.predictions,
+      firstDoorSpawnScanFrames: profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES),
+      controlPipeline: controller.controlPipeline,
+      mobilityMode: controller.mobilityMode
+    });
+  }
+
+  function controllerBridgeLaneVisible(controller) {
+    return isBridgeLaneVisible(
+      controller.bridgeBrownScore,
+      controller.bridgeGreenLeft,
+      controller.bridgeGreenCenter,
+      controller.bridgeGreenRight,
+      profileNumber(controller.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD),
+      profileNumber(controller.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD));
   }
 
   function inferControlPipeline(controller) {
-    if (!controller || !controller.enabled) {
-      return "Idle";
+    if (!controller) {
+      return requireRoutingCognition("inferControlPipeline")({ enabled: false });
     }
 
-    if (controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
-      return "Retry";
-    }
-
-    if (isDoorTransitionGraceActive(controller)) {
-      return controller.computerRoomEntered ? "ComputerRoom" : "FirstDoor";
-    }
-
-    if (controller.computerRoomEntered && !controller.centralHallEntered) {
-      return "ComputerRoom";
-    }
-
-    if (controller.doorOpenedCount <= 0) {
-      const objective = inferFirstDoorDemoObjective(controller);
-      return objective === "find-corridor-to-first-door"
-        || objective === "follow-demo-route-to-first-door"
-        || objective === "recover-via-east-window"
-        || objective === "locate-first-door-corridor"
-        ? "OpeningHome"
-        : "FirstDoor";
-    }
-
-    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
-      return "FirstDoor";
-    }
-
-    if (controller.centralHallEntered && Number(controller.enemyDefeatedCount || 0) <= 0 && !controller.ammoLikelyEmpty) {
-      return "ComputerRoom";
-    }
-
-    if (controller.finalRoomEntered) {
-      return "ExitRoom";
-    }
-
-    if (controller.movementSensorSnapshot?.eventType === "movement-stall"
-      && Number(controller.movementSensorSnapshot?.confidence || 0) >= 0.55
-      && Number(controller.stuckFrames || 0) >= 2) {
-      return "SensorRecovery";
-    }
-
-    if (controller.doorOpenedCount > 1) {
-      return "SecondDoor";
-    }
-
-    if (controller.computerRoomEntered && !controller.centralHallEntered) {
-      return "ComputerRoom";
-    }
-
-    if (controller.doorOpenedCount > 0
-      && !isComputerPanelStillVisible(controller)
-      && isBridgeLaneVisible(
-        controller.bridgeBrownScore,
-        controller.bridgeGreenLeft,
-        controller.bridgeGreenCenter,
-        controller.bridgeGreenRight,
-        profileNumber(controller.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD),
-        profileNumber(controller.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD))) {
-      return "Bridge";
-    }
-
-    if (controller.computerRoomEntered) {
-      return "ComputerRoom";
-    }
-
-    if (controller.firstDoorCorridorLocated) {
-      return "FirstDoor";
-    }
-
-    return "OpeningHome";
+    const bridgeLaneVisible = controllerBridgeLaneVisible(controller);
+    return requireRoutingCognition("inferControlPipeline")({
+      enabled: Boolean(controller.enabled),
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      doorTransitionGraceActive: isDoorTransitionGraceActive(controller),
+      computerRoomEntered: Boolean(controller.computerRoomEntered),
+      centralHallEntered: Boolean(controller.centralHallEntered),
+      doorOpenedCount: controller.doorOpenedCount,
+      firstDoorObjective: inferFirstDoorDemoObjective(controller),
+      enemyDefeatedCount: controller.enemyDefeatedCount,
+      ammoLikelyEmpty: Boolean(controller.ammoLikelyEmpty),
+      finalRoomEntered: Boolean(controller.finalRoomEntered),
+      movementStallActive: controller.movementSensorSnapshot?.eventType === "movement-stall"
+        && Number(controller.movementSensorSnapshot?.confidence || 0) >= 0.55
+        && Number(controller.stuckFrames || 0) >= 2,
+      computerPanelVisible: isComputerPanelStillVisible(controller),
+      bridgeLaneVisible,
+      firstDoorCorridorLocated: Boolean(controller.firstDoorCorridorLocated)
+    });
   }
 
   function inferObjective(controller) {
-    if (!controller || !controller.enabled) {
-      return "disabled";
+    if (!controller) {
+      return requireRoutingCognition("inferObjective")({ enabled: false });
     }
 
-    if (controller.healthSensorSnapshot?.retryRequested || controller.healthLikelyDead) {
-      return "retry-after-death";
-    }
-
-    if (controller.exitSwitchPressed) {
-      return "level-clear";
-    }
-
-    if (controller.centralHallEntered) {
-      return Number(controller.enemyDefeatedCount || 0) > 0
-        ? "secure-central-hall"
-        : "engage-front-enemy";
-    }
-
-    if (controller.finalRoomEntered) {
-      return "press-exit-switch";
-    }
-
-    if (controller.stairsEntered || controller.doorOpenedCount > 1) {
-      return "reach-final-room";
-    }
-
-    if (controller.doorOpenedCount > 0 && !controller.computerRoomEntered) {
-      return "enter-computer-control-room";
-    }
-
-    if (isDoorTransitionGraceActive(controller)) {
-      return controller.computerRoomEntered
-        ? "reach-central-hall"
-        : inferFirstDoorDemoObjective(controller);
-    }
-
-    if (controller.computerRoomEntered
-      && isBridgeLaneVisible(
-        controller.bridgeBrownScore,
-        controller.bridgeGreenLeft,
-        controller.bridgeGreenCenter,
-        controller.bridgeGreenRight,
-        profileNumber(controller.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD),
-        profileNumber(controller.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD))) {
-      return "cross-bridge";
-    }
-
-    if (controller.computerRoomEntered) {
-      return "reach-central-hall";
-    }
-
-    if (controller.controlPipeline === "SensorRecovery") {
-      return "restore-relative-motion";
-    }
-
-    if (controller.doorOpenedCount <= 0) {
-      return inferFirstDoorDemoObjective(controller);
-    }
-
-    return inferFirstDoorDemoObjective(controller) || "reach-central-hall";
+    return requireRoutingCognition("inferObjective")({
+      enabled: Boolean(controller.enabled),
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      exitSwitchPressed: Boolean(controller.exitSwitchPressed),
+      centralHallEntered: Boolean(controller.centralHallEntered),
+      enemyDefeatedCount: controller.enemyDefeatedCount,
+      finalRoomEntered: Boolean(controller.finalRoomEntered),
+      stairsEntered: Boolean(controller.stairsEntered),
+      doorOpenedCount: controller.doorOpenedCount,
+      computerRoomEntered: Boolean(controller.computerRoomEntered),
+      doorTransitionGraceActive: isDoorTransitionGraceActive(controller),
+      firstDoorObjective: inferFirstDoorDemoObjective(controller),
+      bridgeLaneVisible: controllerBridgeLaneVisible(controller),
+      controlPipeline: controller.controlPipeline
+    });
   }
 
   function activeDetectionsForPipeline(controller) {
-    const phase = inferControlPipeline(controller);
-    const withSensorEvents = (detections) => {
-      let next = detections;
-      if (controller?.healthSensorSnapshot?.retryRequested || controller?.healthLikelyDead) {
-        next = [...next, "health"];
-      }
-
-      if (controller?.auditorySnapshot?.eventDetected || controller?.spatialSnapshot?.eventDetected) {
-        next = [...next, "audio", "spatial"];
-      }
-
-      if (Array.isArray(controller?.sensorDetections) && controller.sensorDetections.length > 0) {
-        next = [...next, ...controller.sensorDetections];
-      }
-      if (Number(controller?.semanticContextResetFrames || 0) > 0) {
-        next = [...next, "context-reset"];
-      }
-      if (controller?.topologicalTransitionBlocked) {
-        next = [...next, "topology-blocked"];
-      }
-      if (Number(controller?.wallFollowFrames || 0) > 0) {
-        next = [...next, "wall-follow"];
-      }
-      if (controller?.combatContextActive && hasTrustedCombatEvidence(controller)) {
-        next = [...next, "combat-context"];
-      }
-      if (Number(controller?.combatSurveyFrames || 0) > 0) {
-        next = [...next, "combat-survey"];
-      }
-
-      return Array.from(new Set(next));
-    };
-    if (!controller || !controller.enabled) {
-      return withSensorEvents(["objective", "hud"]);
+    if (!controller) {
+      return requireRoutingCognition("activeDetectionsForPipeline")({ enabled: false });
     }
 
-    if (phase === "Retry") {
-      return withSensorEvents(["objective", "health", "hud"]);
-    }
-
-    if (phase === "SensorRecovery") {
-      return withSensorEvents(["objective", "motion", "movement", "spatial", "wall", "hud"]);
-    }
-
-    if (phase === "OpeningHome") {
-      return withSensorEvents(["objective", "motion", "wall", "foot", "hud"]);
-    }
-
-    if (phase === "FirstDoor") {
-      return withSensorEvents(["objective", "motion", "door", "wall", "foot", "hud"]);
-    }
-
-    if (phase === "ComputerRoom") {
-      const detections = ["objective", "motion", "computer", "wall", "foot", "hud"];
-      if (hasTrustedCombatEvidence(controller)) {
-        detections.push("enemy");
-      }
-      return withSensorEvents(detections);
-    }
-
-    if (phase === "Bridge") {
-      return withSensorEvents(["objective", "motion", "wall", "foot", "hud"]);
-    }
-
-    if (phase === "SecondDoor") {
-      const detections = ["objective", "motion", "door", "wall", "foot", "hud"];
-      if (hasTrustedCombatEvidence(controller)) {
-        detections.push("enemy");
-      }
-      return withSensorEvents(detections);
-    }
-
-    if (phase === "ExitRoom") {
-      return withSensorEvents(["objective", "motion", "door", "hud"]);
-    }
-
-    return withSensorEvents(["objective", "hud"]);
+    return requireRoutingCognition("activeDetectionsForPipeline")({
+      enabled: Boolean(controller.enabled),
+      phase: inferControlPipeline(controller),
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      auditoryEventDetected: Boolean(controller.auditorySnapshot?.eventDetected),
+      spatialEventDetected: Boolean(controller.spatialSnapshot?.eventDetected),
+      sensorDetections: Array.isArray(controller.sensorDetections) ? controller.sensorDetections : [],
+      semanticContextResetFrames: controller.semanticContextResetFrames,
+      topologicalTransitionBlocked: Boolean(controller.topologicalTransitionBlocked),
+      wallFollowFrames: controller.wallFollowFrames,
+      combatContextActive: Boolean(controller.combatContextActive),
+      trustedCombatEvidence: hasTrustedCombatEvidence(controller),
+      combatSurveyFrames: controller.combatSurveyFrames
+    });
   }
 
   function createE1M1SemanticMemory() {
-    return {
-      map: "E1M1",
-      coordinateHint: "spawn=south; firstDoor=north; courtyard=east-after-first-door; computerControlRoom=northwest; bridge=east-southeast; exit=southeast",
-      phase: "OpeningHome",
-      objective: "find-and-open-first-door",
-      spawn: {
-        blueFloorScore: 0,
-        courtyardScore: 0,
-        courtyardTurn: "none",
-        secretDoorScore: 0,
-        secretDoorTurn: "none",
-        westStairScore: 0,
-        westStairTurn: "none"
-      },
-      firstDoor: {
-        corridorConfidence: 0,
-        corridorBearing: "right",
-        doorConfidence: 0,
-        distance: 1,
-        opened: false
-      },
-      computerRoom: {
-        confidence: 0,
-        darkAreaScore: 0,
-        enemyZoneMatch: false
-      },
-      bridge: {
-        confidence: 0,
-        laneTurn: "none",
-        greenHazard: 0
-      },
-      finalRoom: {
-        confidence: 0,
-        exitSwitchArmed: false
-      },
-      motion: {
-        forwardProgress: 0,
-        turning: 0,
-        obstacle: 0
-      },
-      lastUpdatedFrame: 0
-    };
+    return requireSemanticCognition("createE1M1SemanticMemory")();
+  }
+
+  function updateE1M1SemanticMemory(memory, observation) {
+    return requireSemanticCognition("updateE1M1SemanticMemory")(memory, observation);
   }
 
   function normalizeAction(action, fallback) {
-    const source = action || fallback || {};
-    return {
-      move: source.move === "back" || source.move === "backward" ? "back" : (source.move === "forward" ? "forward" : "none"),
-      turn: source.turn === "left" ? "left" : (source.turn === "right" ? "right" : "none"),
-      fire: Boolean(source.fire),
-      strafe: Boolean(source.strafe),
-      use: Boolean(source.use),
-      run: Boolean(source.run)
-    };
+    return requireKinesisCognition("normalizeAction")(action, fallback);
   }
 
   function neutralAction() {
-    return {
-      move: "none",
-      turn: "none",
-      fire: false,
-      strafe: false,
-      use: false,
-      run: false
-    };
+    return requireKinesisCognition("neutralAction")();
+  }
+
+  function requireSemanticCognition(name) {
+    const fn = self.AIKernelDoomSemantics?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom semantic cognition module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requireRoutingCognition(name) {
+    const fn = self.AIKernelDoomRouting?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom routing cognition module is missing: ${name}`);
+    }
+
+    return fn;
   }
 
   function delay(milliseconds) {

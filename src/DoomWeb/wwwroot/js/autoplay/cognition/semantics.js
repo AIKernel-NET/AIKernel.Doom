@@ -64,7 +64,12 @@
         secretDoorScore: 0,
         secretDoorTurn: "none",
         westStairScore: 0,
-        westStairTurn: "none"
+        westStairTurn: "none",
+        centerAnchorScore: 0,
+        centerAnchorTurn: "right",
+        landmarkRouteEvidence: 0,
+        landmarkRouteTurn: "right",
+        landmarkRouteKind: "none"
       },
       firstDoor: {
         corridorConfidence: symbols.corridor.confidence,
@@ -148,6 +153,7 @@
     const corridorConfidence = clamp01(
       (number(observation.firstDoorCorridorSignature) * 0.46)
       + (number(observation.spawnCorridorGapScore) * 0.24)
+      + (number(observation.spawnLandmarkRouteEvidence) * 0.18)
       + (number(observation.motionEntranceScore) * 0.14)
       + (number(observation.motionForwardProgress) * 0.08)
       + (number(observation.blueFloorScore) < blueFloorHomeThreshold ? 0.08 : 0));
@@ -188,8 +194,13 @@
     next.spawn.secretDoorTurn = turn(observation.spawnSecretDoorTurn);
     next.spawn.westStairScore = round2(observation.spawnWestStairScore);
     next.spawn.westStairTurn = turn(observation.spawnWestStairTurn);
+    next.spawn.centerAnchorScore = round2(observation.spawnCenterAnchorScore);
+    next.spawn.centerAnchorTurn = turn(observation.spawnCenterAnchorTurn, "right");
+    next.spawn.landmarkRouteEvidence = round2(observation.spawnLandmarkRouteEvidence);
+    next.spawn.landmarkRouteTurn = turn(observation.spawnLandmarkRouteTurn, "right");
+    next.spawn.landmarkRouteKind = observation.spawnLandmarkRouteKind || "none";
     next.firstDoor.corridorConfidence = round2(corridorConfidence);
-    next.firstDoor.corridorBearing = turn(observation.spawnCorridorGapTurn, "right");
+    next.firstDoor.corridorBearing = turn(observation.spawnCorridorGapTurn, turn(observation.spawnLandmarkRouteTurn, "right"));
     next.firstDoor.doorConfidence = round2(firstDoorConfidence);
     next.firstDoor.distance = round2(depthEstimate);
     next.firstDoor.opened = number(observation.doorOpenedCount) > 0 || Boolean(observation.firstDoorLikelyOpened);

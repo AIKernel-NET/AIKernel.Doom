@@ -122,7 +122,10 @@
       strategyName: pipeline.name || profile?.strategyName || "DynamicPipeline",
       graph,
       predict(state) {
-        const context = buildContext(profile, state || {});
+        const context = buildContext(profile, Object.assign({}, state || {}, {
+          predictions: this.predictions,
+          previousRouteMode: this.lastStatus?.autoplayState?.routeMode || this.lastStatus?.debugRouteValues?.routeMode || "none"
+        }));
         const arbitration = requireControlArbitration("evaluateStages")(context, stages, {
           defaultThreshold,
           number,

@@ -361,7 +361,14 @@
       };
       this.requests = new Map();
       this.nextId = 1;
-      this.worker = new Worker("/demo/doom/js/doom-worker.js?v=20260618-sensorpanel1", { name: "AIKernel.Doom" });
+      const cacheKey = (() => {
+        try {
+          return new URL(globalThis.location.href).searchParams.get("doomdev") || "dev";
+        } catch {
+          return "dev";
+        }
+      })();
+      this.worker = new Worker(`/demo/doom/js/doom-worker.js?v=${encodeURIComponent(cacheKey)}`, { name: "AIKernel.Doom" });
       this.ready = new Promise((resolve, reject) => {
         this.resolveReady = resolve;
         this.rejectReady = reject;

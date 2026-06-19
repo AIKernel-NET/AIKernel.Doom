@@ -83,6 +83,10 @@ assert(fallbackQueued.every(item => !["forward", "back", "left", "right", "straf
 assert(fallbackQueued.some(item => item.name === "fire" && item.pressed === true), "fallback path should queue fire");
 assert(fallbackQueued.some(item => item.name === "use" && item.pressed === true), "fallback path should queue pulsed use");
 
+const yawOnlyPlan = adapter.createInputPlan({ move: "none", turn: "none", turnYaw: -9 }, { normalized: true });
+assert(yawOnlyPlan.turn === -1, "numeric turnYaw should recover the turn axis when turn text is none");
+assert(yawOnlyPlan.desired.left === true && yawOnlyPlan.desired.right === false, "numeric turnYaw should queue the matching turn key");
+
 let clearCount = 0;
 let releaseCount = 0;
 const senseOnly = adapter.applyAction({ move: "forward" }, {

@@ -3,7 +3,7 @@ namespace AIKernel.Doom.Provider.Autoplay;
 internal sealed record CompiledAutoplayPipelineStage(
     string Id,
     string Objective,
-    int Priority,
+    float Priority,
     float Threshold,
     IReadOnlyDictionary<string, float> Evidence,
     Func<AutoplayPipelineContext, bool> Condition,

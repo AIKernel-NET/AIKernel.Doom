@@ -158,6 +158,10 @@
     } else if (input.spawnCorridorGapTurn === "left" || input.spawnCorridorGapTurn === "right") {
       x = turnToX(input.spawnCorridorGapTurn);
       y = 0.78;
+    } else if ((input.spawnLandmarkRouteTurn === "left" || input.spawnLandmarkRouteTurn === "right")
+      && number(input.spawnLandmarkRouteEvidence) >= 0.24) {
+      x = turnToX(input.spawnLandmarkRouteTurn) * Math.max(0.42, number(input.spawnLandmarkRouteEvidence));
+      y = 0.82;
     } else if (!x) {
       x = turnToX(input.actionTurn);
     }
@@ -174,7 +178,8 @@
   }
 
   function resolvePathosVector(input = {}) {
-    const stuck = clamp01(Math.max(
+    const preDoorDemoRouteGraceActive = Boolean(input.preDoorDemoRouteGraceActive);
+    let stuck = clamp01(Math.max(
       number(input.motionStallScore),
       number(input.stuckFrames) / 12,
       number(input.quantizedStallFrames) / 10,
@@ -187,8 +192,14 @@
       enemy,
       input.dynamicThreatContext ? dynamicRaw : dynamicRaw * 0.18,
       input.healthThreat ? 1 : 0));
+    const depthEstimate = number(input.depthEstimate, 1);
+    if (preDoorDemoRouteGraceActive && depthEstimate > 0.22 && danger < 0.32 && !input.healthThreat) {
+      stuck = Math.min(stuck, 0.36);
+    }
+
     const enemyBias = clampSigned(input.enemyLateralBias);
-    const closeWall = number(input.depthEstimate, 1) <= 0.34 || stuck >= 0.52;
+    const closeWallDepth = preDoorDemoRouteGraceActive ? 0.22 : 0.34;
+    const closeWall = depthEstimate <= closeWallDepth || stuck >= 0.52;
     let x = enemyBias ? -enemyBias : 0;
     if (!x && (input.actionTurn === "left" || input.actionTurn === "right")) {
       x = turnToX(oppositeTurn(input.actionTurn)) * Math.max(0.28, stuck);
@@ -199,9 +210,15 @@
       x = -0.42;
     }
 
-    const y = closeWall || danger >= 0.42
-      ? -Math.max(0.42, stuck, danger)
-      : -Math.max(0.12, danger * 0.72);
+    let y = 0;
+    if (closeWall || danger >= 0.42) {
+      y = -Math.max(0.42, stuck, danger);
+    } else if (danger >= 0.24) {
+      y = -Math.max(0.12, danger * 0.72);
+    } else if (stuck >= 0.44) {
+      y = -Math.max(0.18, stuck * 0.58);
+    }
+
     return normalizeVector({
       x,
       y,
@@ -218,8 +235,18 @@
       || objective === "recover-via-east-window"
       || objective === "locate-first-door-corridor"
       || objective === "enter-first-door-corridor") {
-      x = turnToX(input.spawnCorridorGapTurn) || turnToX(input.firstDoorCorridorSearchTurn) || 0.34;
+      x = turnToX(input.spawnCorridorGapTurn)
+        || (number(input.spawnLandmarkRouteEvidence) >= 0.24 ? turnToX(input.spawnLandmarkRouteTurn) : 0)
+        || turnToX(input.firstDoorCorridorSearchTurn)
+        || 0.34;
       y = objective === "enter-first-door-corridor" || objective === "recover-via-east-window" ? 0.88 : 0.76;
+      if (input.preDoorDemoRouteGraceActive) {
+        x = turnToX(input.spawnCorridorGapTurn)
+          || (number(input.spawnLandmarkRouteEvidence) >= 0.18 ? turnToX(input.spawnLandmarkRouteTurn) : 0)
+          || turnToX(input.firstDoorCorridorSearchTurn)
+          || 0.44;
+        y = Math.max(y, 0.9);
+      }
     } else if (objective === "align-first-door"
       || objective === "approach-first-door"
       || objective === "open-first-door"
@@ -272,6 +299,9 @@
       || objective === "recover-via-east-window"
       || objective === "locate-first-door-corridor") {
       score = 0.68;
+      if (input.preDoorDemoRouteGraceActive) {
+        score = 0.78;
+      }
     } else if (objective === "enter-first-door-corridor") {
       score = 0.74;
     } else if (objective === "align-first-door"
@@ -283,6 +313,10 @@
       score = 0.82;
     } else if (objective === "reach-central-hall") {
       score = 0.76;
+    } else if (objective === "engage-front-enemy") {
+      score = 0.84;
+    } else if (objective === "secure-central-hall") {
+      score = 0.72;
     } else if (objective === "cross-bridge" || objective === "reach-final-room") {
       score = 0.8;
     } else if (objective === "restore-relative-motion") {

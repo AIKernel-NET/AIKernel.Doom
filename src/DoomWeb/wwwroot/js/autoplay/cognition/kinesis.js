@@ -315,6 +315,7 @@
     const contactUseReady = Boolean(kairos.contactUseReady);
     const shouldAdvanceFirstDoor = Boolean(kairos.shouldAdvanceFirstDoor);
     const depthEstimate = Number(kairos.depthEstimate || 1);
+    const routeAdvanceProtected = shouldAdvanceFirstDoor || Boolean(kairos.routeAdvanceProtected);
     const wallHugSide = kairos.wallHugSide === "left" || kairos.wallHugSide === "right" ? kairos.wallHugSide : "none";
     let next = { ...safe };
     let applied = false;
@@ -327,7 +328,13 @@
 
     if (pathosDominant && pathos >= 0.62 && !firstDoorAlignmentWindow) {
       const stallOnly = danger < 0.32 && stuck >= 0.58 && depthEstimate > 0.46;
-      if (stallOnly) {
+      if (stallOnly && routeAdvanceProtected) {
+        next.move = "forward";
+        next.run = true;
+        next.turn = Math.abs(Number(vector.x || 0)) >= 0.18 ? turnFromX(vector.x) : "none";
+        applied = true;
+        reason = "logos-ethos-route-protected";
+      } else if (stallOnly) {
         next.move = "forward";
         next.run = false;
         next.turn = Math.abs(Number(vector.x || 0)) >= 0.18

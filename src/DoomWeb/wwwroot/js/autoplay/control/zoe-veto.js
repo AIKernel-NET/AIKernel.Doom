@@ -34,6 +34,7 @@
         return Object.assign({}, action || {}, {
           move: "none",
           turn: "none",
+          turnYaw: 0,
           fire: false,
           strafe: false,
           use: false,

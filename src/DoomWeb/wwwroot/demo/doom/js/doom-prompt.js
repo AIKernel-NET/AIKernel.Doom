@@ -100,34 +100,20 @@
     let doomAudioEventBadge = null;
     let doomAudioPlaybackToggle = document.getElementById("doom-audio-playback-toggle");
     let doomToposDetailToggle = document.getElementById("doom-topos-detail-toggle");
+    let doomSensorPanelScriptLoading = null;
+    let doomPipelinePanelScriptLoading = null;
+    let doomRuntimeFormatScriptLoading = null;
+    let doomGoalPanelScriptLoading = null;
+    let doomDebugOverlayScriptLoading = null;
     let doomBridgeAudioSnapshot = null;
     let doomAudioHudEnvelope = { left: 0, right: 0, balance: 0, updatedAt: 0 };
     let doomAudioEventHolds = [];
 
-    const doomSensorPanel = self.AIKernelDoomSensorPanel || {};
-    const sensorUi = typeof doomSensorPanel.cloneSensorDescriptors === "function"
-      ? doomSensorPanel.cloneSensorDescriptors()
-      : {
-        visual: { label: "Visual", signal: "9x9 frame", panel: "aisthesis", stage: "primary" },
-        audio: { label: "Audio", signal: "stereo energy", panel: "aisthesis", stage: "primary" },
-        movement: { label: "Movement", signal: "motion vector", panel: "aisthesis", stage: "primary" },
-        compass: { label: "Compass", signal: "heading vector", panel: "aisthesis", stage: "primary" },
-        health: { label: "Health", signal: "life state", panel: "aisthesis", stage: "primary" },
-        spatial: { label: "Spatial", signal: "Topos state", panel: "krisis", stage: "topos" },
-        motor: { label: "Motor", signal: "input vector", panel: "kinesis", stage: "motion" }
-      };
-    const detectionUi = typeof doomSensorPanel.cloneDetectionDescriptors === "function"
-      ? doomSensorPanel.cloneDetectionDescriptors()
-      : {};
-    const sensorPanelLayout = Array.isArray(doomSensorPanel.panelLayout)
-      ? doomSensorPanel.panelLayout
-      : [
-        { key: "aisthesis", className: "is-aisthesis", title: "Aisthesis", subtitle: "Perception layer", stages: [{ key: "primary", title: "Primary sensors", items: [{ type: "sensor", key: "visual" }, { type: "sensor", key: "audio" }, { type: "sensor", key: "movement" }, { type: "sensor", key: "compass" }, { type: "detection", key: "foot" }, { type: "sensor", key: "health" }] }] },
-        { key: "noesis", className: "is-noesis", title: "Noesis", subtitle: "Cognition layer", stages: [{ key: "phainesis", title: "Phainesis", items: [{ type: "detection", key: "motion" }, { type: "detection", key: "wall" }, { type: "signal", label: "Damage", signal: "localization" }, { type: "detection", key: "enemy" }, { type: "detection", key: "hud" }, { type: "detection", key: "computer" }] }, { key: "nous", title: "Nous", items: [{ type: "signal", label: "LoomingVector", signal: "approach" }, { type: "signal", label: "StuckVector", signal: "trap" }, { type: "signal", label: "DamageVector", signal: "damage" }, { type: "signal", label: "EnemyVector", signal: "enemy" }, { type: "signal", label: "EntropyVector", signal: "entropy" }, { type: "signal", label: "ItemVector", signal: "item" }] }] },
-        { key: "krisis", className: "is-krisis", title: "Krisis", subtitle: "Judgement layer", stages: [{ key: "topos", title: "Topos", items: [{ type: "sensor", key: "spatial" }, { type: "detection", key: "objective" }, { type: "detection", key: "door" }, { type: "detection", key: "spatial" }, { type: "signal", label: "LogosVector", signal: "route" }, { type: "signal", label: "PathosVector", signal: "risk" }, { type: "signal", label: "EthosVector", signal: "veto" }, { type: "signal", label: "ToposDecision", signal: "carrier" }] }, { key: "kairos", title: "Kairos", items: [{ type: "signal", label: "Pathos-priority", signal: "danger first" }, { type: "signal", label: "Ethos-priority", signal: "fail closed" }, { type: "signal", label: "Logos-priority", signal: "route proof" }] }] },
-        { key: "kinesis", className: "is-kinesis", title: "Kinesis", subtitle: "Action layer", stages: [{ key: "motion", title: "Kinesis", items: [{ type: "sensor", key: "motor" }, { type: "signal", label: "Move", signal: "forward / back" }, { type: "signal", label: "Turn", signal: "left / right" }, { type: "signal", label: "Strafe", signal: "lateral" }, { type: "signal", label: "Shoot", signal: "fire" }] }, { key: "zoe", title: "Zoe", items: [{ type: "detection", key: "health" }, { type: "signal", label: "HP veto", signal: "life guard" }, { type: "signal", label: "Life audit", signal: "action check" }, { type: "signal", label: "Fatal avoid", signal: "forced stop" }] }] }
-      ];
-    const sensorPanelVersion = doomSensorPanel.version || "legacy-sensorpanel";
+    let sensorUi = {};
+    let detectionUi = {};
+    let sensorPanelLayout = [];
+    let sensorPanelVersion = "loading-sensorpanel";
+    refreshSensorPanelDescriptors();
     const commandHistory = [];
     const controllerDebugLogEntries = [];
     const controllerDebugLogSignatureByCategory = new Map();
@@ -198,12 +184,19 @@
       Enter: "enter",
       Escape: "escape"
     };
+    const doomDevCacheKey = (() => {
+      try {
+        return new URL(window.location.href).searchParams.get("doomdev") || "dev";
+      } catch {
+        return "dev";
+      }
+    })();
     const doomRuntime = window.createAIKernelDoomRuntime
       ? window.createAIKernelDoomRuntime({
         canvas: doomScreen,
         moduleUrl: "/demo/doom/module.json",
         modelManifestUrl: "/models/bonsai1.7b/manifest.json",
-        autoplayProfileUrl: "/demo/doom/autoplay-profile.json",
+        autoplayProfileUrl: `/demo/doom/autoplay-profile.json?v=${encodeURIComponent(doomDevCacheKey)}`,
         log: appendConsoleLine,
         onStatusChange: queueRuntimeStatusUpdate
       })
@@ -328,11 +321,14 @@
         return false;
       }
 
-      doomHasStarted = true;
+      const status = doomRuntime?.status?.() || {};
+      if (!wasmApprovalPending && status.state === "running") {
+        doomHasStarted = true;
+      }
       if (doomScreenPanel) {
         doomScreenPanel.hidden = false;
       }
-      setDoomRuntimeUiVisibility(doomRuntime?.status?.() || { state: "running" });
+      setDoomRuntimeUiVisibility(status.state ? status : { state: "running" });
 
       if (doomScreen.tabIndex < 0) {
         doomScreen.tabIndex = 0;
@@ -403,7 +399,15 @@
     }
 
     function isDoomRuntimeUiVisible(status = doomRuntime?.status?.() || {}) {
-      return doomHasStarted || status?.state === "running";
+      if (wasmApprovalPending) {
+        return false;
+      }
+
+      if (status?.state === "running") {
+        return true;
+      }
+
+      return doomHasStarted && (status?.state === "ready" || status?.state === "stopped" || status?.state === "failed");
     }
 
     function setDoomRuntimeUiVisibility(status = doomRuntime?.status?.() || {}) {
@@ -415,6 +419,9 @@
       }
       if (doomController) {
         doomController.hidden = !visible;
+      }
+      if (doomControllerDebugLog) {
+        doomControllerDebugLog.hidden = !visible;
       }
       if (doomRuntimePanel) {
         doomRuntimePanel.hidden = !visible;
@@ -458,13 +465,9 @@
         .replace(/"/g, "&quot;");
     }
 
-    const DISPLAY_LABELS = {
+    const FALLBACK_DISPLAY_LABELS = {
       "find-corridor-to-first-door": "Find Door Corridor",
-      "follow-demo-route-to-first-door": "Follow Demo Route",
-      "recover-via-east-window": "East Window Recovery",
       "locate-first-door-corridor": "Lock Door Corridor",
-      "enter-first-door-corridor": "Enter Door Corridor",
-      "align-first-door": "Align First Door",
       "approach-first-door": "Approach First Door",
       "open-first-door": "Open First Door",
       "enter-computer-control-room": "Enter Computer Room",
@@ -474,9 +477,14 @@
     };
 
     function labelize(value) {
+      const formatter = self.AIKernelDoomGoalPanel?.labelize;
+      if (typeof formatter === "function") {
+        return formatter(value);
+      }
+
       const key = String(value || "none");
-      if (DISPLAY_LABELS[key]) {
-        return DISPLAY_LABELS[key];
+      if (FALLBACK_DISPLAY_LABELS[key]) {
+        return FALLBACK_DISPLAY_LABELS[key];
       }
 
       return key
@@ -484,7 +492,12 @@
         .replace(/\b\w/g, letter => letter.toUpperCase());
     }
 
-    function resolvePrimaryObjective(autoplay) {
+    function resolveGoalPanelValue(name, fallback, autoplay) {
+      const resolver = self.AIKernelDoomGoalPanel?.[name];
+      return typeof resolver === "function" ? resolver(autoplay) : fallback(autoplay);
+    }
+
+    function fallbackPrimaryObjective(autoplay) {
       const milestones = autoplay?.milestones || {};
       const objective = String(autoplay?.objective || "");
       if (!autoplay?.enabled) {
@@ -534,8 +547,13 @@
       return labelize(autoplay.controlPipeline || autoplay.objective || "Idle");
     }
 
-    function resolveTelosObjective(autoplay) {
+    function resolvePrimaryObjective(autoplay) {
+      return resolveGoalPanelValue("resolvePrimaryObjective", fallbackPrimaryObjective, autoplay);
+    }
+
+    function fallbackTelosObjective(autoplay) {
       const milestones = autoplay?.milestones || {};
+      const objective = String(autoplay?.objective || "");
       if (!autoplay?.enabled) {
         return "Idle";
       }
@@ -556,7 +574,13 @@
         return "ComputerRoom";
       }
 
-      if (milestones.firstDoorCorridorLocated || milestones.firstDoorUseAttempted || autoplay.controlPipeline === "FirstDoor" || autoplay.controlPipeline === "OpeningHome") {
+      if (objective.indexOf("first-door") >= 0
+        || objective.indexOf("corridor") >= 0
+        || milestones.firstDoorCorridorLocated
+        || milestones.firstDoorUseAttempted
+        || autoplay.controlPipeline === "FirstDoor"
+        || autoplay.controlPipeline === "OpeningHome"
+        || String(autoplay.controlPipeline || "").indexOf("demo-spawn") >= 0) {
         return "FirstDoor";
       }
 
@@ -566,7 +590,32 @@
         .replace(/\s+/g, "");
     }
 
-    function resolveSubObjectives(autoplay) {
+    function resolveTelosObjective(autoplay) {
+      return resolveGoalPanelValue("resolveTelosObjective", fallbackTelosObjective, autoplay);
+    }
+
+    function fallbackKairosSignal(autoplay) {
+      if (autoplay?.retryDispatch?.active) {
+        return "Kairos: Retry";
+      }
+
+      if ((autoplay?.firstDoorUseLatchFrames || 0) > 0) {
+        return `Kairos: Use Latch ${autoplay.firstDoorUseLatchFrames}`;
+      }
+
+      if ((autoplay?.useCooldown || 0) > 0) {
+        return `Kairos: Use Cooldown ${autoplay.useCooldown}`;
+      }
+
+      const phainomenon = autoplay?.phainomenon || autoplay?.nousDetectorResult;
+      return phainomenon?.sensorRecovery?.needed ? "Kairos: Recovery" : "";
+    }
+
+    function resolveKairosSignal(autoplay) {
+      return resolveGoalPanelValue("resolveKairosSignal", fallbackKairosSignal, autoplay);
+    }
+
+    function fallbackSubObjectives(autoplay) {
       const parts = [];
       if (autoplay?.objective) {
         parts.push({ kind: "objective", label: labelize(autoplay.objective) });
@@ -596,7 +645,11 @@
       return parts.length ? parts : [{ kind: "monitor", label: "Monitoring" }];
     }
 
-    function resolvePriorityPrefix(autoplay) {
+    function resolveSubObjectives(autoplay) {
+      return resolveGoalPanelValue("resolveSubObjectives", fallbackSubObjectives, autoplay);
+    }
+
+    function fallbackPriorityPrefix(autoplay) {
       const carrier = autoplay?.toposDecisionCarrier || autoplay?.ctgCarrier?.toposDecision || {};
       const dominant = String(carrier.dominantAxis || "").toUpperCase();
       if (dominant === "PATHOS") {
@@ -624,7 +677,11 @@
       return "L";
     }
 
-    function resolvePriorityAction(autoplay) {
+    function resolvePriorityPrefix(autoplay) {
+      return resolveGoalPanelValue("resolvePriorityPrefix", fallbackPriorityPrefix, autoplay);
+    }
+
+    function fallbackPriorityAction(autoplay) {
       if (!autoplay?.enabled) {
         return "Idle";
       }
@@ -682,46 +739,8 @@
       return `[L] Approach Target`;
     }
 
-    function resolveKairosSignal(autoplay) {
-      const milestones = autoplay?.milestones || {};
-      if (autoplay?.retryDispatch?.active) {
-        return "Kairos: Retry";
-      }
-
-      if ((autoplay?.firstDoorUseLatchFrames || 0) > 0) {
-        return `Kairos: Use Latch ${autoplay.firstDoorUseLatchFrames}`;
-      }
-
-      if ((autoplay?.wallUseProbeFrames || 0) > 0) {
-        return `Kairos: Probe ${autoplay.wallUseProbeFrames}`;
-      }
-
-      if ((autoplay?.useCooldown || 0) > 0) {
-        return `Kairos: Use Cooldown ${autoplay.useCooldown}`;
-      }
-
-      if ((autoplay?.combatSurveyFrames || 0) > 0) {
-        return `Kairos: Combat Survey ${autoplay.combatSurveyFrames}`;
-      }
-
-      if ((autoplay?.semanticContextResetFrames || 0) > 0) {
-        return `Kairos: Context Reset ${autoplay.semanticContextResetFrames}`;
-      }
-
-      if ((milestones.firstDoorTransitionFrames || 0) > 0) {
-        return `Kairos: Door Transition ${milestones.firstDoorTransitionFrames}`;
-      }
-
-      if ((milestones.computerRoomAdvanceFrames || 0) > 0) {
-        return `Kairos: Advance ${milestones.computerRoomAdvanceFrames}`;
-      }
-
-      const phainomenon = autoplay?.phainomenon || autoplay?.nousDetectorResult;
-      if (phainomenon?.sensorRecovery?.needed) {
-        return "Kairos: Recovery";
-      }
-
-      return "";
+    function resolvePriorityAction(autoplay) {
+      return resolveGoalPanelValue("resolvePriorityAction", fallbackPriorityAction, autoplay);
     }
 
     function renderDoomState(status, note = "") {
@@ -742,6 +761,11 @@
     }
 
     function queueRuntimeStatusUpdate(status, reason = "status") {
+      loadDoomSensorPanelScript();
+      loadDoomRuntimeFormatScript();
+      loadDoomPipelinePanelScript();
+      loadDoomGoalPanelScript();
+      loadDoomDebugOverlayScript();
       runtimeStatusFlow.queue(status, reason, {
         light: syncRuntimeStatusLight,
         update: updateRuntimeStatus
@@ -1043,6 +1067,43 @@
         return;
       }
 
+      const runtimeFormatter = self.AIKernelDoomRuntimeFormat;
+      if (typeof runtimeFormatter?.formatRuntimeStatus === "function") {
+        const formatted = runtimeFormatter.formatRuntimeStatus(status, {
+          droppedFrames: runtimeStatusFlow.snapshot().droppedFrames
+        });
+        runtimeStatus.innerHTML = formatted.html;
+        doomFps.textContent = formatted.fpsText;
+        renderDoomState(status);
+        setDoomRuntimeUiVisibility(status);
+        syncAutoplayToggle(status);
+        syncManualMoveToggle(status);
+        syncSenseOnlyToggle(status);
+        syncOverlayToggle();
+        syncToposDetailToggle();
+        syncSensorToggles(status);
+        syncDetectionToggleButtons(status);
+        ensureDoomSpatialHud();
+        ensureDoomGoalHud();
+        ensureDoomToposHud();
+        updateDoomSpatialHud(status);
+        updateDoomGoalHud(status);
+        updateDoomToposHud(status);
+        syncAudioPlaybackToggle(status);
+        renderDoomDebugOverlay(status);
+        syncControllerDebugLog(status, reason);
+
+        lastObjectiveStatus = formatted.objectiveText || "none";
+        if (formatted.text !== lastRuntimeStatus && ["stopped", "failed"].includes(reason)) {
+          const level = status.state === "failed" ? "log-fail" : "log-info";
+          appendConsoleLine("[STATE]", level, formatted.text);
+        }
+        lastRuntimeStatus = formatted.text;
+        return;
+      }
+
+      loadDoomRuntimeFormatScript();
+
       const fps = Number.isFinite(status.fps) ? status.fps : 0;
       const targetFps = status.targetFps || 30;
       const workMs = Math.round(status.lastFrameWorkMs || 0);
@@ -1078,11 +1139,25 @@
       const semantic = autoplay.semanticMemory || {};
       const semanticText = `${semantic.phase || pipelineText}/${semantic.objective || objectiveText}/d${semantic.firstDoor?.doorConfidence ?? 0}/c${semantic.firstDoor?.corridorConfidence ?? 0}/b${semantic.bridge?.confidence ?? 0}/f${semantic.finalRoom?.confidence ?? 0}`;
       const strategyText = `${autoplay.strategyName || "unknown"}/${autoplay.strategyContext || "unknown"}/p${autoplay.strategyPriority || 0}`;
+      const stageEvalText = Array.isArray(autoplay.stageEvaluations) && autoplay.stageEvaluations.length > 0
+        ? autoplay.stageEvaluations.slice(0, 5).map(item => `${item.stageId || "?"}:${item.conditionMatched ? "T" : "f"}/${item.evidenceMatched ? "E" : "e"}`).join(",")
+        : "none";
+      const debugRoute = autoplay.debugRouteValues || {};
+      const routeTextureText = debugRoute.routeTextureWallOcclusion ? "/tex!" : "";
+      const routeEastText = debugRoute.eastWindowRecoverAnchor ? "/east!" : "";
+      const routeMode = debugRoute.routeMode || autoplay.routeMode || autoplay.autoplayState?.routeMode || "";
+      const routeModeText = routeMode ? `/mode=${routeMode}` : "";
+      const routeLoopKind = debugRoute.routeLoopKind || autoplay.routeLoopKind || autoplay.autoplayState?.routeLoopKind || "none";
+      const routeLoopExceeded = Boolean(debugRoute.routeLoopBudgetExceeded || autoplay.routeLoopBudgetExceeded || autoplay.autoplayState?.routeLoopBudgetExceeded);
+      const routeLoopUsed = Math.max(Number(debugRoute.routePivotUsed || 0), Number(debugRoute.routeSlideUsed || 0), Number(debugRoute.routeBackoffUsed || 0));
+      const routeLoopBudget = Math.max(Number(debugRoute.routePivotBudget || 0), Number(debugRoute.routeSlideBudget || 0), Number(debugRoute.routeBackoffBudget || 0));
+      const routeLoopText = routeLoopKind !== "none" || routeLoopExceeded ? `/loop=${routeLoopKind}${routeLoopExceeded ? "!" : ""}:${Math.round(routeLoopUsed)}/${Math.round(routeLoopBudget)}` : "";
+      const routeDebugText = `ctx=${debugRoute.context || "?"}${routeModeText}/d${Number(debugRoute.depthSig || 0).toFixed(2)}/foot${Number(debugRoute.footObstacleScore || 0).toFixed(2)}${debugRoute.routeFootObstacle ? "!" : ""}/mo${Number(debugRoute.motionObstacleScore || 0).toFixed(2)}${routeTextureText}${routeEastText}/gap${Number(debugRoute.spawnCorridorGapScore || 0).toFixed(2)}/sec${Number(debugRoute.spawnSecretDoorScore || 0).toFixed(2)}/lm${Number(debugRoute.spawnLandmarkRouteEvidence || 0).toFixed(2)}${routeLoopText}`;
       const milestones = autoplay.milestones || {};
       const mapText = `map=${milestones.mapSectorId || "unknown"}/${milestones.mapDoorSectorMatch ? "door" : "-"}${milestones.mapDarkSectorMatch ? "+dark" : ""}${milestones.mapEnemyZoneMatch ? "+enemy" : ""}`;
       const alertText = `alert=${milestones.enemyAlertFrames || 0}/${milestones.enemyAlertTurn || "none"}/${milestones.enemyAlertCluster || "none"}/${Number(milestones.enemyAlertDepth ?? 1).toFixed(2)}/${Number(milestones.enemyAlertPeakConfidence || 0).toFixed(2)}`;
       const progressText = `hall=${milestones.centralHallEntered ? "yes" : "no"}/${milestones.centralHallFrames || 0}; stairs=${milestones.stairsEntered ? "yes" : "no"}/${milestones.stairsCandidateFrames || 0}; final=${milestones.finalRoomEntered ? "yes" : "no"}/${milestones.finalRoomCandidateFrames || 0}`;
-      const routeText = `blue=${Number(milestones.blueFloorScore || 0).toFixed(2)}; court=${Number(milestones.courtyardScore || 0).toFixed(2)}/${milestones.courtyardTurn || "none"}/${milestones.courtyardRescueMode || "none"}/${milestones.courtyardRescueFrames || 0}; secret=${Number(milestones.spawnSecretDoorScore || 0).toFixed(2)}/${milestones.spawnSecretDoorTurn || "none"}; stair=${Number(milestones.spawnWestStairScore || 0).toFixed(2)}/${milestones.spawnWestStairTurn || "none"}; gap=${Number(milestones.spawnCorridorGapScore || 0).toFixed(2)}/${milestones.spawnCorridorGapTurn || "none"}/${milestones.spawnCorridorGapFrames || 0}; bridge=${Number(milestones.bridgeBrownScore || 0).toFixed(2)}/${Number(milestones.bridgeGreenLeft || 0).toFixed(2)}-${Number(milestones.bridgeGreenCenter || 0).toFixed(2)}-${Number(milestones.bridgeGreenRight || 0).toFixed(2)}/${milestones.bridgeLaneTurn || "none"}/door${Number(milestones.bridgeDoorScore || 0).toFixed(2)}; corridor=${milestones.firstDoorCorridorLocated ? "yes" : "no"}/${milestones.firstDoorCorridorFrames || 0}/${Number(milestones.firstDoorCorridorSignature || 0).toFixed(2)}/v9${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)}; deadEnd=${milestones.firstDoorDeadEndTurnFrames || 0}; useSeen=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}`;
+      const routeText = `blue=${Number(milestones.blueFloorScore || 0).toFixed(2)}; court=${Number(milestones.courtyardScore || 0).toFixed(2)}/${milestones.courtyardTurn || "none"}/${milestones.courtyardRescueMode || "none"}/${milestones.courtyardRescueFrames || 0}; secret=${Number(milestones.spawnSecretDoorScore || 0).toFixed(2)}/${milestones.spawnSecretDoorTurn || "none"}; stair=${Number(milestones.spawnWestStairScore || 0).toFixed(2)}/${milestones.spawnWestStairTurn || "none"}; gap=${Number(milestones.spawnCorridorGapScore || 0).toFixed(2)}/${milestones.spawnCorridorGapTurn || "none"}/${milestones.spawnCorridorGapFrames || 0}/yaw${Number(autoplay.routeFallbackYaw || 0).toFixed(0)}/${autoplay.spawnCorridorGapActionTurn || "none"}; bridge=${Number(milestones.bridgeBrownScore || 0).toFixed(2)}/${Number(milestones.bridgeGreenLeft || 0).toFixed(2)}-${Number(milestones.bridgeGreenCenter || 0).toFixed(2)}-${Number(milestones.bridgeGreenRight || 0).toFixed(2)}/${milestones.bridgeLaneTurn || "none"}/door${Number(milestones.bridgeDoorScore || 0).toFixed(2)}; corridor=${milestones.firstDoorCorridorLocated ? "yes" : "no"}/${milestones.firstDoorCorridorFrames || 0}/${Number(milestones.firstDoorCorridorSignature || 0).toFixed(2)}/v9${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)}/r${Number(milestones.firstDoorVision9x9RedScore || 0).toFixed(2)}; deadEnd=${milestones.firstDoorDeadEndTurnFrames || 0}; useSeen=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}/3x3${Number(milestones.firstDoorUse3x3Score || 0).toFixed(2)}/${milestones.firstDoorUse3x3Turn || "none"}`;
       const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
       const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
       const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
@@ -1101,7 +1176,9 @@
       const visualFlowText = `${Number(visualMotion.vectorX || 0).toFixed(2)}/${Number(visualMotion.vectorY || 0).toFixed(2)}/m${Number(visualMotion.magnitude || 0).toFixed(2)}/b${Number(visualMotion.baseMagnitude || 0).toFixed(2)}/lm${autoplay.compassLandmarks || 0}`;
       const nousText = `${nous.bonsaiTernary?.aisthesis || "neutral"}/${nous.bonsaiTernary?.kinesis || "neutral"}/${nous.bonsaiTernary?.phantasia || "neutral"}`;
       const phainesisEvidenceText = `loom=${detector.looming?.active ? detector.looming.direction || "active" : "-"}; dmg=${detector.damageLocalization?.active ? detector.damageLocalization.direction || "active" : "-"}; trap=${detector.trap?.active ? detector.trap.kind || "active" : "-"}; stuck=${detector.stuck?.active ? "yes" : "no"}; ent=${detector.explorationEntropy?.high ? "high" : "ok"}; item=${detector.itemBacktrack?.suggested ? detector.itemBacktrack.targetKind || "yes" : "-"}; rec=${detector.sensorRecovery?.needed ? detector.sensorRecovery.reason || "yes" : "-"}`;
-      const autoplayText = `${autoplay.enabled ? "on" : "off"}/${autoplay.mode || "disabled"}${autoplay.manualMove ? "/manual-move" : ""}${autoplay.senseOnly ? "/sense-only" : ""}; pipeline=${pipelineText}; objective=${objectiveText}; phainesis=${phainesisText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; move=${Number(movement.vectorX || 0).toFixed(2)}/${Number(movement.vectorY || 0).toFixed(2)}/${Number(movement.confidence || 0).toFixed(2)}; flow=${visualFlowText}; nous=${nousText}; phainesisEvidence=${phainesisEvidenceText}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; ammo=${ammoText}; health=${healthText}; retry=${retryText}; milestones=${milestoneText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; vision9x9=${String(autoplay.vision9x9Signature || "").slice(0, 18)}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; audio=${audioText}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; useLatch=${autoplay.firstDoorUseLatchFrames || 0}/${autoplay.firstDoorUsePulsed ? "pulsed" : "armed"}; predictions=${autoplay.predictions || 0}; reuse=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`;
+      const action = autoplay.action || {};
+      const actionText = `${action.move || "none"}/${action.turn || "none"}/use=${Boolean(action.use)}/fire=${Boolean(action.fire)}/run=${Boolean(action.run)}`;
+      const autoplayText = `${autoplay.enabled ? "on" : "off"}/${autoplay.mode || "disabled"}${autoplay.manualMove ? "/manual-move" : ""}${autoplay.senseOnly ? "/sense-only" : ""}; pipeline=${pipelineText}; objective=${objectiveText}; action=${actionText}; phainesis=${phainesisText}; semantic=${semanticText}; strategy=${strategyText}; eval=${stageEvalText}; routeDbg=${routeDebugText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; move=${Number(movement.vectorX || 0).toFixed(2)}/${Number(movement.vectorY || 0).toFixed(2)}/${Number(movement.confidence || 0).toFixed(2)}; flow=${visualFlowText}; nous=${nousText}; phainesisEvidence=${phainesisEvidenceText}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; ammo=${ammoText}; health=${healthText}; retry=${retryText}; milestones=${milestoneText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; vision9x9=${String(autoplay.vision9x9Signature || "").slice(0, 18)}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; audio=${audioText}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; kRepeat=${autoplay.actionRepeatFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; useLatch=${autoplay.firstDoorUseLatchFrames || 0}/${autoplay.firstDoorUsePulsed ? "pulsed" : "armed"}; predictions=${autoplay.predictions || 0}; reuse=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`;
       const text = `runtime=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
       runtimeStatus.innerHTML = `<strong>runtime</strong>=${status.state}; wasm=${status.wasmLoaded}; wad=${status.wadLoaded}; model=${status.modelLoaded}; input=${status.inputReady}; actionInput=${status.actionInputReady}; loop=${status.loopActive}; ${watchdogText}; autoplay=${autoplayText}; frames=${status.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status.gpuDelegate || "pending"}; framebuffer=${status.framebuffer}`;
       const hudControl = status.hudFlowControl || {};
@@ -1135,26 +1212,6 @@
       lastRuntimeStatus = text;
     }
 
-    function createDebugRegion(className, left, top, width, height, label, value = "", options = {}) {
-      const region = document.createElement("div");
-      const priority = options.priority ? `priority-${options.priority}` : "";
-      region.className = `debug-region ${className} ${priority} ${options.active ? "is-detected" : ""}`.trim();
-      region.style.left = `${left}%`;
-      region.style.top = `${top}%`;
-      region.style.width = `${width}%`;
-      region.style.height = `${height}%`;
-      if (options.slot !== undefined) {
-        region.dataset.labelSlot = String(options.slot);
-      }
-      if (!options.noLabel) {
-        const labelNode = document.createElement("span");
-        labelNode.className = "debug-region-label";
-        labelNode.textContent = value ? `${label} ${value}` : label;
-        region.appendChild(labelNode);
-      }
-      return region;
-    }
-
     function renderDoomDebugOverlay(status) {
       if (!doomDebugOverlay) {
         return;
@@ -1174,241 +1231,17 @@
         return;
       }
 
-      const autoplay = status?.autoplay || {};
-      const milestones = autoplay.milestones || {};
-      const semantic = autoplay.semanticMemory || {};
-      const objective = autoplay.objective || semantic.objective || "none";
-      const pipeline = autoplay.controlPipeline || semantic.phase || "Idle";
-      const priorityLabel = resolvePriorityAction(autoplay);
-      const doorOpened = Number(milestones.doorOpened || 0) > 0;
-      const firstDoorPhase = !doorOpened;
-      const activeDetections = new Set(Array.isArray(autoplay.activeDetections) ? autoplay.activeDetections : []);
-      const phaseDetectionReady = activeDetections.size > 0;
-      const detectorEnabled = (key) => doomDetectionVisibility.get(key) !== false && (!phaseDetectionReady || activeDetections.has(key));
-      const showMotion = detectorEnabled("motion");
-      const showPriority = detectorEnabled("objective");
-      const showDoor = detectorEnabled("door");
-      const showWall = detectorEnabled("wall");
-      const showEnemy = detectorEnabled("enemy");
-      const showComputer = detectorEnabled("computer");
-      const showFoot = detectorEnabled("foot");
-      const showHud = detectorEnabled("hud");
-      const showSpatial = detectorEnabled("spatial");
-      const showHealth = detectorEnabled("health");
-      const wallAvoidActive = /wall|corner|stuck|detach|escape|avoid|survey/.test(String(autoplay.safetyReason || ""))
-        || /wall|corner|stuck|detach|escape|avoid|survey/.test(String(autoplay.mobilityMode || ""));
-      const region9 = String(autoplay.region9Signature || "000000000").padEnd(9, "0").slice(0, 9);
-      const motion9 = String(autoplay.motion9Signature || "000000000").padEnd(9, "0").slice(0, 9);
-      const fragment = document.createDocumentFragment();
-      const viewHeight = 80;
-      const cellWidth = 100 / 3;
-      const cellHeight = viewHeight / 3;
-      appendVision9x9Heatmap(fragment, milestones);
-      appendKairosPulse(fragment, autoplay);
-      appendUseProbeArrow(fragment, autoplay);
+      const overlayRenderer = self.AIKernelDoomDebugOverlay;
+      if (typeof overlayRenderer?.renderDebugOverlay === "function") {
+        overlayRenderer.renderDebugOverlay(doomDebugOverlay, status, { detectionVisibility: doomDetectionVisibility });
+        return;
+      }
 
-      for (let row = 0; row < 3; row += 1) {
-        for (let column = 0; column < 3; column += 1) {
-          const index = row * 3 + column;
-          const regionBucket = Number.parseInt(region9[index], 16) || 0;
-          const motionBucket = Number.parseInt(motion9[index], 16) || 0;
-          const value = `${region9[index]}/${motion9[index]}\nmotion score: ${(motionBucket / 15).toFixed(2)}\nmotion: ${motionBucket}/15\nscore: ${(regionBucket / 15).toFixed(2)}`;
-          let className = "is-vision";
-          if (index === 4 && Number(autoplay.enemyCenterCellConfidence || 0) > 0.18) {
-            className = "is-enemy";
-          } else if (index === 2 || index === 5 || index === 8) {
-            className = "is-gap";
-          }
-          const motionActive = Number(motion9[index] || 0) >= 4;
-          if (showMotion && (motionActive || (index === 4 && Number(autoplay.enemyCenterCellConfidence || 0) > 0.18) || (firstDoorPhase && (index === 2 || index === 5 || index === 8) && Number(milestones.spawnCorridorGapScore || 0) > 0.18))) {
-            fragment.appendChild(createDebugRegion(
-              className,
-              column * cellWidth,
-              row * cellHeight,
-              cellWidth,
-              cellHeight,
-              `r${index}`,
-              value,
-              { active: true, slot: row, priority: "low" }
-            ));
-          }
+      loadDoomDebugOverlayScript()?.then(panel => {
+        if (typeof panel?.renderDebugOverlay === "function") {
+          panel.renderDebugOverlay(doomDebugOverlay, doomRuntime?.status?.() || status, { detectionVisibility: doomDetectionVisibility });
         }
-      }
-
-      if (showPriority) {
-        fragment.appendChild(createDebugRegion(
-          "is-objective",
-          33,
-          49,
-          34,
-          16,
-          "PRIORITY:",
-          priorityLabel,
-          { active: Boolean(autoplay.enabled), slot: 0, priority: "high" }
-        ));
-      }
-
-      if (showEnemy && doorOpened && (Number(autoplay.enemyConfidence || 0) > 0.22 || Number(autoplay.enemyCenterCellConfidence || 0) > 0.14 || Number(autoplay.enemyAllRegionPeak || 0) > 0.28)) {
-        const enemyLeft = autoplay.enemyTurn === "right" ? 67 : (autoplay.enemyTurn === "left" ? 13 : 41);
-        fragment.appendChild(createDebugRegion(
-          "is-enemy-ring",
-          enemyLeft,
-          48,
-          14,
-          14,
-          "",
-          "",
-          { active: true, noLabel: true, priority: "high" }
-        ));
-        fragment.appendChild(createDebugRegion(
-          "is-enemy is-target-card",
-          autoplay.enemyTurn === "right" ? 63 : (autoplay.enemyTurn === "left" ? 9 : 34),
-          46,
-          18,
-          12,
-          "ENEMY:",
-          `${autoplay.enemyCluster || "unknown"} ${Number(autoplay.enemyConfidence || 0).toFixed(2)} all=${Number(autoplay.enemyAllRegionPeak || 0).toFixed(2)} ${autoplay.enemyFireReady ? "fire" : "hold"}`,
-          { active: true, slot: 0, priority: "high" }
-        ));
-      }
-
-      if (showFoot && (Number(autoplay.priorFootObstacleScore || 0) > 0.18
-        || Number(autoplay.footObstacleFlickerScore || 0) > 0.32
-        || Number(autoplay.footObstacleBounceFrames || 0) > 0
-        || Number(autoplay.inputStallFrames || 0) > 0)) {
-        fragment.appendChild(createDebugRegion(
-          "is-foot",
-          30,
-          64,
-          42,
-          16,
-          "foot",
-          `obs=${Number(autoplay.priorFootObstacleScore || 0).toFixed(2)} flicker=${Number(autoplay.footObstacleFlickerScore || 0).toFixed(2)} bounce=${autoplay.footObstacleBounceFrames || 0} stall=${autoplay.inputStallFrames || 0}`,
-          { active: true, slot: 3, priority: Number(autoplay.footObstacleBounceFrames || 0) >= 3 ? "high" : "mid" }
-        ));
-      }
-      if (showWall && wallAvoidActive) {
-        fragment.appendChild(createDebugRegion(
-          "is-wall",
-          autoplay.wallHugSide === "right" ? 58 : 4,
-          22,
-          38,
-          42,
-          "WALL AVOID",
-          `${autoplay.safetyReason || "active"}\n${autoplay.mobilityMode || "avoid"}`,
-          { active: true, slot: 1, priority: "high" }
-        ));
-      }
-      if (showDoor && firstDoorPhase && (Boolean(milestones.firstDoorCorridorLocated) || Number(milestones.firstDoorUseSignature || 0) > 0.48 || Number(milestones.spawnCorridorGapScore || 0) > 0.18)) {
-        fragment.appendChild(createDebugRegion(
-          "is-door",
-          30,
-          18,
-          40,
-          42,
-          "door",
-          `corr=${milestones.firstDoorCorridorLocated ? "yes" : "no"} use=${Number(milestones.firstDoorUseSignature || 0).toFixed(2)} 3x3=${Number(milestones.firstDoorUse3x3Score || 0).toFixed(2)}/${milestones.firstDoorUse3x3Turn || "none"}`,
-          { active: true, slot: 1, priority: "high" }
-        ));
-      }
-      const firstDoorVision9x9Box = milestones.firstDoorVision9x9Box || null;
-      if (showDoor && firstDoorPhase && firstDoorVision9x9Box && Number(firstDoorVision9x9Box.score || 0) >= 0.24) {
-        const boxColumn = Number(firstDoorVision9x9Box.column || 0);
-        const boxRow = Number(firstDoorVision9x9Box.row || 0);
-        const boxColumns = Math.max(1, Number(firstDoorVision9x9Box.columns || 2));
-        const boxRows = Math.max(1, Number(firstDoorVision9x9Box.rows || 2));
-        const wallPattern = firstDoorVision9x9Box.kind === "first-door-wall-pattern";
-        const floorRed = firstDoorVision9x9Box.kind === "first-door-floor-red";
-        fragment.appendChild(createDebugRegion(
-          wallPattern || floorRed ? "is-wall is-corner-candidate" : "is-door is-door-candidate",
-          (boxColumn / 9) * 100,
-          (boxRow / 9) * 80,
-          (boxColumns / 9) * 100,
-          (boxRows / 9) * 80,
-          floorRed ? "floor red" : (wallPattern ? "wall pattern" : "door 9x9"),
-          `patch=${Number(firstDoorVision9x9Box.score || 0).toFixed(2)} red=${Number(firstDoorVision9x9Box.redScore || 0).toFixed(2)} edge=${Number(firstDoorVision9x9Box.edgeScore || 0).toFixed(2)}`,
-          { active: true, slot: 2, priority: wallPattern || floorRed ? "mid" : "high" }
-        ));
-      }
-      if (showWall && firstDoorPhase && Number(autoplay.cornerSignal || 0) >= 0.48) {
-        const wallLeft = autoplay.wallHugSide === "right" ? 58 : 8;
-        fragment.appendChild(createDebugRegion(
-          "is-wall is-corner-candidate",
-          wallLeft,
-          18,
-          34,
-          48,
-          "wall corner",
-          `corner=${Number(autoplay.cornerSignal || 0).toFixed(2)}`,
-          { active: true, slot: 2, priority: "mid" }
-        ));
-      }
-      if (showComputer && doorOpened && (Number(milestones.computerRoomScore || 0) > 0.28 || Boolean(milestones.computerRoomEntered))) {
-        fragment.appendChild(createDebugRegion(
-          "is-computer",
-          20,
-          8,
-          60,
-          48,
-          "computer",
-          `${Number(milestones.computerRoomScore || 0).toFixed(2)} blue=${Number(milestones.computerBlueScore || 0).toFixed(2)} red=${Number(milestones.computerRedLightScore || 0).toFixed(2)} dark=${Number(milestones.computerDarkPanelScore || 0).toFixed(2)} panel=${Number(milestones.computerPanelScore || 0).toFixed(2)}`,
-          { active: true, slot: 0, priority: "mid" }
-        ));
-      }
-      if (showEnemy && doorOpened && (Number(autoplay.enemyConfidence || 0) > 0.28 || Number(autoplay.enemyCenterCellConfidence || 0) > 0.18 || Number(autoplay.enemyAllRegionPeak || 0) > 0.28)) {
-        fragment.appendChild(createDebugRegion(
-          "is-enemy",
-          36,
-          18,
-          28,
-          34,
-          "enemy",
-          `${Number(autoplay.enemyConfidence || 0).toFixed(2)} ${autoplay.enemyTurn || "none"} all=${Number(autoplay.enemyAllRegionPeak || 0).toFixed(2)}`,
-          { active: true, slot: 2, priority: "high" }
-        ));
-      }
-      if (showHud) {
-        fragment.appendChild(createDebugRegion(
-          "is-hud",
-          0,
-          80,
-          100,
-          20,
-          "hud",
-          `objective=${objective} phase=${pipeline} health=${autoplay.healthLikelyDead ? "dead" : "live"} ammo=${autoplay.ammoLikelyEmpty ? "empty" : "ok"}`,
-          { active: Boolean(autoplay.enabled), slot: 0, priority: "low" }
-        ));
-      }
-      if (showSpatial && autoplay.spatialSnapshot?.eventDetected) {
-        const spatial = autoplay.spatialSnapshot;
-        const x = Math.max(4, Math.min(86, Number(spatial.hudX ?? 0.5) * 100 - 7));
-        const y = Math.max(4, Math.min(70, Number(spatial.hudY ?? 0.45) * 80 - 7));
-        fragment.appendChild(createDebugRegion(
-          "is-spatial",
-          x,
-          y,
-          14,
-          14,
-          "spatial",
-          `${spatial.eventType || "event"} ${Number(spatial.confidence || 0).toFixed(2)}`,
-          { active: true, slot: 2, priority: "high" }
-        ));
-      }
-      if (showHealth && (autoplay.healthSensor?.retryRequested || autoplay.healthLikelyDead || Number(autoplay.healthZeroScore || 0) >= 0.78)) {
-        const health = autoplay.healthSensor || {};
-        fragment.appendChild(createDebugRegion(
-          "is-health",
-          2,
-          72,
-          34,
-          8,
-          "health retry",
-          `z=${Number(health.zeroScore ?? autoplay.healthZeroScore ?? 0).toFixed(2)} face=${Number(health.faceQuantizedFrameChange ?? autoplay.faceQuantizedFrameChange ?? 255).toFixed(2)}`,
-          { active: true, slot: 0, priority: "high" }
-        ));
-      }
-
-      doomDebugOverlay.replaceChildren(fragment);
+      });
     }
 
     function resolveWebGpuProvider() {
@@ -1438,75 +1271,6 @@
       provider.setHudOverlayEnabled(Boolean(doomDebugOverlayEnabled && ready));
       const nextStatus = typeof provider.status === "function" ? provider.status() : providerStatus;
       return Boolean(nextStatus?.hudOverlayActive);
-    }
-
-    function appendVision9x9Heatmap(fragment, milestones) {
-      const heatmap = Array.isArray(milestones?.firstDoorVision9x9Heatmap)
-        ? milestones.firstDoorVision9x9Heatmap
-        : [];
-      if (heatmap.length <= 0) {
-        return;
-      }
-
-      const cellWidth = 100 / 9;
-      const cellHeight = 80 / 9;
-      for (let index = 0; index < Math.min(81, heatmap.length); index += 1) {
-        const score = clampHud01(Number(heatmap[index] || 0));
-        if (score < 0.08) {
-          continue;
-        }
-
-        const column = index % 9;
-        const row = Math.floor(index / 9);
-        const cell = createDebugRegion(
-          "is-vision-heat",
-          column * cellWidth,
-          row * cellHeight,
-          cellWidth,
-          cellHeight,
-          "",
-          "",
-          { active: false, noLabel: true, priority: "low" }
-        );
-        cell.style.setProperty("--heat-alpha", Math.max(0.05, score * 0.32).toFixed(3));
-        cell.style.setProperty("--heat-border-alpha", Math.max(0.08, score * 0.72).toFixed(3));
-        fragment.appendChild(cell);
-      }
-    }
-
-    function appendKairosPulse(fragment, autoplay) {
-      const kairos = resolveKairosSignal(autoplay);
-      if (!kairos) {
-        return;
-      }
-
-      fragment.appendChild(createDebugRegion(
-        "is-kairos-pulse",
-        24,
-        33,
-        52,
-        24,
-        kairos,
-        "",
-        { active: true, slot: 0, priority: "high" }
-      ));
-    }
-
-    function appendUseProbeArrow(fragment, autoplay) {
-      const probeFrames = Number(autoplay?.wallUseProbeFrames || 0);
-      const latchFrames = Number(autoplay?.firstDoorUseLatchFrames || 0);
-      if (probeFrames <= 0 && latchFrames <= 0) {
-        return;
-      }
-
-      const turn = autoplay?.wallUseProbeTurn === "left" || autoplay?.wallUseProbeTurn === "right"
-        ? autoplay.wallUseProbeTurn
-        : "none";
-      const arrow = document.createElement("div");
-      arrow.className = `debug-probe-arrow is-${turn}`;
-      arrow.textContent = turn === "left" ? "<" : (turn === "right" ? ">" : "^");
-      arrow.title = `UseProbe ${turn}; frames=${probeFrames || latchFrames}`;
-      fragment.appendChild(arrow);
     }
 
     function ensureDoomSpatialHud() {
@@ -1675,8 +1439,153 @@
       doomGoalHud.replaceChildren(fragment);
     }
 
+    function fallbackSensorDescriptors() {
+      return {
+        visual: { label: "Visual", signal: "9x9 frame", panel: "aisthesis", stage: "primary" },
+        audio: { label: "Audio", signal: "stereo energy", panel: "aisthesis", stage: "primary" },
+        movement: { label: "Movement", signal: "motion vector", panel: "aisthesis", stage: "primary" },
+        compass: { label: "Compass", signal: "heading vector", panel: "aisthesis", stage: "primary" },
+        health: { label: "Health", signal: "life state", panel: "aisthesis", stage: "primary" },
+        spatial: { label: "Spatial", signal: "Topos state", panel: "krisis", stage: "topos" },
+        motor: { label: "Motor", signal: "input vector", panel: "kinesis", stage: "motion" }
+      };
+    }
+
+    function fallbackDetectionDescriptors() {
+      return {
+        motion: { label: "Looming", signal: "flow / approach" },
+        wall: { label: "Stuck", signal: "wall / trap" },
+        health: { label: "HP Veto", signal: "life audit" },
+        enemy: { label: "Enemy", signal: "enemy seen" },
+        hud: { label: "Entropy", signal: "HUD / uncertainty" },
+        computer: { label: "Item", signal: "backtrack / room" },
+        objective: { label: "Objective", signal: "Telos route" },
+        door: { label: "Door", signal: "open target" },
+        spatial: { label: "Spatial", signal: "decision field" },
+        foot: { label: "Collision", signal: "foot contact" }
+      };
+    }
+
+    function fallbackSensorPanelLayout() {
+      return [
+        { key: "aisthesis", className: "is-aisthesis", title: "Aisthesis", subtitle: "Perception layer", stages: [{ key: "primary", title: "Primary sensors", items: [{ type: "sensor", key: "visual" }, { type: "sensor", key: "audio" }, { type: "sensor", key: "movement" }, { type: "sensor", key: "compass" }, { type: "detection", key: "foot" }, { type: "sensor", key: "health" }] }] },
+        { key: "noesis", className: "is-noesis", title: "Noesis", subtitle: "Cognition layer", stages: [{ key: "phainesis", title: "Phainesis", items: [{ type: "detection", key: "motion" }, { type: "detection", key: "wall" }, { type: "detection", key: "enemy" }, { type: "detection", key: "hud" }, { type: "detection", key: "computer" }] }] },
+        { key: "krisis", className: "is-krisis", title: "Krisis", subtitle: "Judgement layer", stages: [{ key: "topos", title: "Topos", items: [{ type: "sensor", key: "spatial" }, { type: "detection", key: "objective" }, { type: "detection", key: "door" }, { type: "detection", key: "spatial" }] }] },
+        { key: "kinesis", className: "is-kinesis", title: "Kinesis", subtitle: "Action layer", stages: [{ key: "motion", title: "Kinesis", items: [{ type: "sensor", key: "motor" }, { type: "detection", key: "health" }] }] }
+      ];
+    }
+
+    function refreshSensorPanelDescriptors() {
+      const panel = self.AIKernelDoomSensorPanel || {};
+      sensorUi = typeof panel.cloneSensorDescriptors === "function"
+        ? panel.cloneSensorDescriptors()
+        : fallbackSensorDescriptors();
+      detectionUi = typeof panel.cloneDetectionDescriptors === "function"
+        ? panel.cloneDetectionDescriptors()
+        : fallbackDetectionDescriptors();
+      sensorPanelLayout = Array.isArray(panel.panelLayout)
+        ? panel.panelLayout
+        : fallbackSensorPanelLayout();
+      sensorPanelVersion = panel.version || "fallback-sensorpanel";
+      return panel;
+    }
+
+    function loadDoomSensorPanelScript() {
+      if (self.AIKernelDoomSensorPanel || doomSensorPanelScriptLoading) {
+        return doomSensorPanelScriptLoading;
+      }
+
+      doomSensorPanelScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = "/demo/doom/js/doom-sensor-panel.js?v=20260618-sensorpanel1";
+        script.async = false;
+        script.onload = () => {
+          refreshSensorPanelDescriptors();
+          resolve(self.AIKernelDoomSensorPanel || null);
+        };
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomSensorPanelScriptLoading;
+    }
+
+    function loadDoomPipelinePanelScript() {
+      if (self.AIKernelDoomPipelinePanel || doomPipelinePanelScriptLoading) {
+        return doomPipelinePanelScriptLoading;
+      }
+
+      doomPipelinePanelScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = "/demo/doom/js/doom-pipeline-panel.js?v=20260619-pipelinepanel6";
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomPipelinePanel || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomPipelinePanelScriptLoading;
+    }
+
+    function loadDoomGoalPanelScript() {
+      if (self.AIKernelDoomGoalPanel || doomGoalPanelScriptLoading) {
+        return doomGoalPanelScriptLoading;
+      }
+
+      doomGoalPanelScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = "/demo/doom/js/doom-goal-panel.js?v=20260619-goalpanel2";
+        script.async = false;
+        script.onload = () => {
+          if (self.AIKernelDoomGoalPanel?.version) {
+            document.documentElement.dataset.doomGoalPanelVersion = self.AIKernelDoomGoalPanel.version;
+          }
+          resolve(self.AIKernelDoomGoalPanel || null);
+        };
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomGoalPanelScriptLoading;
+    }
+
+    function loadDoomDebugOverlayScript() {
+      if (self.AIKernelDoomDebugOverlay || doomDebugOverlayScriptLoading) {
+        return doomDebugOverlayScriptLoading;
+      }
+
+      doomDebugOverlayScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = "/demo/doom/js/doom-debug-overlay.js?v=20260619-debugoverlay3";
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomDebugOverlay || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomDebugOverlayScriptLoading;
+    }
+
+    function loadDoomRuntimeFormatScript() {
+      if (self.AIKernelDoomRuntimeFormat || doomRuntimeFormatScriptLoading) {
+        return doomRuntimeFormatScriptLoading;
+      }
+
+      doomRuntimeFormatScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = `/demo/doom/js/doom-runtime-format.js?v=${encodeURIComponent(doomDevCacheKey)}`;
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomRuntimeFormat || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomRuntimeFormatScriptLoading;
+    }
+
     function ensureDoomToposHud() {
       if (doomToposHud || !doomScreen) {
+        return;
+      }
+
+      const pipelinePanel = self.AIKernelDoomPipelinePanel;
+      if (typeof pipelinePanel?.ensureToposHud === "function") {
+        doomToposHud = pipelinePanel.ensureToposHud({ doomScreen, doomScreenPanel, node: doomToposHud });
         return;
       }
 
@@ -1701,246 +1610,17 @@
         return;
       }
 
-      const autoplay = status?.autoplay || {};
-      if (!autoplay.enabled) {
-        doomToposHud.textContent = "[CTG OBSERVED]\n  idle\n\n[Topos]\n  waiting for autoplay";
-        return;
+      const pipelinePanel = self.AIKernelDoomPipelinePanel;
+      if (typeof pipelinePanel?.renderToposHud === "function") {
+        pipelinePanel.renderToposHud(doomToposHud, status, { detail: doomToposDetailEnabled });
+      } else {
+        doomToposHud.textContent = "[CTG]\n  panel module loading\n\n[Topos]\n  waiting for pipeline view";
+        loadDoomPipelinePanelScript()?.then(() => {
+          if (self.AIKernelDoomPipelinePanel?.renderToposHud) {
+            self.AIKernelDoomPipelinePanel.renderToposHud(doomToposHud, status, { detail: doomToposDetailEnabled });
+          }
+        });
       }
-
-      const carrier = autoplay.toposDecisionCarrier || autoplay.ctgCarrier?.toposDecision || {};
-      const scores = autoplay.ctgObservedScores || autoplay.ctgCarrier?.observedScores || resolveObservedCtgScores(autoplay);
-      const decision = resolveObservedDecisionCarrier(autoplay, scores, carrier);
-      const topos = resolveObservedToposCarrier(autoplay);
-      const compass = autoplay.compassSensor || {};
-      const kairos = resolveKairosCarrier(autoplay);
-      const weights = scores.weights || { logos: 0, pathos: 0, ethos: 0 };
-      const simpleLines = [
-        "[CTG]",
-        `  Dominant: ${decision.dominant}`,
-        `  Vector: ${decision.vector} (${formatHudScore(decision.confidence)})`,
-        `  W: L=${formatHudScore(weights.logos)} P=${formatHudScore(weights.pathos)} E=${formatHudScore(weights.ethos)}`,
-        "",
-        "[Topos]",
-        `  Target: ${topos.target}`,
-        `  Phase: ${topos.phase}`,
-        `  Distance: ${topos.distance}`,
-        "",
-        "[Kairos]",
-        `  ${kairos.state}${kairos.trigger && kairos.trigger !== "none" ? ` / ${kairos.trigger}` : ""}`
-      ];
-      const detailLines = [
-        "[CTG OBSERVED]",
-        `  LOGOS: dist=${topos.distance} headingRel=${formatHudScore(scores.headingRel)} corridor=${topos.corridor}`,
-        `  PATHOS: danger=${formatHudScore(scores.danger)} (${scores.dangerKind}) stuck=${formatHudScore(scores.stuck)}`,
-        `  ETHOS: TELOS=${topos.target} Obj=${labelize(autoplay.objective || "Monitor")}`,
-        `  W: L=${formatHudScore(weights.logos)} P=${formatHudScore(weights.pathos)} E=${formatHudScore(weights.ethos)}`,
-        "",
-        "[CTG DECISION CARRIER]",
-        `  Vector: ${decision.vector} (${formatHudScore(decision.confidence)})`,
-        `  Dominant: ${decision.dominant}`,
-        `  Source: ${decision.source}`,
-        `  Feedback: ${decision.feedback}`,
-        "",
-        "[Topos]",
-        `  Target: ${topos.target}`,
-        `  Phase: ${topos.phase}`,
-        `  Distance: ${topos.distance}`,
-        "",
-        "[Spatial]",
-        `  Facing: ${formatFacing(compass)}`,
-        `  Landmark: ${formatLandmark(compass, autoplay)}`,
-        `  CorridorMode: ${topos.corridor}`,
-        "",
-        "[Topos Compass]",
-        `  Heading: ${formatHeading(compass)}`,
-        `  Reliability: ${String(compass.headingReliability || "unknown")}`,
-        "",
-        "[Kairos]",
-        `  State: ${kairos.state}`,
-        `  Trigger: ${kairos.trigger}`
-      ];
-      doomToposHud.textContent = (doomToposDetailEnabled ? detailLines : simpleLines).join("\n");
-    }
-
-    function resolveObservedCtgScores(autoplay) {
-      const milestones = autoplay?.milestones || {};
-      const compass = autoplay?.compassSensor || {};
-      const headingConfidence = clampHud01(Number(compass.confidence || 0));
-      const headingRel = compass.headingUsable === false || compass.headingUncertain
-        ? Math.min(headingConfidence, 0.34)
-        : Math.max(headingConfidence, compass.headingReliability === "absolute-landmark" || compass.headingReliability === "absolute-forced-landmark" ? 0.82 : 0.48);
-      const routeEvidence = Math.max(
-        Number(milestones.firstDoorVision9x9Score || 0),
-        Number(milestones.firstDoorCorridorSignature || 0),
-        Number(milestones.computerRoomScore || 0),
-        Number(milestones.computerPanelScore || 0),
-        Number(milestones.spawnCorridorGapScore || 0));
-      const logos = clampHud01((headingRel * 0.46) + (routeEvidence * 0.42) + (autoplay.controlPipeline ? 0.12 : 0));
-      const projectile = Number(autoplay.projectileScore || autoplay.phantasiaSnapshot?.projectileScore || 0);
-      const enemy = Number(autoplay.enemyConfidence || 0);
-      const dynamicObject = Number(autoplay.phantasiaSnapshot?.dynamicObjectScore || autoplay.dynamicObjectScore || 0);
-      const health = autoplay.healthLikelyDead || autoplay.healthSensor?.retryRequested ? 1 : 0;
-      const danger = clampHud01(Math.max(projectile, enemy, dynamicObject, health));
-      const footBounce = Number(autoplay.footObstacleBounceFrames || 0) >= 3
-        ? Number(autoplay.footObstacleFlickerScore || 0)
-        : 0;
-      const stuck = clampHud01(Math.max(Number(autoplay.motionStallScore || 0), Number(autoplay.stuckFrames || 0) / 12, footBounce));
-      const pathos = clampHud01(Math.max(danger, stuck));
-      const ethos = clampHud01((resolveTelosObjective(autoplay) === "Recovery" ? 1 : 0.38)
-        + (autoplay.retryDispatch?.active ? 0.32 : 0)
-        + ((milestones.doorOpened || 0) > 0 || milestones.computerRoomEntered ? 0.18 : 0));
-      const dangerKind = health > 0
-        ? "health"
-        : (projectile >= Math.max(enemy, dynamicObject) && projectile > 0.18
-          ? "projectile"
-          : (enemy >= Math.max(dynamicObject, 0.18) ? "enemy" : (dynamicObject > 0.18 ? "dynamic" : "none")));
-      return { logos, pathos, ethos, headingRel, danger, stuck, dangerKind };
-    }
-
-    function resolveObservedDecisionCarrier(autoplay, scores, carrier) {
-      const carrierVector = carrier?.decisionVector || null;
-      if (carrierVector) {
-        const x = Number(carrierVector.x || 0);
-        const y = Number(carrierVector.y || 0);
-        return {
-          dominant: carrier.dominantAxis || scores.dominant || "LOGOS",
-          confidence: Number(carrier.confidence || Math.max(scores.logos, scores.pathos, scores.ethos)),
-          vector: `${carrierVector.arrow || resolveObservedVector(autoplay, carrierVector.turn, carrierVector.move)} x=${x.toFixed(2)} y=${y.toFixed(2)}`,
-          source: labelize(carrier.source || "vector-superposition"),
-          feedback: carrier.feedbackApplied ? labelize(carrier.feedbackReason || "applied") : "observed"
-        };
-      }
-
-      const dominant = scores.pathos >= Math.max(scores.logos, scores.ethos)
-        ? "PATHOS"
-        : (scores.ethos >= Math.max(scores.logos, scores.pathos) ? "ETHOS" : "LOGOS");
-      const confidence = clampHud01(Math.max(scores.logos, scores.pathos, scores.ethos));
-      const turn = autoplay?.lastAction?.turn || autoplay?.wallUseProbeTurn || autoplay?.enemyTurn || "none";
-      const move = autoplay?.lastAction?.move || autoplay?.mobilityMode || "none";
-      const vector = resolveObservedVector(autoplay, turn, move);
-      const source = autoplay?.safetyReason && autoplay.safetyReason !== "none"
-        ? labelize(autoplay.safetyReason)
-        : labelize(autoplay?.controlPipeline || autoplay?.strategyName || "Observed");
-      return { dominant, confidence, vector, source, feedback: "observed" };
-    }
-
-    function resolveObservedToposCarrier(autoplay) {
-      const milestones = autoplay?.milestones || {};
-      const target = resolveTelosObjective(autoplay);
-      const phase = labelize(autoplay?.controlPipeline || autoplay?.semanticMemory?.phase || "Unknown");
-      const depth = Number(autoplay?.depthEstimate ?? autoplay?.spatialSnapshot?.confidence ?? NaN);
-      const distance = Number.isFinite(depth)
-        ? `depth=${depth.toFixed(2)}`
-        : "unknown";
-      const corridor = Boolean(milestones.firstDoorCorridorLocated || milestones.spawnCorridorGapFrames || autoplay?.compassSensor?.headingReliability === "corridor-ambiguous");
-      return { target, phase, distance, corridor: corridor ? "true" : "false" };
-    }
-
-    function resolveKairosCarrier(autoplay) {
-      const signal = resolveKairosSignal(autoplay);
-      if (signal) {
-        const parts = signal.split(":");
-        return {
-          state: (parts[1] || parts[0] || "Active").trim(),
-          trigger: autoplay?.contextResetReason || autoplay?.safetyReason || "timing-window"
-        };
-      }
-
-      if (autoplay?.topologicalTransitionBlocked) {
-        return { state: "Topology Hold", trigger: "transition-matrix" };
-      }
-
-      if (autoplay?.combatContextActive) {
-        return { state: "Combat Watch", trigger: "dynamic-mask" };
-      }
-
-      return { state: "Monitor", trigger: autoplay?.safetyReason || "none" };
-    }
-
-    function resolveObservedVector(autoplay, turn, move) {
-      const spatial = autoplay?.spatialSensor || autoplay?.spatialSnapshot || {};
-      const fused = Number(spatial.fusedDirection);
-      if (Number.isFinite(fused)) {
-        return `${directionArrowFromDegrees(fused)} ${Math.round(((fused % 360) + 360) % 360)}deg`;
-      }
-
-      if (turn === "left") {
-        return "<";
-      }
-
-      if (turn === "right") {
-        return ">";
-      }
-
-      if (move === "forward" || String(move).indexOf("forward") >= 0) {
-        return "^";
-      }
-
-      if (move === "back" || String(move).indexOf("back") >= 0) {
-        return "v";
-      }
-
-      return "-";
-    }
-
-    function directionArrowFromDegrees(value) {
-      const heading = ((Number(value) % 360) + 360) % 360;
-      if (heading >= 337.5 || heading < 22.5) {
-        return "^";
-      }
-      if (heading < 67.5) {
-        return "^>";
-      }
-      if (heading < 112.5) {
-        return ">";
-      }
-      if (heading < 157.5) {
-        return "v>";
-      }
-      if (heading < 202.5) {
-        return "v";
-      }
-      if (heading < 247.5) {
-        return "<v";
-      }
-      if (heading < 292.5) {
-        return "<";
-      }
-      return "<^";
-    }
-
-    function formatHudScore(value) {
-      return clampHud01(Number(value || 0)).toFixed(2);
-    }
-
-    function formatHeading(compass) {
-      const heading = Number(compass?.heading);
-      if (!Number.isFinite(heading)) {
-        return "unknown";
-      }
-
-      return `${Math.round((((heading % 360) + 360) % 360) * 10) / 10}deg`;
-    }
-
-    function formatFacing(compass) {
-      if (compass?.headingUsable === false || compass?.headingUncertain) {
-        return "unknown";
-      }
-
-      const heading = Number(compass?.heading);
-      if (!Number.isFinite(heading)) {
-        return "unknown";
-      }
-
-      const names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-      const index = Math.round((((heading % 360) + 360) % 360) / 45) % names.length;
-      return `${names[index]} rel=${formatHudScore(compass.confidence)}`;
-    }
-
-    function formatLandmark(compass, autoplay) {
-      const kind = compass?.landmarkKind || compass?.landmarkLabel || autoplay?.signatureMatchKind || "none";
-      const confidence = Number(compass?.landmarkConfidence ?? autoplay?.targetConfidence ?? 0);
-      return `${labelize(kind)} (${formatHudScore(confidence)})`;
     }
 
     function createSensorToggleButton(key) {
@@ -2032,6 +1712,22 @@
     function ensureDoomSensorToggleRow() {
       if (!doomDebugBar) {
         return;
+      }
+
+      refreshSensorPanelDescriptors();
+      if (!self.AIKernelDoomSensorPanel) {
+        loadDoomSensorPanelScript()?.then(panel => {
+          if (!panel || !doomDebugBar) {
+            return;
+          }
+
+          refreshSensorPanelDescriptors();
+          const currentRow = doomDebugBar.querySelector(".doom-sensor-toggles");
+          if (currentRow) {
+            currentRow.dataset.sensorPanelVersion = "";
+          }
+          ensureDoomSensorToggleRow();
+        });
       }
 
       let sensorRow = doomDebugBar.querySelector(".doom-sensor-toggles");
@@ -3183,7 +2879,7 @@
         const mapText = `map=${milestones.mapSectorId || "unknown"}/${milestones.mapDoorSectorMatch ? "door" : "-"}${milestones.mapDarkSectorMatch ? "+dark" : ""}${milestones.mapEnemyZoneMatch ? "+enemy" : ""}`;
         const alertText = `alert=${milestones.enemyAlertFrames || 0}/${milestones.enemyAlertTurn || "none"}/${milestones.enemyAlertCluster || "none"}/${Number(milestones.enemyAlertDepth ?? 1).toFixed(2)}/${Number(milestones.enemyAlertPeakConfidence || 0).toFixed(2)}`;
         const progressText = `hall=${milestones.centralHallEntered ? "yes" : "no"}/${milestones.centralHallFrames || 0}; stairs=${milestones.stairsEntered ? "yes" : "no"}/${milestones.stairsCandidateFrames || 0}; final=${milestones.finalRoomEntered ? "yes" : "no"}/${milestones.finalRoomCandidateFrames || 0}`;
-        const routeText = `blue=${Number(milestones.blueFloorScore || 0).toFixed(2)}; court=${Number(milestones.courtyardScore || 0).toFixed(2)}/${milestones.courtyardTurn || "none"}/${milestones.courtyardRescueMode || "none"}/${milestones.courtyardRescueFrames || 0}; secret=${Number(milestones.spawnSecretDoorScore || 0).toFixed(2)}/${milestones.spawnSecretDoorTurn || "none"}; stair=${Number(milestones.spawnWestStairScore || 0).toFixed(2)}/${milestones.spawnWestStairTurn || "none"}; gap=${Number(milestones.spawnCorridorGapScore || 0).toFixed(2)}/${milestones.spawnCorridorGapTurn || "none"}/${milestones.spawnCorridorGapFrames || 0}; bridge=${Number(milestones.bridgeBrownScore || 0).toFixed(2)}/${Number(milestones.bridgeGreenLeft || 0).toFixed(2)}-${Number(milestones.bridgeGreenCenter || 0).toFixed(2)}-${Number(milestones.bridgeGreenRight || 0).toFixed(2)}/${milestones.bridgeLaneTurn || "none"}/door${Number(milestones.bridgeDoorScore || 0).toFixed(2)}; corridor=${milestones.firstDoorCorridorLocated ? "yes" : "no"}/${milestones.firstDoorCorridorFrames || 0}/${Number(milestones.firstDoorCorridorSignature || 0).toFixed(2)}/v9${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)}; deadEnd=${milestones.firstDoorDeadEndTurnFrames || 0}; useSeen=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}`;
+        const routeText = `blue=${Number(milestones.blueFloorScore || 0).toFixed(2)}; court=${Number(milestones.courtyardScore || 0).toFixed(2)}/${milestones.courtyardTurn || "none"}/${milestones.courtyardRescueMode || "none"}/${milestones.courtyardRescueFrames || 0}; secret=${Number(milestones.spawnSecretDoorScore || 0).toFixed(2)}/${milestones.spawnSecretDoorTurn || "none"}; stair=${Number(milestones.spawnWestStairScore || 0).toFixed(2)}/${milestones.spawnWestStairTurn || "none"}; gap=${Number(milestones.spawnCorridorGapScore || 0).toFixed(2)}/${milestones.spawnCorridorGapTurn || "none"}/${milestones.spawnCorridorGapFrames || 0}/yaw${Number(autoplay.routeFallbackYaw || 0).toFixed(0)}/${autoplay.spawnCorridorGapActionTurn || "none"}; bridge=${Number(milestones.bridgeBrownScore || 0).toFixed(2)}/${Number(milestones.bridgeGreenLeft || 0).toFixed(2)}-${Number(milestones.bridgeGreenCenter || 0).toFixed(2)}-${Number(milestones.bridgeGreenRight || 0).toFixed(2)}/${milestones.bridgeLaneTurn || "none"}/door${Number(milestones.bridgeDoorScore || 0).toFixed(2)}; corridor=${milestones.firstDoorCorridorLocated ? "yes" : "no"}/${milestones.firstDoorCorridorFrames || 0}/${Number(milestones.firstDoorCorridorSignature || 0).toFixed(2)}/v9${Number(milestones.firstDoorVision9x9Score || 0).toFixed(2)}; deadEnd=${milestones.firstDoorDeadEndTurnFrames || 0}; useSeen=${Boolean(milestones.firstDoorUseAttempted)}/${Number(milestones.firstDoorUseSignature || 0).toFixed(2)}`;
         const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
         const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
         const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
@@ -3191,7 +2887,7 @@
         const motionText = `${autoplay.motion9Signature || "000000000"}/${Number(autoplay.motion9Delta ?? 255).toFixed(2)}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/o${Number(autoplay.motionObstacleScore || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/e${Number(autoplay.motionEntranceScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}/${autoplay.motionIntent || "idle"}`;
         const footText = `${Number(autoplay.footObstacleScore || 0).toFixed(2)}/${Number(autoplay.priorFootObstacleScore || 0).toFixed(2)}/f${Number(autoplay.footObstacleFlickerScore || 0).toFixed(2)}/b${autoplay.footObstacleBounceFrames || 0}/d${Number(autoplay.footObstacleBandDelta || 0).toFixed(2)}`;
         updateRuntimeStatus(status, "autoplay-status");
-        appendConsoleLine("[AUTOPLAY]", Boolean(autoplay.zeroCopy) ? "log-ok" : "log-warn", `enabled=${Boolean(autoplay.enabled)}; mode=${autoplay.mode || "disabled"}; manualMove=${Boolean(autoplay.manualMove)}; pipeline=${pipelineText}; objective=${objectiveText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; milestones=${milestoneText}; ammo=${ammoText}; health=${healthText}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; predictions=${autoplay.predictions || 0}; reused=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`);
+        appendConsoleLine("[AUTOPLAY]", Boolean(autoplay.zeroCopy) ? "log-ok" : "log-warn", `enabled=${Boolean(autoplay.enabled)}; mode=${autoplay.mode || "disabled"}; manualMove=${Boolean(autoplay.manualMove)}; pipeline=${pipelineText}; objective=${objectiveText}; semantic=${semanticText}; strategy=${strategyText}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; milestones=${milestoneText}; ammo=${ammoText}; health=${healthText}; safety=${autoplay.safetyReason || "none"}; mobility=${autoplay.mobilityMode || "none"}; wall=${autoplay.wallHugSide || "left"}; target=${targetConfidence}; enemy=${enemyText}; corner=${cornerSignal}; sig=${signatureText}; dict=${dictionaryText}; regions=${autoplay.regionSignature || "000000"}; regions9=${autoplay.region9Signature || "000000000"}; motion9=${motionText}; foot=${footText}; depthSig=${autoplay.depthSignature || "0000"}; depth=${depthEstimate}; faceSig=${autoplay.faceSignature || "0000000000000000"}; sound=${Boolean(autoplay.soundCueActive)}; stuck=${autoplay.stuckFrames || 0}; qStall=${autoplay.quantizedStallFrames || 0}; qDelta=${quantizedDelta}; rDelta=${regionDelta}; hudDelta=${hudDelta}; faceDelta=${faceDelta}; probe=${probe}; detach=${detach}; survey=${survey}; mapRush=${mapRush}; mapDoor=${mapDoor}; suppress=${autoplay.cornerSuppressFrames || 0}; repeat=${autoplay.repeatActionFrames || 0}; kRepeat=${autoplay.actionRepeatFrames || 0}; repeatTurn=${autoplay.repeatTurnFrames || 0}; recovery=${autoplay.recoveryFrames || 0}; loopEscape=${autoplay.loopEscapeFrames || 0}; useCooldown=${autoplay.useCooldown || 0}; predictions=${autoplay.predictions || 0}; reused=${autoplay.reused || 0}; latency=${Math.round(autoplay.latencyMs || 0)}ms`);
         return;
       }
 
@@ -3831,6 +3527,7 @@
     doomDebugBar?.addEventListener("click", async (event) => {
       const detailButton = event.target.closest("#doom-topos-detail-toggle");
       if (detailButton) {
+        event.stopPropagation();
         doomToposDetailEnabled = !doomToposDetailEnabled;
         syncToposDetailToggle();
         updateDoomToposHud(doomRuntime?.status?.() || {});
@@ -3841,18 +3538,21 @@
       const autoplayButton = event.target.closest("#doom-autoplay-toggle");
       if (autoplayButton && runAutoplayToggleButton(autoplayButton)) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
       const sensorButton = event.target.closest("button[data-sensor-toggle]");
       if (sensorButton && runSensorToggleButton(sensorButton)) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
       const detectionButton = event.target.closest("button[data-detection-toggle]");
       if (detectionButton && runDetectionToggleButton(detectionButton)) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
@@ -3861,6 +3561,7 @@
         return;
       }
 
+      event.stopPropagation();
       await runButtonCommands(button);
     });
 

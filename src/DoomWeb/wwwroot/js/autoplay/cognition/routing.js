@@ -122,8 +122,11 @@
       : "none";
     const relativeAlignment = input.relativeAlignment || {};
     const visualGap = number(input.spawnCorridorGapScore) >= Math.max(0.18, number(input.spawnCorridorGapThreshold) - 0.08);
+    const landmarkRoute = number(input.spawnLandmarkRouteEvidence) >= 0.26
+      && number(input.spawnLandmarkRouteFrames) >= 2;
     const motionEntrance = number(input.motionEntranceScore) >= number(input.motionEntranceThreshold, 0.22);
     const alignmentStarted = number(input.spawnCorridorGapFrames) > 0
+      || landmarkRoute
       || (gapTurn !== "none"
         && visualGap
         && !relativeAlignment.conflict
@@ -217,18 +220,18 @@
       return "level-clear";
     }
 
-    if (input.centralHallEntered) {
-      return number(input.enemyDefeatedCount) > 0
-        ? "secure-central-hall"
-        : "engage-front-enemy";
-    }
-
     if (input.finalRoomEntered) {
       return "press-exit-switch";
     }
 
     if (input.stairsEntered || number(input.doorOpenedCount) > 1) {
       return "reach-final-room";
+    }
+
+    if (input.centralHallEntered) {
+      return self.AIKernelDoomCombatRoute?.inferPostEnemyObjective
+        ? self.AIKernelDoomCombatRoute.inferPostEnemyObjective(input)
+        : (number(input.enemyDefeatedCount) > 0 ? "secure-central-hall" : "engage-front-enemy");
     }
 
     if (number(input.doorOpenedCount) > 0 && !input.computerRoomEntered) {

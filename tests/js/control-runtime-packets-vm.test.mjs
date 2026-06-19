@@ -91,11 +91,33 @@ const action = packets.actionFromStage(
 
 assert(action.move === "forward", "stage action should map moveForward to forward");
 assert(action.turn === "left", "negative yaw should map to left turn");
+assert(action.turnYaw === -3, "stage action should preserve the numeric turn yaw");
 assert(action.use === true, "stage action should preserve use command");
 assert(action.evidenceScore === 0.66, "stage action should include evidence score");
 assert(action.semanticScores.door === 0.8, "stage action should include semantic scores");
 
-const status = packets.statusFromAction(action, [{ id: "door-route" }], { profile: { strategyName: "PacketProfile" } }, 3, {
+const status = packets.statusFromAction(action, [{ id: "door-route" }], {
+  profile: { strategyName: "PacketProfile" },
+  values: {
+    currentRoute: "first-door-route",
+    routeMode: "door-approach",
+    routeLoopKind: "slide-stall",
+    routeAbortHint: "slide-stall",
+    routeLoopBudgetExceeded: true,
+    routeSlideUsed: 8,
+    routeSlideBudget: 6,
+    currentLandmark: "spawn-corridor-gap",
+    routeConfidence: 0.74,
+    recommendedYaw: 9,
+    useProbeConfidence: 0.68,
+    firstDoorRouteEvidence: 0.42,
+    firstDoorRouteEvidenceReady: true,
+    actionRepeatFrames: 20,
+    moveRepeatFrames: 20,
+    turnRepeatFrames: 6,
+    lethalRisk: 0.8
+  }
+}, 3, {
   runtimeId: "packet-runtime",
   createDecisionTrace: payload => ({ version: "trace-test", payload })
 });
@@ -104,6 +126,31 @@ assert(status.runtimeId === "packet-runtime", "status should preserve runtime id
 assert(status.controlPipeline === "door-route", "status should expose selected pipeline");
 assert(status.decisionTrace.payload.objective === "open-door", "status should build decision trace from action");
 assert(status.stageEvaluations.length === 1, "status should preserve stage evaluations");
+assert(status.pipelineState?.krisis?.kairos?.selectedAxis, "status should expose PipelineState DTO");
+assert(status.pipelineState?.noesis?.phainesisEvents?.goalDirection > 0, "PipelineState should expose non-empty Phainesis events");
+assert(status.pipelineState?.noesis?.eventLabels?.includes("door-route"), "PipelineState should expose Phainesis event labels");
+assert(Array.isArray(status.pipelineState?.noesis?.meaningVector4) && status.pipelineState.noesis.meaningVector4.length === 4, "PipelineState should expose compact Noesis Vector4");
+assert(status.pipelineState?.noesis?.nousVectors?.goalVector > 0, "PipelineState should expose non-empty Nous vectors");
+assert(status.pipelineState?.krisis?.toposVectors?.LogosVector > 0, "PipelineState should expose non-empty Topos vectors");
+assert(status.pipelineState?.krisis?.toposLabels?.includes("route-abort"), "PipelineState should expose Topos labels");
+assert(status.pipelineState?.kinesis?.turnYaw === -3, "PipelineState should expose numeric Kinesis yaw");
+assert(status.pipelineState?.kinesis?.actionRepeatFrames === 20, "PipelineState should expose Kinesis action repeat frames");
+assert(status.pipelineState?.kinesis?.moveRepeatFrames === 20, "PipelineState should expose Kinesis movement repeat frames");
+assert(status.pipelineState?.kinesis?.turnRepeatFrames === 6, "PipelineState should expose Kinesis turn repeat frames");
+assert(status.pipelineState?.aisthesis?.routePlan?.routeMode === "door-approach", "PipelineState route plan should expose route mode");
+assert(status.pipelineState?.aisthesis?.routePlan?.routeLoopKind === "slide-stall", "PipelineState route plan should expose route loop kind");
+assert(status.pipelineState?.aisthesis?.routePlan?.routeLoopBudgetExceeded === true, "PipelineState route plan should expose loop budget exhaustion");
+assert(status.goalState?.telos === "FirstDoor", "status should expose GoalState DTO");
+assert(status.debugOverlay?.regions?.length > 0, "status should expose DebugOverlay DTO regions");
+assert(status.autoplayState?.goalState?.priority, "status should expose aggregate AutoplayState DTO");
+assert(status.autoplayState?.currentRoute === "first-door-route", "aggregate AutoplayState should preserve route planner route name");
+assert(status.autoplayState?.routeAbortHint === "slide-stall", "aggregate AutoplayState should preserve route abort hint");
+assert(status.autoplayState?.recommendedYaw === 9, "aggregate AutoplayState should preserve recommended yaw");
+assert(status.autoplayState?.suggestedAction?.yaw === -3, "aggregate AutoplayState should preserve action yaw over fallback yaw");
+assert(status.debugOverlay?.useProbe?.confidence === 0.68, "DebugOverlay should expose UseProbe confidence");
+assert(status.pipelineState?.kinesis?.zoe?.vetoed === true, "PipelineState should expose Zoe veto state");
+assert(status.debugRouteValues?.routeLoopKind === "slide-stall", "debug route values should expose route loop kind");
+assert(status.debugRouteValues?.routeLoopBudgetExceeded === true, "debug route values should expose loop budget exhaustion");
 
 const initialized = packets.initializedStatus({
   runtimeId: "packet-runtime",

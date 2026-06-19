@@ -12,7 +12,7 @@ public sealed record AutoplayPipelineStageDefinition
 
     public string When { get; init; } = "false";
 
-    public int Priority { get; init; }
+    public float Priority { get; init; }
 
     public float Threshold { get; init; }
 

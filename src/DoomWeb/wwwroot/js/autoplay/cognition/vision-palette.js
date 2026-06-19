@@ -409,10 +409,13 @@
     const luma = red * 0.299 + green * 0.587 + blue * 0.114;
     const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
     const barrelBrown = red >= green - 2 && green >= blue + 2 && luma >= 34 && luma <= 134 && saturation >= 12;
+    const barrelGreen = green >= red + 4 && green >= blue + 8 && luma >= 26 && luma <= 150 && saturation >= 18;
     const metalGray = saturation <= 30 && luma >= 52 && luma <= 162;
     return barrelBrown
       ? clamp01((saturation - 8) / 78)
-      : (metalGray ? clamp01((162 - Math.abs(luma - 96)) / 162) * 0.42 : 0);
+      : (barrelGreen
+        ? clamp01((saturation - 12) / 84)
+        : (metalGray ? clamp01((162 - Math.abs(luma - 96)) / 162) * 0.42 : 0));
   }
 
   function scoreEnemyRgb(red, green, blue) {

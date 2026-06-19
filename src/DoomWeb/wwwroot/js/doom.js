@@ -243,6 +243,12 @@
       this.autoplayToposDecisionCarrier = null;
       this.autoplayNousCarrier = null;
       this.autoplayNousDetectorResult = null;
+      this.autoplayActionSignature = "";
+      this.autoplayActionRepeatFrames = 0;
+      this.autoplayMoveSignature = "";
+      this.autoplayMoveRepeatFrames = 0;
+      this.autoplayTurnSignature = "";
+      this.autoplayTurnRepeatFrames = 0;
       this.autoplayRepeatActionFrames = 0;
       this.autoplayRepeatTurnFrames = 0;
       this.autoplayQuantizedStallFrames = 0;
@@ -296,6 +302,11 @@
       this.autoplayEvidenceScore = 0;
       this.autoplaySemanticScores = null;
       this.autoplayDecisionTrace = null;
+      this.autoplayKairosPriorityAxis = null;
+      this.autoplayPipelineState = null;
+      this.autoplayGoalState = null;
+      this.autoplayDebugOverlay = null;
+      this.autoplayAutoplayState = null;
       this.autoplayControlPipeline = "Idle";
       this.autoplayObjective = "disabled";
       this.autoplayActiveDetections = ["objective", "hud"];
@@ -385,6 +396,10 @@
             nativeAvailableFrames: this.nativeAudioAvailableFrames()
           },
           sensorInputs: this.createSensorStatusMap(),
+          actionSignature: this.autoplayActionSignature,
+          actionRepeatFrames: this.autoplayActionRepeatFrames,
+          moveRepeatFrames: this.autoplayMoveRepeatFrames,
+          turnRepeatFrames: this.autoplayTurnRepeatFrames,
           repeatActionFrames: this.autoplayRepeatActionFrames,
           repeatTurnFrames: this.autoplayRepeatTurnFrames,
           quantizedStallFrames: this.autoplayQuantizedStallFrames,
@@ -402,6 +417,12 @@
           motionEntranceScore: this.autoplayMotionEntranceScore,
           motionStallScore: this.autoplayMotionStallScore,
           motionIntent: this.autoplayMotionIntent,
+          footObstacleScore: this.autoplayFootObstacleScore || 0,
+          priorFootObstacleScore: this.autoplayPriorFootObstacleScore || 0,
+          footObstacleFlickerScore: this.autoplayFootObstacleFlickerScore || 0,
+          footObstacleBounceFrames: this.autoplayFootObstacleBounceFrames || 0,
+          footObstacleBandDelta: this.autoplayFootObstacleBandDelta || 0,
+          inputStallFrames: this.autoplayInputStallFrames || 0,
           depthSignature: this.autoplayDepthSignature,
           depthEstimate: this.autoplayDepthEstimate,
           faceSignature: this.autoplayFaceSignature,
@@ -435,15 +456,15 @@
           enemyFireReady: this.autoplayEnemyFireReady,
           enemyAllRegionPeak: this.autoplayEnemyAllRegionPeak,
           enemyLateralBias: this.autoplayEnemyLateralBias,
-          ammoSignature: this.bonsaiSupervisor?.status?.().ammoSignature || "",
-          ammoLikelyEmpty: Boolean(this.bonsaiSupervisor?.status?.().ammoLikelyEmpty),
-          healthSignature: this.bonsaiSupervisor?.status?.().healthSignature || "",
-          healthLikelyDead: Boolean(this.bonsaiSupervisor?.status?.().healthLikelyDead),
-          healthZeroScore: this.bonsaiSupervisor?.status?.().healthZeroScore || 0,
-          healthActiveColumns: this.bonsaiSupervisor?.status?.().healthActiveColumns || 0,
-          healthActiveCells: this.bonsaiSupervisor?.status?.().healthActiveCells || 0,
+          ammoSignature: this.autoplayAmmoSignature || this.bonsaiSupervisor?.status?.().ammoSignature || "",
+          ammoLikelyEmpty: Boolean(this.autoplayAmmoLikelyEmpty || this.bonsaiSupervisor?.status?.().ammoLikelyEmpty),
+          healthSignature: this.autoplayHealthSignature || this.bonsaiSupervisor?.status?.().healthSignature || "",
+          healthLikelyDead: Boolean(this.autoplayHealthLikelyDead || this.bonsaiSupervisor?.status?.().healthLikelyDead),
+          healthZeroScore: this.autoplayHealthZeroScore || this.bonsaiSupervisor?.status?.().healthZeroScore || 0,
+          healthActiveColumns: this.autoplayHealthActiveColumns || this.bonsaiSupervisor?.status?.().healthActiveColumns || 0,
+          healthActiveCells: this.autoplayHealthActiveCells || this.bonsaiSupervisor?.status?.().healthActiveCells || 0,
           healthSensor: this.autoplayHealthSensor || this.bonsaiSupervisor?.status?.().healthSensor || null,
-          milestones: this.bonsaiSupervisor?.status?.().milestones || {
+          milestones: this.autoplayMilestones || this.bonsaiSupervisor?.status?.().milestones || {
             doorOpened: 0,
             enemyDefeated: 0,
             combatFireFrames: 0,
@@ -457,8 +478,19 @@
           evidenceScore: this.autoplayEvidenceScore,
           semanticScores: this.autoplaySemanticScores,
           decisionTrace: this.autoplayDecisionTrace,
+          stageEvaluations: this.autoplayStageEvaluations || [],
+          kairosPriorityAxis: this.autoplayKairosPriorityAxis || null,
+          pipelineState: this.autoplayPipelineState || null,
+          goalState: this.autoplayGoalState || null,
+          debugOverlay: this.autoplayDebugOverlay || null,
+          autoplayState: this.autoplayAutoplayState || null,
+          debugRouteValues: this.autoplayDebugRouteValues || null,
           controlPipeline: this.autoplayControlPipeline,
           objective: this.autoplayObjective,
+          routeFallbackYaw: this.autoplayRouteFallbackYaw,
+          openCruiseYaw: this.autoplayOpenCruiseYaw,
+          spawnCorridorGapActionScore: this.autoplaySpawnCorridorGapActionScore,
+          spawnCorridorGapActionTurn: this.autoplaySpawnCorridorGapActionTurn,
           activeDetections: this.autoplayActiveDetections,
           semanticMemory: this.autoplaySemanticMemory,
           action: this.autoplayLastAction,
@@ -950,6 +982,12 @@
       } else {
         this.releaseAutoplayInputs();
         this.autoplayLastAction = self.AIKernelBonsai?.neutralAction?.() || this.autoplayLastAction;
+        this.autoplayActionSignature = "";
+        this.autoplayActionRepeatFrames = 0;
+        this.autoplayMoveSignature = "";
+        this.autoplayMoveRepeatFrames = 0;
+        this.autoplayTurnSignature = "";
+        this.autoplayTurnRepeatFrames = 0;
         this.autoplayMobilityMode = "none";
         this.autoplayLoopEscapeFrames = 0;
         this.autoplayTargetConfidence = 0;
@@ -963,6 +1001,12 @@
         this.autoplayNousCarrier = null;
         this.autoplayNousDetectorResult = null;
         this.clearAutoplayRetryDispatch();
+        this.autoplayActionSignature = "";
+        this.autoplayActionRepeatFrames = 0;
+        this.autoplayMoveSignature = "";
+        this.autoplayMoveRepeatFrames = 0;
+        this.autoplayTurnSignature = "";
+        this.autoplayTurnRepeatFrames = 0;
         this.autoplayRepeatActionFrames = 0;
         this.autoplayRepeatTurnFrames = 0;
         this.autoplayQuantizedStallFrames = 0;
@@ -1420,6 +1464,7 @@
         } else if (this.bonsaiSupervisor) {
           this.bonsaiSupervisor.predict(state).then(action => {
           this.autoplayLastAction = self.AIKernelBonsai?.normalizeAction?.(action, this.autoplayLastAction) || action;
+          this.updateAutoplayKinesisActionLoop(this.autoplayLastAction);
           const status = this.bonsaiSupervisor.status();
           this.applyAutoplaySupervisorStatus(status);
           this.updateGpuHudOverlayState(state);
@@ -1465,8 +1510,10 @@
 
         const rawAction = this.controlRuntime.predict(wasmState);
         this.autoplayLastAction = self.AIKernelBonsai?.normalizeAction?.(rawAction, this.autoplayLastAction) || rawAction;
+        this.updateAutoplayKinesisActionLoop(this.autoplayLastAction);
         const wasmStatus = this.readWasmAutoplayStatus() || {};
-        const status = Object.assign({}, wasmStatus, {
+        const sensorStatus = this.createControlRuntimeSensorStatus(state, wasmState);
+        const status = Object.assign({}, wasmStatus, sensorStatus, {
           controller: wasmStatus.controller || "control-runtime-shim",
           controlPipeline: rawAction.pipeline,
           stage: rawAction.stage || rawAction.pipeline,
@@ -1479,6 +1526,10 @@
           depthEstimate: wasmState.depthSig,
           stuckFrames: wasmState.stuckTicks,
           recoveryFrames: wasmState.recoveryFrames,
+          actionSignature: this.autoplayActionSignature,
+          actionRepeatFrames: this.autoplayActionRepeatFrames,
+          moveRepeatFrames: this.autoplayMoveRepeatFrames,
+          turnRepeatFrames: this.autoplayTurnRepeatFrames,
           activeDetections: wasmState.activeDetections,
           semanticMemory: wasmState.semanticMemory,
           action: this.autoplayLastAction
@@ -1503,6 +1554,122 @@
 
     resolveWasmAutoplayObjective(signals) {
       return requireDoomWasmState("resolveObjective")(signals);
+    }
+
+    createControlRuntimeSensorStatus(state, wasmState) {
+      const frame = state?.framebuffer || {};
+      const audio = state?.audio || {};
+      const motor = state?.motor || {};
+      const movement = state?.movement || {};
+      const compass = state?.compass || {};
+      const visualMotion = state?.visualMotion || frame.visualMotion || {};
+      const regionSignature = this.gridSignature(frame.regionSample).padEnd(6, "0").slice(0, 6);
+      const region9Signature = this.gridSignature(frame.region9Sample).padEnd(9, "0").slice(0, 9);
+      const vision9x9Signature = this.gridSignature(frame.vision9x9Sample).padEnd(81, "0").slice(0, 81);
+      const motion9Signature = String(visualMotion.baseSignature || visualMotion.signature || "").padEnd(9, "0").slice(0, 9);
+      const previousMilestones = this.autoplayMilestones || this.bonsaiSupervisor?.status?.().milestones || {};
+      const milestones = Object.assign({}, previousMilestones, {
+        darkAreaScore: this.round2(frame.darkAreaScore),
+        gameplayLuma: this.round2(frame.gameplayLuma),
+        blueFloorScore: this.round2(frame.blueFloorScore),
+        courtyardScore: this.round2(frame.courtyardScore),
+        courtyardTurn: frame.courtyardTurn || "none",
+        spawnSecretDoorScore: this.round2(frame.spawnSecretDoorScore),
+        spawnSecretDoorTurn: frame.spawnSecretDoorTurn || "none",
+        spawnWestStairScore: this.round2(frame.spawnWestStairScore),
+        spawnWestStairTurn: frame.spawnWestStairTurn || "none",
+        spawnCenterAnchorScore: this.round2(frame.spawnCenterAnchorScore),
+        spawnCenterAnchorTurn: frame.spawnCenterAnchorTurn || "none",
+        spawnCorridorGapScore: this.round2(wasmState?.spawnCorridorGapScore ?? frame.spawnCorridorGapScore),
+        spawnCorridorGapTurn: wasmState?.spawnCorridorGapTurn || frame.spawnCorridorGapTurn || "none",
+        spawnCorridorGapFrames: wasmState?.spawnCorridorGapLockFrames || frame.spawnCorridorGapFrames || 0,
+        bridgeBrownScore: this.round2(frame.bridgeBrownScore),
+        bridgeGreenLeft: this.round2(frame.bridgeGreenLeft),
+        bridgeGreenCenter: this.round2(frame.bridgeGreenCenter),
+        bridgeGreenRight: this.round2(frame.bridgeGreenRight),
+        bridgeLaneTurn: frame.bridgeLaneTurn || "none",
+        bridgeDoorScore: this.round2(frame.bridgeDoorScore),
+        firstDoorCorridorSignature: this.round2(frame.firstDoorCorridorSignature),
+        firstDoorVision9x9Score: this.round2(frame.firstDoorVision9x9Score),
+        firstDoorVision9x9Box: frame.firstDoorVision9x9Box || null,
+        firstDoorVision9x9Heatmap: Array.isArray(frame.firstDoorVision9x9Heatmap) ? frame.firstDoorVision9x9Heatmap : [],
+        firstDoorVision9x9RedScore: this.round2(frame.firstDoorVision9x9RedScore),
+        firstDoorUse3x3Score: this.round2(frame.firstDoorUse3x3Score),
+        firstDoorUse3x3Turn: frame.firstDoorUse3x3Turn || "none",
+        firstDoorUse3x3Reason: frame.firstDoorUse3x3Reason || "none",
+        computerRoomScore: this.round2(frame.computerRoomScore),
+        computerBlueScore: this.round2(frame.computerBlueScore),
+        computerRedLightScore: this.round2(frame.computerRedLightScore),
+        computerDarkPanelScore: this.round2(frame.computerDarkPanelScore),
+        computerPanelScore: this.round2(frame.computerPanelScore),
+        combatFireFrames: previousMilestones.combatFireFrames || 0,
+        enemyConfidencePeak: Math.max(Number(previousMilestones.enemyConfidencePeak || 0), Number(frame.enemyConfidence || 0)),
+        enemyDropFrames: previousMilestones.enemyDropFrames || 0
+      });
+
+      return {
+        auditorySnapshot: audio,
+        visionSensor: {
+          active: Array.isArray(frame.vision9x9Sample) && frame.vision9x9Sample.length > 0,
+          signature: vision9x9Signature,
+          region9Signature,
+          cells: Array.isArray(frame.vision9x9Sample) ? frame.vision9x9Sample.length : 0,
+          zeroCopy: Boolean(frame.zeroCopy)
+        },
+        motorSensor: motor,
+        movementSensor: movement,
+        compassSensor: compass,
+        spatialSensor: state?.spatial || state?.spatialSnapshot || null,
+        healthSensor: {
+          active: true,
+          likelyDead: Boolean(frame.healthLikelyDead),
+          retryRequested: Boolean(frame.healthLikelyDead),
+          confidence: this.round2(frame.healthZeroScore),
+          signature: frame.healthSignature || "",
+          activeColumns: Number(frame.healthActiveColumns || 0),
+          activeCells: Number(frame.healthActiveCells || 0)
+        },
+        quantizedFrameChange: this.round2(Number(visualMotion.magnitude || 0) * 255),
+        regionQuantizedFrameChange: this.round2(Number(visualMotion.baseMagnitude || 0) * 255),
+        statusBarQuantizedFrameChange: this.round2(frame.statusBarQuantizedFrameChange ?? 255),
+        regionSignature,
+        region9Signature,
+        vision9x9Signature,
+        motion9Signature,
+        motion9Delta: this.round2(Number(visualMotion.magnitude || 0) * 255),
+        motionForwardProgress: this.round2(Math.max(0, Number(movement.vectorY || 0))),
+        motionObstacleScore: this.round2(frame.footObstacleScore),
+        motionTurnScore: this.round2(Math.abs(Number(visualMotion.vectorX || 0))),
+        motionEntranceScore: this.round2(frame.spawnCorridorGapScore),
+        motionStallScore: this.round2(Number(movement.confidence || 0) <= 0.1 && motor.active ? 0.35 : 0),
+        motionIntent: motor.move || "idle",
+        footObstacleScore: this.round2(frame.footObstacleScore),
+        priorFootObstacleScore: this.round2(frame.priorFootObstacleScore),
+        footObstacleFlickerScore: this.round2(frame.footObstacleFlickerScore),
+        footObstacleBounceFrames: Number(frame.footObstacleBounceFrames || 0),
+        footObstacleBandDelta: this.round2(frame.footObstacleBandDelta),
+        inputStallFrames: Number(frame.inputStallFrames || 0),
+        depthSignature: frame.depthSignature || "0000",
+        depthEstimate: Number(frame.depthEstimate ?? wasmState?.depthSig ?? 1),
+        faceSignature: frame.faceSignature || "0000000000000000",
+        faceQuantizedFrameChange: this.round2(frame.faceQuantizedFrameChange ?? 255),
+        cornerSignal: this.round2(frame.firstDoorUse3x3Score),
+        enemyConfidence: this.round2(frame.enemyConfidence),
+        enemyTurn: frame.enemyTurn || "none",
+        enemyDistance: Number(frame.enemyDistance ?? 1),
+        enemyCluster: frame.enemyCluster || "none",
+        enemyFireReady: Boolean(frame.enemyCentered),
+        enemyAllRegionPeak: this.round2(frame.enemyAllRegionPeak),
+        enemyLateralBias: this.round2(frame.enemyLateralBias),
+        ammoSignature: frame.ammoSignature || "",
+        ammoLikelyEmpty: Boolean(frame.ammoLikelyEmpty),
+        healthSignature: frame.healthSignature || "",
+        healthLikelyDead: Boolean(frame.healthLikelyDead),
+        healthZeroScore: this.round2(frame.healthZeroScore),
+        healthActiveColumns: Number(frame.healthActiveColumns || 0),
+        healthActiveCells: Number(frame.healthActiveCells || 0),
+        milestones
+      };
     }
 
     applyAutoplaySupervisorStatus(status) {
@@ -1536,6 +1703,10 @@
       this.autoplayToposDecisionCarrier = status.toposDecisionCarrier || this.autoplayToposDecisionCarrier || null;
       this.autoplayNousCarrier = status.nousCarrier || this.autoplayNousCarrier || null;
       this.autoplayNousDetectorResult = status.nousDetectorResult || status.nousCarrier?.cognitionHints?.nousDetectorResult || this.autoplayNousDetectorResult || null;
+      this.autoplayActionSignature = status.actionSignature || this.autoplayActionSignature || "";
+      this.autoplayActionRepeatFrames = Math.max(0, Math.floor(Number(status.actionRepeatFrames ?? this.autoplayActionRepeatFrames ?? 0)));
+      this.autoplayMoveRepeatFrames = Math.max(0, Math.floor(Number(status.moveRepeatFrames ?? this.autoplayMoveRepeatFrames ?? 0)));
+      this.autoplayTurnRepeatFrames = Math.max(0, Math.floor(Number(status.turnRepeatFrames ?? this.autoplayTurnRepeatFrames ?? 0)));
       this.autoplayRepeatActionFrames = status.repeatActionFrames || 0;
       this.autoplayRepeatTurnFrames = status.repeatTurnFrames || 0;
       this.autoplayQuantizedStallFrames = status.quantizedStallFrames || 0;
@@ -1553,6 +1724,12 @@
       this.autoplayMotionEntranceScore = status.motionEntranceScore || 0;
       this.autoplayMotionStallScore = status.motionStallScore || 0;
       this.autoplayMotionIntent = status.motionIntent || "idle";
+      this.autoplayFootObstacleScore = status.footObstacleScore || 0;
+      this.autoplayPriorFootObstacleScore = status.priorFootObstacleScore || 0;
+      this.autoplayFootObstacleFlickerScore = status.footObstacleFlickerScore || 0;
+      this.autoplayFootObstacleBounceFrames = status.footObstacleBounceFrames || 0;
+      this.autoplayFootObstacleBandDelta = status.footObstacleBandDelta || 0;
+      this.autoplayInputStallFrames = status.inputStallFrames || 0;
       this.autoplayDepthSignature = status.depthSignature || this.autoplayDepthSignature || "0000";
       this.autoplayDepthEstimate = status.depthEstimate ?? this.autoplayDepthEstimate ?? 1;
       this.autoplayFaceSignature = status.faceSignature || this.autoplayFaceSignature || "0000000000000000";
@@ -1593,10 +1770,31 @@
       this.autoplayEvidenceScore = Number.isFinite(Number(status.evidenceScore)) ? Number(status.evidenceScore) : 0;
       this.autoplaySemanticScores = status.semanticScores || status.semanticMemory?.symbols || this.autoplaySemanticScores || null;
       this.autoplayDecisionTrace = status.decisionTrace || this.autoplayDecisionTrace || null;
+      this.autoplayStageEvaluations = Array.isArray(status.stageEvaluations)
+        ? status.stageEvaluations.slice(0, 12)
+        : (this.autoplayStageEvaluations || []);
+      this.autoplayKairosPriorityAxis = status.kairosPriorityAxis || this.autoplayKairosPriorityAxis || null;
+      this.autoplayPipelineState = status.pipelineState || this.autoplayPipelineState || null;
+      this.autoplayGoalState = status.goalState || status.autoplayState?.goalState || this.autoplayGoalState || null;
+      this.autoplayDebugOverlay = status.debugOverlay || status.autoplayState?.debugOverlay || this.autoplayDebugOverlay || null;
+      this.autoplayAutoplayState = status.autoplayState || this.autoplayAutoplayState || null;
+      this.autoplayDebugRouteValues = status.debugRouteValues || this.autoplayDebugRouteValues || null;
       this.autoplayControlPipeline = status.controlPipeline || "Idle";
       this.autoplayObjective = status.objective || this.autoplayObjective || "disabled";
+      this.autoplayRouteFallbackYaw = Number.isFinite(Number(status.routeFallbackYaw)) ? Number(status.routeFallbackYaw) : this.autoplayRouteFallbackYaw || 0;
+      this.autoplayOpenCruiseYaw = Number.isFinite(Number(status.openCruiseYaw)) ? Number(status.openCruiseYaw) : this.autoplayOpenCruiseYaw || 0;
+      this.autoplaySpawnCorridorGapActionScore = Number.isFinite(Number(status.spawnCorridorGapScore)) ? Number(status.spawnCorridorGapScore) : this.autoplaySpawnCorridorGapActionScore || 0;
+      this.autoplaySpawnCorridorGapActionTurn = status.spawnCorridorGapTurn || this.autoplaySpawnCorridorGapActionTurn || "none";
       this.autoplayActiveDetections = Array.isArray(status.activeDetections) ? status.activeDetections : this.autoplayActiveDetections;
       this.autoplaySemanticMemory = status.semanticMemory || this.autoplaySemanticMemory || null;
+      this.autoplayAmmoSignature = status.ammoSignature || this.autoplayAmmoSignature || "";
+      this.autoplayAmmoLikelyEmpty = Boolean(status.ammoLikelyEmpty);
+      this.autoplayHealthSignature = status.healthSignature || this.autoplayHealthSignature || "";
+      this.autoplayHealthLikelyDead = Boolean(status.healthLikelyDead);
+      this.autoplayHealthZeroScore = status.healthZeroScore || 0;
+      this.autoplayHealthActiveColumns = status.healthActiveColumns || 0;
+      this.autoplayHealthActiveCells = status.healthActiveCells || 0;
+      this.autoplayMilestones = status.milestones || this.autoplayMilestones || null;
     }
 
     syncAutoplaySupervisorStatus() {
@@ -2789,6 +2987,88 @@
         enterKey: AUTOPLAY_RETRY_ENTER_KEY,
         queueInput: (keycode, pressed) => this.queueInput(keycode, pressed)
       });
+    }
+
+    normalizeAutoplayKinesisAction(action) {
+      const normalizer = self.AIKernelDoomKinesis?.normalizeAction || self.AIKernelBonsai?.normalizeAction;
+      if (typeof normalizer === "function") {
+        return normalizer(action, this.autoplayLastAction);
+      }
+
+      const safe = action || {};
+      return {
+        move: safe.move === "forward" ? "forward" : (safe.move === "back" ? "back" : "none"),
+        turn: safe.turn === "left" ? "left" : (safe.turn === "right" ? "right" : "none"),
+        fire: Boolean(safe.fire),
+        strafe: Boolean(safe.strafe),
+        use: Boolean(safe.use),
+        run: Boolean(safe.run)
+      };
+    }
+
+    createAutoplayKinesisSignature(action) {
+      const signature = self.AIKernelDoomKinesis?.actionSignature;
+      if (typeof signature === "function") {
+        return signature(action);
+      }
+
+      const safe = this.normalizeAutoplayKinesisAction(action);
+      return [
+        safe.move,
+        safe.turn,
+        safe.fire ? "f" : "-",
+        safe.strafe ? "s" : "-",
+        safe.use ? "u" : "-",
+        safe.run ? "r" : "-"
+      ].join(":");
+    }
+
+    updateAutoplayKinesisActionLoop(action) {
+      const safe = this.normalizeAutoplayKinesisAction(action);
+      const trackable = !safe.fire
+        && !safe.use
+        && (safe.move !== "none" || safe.turn !== "none" || safe.strafe || safe.run);
+      if (!trackable) {
+        this.autoplayActionSignature = "";
+        this.autoplayActionRepeatFrames = 0;
+        this.autoplayMoveSignature = "";
+        this.autoplayMoveRepeatFrames = 0;
+        this.autoplayTurnSignature = "";
+        this.autoplayTurnRepeatFrames = 0;
+        return 0;
+      }
+
+      const signature = this.createAutoplayKinesisSignature(safe);
+      if (signature === this.autoplayActionSignature) {
+        this.autoplayActionRepeatFrames = Math.min(240, Number(this.autoplayActionRepeatFrames || 0) + 1);
+      } else {
+        this.autoplayActionSignature = signature;
+        this.autoplayActionRepeatFrames = 1;
+      }
+
+      const moveSignature = safe.move !== "none" ? safe.move : "";
+      if (moveSignature) {
+        this.autoplayMoveRepeatFrames = moveSignature === this.autoplayMoveSignature
+          ? Math.min(240, Number(this.autoplayMoveRepeatFrames || 0) + 1)
+          : 1;
+        this.autoplayMoveSignature = moveSignature;
+      } else {
+        this.autoplayMoveSignature = "";
+        this.autoplayMoveRepeatFrames = 0;
+      }
+
+      const turnSignature = safe.turn !== "none" ? safe.turn : "";
+      if (turnSignature) {
+        this.autoplayTurnRepeatFrames = turnSignature === this.autoplayTurnSignature
+          ? Math.min(240, Number(this.autoplayTurnRepeatFrames || 0) + 1)
+          : 1;
+        this.autoplayTurnSignature = turnSignature;
+      } else {
+        this.autoplayTurnSignature = "";
+        this.autoplayTurnRepeatFrames = 0;
+      }
+
+      return this.autoplayActionRepeatFrames;
     }
 
     applyAutoplayAction(action) {

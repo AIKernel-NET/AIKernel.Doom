@@ -77,8 +77,12 @@ assert(compat.stuck.evidence === null, "delegated Phainesis defaults should pres
 const evaluated = phainesis.evaluatePhainomenon({
   nousCarrier: { movementEnvelope: { y: "positive" } },
   frames: [
-    { projectileScore: 0.05, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", movementSpeed: 0.1 },
-    { projectileScore: 0.31, dynamicObjectScore: 0.2, temporalDelta: 0.04, flowX: 0.2, healthActiveCells: 9, healthZeroScore: 0.28, audioEnergy: 0.2, audioBalance: -0.4, base3x3Signature: "aaaa", movementSpeed: 0.08, motorForward: 0, stuckFrames: 2 }
+    { projectileScore: 0.05, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.1, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 13 },
+    { projectileScore: 0.06, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.09, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 14 },
+    { projectileScore: 0.07, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.08, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 15 },
+    { projectileScore: 0.08, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.09, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 16 },
+    { projectileScore: 0.05, healthActiveCells: 12, healthZeroScore: 0.1, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.08, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 17 },
+    { projectileScore: 0.31, dynamicObjectScore: 0.2, temporalDelta: 0.04, flowX: 0.2, healthActiveCells: 9, healthZeroScore: 0.28, audioEnergy: 0.2, audioBalance: -0.4, base3x3Signature: "aaaa", depthSignature: "1111", movementSpeed: 0.08, motorForward: 0, stuckFrames: 2, actionSignature: "forward:none:-:-:-:r", actionRepeatFrames: 18 }
   ],
   itemMemory: [{ targetKind: "medkit" }],
   movementEventType: "movement-stall",
@@ -87,6 +91,106 @@ const evaluated = phainesis.evaluatePhainomenon({
 assert(evaluated.looming.active === true, "evaluatePhainomenon should detect looming");
 assert(evaluated.stuck.active === true, "evaluatePhainomenon should detect stuck state");
 assert(evaluated.sensorRecovery.needed === true, "evaluatePhainomenon should request sensor recovery");
+
+const counterOnlyEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "new1", depthSignature: "2000", movementSpeed: 0.05, temporalDelta: 0.12, flowX: 0.16, flowY: 0.05, stuckFrames: 2, motorForward: 1 }
+  ]
+});
+assert(counterOnlyEvaluated.stuck.active === false, "stuck counters alone should not bypass Kinesis/repeated-world evidence");
+
+const repeatedKinesisEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "abca", movementSpeed: 0.08, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 13 },
+    { base3x3Signature: "abca", movementSpeed: 0.07, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 14 },
+    { base3x3Signature: "abca", movementSpeed: 0.08, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 15 },
+    { base3x3Signature: "abca", movementSpeed: 0.07, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 16 },
+    { base3x3Signature: "abca", movementSpeed: 0.08, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 17 },
+    { base3x3Signature: "abca", movementSpeed: 0.06, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 18, motorForward: 1 }
+  ]
+});
+assert(repeatedKinesisEvaluated.stuck.active === true, "repeated Kinesis action with low motion should detect stuck state");
+assert(repeatedKinesisEvaluated.stuck.evidence === "kinesis-repeat", "repeated Kinesis action should expose kinesis-repeat evidence");
+
+const repeatedButMovingEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "zzzz", movementSpeed: 0.42, temporalDelta: 0.2, flowX: 0.16, flowY: 0.05, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 18, motorForward: 1 }
+  ]
+});
+assert(repeatedButMovingEvaluated.stuck.active === false, "repeated Kinesis action should not be stuck while motion is progressing");
+
+const shortRepeatEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "short", movementSpeed: 0.06, temporalDelta: 0.04, flowX: 0.01, flowY: 0.01, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 5, motorForward: 1 }
+  ]
+});
+assert(shortRepeatEvaluated.stuck.active === false, "short Kinesis repeats should not be enough for stuck evidence");
+
+const changingSignatureEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "a111", movementSpeed: 0.07, temporalDelta: 0.12, flowX: 0.10, flowY: 0.05, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 18, motorForward: 1 },
+    { base3x3Signature: "b222", movementSpeed: 0.07, temporalDelta: 0.14, flowX: 0.10, flowY: 0.05, actionSignature: "forward:right:-:-:-:r", actionRepeatFrames: 19, motorForward: 1 }
+  ]
+});
+assert(changingSignatureEvaluated.stuck.active === false, "changing visual signatures should suppress repeated-action stuck evidence");
+
+const useRepeatEvaluated = phainesis.evaluatePhainomenon({
+  nousCarrier: { movementEnvelope: { y: "positive" } },
+  frames: [
+    { base3x3Signature: "use1", movementSpeed: 0.05, temporalDelta: 0.03, flowX: 0.01, flowY: 0.01, actionSignature: "forward:none:-:-:u:-", actionRepeatFrames: 24, motorForward: 1 }
+  ]
+});
+assert(useRepeatEvaluated.stuck.active === false, "Use/action repeats should not become Kinesis stuck evidence");
+const expectedEventScores = [
+  "wallFlow",
+  "corridorFlow",
+  "gap",
+  "stuck",
+  "oscillation",
+  "looming",
+  "enemyPresence",
+  "damageLocalization",
+  "projectileFlow",
+  "threatField",
+  "explorationEntropy",
+  "itemBacktrack",
+  "goalDirection",
+  "safeZone",
+  "intentConsistency",
+  "movementStability",
+  "confidenceFusion"
+];
+for (const name of expectedEventScores) {
+  assert(Object.prototype.hasOwnProperty.call(evaluated.eventScores, name), `Phainesis event score should include ${name}`);
+}
+
+const vectors = nous.buildMeaningVectors(evaluated);
+const expectedVectors = [
+  "wallFlowVector",
+  "gapVector",
+  "corridorVector",
+  "stuckVector",
+  "loomingVector",
+  "enemyVector",
+  "damageVector",
+  "projectileVector",
+  "threatVector",
+  "explorationVector",
+  "itemVector",
+  "goalVector",
+  "safeZoneVector",
+  "intentVector",
+  "stabilityVector",
+  "confidenceVector"
+];
+for (const name of expectedVectors) {
+  assert(Object.prototype.hasOwnProperty.call(vectors, name), `Nous vector should include ${name}`);
+}
 
 const damageEvaluated = phainesis.evaluatePhainomenon({
   frames: [
@@ -108,5 +212,7 @@ console.log("DOOM_PHAINESIS_VM_TEST_OK", {
   events: events.length,
   graceEvents: graceEvents.length,
   delegated: compat.stuck.active,
-  evaluated: evaluated.sensorRecovery.needed
+  evaluated: evaluated.sensorRecovery.needed,
+  eventScores: expectedEventScores.length,
+  vectors: expectedVectors.length
 });

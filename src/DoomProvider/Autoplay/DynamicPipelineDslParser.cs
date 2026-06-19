@@ -1,9 +1,19 @@
 namespace AIKernel.Doom.Provider.Autoplay;
 
+/// <summary>
+/// EN: Result of parsing a dynamic philosophical autoplay pipeline DSL document.
+/// JA: dynamic philosophical autoplay pipeline DSL document の parse result です。
+/// </summary>
+/// <param name="Definition">EN: Parsed pipeline definition. JA: parse 済み pipeline definition です。</param>
+/// <param name="Diagnostics">EN: Parser diagnostics that do not prevent returning a definition. JA: definition の返却を妨げない parser diagnostic です。</param>
 public sealed record DynamicPipelineDslParseResult(
     AutoplayPipelineDefinition Definition,
     IReadOnlyList<string> Diagnostics);
 
+/// <summary>
+/// EN: Parses the dynamic philosophical autoplay pipeline DSL into contract-level definitions.
+/// JA: dynamic philosophical autoplay pipeline DSL を contract-level definition に parse します。
+/// </summary>
 public static class DynamicPipelineDslParser
 {
     private static readonly string[] RequiredTopLevelBlocks =
@@ -25,6 +35,10 @@ public static class DynamicPipelineDslParser
         "kinesis.zoe"
     ];
 
+    /// <summary>
+    /// EN: Parses source text and validates the required canonical block order.
+    /// JA: source text を parse し、required canonical block order を検証します。
+    /// </summary>
     public static DynamicPipelineDslParseResult Parse(string source)
     {
         if (string.IsNullOrWhiteSpace(source))

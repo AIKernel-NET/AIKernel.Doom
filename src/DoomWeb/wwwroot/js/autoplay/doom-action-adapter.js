@@ -30,7 +30,17 @@
   }
 
   function turnAxis(action) {
+    const yaw = Number(action?.turnYaw);
+    if (Number.isFinite(yaw) && yaw !== 0) {
+      return yaw > 0 ? 1 : -1;
+    }
+
     return action?.turn === "right" ? 1 : (action?.turn === "left" ? -1 : 0);
+  }
+
+  function turnDirection(action) {
+    const axis = turnAxis(action);
+    return axis > 0 ? "right" : (axis < 0 ? "left" : "none");
   }
 
   function isMoveKey(name) {
@@ -43,11 +53,12 @@
       : normalizeAction(action, options.previousAction, options.normalizeAction);
     const aiMoveAllowed = !Boolean(options.manualMove);
     const usePressed = Boolean(options.usePressed);
+    const turn = turnDirection(normalized);
     const desired = {
       forward: aiMoveAllowed && normalized.move === "forward",
       back: aiMoveAllowed && normalized.move === "back",
-      left: aiMoveAllowed && normalized.turn === "left",
-      right: aiMoveAllowed && normalized.turn === "right",
+      left: aiMoveAllowed && turn === "left",
+      right: aiMoveAllowed && turn === "right",
       fire: Boolean(normalized.fire),
       strafe: aiMoveAllowed && Boolean(normalized.strafe),
       use: usePressed,

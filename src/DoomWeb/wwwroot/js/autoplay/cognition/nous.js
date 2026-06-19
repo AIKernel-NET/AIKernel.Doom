@@ -42,6 +42,7 @@
         gateExecuted: false,
         ternaryTrace: {}
       },
+      meaningVectors: overrides.meaningVectors || {},
       cognitionHints: overrides.cognitionHints || {},
       timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
     };
@@ -84,9 +85,45 @@
     return normalized;
   }
 
+  function buildMeaningVectors(phainomenon = {}) {
+    const scores = phainomenon.eventScores || {};
+    return {
+      wallFlowVector: scoreByName(scores, "wallFlow", phainomenon.wallFlow?.strength),
+      gapVector: scoreByName(scores, "gap", phainomenon.gap?.score),
+      corridorVector: scoreByName(scores, "corridorFlow", phainomenon.corridorFlow?.score),
+      stuckVector: scoreByName(scores, "stuck", phainomenon.stuck?.active ? 1 : 0),
+      loomingVector: scoreByName(scores, "looming", phainomenon.looming?.active ? 1 : 0),
+      enemyVector: scoreByName(scores, "enemyPresence", phainomenon.enemyPresence?.probability),
+      damageVector: scoreByName(scores, "damageLocalization", phainomenon.damageLocalization?.active ? 1 : 0),
+      projectileVector: scoreByName(scores, "projectileFlow", phainomenon.projectileFlow?.strength),
+      threatVector: scoreByName(scores, "threatField", phainomenon.threatField?.score),
+      explorationVector: scoreByName(scores, "explorationEntropy", phainomenon.explorationEntropy?.high ? 1 : 0),
+      itemVector: scoreByName(scores, "itemBacktrack", phainomenon.itemBacktrack?.suggested ? 1 : 0),
+      goalVector: scoreByName(scores, "goalDirection", phainomenon.goalDirection?.score),
+      safeZoneVector: scoreByName(scores, "safeZone", phainomenon.safeZone?.score),
+      intentVector: scoreByName(scores, "intentConsistency", phainomenon.intentConsistency?.score),
+      stabilityVector: scoreByName(scores, "movementStability", phainomenon.movementStability?.score),
+      confidenceVector: scoreByName(scores, "confidenceFusion", phainomenon.confidenceFusion?.score)
+    };
+  }
+
+  function scoreByName(scores, name, fallback) {
+    return clamp01(Number((scores && scores[name]) ?? fallback ?? 0));
+  }
+
+  function clamp01(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return 0;
+    }
+
+    return Math.max(0, Math.min(1, number));
+  }
+
   self.AIKernelDoomNous = Object.freeze({
     createNousCarrier,
     createNousDetectorResult,
-    normalizeNousSensorMap
+    normalizeNousSensorMap,
+    buildMeaningVectors
   });
 })();

@@ -93,6 +93,72 @@ layers before detector labels are emitted:
 These preprocessing values remain scenario-local evidence. They do not create
 Council votes, Gate decisions, reject reasons, or action commands.
 
+## Spawn Landmark Route Evidence
+
+The E1M1 opening room cannot reliably expose the first-door corridor through a
+single direct visual cue. The demo route therefore treats opening-room landmarks
+as stabilized evidence for a route hint, not as immediate control locks.
+
+- the blue floor plus pillar evidence forms a `spawn-center-anchor` route hint.
+- the east courtyard window, south secret-door brightness, and west stair lamps
+  remain route hints that must stabilize before they influence objective
+  promotion.
+- route evidence can promote `follow-demo-route-to-first-door` into
+  `locate-first-door-corridor`, but Kinesis only receives Kairos conclusions
+  such as `routeAdvanceProtected`; it does not read raw landmark evidence.
+- close-wall and use-contact evidence near the first door are treated as normal
+  approach context so wall recovery does not fight corridor movement.
+
+Doom's first-person view does not show the player's feet. Foot-level obstacle
+handling must therefore stay differential: bottom-row flicker, visual stall, and
+movement mismatch can indicate a low obstacle, but no detector should treat
+"visible feet" as a stable landmark or route feature.
+
+## Pipeline HUD Ownership
+
+The Topos / CTG-ROM debug panel is rendered by
+`doom-pipeline-panel.js`. `doom-prompt.js` loads that panel module and delegates
+formatting so the prompt script remains a UI shell instead of accumulating
+decision-carrier formatting logic.
+
+The panel displays observed Logos / Pathos / Ethos values, the decision carrier,
+Topos route evidence, Spatial facts, Hodos reliability, and Kairos state. It is
+an observability surface only; it does not calculate decision vectors or apply
+Gate logic.
+
+`bonsai.js` also emits a display-only `pipelineTrace` carrier. The trace
+summarizes the active Aisthesis, Phainesis, Nous, Topos, Kairos, Kinesis, and
+Zoe stages, plus the demo route milestones:
+
+- First Door
+- Computer Room
+- Central Hall
+- Front Enemy
+- Final Room
+- Exit Switch
+
+The trace is derived from already-produced carriers such as active detections,
+Topos decisions, Kairos priority, and the last Kinesis action. It must not
+become a second decision system.
+
+When the central hall has been reached but the front enemy is not yet locked,
+DoomWeb may run a short `central-hall-front-enemy-sweep` action. The sweep and
+its narrow `central-hall-enemy-probe-fire` confirmation shot are planned in
+`combat-route.js`, keeping `bonsai.js` as the state bridge. This is a
+scenario-local Kinesis search behavior for the public demo route; enemy
+engagement and defeated-state inference still use the existing combat evidence
+and milestone logic. After the enemy is defeated, the same route module advances
+the objective toward bridge crossing, final room entry, and the exit switch
+instead of leaving the demo parked at `secure-central-hall`.
+
+The implementation direction is to keep this JavaScript layer thin. Neutral
+detectors such as `gap`, `corridorFlow`, `wallFlow`, `stuck`, `threatField`,
+and `confidenceFusion` belong to `AIKernel.Wasm.Perception` as
+`WasmSyntheticSensorProvider` phenomena and vectors. DoomWeb may temporarily
+mirror a detector for browser-debug iteration, but the durable runtime owner is
+the WASM package. Doom-specific code should map returned neutral vectors to E1M1
+context only after the runtime analysis has completed.
+
 ## Nous Detector Result
 
 DoomWeb now builds a scenario-local `NousDetectorResult` from `NousCarrier`,

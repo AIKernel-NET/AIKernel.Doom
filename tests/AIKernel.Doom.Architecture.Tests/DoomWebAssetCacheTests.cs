@@ -2,8 +2,6 @@ namespace AIKernel.Doom.Architecture.Tests;
 
 public sealed class DoomWebAssetCacheTests
 {
-    private const string CacheBustingVersion = "20260618-sensorpanel1";
-
     [Fact]
     public void DoomRuntime_CachesProtectedWadAndBonsaiBinariesAfterConsent()
     {
@@ -73,45 +71,49 @@ public sealed class DoomWebAssetCacheTests
         var proxy = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker-proxy.js"));
         var runtime = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom.js"));
 
-        Assert.Contains($"/demo/doom/js/doom-worker.js?v={CacheBustingVersion}", proxy, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay-profile.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/webgpu-provider.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/semantics.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/routing.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/topos.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/ctg.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/sensory.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/vision-palette.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/phainesis.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/nous.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/phantasia.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/kairos.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/kinesis.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/cognition/zoe.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/sensor-tensor.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/objective-routing.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/expression-dsl.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/doom-context.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/evidence.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/arbitration.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/decision-trace.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/pipeline-graph.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/zoe-veto.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control/runtime-packets.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/wasm-state.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/control-runtime.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/doom-sensor-inputs.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/doom-action-adapter.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/doom-retry-dispatch.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/autoplay/doom-binary-assets.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom-wasm-imports.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom-native-audio.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom-auditory-runtime.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom-wad-metadata.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/bonsai.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom-debug-audio.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/doom.js?v={CacheBustingVersion}", worker, StringComparison.Ordinal);
-        Assert.Contains($"/demo/doom/js/webgpu-provider.js?v={CacheBustingVersion}", runtime, StringComparison.Ordinal);
+        Assert.Contains("doomdev", proxy, StringComparison.Ordinal);
+        Assert.Contains("encodeURIComponent(cacheKey)", proxy, StringComparison.Ordinal);
+        Assert.Contains("/demo/doom/js/doom-worker.js?v=", proxy, StringComparison.Ordinal);
+        Assert.Contains("const scriptUrl = (path) => `${path}?v=${encodeURIComponent(workerCacheKey)}`;", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay-profile.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/webgpu-provider.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/semantics.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/routing.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/topos.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/ctg.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/sensory.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/vision-palette.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/phainesis.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/nous.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/phantasia.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/kairos.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/kinesis.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/zoe.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/pipeline-trace.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/sensor-tensor.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/objective-routing.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/expression-dsl.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/doom-context.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/evidence.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/arbitration.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/decision-trace.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/pipeline-graph.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/zoe-veto.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/runtime-packets.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/wasm-state.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control-runtime.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-sensor-inputs.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-action-adapter.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-retry-dispatch.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-binary-assets.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-wasm-imports.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-native-audio.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-auditory-runtime.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-wad-metadata.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/bonsai.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-debug-audio.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/demo/doom/js/doom.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("/demo/doom/js/webgpu-provider.js?v=20260618-sensorpanel1", runtime, StringComparison.Ordinal);
 
         var scripts = string.Concat(worker, proxy, runtime);
         Assert.DoesNotContain("20260617-framefeatures1", scripts, StringComparison.Ordinal);

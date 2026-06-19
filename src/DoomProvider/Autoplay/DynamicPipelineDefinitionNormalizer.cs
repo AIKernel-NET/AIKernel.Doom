@@ -30,7 +30,7 @@ internal static class DynamicPipelineDefinitionNormalizer
 
         if (vectors.Count == 0)
         {
-            vectors.AddRange(events.Select(rule => new MeaningVectorRule($"{rule.Event}Vector", rule.Event)));
+            vectors.AddRange(events.Select(rule => new MeaningVectorRule(ToDefaultVectorName(rule.Event), rule.Event)));
         }
 
         priorities = DynamicPipelineLegacyAdapters.ApplyHodosAndBehavior(definition, vectors, priorities, deprecations);
@@ -72,6 +72,23 @@ internal static class DynamicPipelineDefinitionNormalizer
             .Where(rule => !string.IsNullOrWhiteSpace(rule.Vector))
             .Select(rule => new MeaningVectorRule(rule.Vector.Trim(), string.IsNullOrWhiteSpace(rule.From) ? rule.Vector.Trim() : rule.From.Trim()))
             .ToList();
+
+    private static string ToDefaultVectorName(string eventName)
+        => eventName switch
+        {
+            "corridorFlow" => "corridorVector",
+            "damageLocalization" => "damageVector",
+            "enemyPresence" => "enemyVector",
+            "projectileFlow" => "projectileVector",
+            "threatField" => "threatVector",
+            "explorationEntropy" => "explorationVector",
+            "itemBacktrack" => "itemVector",
+            "goalDirection" => "goalVector",
+            "intentConsistency" => "intentVector",
+            "movementStability" => "stabilityVector",
+            "confidenceFusion" => "confidenceVector",
+            _ => $"{eventName}Vector"
+        };
 
     private static List<ZoeVetoRule> NormalizeVeto(IEnumerable<AutoplayZoeVetoDefinition>? rules)
         => (rules ?? [])

@@ -349,6 +349,12 @@
       this.spawnSecretDoorTurn = "none";
       this.spawnWestStairScore = 0;
       this.spawnWestStairTurn = "none";
+      this.spawnCenterAnchorScore = 0;
+      this.spawnCenterAnchorTurn = "right";
+      this.spawnLandmarkRouteEvidence = 0;
+      this.spawnLandmarkRouteTurn = "right";
+      this.spawnLandmarkRouteKind = "none";
+      this.spawnLandmarkRouteFrames = 0;
       this.firstDoorDeadEndTurnFrames = 0;
       this.spawnCorridorGapScore = 0;
       this.spawnCorridorGapTurn = "none";
@@ -386,6 +392,8 @@
       this.itemMemory = [];
       this.repeatActionSignature = "";
       this.repeatActionFrames = 0;
+      this.kinesisActionSignature = "";
+      this.kinesisActionRepeatFrames = 0;
       this.repeatTurnFrames = 0;
       this.repeatTurnDirection = "right";
       this.quantizedStallFrames = 0;
@@ -468,6 +476,8 @@
       this.computerPanelScore = 0;
       this.centralHallFrames = 0;
       this.centralHallEntered = false;
+      this.centralHallEnemySweepFrames = 0;
+      this.centralHallEnemySweepTurn = "right";
       this.stairsCandidateFrames = 0;
       this.stairsEntered = false;
       this.finalRoomCandidateFrames = 0;
@@ -580,6 +590,12 @@
         this.spawnSecretDoorTurn = "none";
         this.spawnWestStairScore = 0;
         this.spawnWestStairTurn = "none";
+        this.spawnCenterAnchorScore = 0;
+        this.spawnCenterAnchorTurn = "right";
+        this.spawnLandmarkRouteEvidence = 0;
+        this.spawnLandmarkRouteTurn = "right";
+        this.spawnLandmarkRouteKind = "none";
+        this.spawnLandmarkRouteFrames = 0;
         this.firstDoorDeadEndTurnFrames = 0;
         this.spawnCorridorGapScore = 0;
         this.spawnCorridorGapTurn = "none";
@@ -617,6 +633,8 @@
         this.itemMemory = [];
         this.repeatActionSignature = "";
         this.repeatActionFrames = 0;
+        this.kinesisActionSignature = "";
+        this.kinesisActionRepeatFrames = 0;
         this.repeatTurnFrames = 0;
         this.repeatTurnDirection = "right";
         this.quantizedStallFrames = 0;
@@ -699,6 +717,8 @@
         this.computerPanelScore = 0;
         this.centralHallFrames = 0;
         this.centralHallEntered = false;
+        this.centralHallEnemySweepFrames = 0;
+        this.centralHallEnemySweepTurn = "right";
         this.stairsCandidateFrames = 0;
         this.stairsEntered = false;
         this.finalRoomCandidateFrames = 0;
@@ -792,6 +812,8 @@
         nousDetectorResult: this.nousDetectorResult,
         phantasiaSnapshot: this.phantasiaSnapshot,
         sensorDetections: this.sensorDetections,
+        actionSignature: this.kinesisActionSignature,
+        actionRepeatFrames: this.kinesisActionRepeatFrames,
         repeatActionFrames: this.repeatActionFrames,
         repeatTurnFrames: this.repeatTurnFrames,
         openAdvanceStallFrames: this.openAdvanceStallFrames,
@@ -910,6 +932,12 @@
           spawnSecretDoorTurn: this.spawnSecretDoorTurn,
           spawnWestStairScore: round2(this.spawnWestStairScore),
           spawnWestStairTurn: this.spawnWestStairTurn,
+          spawnCenterAnchorScore: round2(this.spawnCenterAnchorScore),
+          spawnCenterAnchorTurn: this.spawnCenterAnchorTurn,
+          spawnLandmarkRouteEvidence: round2(this.spawnLandmarkRouteEvidence),
+          spawnLandmarkRouteTurn: this.spawnLandmarkRouteTurn,
+          spawnLandmarkRouteKind: this.spawnLandmarkRouteKind,
+          spawnLandmarkRouteFrames: this.spawnLandmarkRouteFrames,
           spawnCorridorGapScore: round2(this.spawnCorridorGapScore),
           spawnCorridorGapTurn: this.spawnCorridorGapTurn,
           spawnCorridorGapFrames: this.spawnCorridorGapFrames,
@@ -948,6 +976,8 @@
           computerPanelScore: round2(this.computerPanelScore),
           centralHallEntered: this.centralHallEntered,
           centralHallFrames: this.centralHallFrames,
+          centralHallEnemySweepFrames: this.centralHallEnemySweepFrames,
+          centralHallEnemySweepTurn: this.centralHallEnemySweepTurn,
           stairsEntered: this.stairsEntered,
           stairsCandidateFrames: this.stairsCandidateFrames,
           finalRoomEntered: this.finalRoomEntered,
@@ -978,6 +1008,7 @@
         controlPipeline: this.controlPipeline,
         objective: this.objective,
         activeDetections: activeDetectionsForPipeline(this),
+        pipelineTrace: buildAutoplayPipelineTrace(this),
         semanticMemory: this.semanticMemory,
         model: this.modelManifest?.name || "Bonsai-1.7B-Q1_0"
       };
@@ -1010,6 +1041,11 @@
         spawnSecretDoorTurn: this.spawnSecretDoorTurn,
         spawnWestStairScore: this.spawnWestStairScore,
         spawnWestStairTurn: this.spawnWestStairTurn,
+        spawnCenterAnchorScore: this.spawnCenterAnchorScore,
+        spawnCenterAnchorTurn: this.spawnCenterAnchorTurn,
+        spawnLandmarkRouteEvidence: this.spawnLandmarkRouteEvidence,
+        spawnLandmarkRouteTurn: this.spawnLandmarkRouteTurn,
+        spawnLandmarkRouteKind: this.spawnLandmarkRouteKind,
         mapDoorSectorMatch: this.mapDoorSectorMatch,
         mapEnemyZoneMatch: this.mapEnemyZoneMatch,
         wallUseProbeFrames: this.wallUseProbeFrames,
@@ -1472,6 +1508,12 @@
         && !String(enemy.cluster || "").startsWith("gate-")) {
         safe = this.combatAction(safe, frame, state, enemy, faceQuantizedFrameChange);
         this.safetyReason = "central-hall-front-enemy";
+      } else if (this.centralHallEntered
+        && this.objective === "engage-front-enemy"
+        && Number(this.enemyDefeatedCount || 0) <= 0
+        && !this.ammoLikelyEmpty) {
+        safe = this.centralHallEnemySweepAction(safe, frame, state);
+        this.safetyReason = "central-hall-front-enemy-sweep";
       } else if (enemy.confidence >= COMBAT_CONFIDENCE_THRESHOLD
         && this.darkZoneEntered
         && this.mapEnemyZoneMatch
@@ -1507,7 +1549,12 @@
       }
 
       const mayFire = !ammoState.likelyEmpty
-        && (effectiveTargetConfidence >= TARGET_LOCK_CONFIDENCE || enemy.fireReady || this.safetyReason === "combat" || this.safetyReason === "combat-alert" || this.safetyReason === "dark-combat-alert")
+        && ((effectiveTargetConfidence >= TARGET_LOCK_CONFIDENCE || enemy.fireReady || this.safetyReason === "combat" || this.safetyReason === "combat-alert" || this.safetyReason === "dark-combat-alert")
+          || (this.safetyReason === "central-hall-front-enemy-sweep"
+            && this.centralHallEntered
+            && this.objective === "engage-front-enemy"
+            && Number(this.enemyDefeatedCount || 0) <= 0
+            && Math.max(Number(this.targetConfidence || 0), Number(enemy.confidence || 0), Number(this.enemyCenterCellConfidence || 0)) >= 0.18))
         && safe.move !== "back"
         && !safe.use;
       if (safe.fire && mayFire) {
@@ -1538,6 +1585,7 @@
 
       safe = this.applySensorFusionStrategy(safe, sensor, frame, state);
       safe = this.applyCtgToposFeedback(safe, sensor, frame, state);
+      updateKinesisActionLoop(this, safe);
       if (safe.use && this.pendingUseResponseFrames <= 0) {
         if (this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated) {
         this.firstDoorUseAttempted = true;
@@ -1595,6 +1643,12 @@
         quantizedAmmo,
         quantizedHealth,
         footObstacleBandSample: Array.isArray(frame.footObstacleBandSample) ? frame.footObstacleBandSample.slice(0) : [],
+        actionSignature: this.kinesisActionSignature,
+        actionRepeatFrames: this.kinesisActionRepeatFrames,
+        motionForwardProgress: this.motionForwardProgress,
+        footObstacleFlickerScore: this.footObstacleFlickerScore,
+        footObstacleBounceFrames: this.footObstacleBounceFrames,
+        depthSignature: this.depthSignature,
         left: frame.left || 0,
         right: frame.right || 0,
         center: frame.center || 0
@@ -1763,12 +1817,19 @@
         }
 
         const spawnLandmarkScanReady = this.predictions >= Math.max(18, firstDoorSpawnScanFrames - 12);
+        const spawnLandmarkRouteStable = spawnLandmarkScanReady
+          && Number(this.spawnLandmarkRouteFrames || 0) >= 2
+          && Number(this.spawnLandmarkRouteEvidence || 0) >= 0.28;
         const spawnSecretDoorAnchorVisible = spawnLandmarkScanReady
+          && spawnLandmarkRouteStable
+          && this.spawnLandmarkRouteKind === "secret-door-anchor"
           && this.spawnSecretDoorScore >= profileNumber(this.profile, "spawnSecretDoorThreshold", SPAWN_SECRET_DOOR_THRESHOLD)
           && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
           && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
           && this.courtyardScore < Math.max(0.18, courtyardRescueThreshold - 0.12);
         const spawnWestStairAnchorVisible = spawnLandmarkScanReady
+          && spawnLandmarkRouteStable
+          && this.spawnLandmarkRouteKind === "west-stair-anchor"
           && this.spawnWestStairScore >= profileNumber(this.profile, "spawnWestStairThreshold", SPAWN_WEST_STAIR_THRESHOLD)
           && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
           && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
@@ -3357,12 +3418,18 @@
       const eastWindowVisible = this.courtyardTurn === "right"
         && this.courtyardScore >= Math.max(0.18, courtyardThreshold - 0.1)
         && frame >= Math.max(24, scanFrames);
+      const landmarkRouteStable = Number(this.spawnLandmarkRouteFrames || 0) >= 2
+        && Number(this.spawnLandmarkRouteEvidence || 0) >= 0.28;
       const secretDoorAnchorVisible = this.spawnSecretDoorScore >= spawnSecretDoorThreshold
+        && landmarkRouteStable
+        && this.spawnLandmarkRouteKind === "secret-door-anchor"
         && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
         && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
         && this.courtyardScore < Math.max(0.18, courtyardThreshold - 0.12)
         && frame >= Math.max(18, scanFrames - 12);
       const westStairAnchorVisible = this.spawnWestStairScore >= spawnWestStairThreshold
+        && landmarkRouteStable
+        && this.spawnLandmarkRouteKind === "west-stair-anchor"
         && this.firstDoorVision9x9RedScore < FIRST_DOOR_RED_ACCENT_THRESHOLD
         && this.firstDoorUse3x3Score < FIRST_DOOR_DARK_PANEL_USE_ALIGNMENT_SCORE
         && this.courtyardScore < Math.max(0.18, courtyardThreshold - 0.12)
@@ -4925,6 +4992,42 @@
       }));
     }
 
+    centralHallEnemySweepAction(action, frame, state) {
+      const plan = requireCombatRouteCognition("planCentralHallEnemySweep")({
+        action,
+        ammoLikelyEmpty: this.ammoLikelyEmpty,
+        defaultSweepFrames: profileNumber(this.profile, "centralHallEnemySweepFrames", 72),
+        depth: this.depthEstimate,
+        enemyCenterCellConfidence: this.enemyCenterCellConfidence,
+        enemyConfidence: this.enemyConfidence,
+        fireCooldown: this.fireCooldown,
+        frameIndex: state?.frame,
+        inputStallFrames: this.inputStallFrames,
+        left: frame?.left,
+        motionStallScore: this.motionStallScore,
+        right: frame?.right,
+        sweepFrames: this.centralHallEnemySweepFrames,
+        sweepTurn: this.centralHallEnemySweepTurn,
+        targetConfidence: this.targetConfidence,
+        targetTurn: targetTurnDirection(frame)
+      });
+
+      this.centralHallEnemySweepFrames = plan.sweepFrames;
+      this.centralHallEnemySweepTurn = plan.sweepTurn;
+      if (plan.probeFire) {
+        this.combatFireFrames += 1;
+        this.enemyFireReady = true;
+        this.enemyConfidencePeak = Math.max(this.enemyConfidencePeak, plan.frontConfidence);
+        this.enemyDropFrames = 0;
+      }
+
+      this.strategyPriority = plan.strategyPriority;
+      this.strategyContext = plan.strategyContext;
+      this.controlPipeline = plan.controlPipeline;
+      this.mobilityMode = plan.mobilityMode;
+      return normalizeAction(Object.assign({}, action, plan.action));
+    }
+
     wallFollowAction(action, frame, state) {
       this.wallFollowSide = chooseWallHugSide(frame, this.wallFollowSide);
       const awaySide = oppositeTurn(this.wallFollowSide);
@@ -5323,6 +5426,15 @@
     controller.spawnSecretDoorTurn = frame.spawnSecretDoorTurn === "left" || frame.spawnSecretDoorTurn === "right" ? frame.spawnSecretDoorTurn : "none";
     controller.spawnWestStairScore = clamp01(Number(frame.spawnWestStairScore || 0));
     controller.spawnWestStairTurn = frame.spawnWestStairTurn === "left" || frame.spawnWestStairTurn === "right" ? frame.spawnWestStairTurn : "none";
+    controller.spawnCenterAnchorScore = clamp01(Number(frame.spawnCenterAnchorScore || 0));
+    controller.spawnCenterAnchorTurn = frame.spawnCenterAnchorTurn === "left" || frame.spawnCenterAnchorTurn === "right" ? frame.spawnCenterAnchorTurn : "right";
+    const routeHint = resolveSpawnLandmarkRouteHint(controller, frame);
+    controller.spawnLandmarkRouteEvidence = routeHint.evidence;
+    controller.spawnLandmarkRouteTurn = routeHint.turn;
+    controller.spawnLandmarkRouteKind = routeHint.kind;
+    controller.spawnLandmarkRouteFrames = routeHint.evidence >= 0.28
+      ? Math.min(MAX_STUCK_COUNTER, Number(controller.spawnLandmarkRouteFrames || 0) + 1)
+      : Math.max(0, Number(controller.spawnLandmarkRouteFrames || 0) - 1);
     controller.spawnCorridorGapScore = clamp01(Number(frame.spawnCorridorGapScore || 0));
     controller.spawnCorridorGapTurn = frame.spawnCorridorGapTurn === "left" || frame.spawnCorridorGapTurn === "right" ? frame.spawnCorridorGapTurn : "none";
     controller.bridgeBrownScore = clamp01(Number(frame.bridgeBrownScore || 0));
@@ -5397,6 +5509,55 @@
       controller.enemyAlertDepth = 1;
       controller.enemyAlertPeakConfidence = 0;
     }
+  }
+
+  function resolveSpawnLandmarkRouteHint(controller, frame) {
+    const gapScore = clamp01(Number(frame?.spawnCorridorGapScore || controller?.spawnCorridorGapScore || 0));
+    const centerAnchorScore = clamp01(Number(frame?.spawnCenterAnchorScore || controller?.spawnCenterAnchorScore || 0));
+    const courtyardScore = clamp01(Number(frame?.courtyardScore || controller?.courtyardScore || 0));
+    const secretScore = clamp01(Number(frame?.spawnSecretDoorScore || controller?.spawnSecretDoorScore || 0));
+    const westStairScore = clamp01(Number(frame?.spawnWestStairScore || controller?.spawnWestStairScore || 0));
+    const candidates = [
+      {
+        kind: "corridor-gap",
+        evidence: gapScore,
+        turn: frame?.spawnCorridorGapTurn === "left" || frame?.spawnCorridorGapTurn === "right" ? frame.spawnCorridorGapTurn : "right"
+      },
+      {
+        kind: "spawn-center-anchor",
+        evidence: centerAnchorScore,
+        turn: frame?.spawnCenterAnchorTurn === "left" || frame?.spawnCenterAnchorTurn === "right" ? frame.spawnCenterAnchorTurn : "right"
+      },
+      {
+        kind: "east-window-anchor",
+        evidence: courtyardScore * 0.82,
+        turn: "left"
+      },
+      {
+        kind: "secret-door-anchor",
+        evidence: secretScore * 0.78,
+        turn: "left"
+      },
+      {
+        kind: "west-stair-anchor",
+        evidence: westStairScore * 0.78,
+        turn: "right"
+      }
+    ];
+    let best = candidates[0];
+    for (let index = 1; index < candidates.length; index += 1) {
+      if (candidates[index].evidence > best.evidence) {
+        best = candidates[index];
+      }
+    }
+
+    const previousFrames = Number(controller?.spawnLandmarkRouteFrames || 0);
+    const stableBonus = Math.min(0.12, previousFrames * 0.015);
+    return {
+      kind: best.evidence >= 0.12 ? best.kind : "none",
+      turn: best.evidence >= 0.12 ? best.turn : "right",
+      evidence: round2(clamp01(best.evidence + stableBonus))
+    };
   }
 
   function updateAutoplaySemanticRouteState(controller, features, state, frame, enemy, effectiveTargetConfidence, auditorySnapshot) {
@@ -5927,6 +6088,8 @@
         spawnSecretDoorTurn: "none",
         spawnWestStairScore: 0,
         spawnWestStairTurn: "none",
+        spawnCenterAnchorScore: 0,
+        spawnCenterAnchorTurn: "right",
         spawnCorridorGapScore: 0,
         spawnCorridorGapTurn: "none",
         firstDoorVision9x9Score: 0,
@@ -6004,6 +6167,10 @@
     let courtyardLowerRight = 0;
     let courtyardUpperLeft = 0;
     let courtyardUpperRight = 0;
+    let courtyardLowerLeftMax = 0;
+    let courtyardLowerRightMax = 0;
+    let courtyardUpperLeftMax = 0;
+    let courtyardUpperRightMax = 0;
     let courtyardLowerLeftCount = 0;
     let courtyardLowerRightCount = 0;
     let courtyardUpperLeftCount = 0;
@@ -6040,6 +6207,7 @@
     let computerPanel = 0;
     let computerPanelCount = 0;
     let footObstacle = 0;
+    let footObstacleMax = 0;
     let footObstacleCount = 0;
     const footObstacleBandSample = [];
     let projectileTotal = 0;
@@ -6066,18 +6234,22 @@
           const courtyardLower = scoreCourtyardLowerPaletteIndex(value, rgbaBytes);
           if (column < SAMPLE_COLUMNS / 2) {
             courtyardLowerLeft += courtyardLower;
+            courtyardLowerLeftMax = Math.max(courtyardLowerLeftMax, courtyardLower);
             courtyardLowerLeftCount += 1;
           } else {
             courtyardLowerRight += courtyardLower;
+            courtyardLowerRightMax = Math.max(courtyardLowerRightMax, courtyardLower);
             courtyardLowerRightCount += 1;
           }
         } else if (row <= Math.floor(SAMPLE_ROWS * 0.46)) {
           const courtyardUpper = scoreCourtyardUpperPaletteIndex(value, rgbaBytes);
           if (column < SAMPLE_COLUMNS / 2) {
             courtyardUpperLeft += courtyardUpper;
+            courtyardUpperLeftMax = Math.max(courtyardUpperLeftMax, courtyardUpper);
             courtyardUpperLeftCount += 1;
           } else {
             courtyardUpperRight += courtyardUpper;
+            courtyardUpperRightMax = Math.max(courtyardUpperRightMax, courtyardUpper);
             courtyardUpperRightCount += 1;
           }
         }
@@ -6147,9 +6319,13 @@
           computerDarkPanelCount += 1;
           computerPanelCount += 1;
         }
-        if (row >= 8 && row <= 12 && column >= 8 && column <= 18) {
+        if (row >= 6 && row <= 12 && column >= 7 && column <= 19) {
           const footScore = scoreFootObstaclePaletteIndex(value, rgbaBytes);
           footObstacle += footScore;
+          if (footScore > footObstacleMax) {
+            footObstacleMax = footScore;
+          }
+
           footObstacleBandSample.push(Math.round(clamp01(footScore) * 15));
           footObstacleCount += 1;
         }
@@ -6309,16 +6485,21 @@
     const depthEstimate = estimateDepthDistance(depthSample);
     const ammoState = estimateAmmoState(ammoSample, quantizeFrameSample(ammoSample));
     const healthState = estimateHealthState(healthSample, quantizeFrameSample(healthSample));
-    const courtyardLeft = (
-      (courtyardLowerLeftCount ? courtyardLowerLeft / courtyardLowerLeftCount : 0) * 0.56)
-      + ((courtyardUpperLeftCount ? courtyardUpperLeft / courtyardUpperLeftCount : 0) * 0.44);
-    const courtyardRight = (
-      (courtyardLowerRightCount ? courtyardLowerRight / courtyardLowerRightCount : 0) * 0.56)
-      + ((courtyardUpperRightCount ? courtyardUpperRight / courtyardUpperRightCount : 0) * 0.44);
+    const courtyardLowerLeftScore = ((courtyardLowerLeftCount ? courtyardLowerLeft / courtyardLowerLeftCount : 0) * 0.68)
+      + (courtyardLowerLeftMax * 0.32);
+    const courtyardLowerRightScore = ((courtyardLowerRightCount ? courtyardLowerRight / courtyardLowerRightCount : 0) * 0.68)
+      + (courtyardLowerRightMax * 0.32);
+    const courtyardUpperLeftScore = ((courtyardUpperLeftCount ? courtyardUpperLeft / courtyardUpperLeftCount : 0) * 0.72)
+      + (courtyardUpperLeftMax * 0.28);
+    const courtyardUpperRightScore = ((courtyardUpperRightCount ? courtyardUpperRight / courtyardUpperRightCount : 0) * 0.72)
+      + (courtyardUpperRightMax * 0.28);
+    const courtyardLeft = (courtyardLowerLeftScore * 0.56) + (courtyardUpperLeftScore * 0.44);
+    const courtyardRight = (courtyardLowerRightScore * 0.56) + (courtyardUpperRightScore * 0.44);
     const courtyardScore = round2(clamp01(Math.max(courtyardLeft, courtyardRight)));
     const courtyardTurn = Math.abs(courtyardLeft - courtyardRight) < 0.08
       ? "none"
       : (courtyardRight > courtyardLeft ? "right" : "left");
+    const blueFloorScore = sample.length ? round2(blueFloorTotal / sample.length) : 0;
     const spawnSecretDoorAverage = spawnSecretDoorCount ? spawnSecretDoorTotal / spawnSecretDoorCount : 0;
     const spawnSecretDoorScore = round2(clamp01(Math.max(spawnSecretDoorAverage * 1.7, spawnSecretDoorMax * 0.68)));
     const spawnSecretDoorCenter = spawnSecretDoorTotal > 0
@@ -6339,6 +6520,11 @@
     const spawnGapEdges = estimateSpawnCorridorGapEdges(lumaGrid);
     const spawnGapDarkScore = spawnGapCount ? spawnGapDark / spawnGapCount : 0;
     const spawnGapPillarScore = spawnPillarCount ? spawnGapPillar / spawnPillarCount : 0;
+    const spawnCenterAnchorScore = round2(clamp01(
+      (blueFloorScore * 0.56)
+      + (spawnGapPillarScore * 0.34)
+      + (spawnGapEdges.score * 0.10)));
+    const spawnCenterAnchorTurn = spawnCenterAnchorScore >= 0.12 ? "right" : "none";
     const spawnCorridorGapScore = round2(clamp01(
       (spawnGapDarkScore * 0.36)
       + (spawnGapPillarScore * 0.24)
@@ -6366,7 +6552,8 @@
       + (computerDarkPanelScore * 0.24)
       + (computerPanelScore * 0.18)
       + (darkAreaAverage * 0.08)));
-    const footObstacleScore = round2(clamp01(footObstacleCount ? footObstacle / footObstacleCount : 0));
+    const footObstacleAverage = footObstacleCount ? footObstacle / footObstacleCount : 0;
+    const footObstacleScore = round2(clamp01(Math.max(footObstacleAverage, footObstacleMax * 0.65)));
     const centerAverage = centerCount ? Math.round(center / centerCount) : 0;
     for (let index = 0; index < sample.length; index += 1) {
       centerContrast += Math.abs(sample[index] - centerAverage);
@@ -6394,13 +6581,15 @@
       statusBarAverage: statusSample.length ? Math.round(statusTotal / statusSample.length) : 0,
       gameplayLuma: gameplayLumaCount ? round2(gameplayLumaTotal / gameplayLumaCount) : 0,
       darkAreaScore: sample.length ? round2(darkAreaTotal / sample.length) : 0,
-      blueFloorScore: sample.length ? round2(blueFloorTotal / sample.length) : 0,
+      blueFloorScore,
       courtyardScore,
       courtyardTurn,
       spawnSecretDoorScore,
       spawnSecretDoorTurn,
       spawnWestStairScore,
       spawnWestStairTurn,
+      spawnCenterAnchorScore,
+      spawnCenterAnchorTurn,
       spawnCorridorGapScore,
       spawnCorridorGapTurn,
       firstDoorVision9x9Score: firstDoorVision9x9.score,
@@ -7627,6 +7816,10 @@
     const flow = estimateDenseGridFlow(previous.spatial9x9, staticSpatial9x9, VISION_GRID_COLUMNS, VISION_GRID_ROWS);
     const depth = Number(controller.depthEstimate ?? frame?.depthEstimate ?? 1);
     const narrowness = clamp01(((1 - depth) * 0.58) + (Number(controller.cornerSignal || 0) * 0.42));
+    const trustedEnemyThreat = getTrustedEnemyThreat(controller);
+    const trustedCombatEvidence = trustedEnemyThreat >= 0.26
+      || Number(controller.enemyAlertFrames || 0) > 0
+      || Number(controller.projectileScore || frame?.projectileScore || 0) >= 0.16;
     return createPhantasiaSnapshot({
       timestamp,
       signature: vision.signature,
@@ -7644,6 +7837,8 @@
       resourceScore: frame?.resourceScore,
       resourceDirection,
       enemyConfidence: Math.max(Number(frame?.enemyConfidence || 0), Number(controller.enemyConfidence || 0)),
+      trustedEnemyThreat,
+      trustedCombatEvidence,
       audioBalance: audio.balance,
       audioEnergy: Math.max(Number(audio.leftEnergy || 0), Number(audio.rightEnergy || 0)),
       audioLowEnergy: audio.lowEnergy,
@@ -7651,13 +7846,26 @@
       audioHighEnergy: audio.highEnergy,
       audioDominantBand: audio.dominantBand,
       movementSpeed: movement.speed,
+      motionForwardProgress: controller.motionForwardProgress,
       motorForward: motor.vectorY,
+      actionSignature: controller.kinesisActionSignature,
+      actionRepeatFrames: controller.kinesisActionRepeatFrames,
       temporalDelta,
       flowX: flow.flowX,
       flowY: flow.flowY,
-      dynamicObjectScore: Math.max(flow.dynamicScore, temporalDelta, dynamicMaskCoverage, Number(frame?.projectileScore || 0), Math.max(Number(frame?.enemyConfidence || 0), Number(controller.enemyConfidence || 0)) * 0.4),
+      dynamicObjectScore: Math.max(flow.dynamicScore, temporalDelta, dynamicMaskCoverage, Number(frame?.projectileScore || 0), trustedEnemyThreat * 0.4),
       spatialConfidence: spatial.confidence,
       spatialEvent: spatial.eventDetected,
+      depthEstimate: depth,
+      depthSignature: controller.depthSignature,
+      footObstacleFlickerScore: controller.footObstacleFlickerScore,
+      footObstacleBounceFrames: controller.footObstacleBounceFrames,
+      firstDoorVision9x9Score: controller.firstDoorVision9x9Score || frame?.firstDoorVision9x9Score || 0,
+      firstDoorUse3x3Score: controller.firstDoorUse3x3Score || frame?.firstDoorUse3x3Score || 0,
+      spawnCorridorGapScore: controller.spawnCorridorGapScore || frame?.spawnCorridorGapScore || 0,
+      spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence || 0,
+      computerRoomScore: controller.computerRoomScore || frame?.computerRoomScore || 0,
+      bridgeDoorScore: controller.bridgeDoorScore || frame?.bridgeDoorScore || 0,
       healthActiveCells: health.activeCells,
       healthZeroScore: health.zeroScore,
       faceDelta: health.faceQuantizedFrameChange,
@@ -8278,6 +8486,8 @@
       kinesis: ternaryScore(kinesisScore),
       phantasia: ternaryScore(phantasiaScore)
     };
+    const phainomenon = controller.phainomenon || controller.nousDetectorResult || createNousDetectorResult();
+    const meaningVectors = requireNousCognition("buildMeaningVectors")(phainomenon);
     return createNousCarrier({
       normalizedSensorMap: normalizeNousSensorMap(state?.sensors || {}),
       spatial9x9: {
@@ -8311,13 +8521,15 @@
         gateExecuted: false,
         ternaryTrace: bonsaiTernary
       },
+      meaningVectors,
       cognitionHints: {
         retryRequested: Boolean(health.retryRequested),
         spatialEvent: Boolean(spatial.eventDetected),
         routeHint: controller.controlPipeline || "Idle",
         activeDetections: controller.sensorDetections || [],
-        phainomenon: controller.phainomenon || controller.nousDetectorResult || createNousDetectorResult(),
-        nousDetectorResult: controller.nousDetectorResult || controller.phainomenon || createNousDetectorResult(),
+        phainomenon,
+        nousDetectorResult: controller.nousDetectorResult || phainomenon,
+        meaningVectors,
         audioBands: {
           low: audio.lowEnergy || 0,
           mid: audio.midEnergy || 0,
@@ -8409,6 +8621,7 @@
     const spawnCorridorGapThreshold = profileNumber(controller.profile, "spawnCorridorGapThreshold", SPAWN_CORRIDOR_GAP_THRESHOLD);
     const routeEvidence = Math.max(
       Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.spawnLandmarkRouteEvidence || 0),
       Number(controller.firstDoorCorridorSignature || 0),
       Number(controller.firstDoorVision9x9Score || 0),
       Number(controller.motionEntranceScore || 0));
@@ -8418,6 +8631,7 @@
       Number(latest?.movementSpeed || 0));
     const routeVisible = controller.firstDoorCorridorLocated
       || Number(controller.spawnCorridorGapFrames || 0) > 0
+      || Number(controller.spawnLandmarkRouteFrames || 0) >= 2
       || routeEvidence >= Math.max(0.18, spawnCorridorGapThreshold - 0.08);
 
     return Boolean(routeVisible && movingEvidence >= 0.04);
@@ -8502,10 +8716,12 @@
       Number(controller.computerRoomScore || 0),
       Number(controller.computerPanelScore || 0),
       Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.spawnLandmarkRouteEvidence || 0),
       Number(controller.bridgeDoorScore || 0),
       Number(controller.bridgeBrownScore || 0)));
     const directCorridorConfidence = clamp01(Math.max(
       Number(controller.spawnCorridorGapScore || 0),
+      Number(controller.spawnLandmarkRouteEvidence || 0),
       Number(controller.firstDoorCorridorLocated ? 0.82 : 0),
       compass.headingReliability === "corridor-ambiguous" ? 0.72 : 0));
     const projectileRaw = clamp01(Number(controller.projectileScore || controller.phantasiaSnapshot?.projectileScore || 0));
@@ -8544,6 +8760,10 @@
       Number(controller.motionForwardProgress || 0),
       Number(controller.motionTurnScore || 0),
       Number(controller.motionEntranceScore || 0));
+    const preDoorDemoRouteGraceActive = isPreDoorDemoRouteGraceActive(controller, {
+      depthEstimate: controller.depthEstimate,
+      movementSpeed: Math.max(movingEvidence, Number(controller.movementSensorSnapshot?.confidence || 0))
+    });
     const firstDoorUseSignatureThreshold = profileNumber(controller.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
     const firstDoorRetrySignatureTolerance = profileNumber(controller.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
     const observedSignals = composeCtgObservedSignals({
@@ -8565,6 +8785,7 @@
       stuckRaw,
       stuckConfirmed,
       firstRouteWarmup,
+      preDoorDemoRouteGraceActive,
       firstDoorClosed: controller.doorOpenedCount <= 0,
       firstDoorContext: controller.firstDoorCorridorLocated || controller.controlPipeline === "FirstDoor",
       firstDoorUseDepthLimit: profileNumber(controller.profile, "firstDoorUseDepth", FIRST_DOOR_USE_DEPTH) + 0.18,
@@ -8638,12 +8859,23 @@
       actionTurn: action.turn,
       bridgeBrownScore: controller.bridgeBrownScore,
       spawnCorridorGapTurn: controller.spawnCorridorGapTurn,
+      spawnLandmarkRouteTurn: controller.spawnLandmarkRouteTurn,
+      spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence,
+      spawnLandmarkRouteKind: controller.spawnLandmarkRouteKind,
       depthEstimate: controller.depthEstimate
     });
   }
 
   function getToposPathosVector(controller, action, sensor, frame, state) {
     const enemy = getTrustedEnemyThreat(controller);
+    const preDoorDemoRouteGraceActive = isPreDoorDemoRouteGraceActive(controller, {
+      depthEstimate: controller.depthEstimate,
+      movementSpeed: Math.max(
+        Number(controller.motionForwardProgress || 0),
+        Number(controller.motionTurnScore || 0),
+        Number(controller.motionEntranceScore || 0),
+        Number(controller.movementSensorSnapshot?.confidence || 0))
+    });
     return requireToposCognition("resolvePathosVector")({
       motionStallScore: controller.motionStallScore,
       stuckFrames: controller.stuckFrames,
@@ -8659,6 +8891,7 @@
       healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
       enemyLateralBias: controller.enemyLateralBias,
       depthEstimate: controller.depthEstimate,
+      preDoorDemoRouteGraceActive,
       actionTurn: action.turn,
       wallHugSide: controller.wallHugSide
     });
@@ -8666,13 +8899,25 @@
 
   function getToposEthosVector(controller, action, sensor, frame, state) {
     const objective = inferObjective(controller);
+    const preDoorDemoRouteGraceActive = isPreDoorDemoRouteGraceActive(controller, {
+      depthEstimate: controller.depthEstimate,
+      movementSpeed: Math.max(
+        Number(controller.motionForwardProgress || 0),
+        Number(controller.motionTurnScore || 0),
+        Number(controller.motionEntranceScore || 0),
+        Number(controller.movementSensorSnapshot?.confidence || 0))
+    });
     return requireToposCognition("resolveEthosVector")({
       objective,
       spawnCorridorGapTurn: controller.spawnCorridorGapTurn,
+      spawnLandmarkRouteTurn: controller.spawnLandmarkRouteTurn,
+      spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence,
+      spawnLandmarkRouteKind: controller.spawnLandmarkRouteKind,
       firstDoorCorridorSearchTurn: controller.firstDoorCorridorSearchTurn,
       firstDoorUseTurn: controller.firstDoorUse3x3Turn,
       bridgeLaneTurn: controller.bridgeLaneTurn,
       wallHugSide: controller.wallHugSide,
+      preDoorDemoRouteGraceActive,
       stableFrames: controller.toposEthosFrames
     });
   }
@@ -8797,6 +9042,14 @@
     return requireToposCognition("resolveEthosScore")({
       objective,
       stableFrames: controller?.toposEthosFrames,
+      preDoorDemoRouteGraceActive: isPreDoorDemoRouteGraceActive(controller, {
+        depthEstimate: controller?.depthEstimate,
+        movementSpeed: Math.max(
+          Number(controller?.motionForwardProgress || 0),
+          Number(controller?.motionTurnScore || 0),
+          Number(controller?.motionEntranceScore || 0),
+          Number(controller?.movementSensorSnapshot?.confidence || 0))
+      }),
       firstDoorDoorConfidence: memory.firstDoor?.doorConfidence,
       firstDoorCorridorConfidence: memory.firstDoor?.corridorConfidence,
       computerRoomConfidence: memory.computerRoom?.confidence,
@@ -8851,6 +9104,24 @@
     const fn = self.AIKernelDoomZoe?.[name];
     if (typeof fn !== "function") {
       throw new Error(`AIKernel.Doom Zoe cognition module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requirePipelineTraceCognition(name) {
+    const fn = self.AIKernelDoomPipelineTrace?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom pipeline trace module is missing: ${name}`);
+    }
+
+    return fn;
+  }
+
+  function requireCombatRouteCognition(name) {
+    const fn = self.AIKernelDoomCombatRoute?.[name];
+    if (typeof fn !== "function") {
+      throw new Error(`AIKernel.Doom combat route module is missing: ${name}`);
     }
 
     return fn;
@@ -8951,6 +9222,34 @@
 
   function actionSignature(action) {
     return requireKinesisCognition("actionSignature")(action);
+  }
+
+  function updateKinesisActionLoop(controller, action) {
+    if (!controller) {
+      return 0;
+    }
+
+    const safe = normalizeAction(action);
+    const trackable = !safe.fire
+      && !safe.use
+      && (safe.move !== "none" || safe.turn !== "none" || safe.strafe || safe.run);
+    if (!trackable) {
+      controller.kinesisActionSignature = "";
+      controller.kinesisActionRepeatFrames = 0;
+      return 0;
+    }
+
+    const signature = actionSignature(safe);
+    if (signature === controller.kinesisActionSignature) {
+      controller.kinesisActionRepeatFrames = Math.min(
+        MAX_STUCK_COUNTER,
+        Number(controller.kinesisActionRepeatFrames || 0) + 1);
+    } else {
+      controller.kinesisActionSignature = signature;
+      controller.kinesisActionRepeatFrames = 1;
+    }
+
+    return controller.kinesisActionRepeatFrames;
   }
 
   function oppositeTurn(turn) {
@@ -9177,6 +9476,10 @@
       spawnCorridorGapTurn: gapTurn,
       spawnCorridorGapScore: controller.spawnCorridorGapScore,
       spawnCorridorGapFrames: controller.spawnCorridorGapFrames,
+      spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence,
+      spawnLandmarkRouteFrames: controller.spawnLandmarkRouteFrames,
+      spawnLandmarkRouteTurn: controller.spawnLandmarkRouteTurn,
+      spawnLandmarkRouteKind: controller.spawnLandmarkRouteKind,
       motionEntranceScore: controller.motionEntranceScore,
       motionEntranceThreshold: profileNumber(controller.profile, "motionEntranceThreshold", 0.22),
       relativeAlignment: relativeCorridorAlignment(controller, gapTurn),
@@ -9184,6 +9487,58 @@
       firstDoorSpawnScanFrames: profileNumber(controller.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES),
       controlPipeline: controller.controlPipeline,
       mobilityMode: controller.mobilityMode
+    });
+  }
+
+  function buildAutoplayPipelineTrace(controller) {
+    if (!controller) {
+      return requirePipelineTraceCognition("buildTrace")({ enabled: false });
+    }
+
+    const detections = activeDetectionsForPipeline(controller);
+    return requirePipelineTraceCognition("buildTrace")({
+      enabled: Boolean(controller.enabled),
+      phase: controller.controlPipeline || "Idle",
+      objective: inferObjective(controller),
+      priority: Number(controller.strategyPriority || 0),
+      activeDetections: detections,
+      action: controller.lastAction,
+      observed: controller.ctgObservedScores,
+      carrier: controller.toposDecisionCarrier,
+      healthRetryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
+      healthLikelyDead: Boolean(controller.healthLikelyDead),
+      safetyReason: controller.safetyReason,
+      hasNousCarrier: Boolean(controller.nousCarrier),
+      hasPhainomenon: Boolean(controller.phainomenon),
+      ternaryVectorCount: Object.keys(controller.nousCarrier?.bonsaiTernary || {}).length,
+      motionForwardProgress: controller.motionForwardProgress,
+      motionStallScore: controller.motionStallScore,
+      spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence,
+      spawnLandmarkRouteKind: controller.spawnLandmarkRouteKind,
+      spawnCorridorGapScore: controller.spawnCorridorGapScore,
+      firstDoorCorridorSignature: controller.firstDoorCorridorSignature,
+      firstDoorVision9x9Score: controller.firstDoorVision9x9Score,
+      firstDoorCorridorLocated: Boolean(controller.firstDoorCorridorLocated),
+      doorOpenedCount: controller.doorOpenedCount,
+    computerRoomEntered: Boolean(controller.computerRoomEntered),
+    computerRoomScore: controller.computerRoomScore,
+    computerPanelScore: controller.computerPanelScore,
+    computerDarkPanelScore: controller.computerDarkPanelScore,
+    centralHallEntered: Boolean(controller.centralHallEntered),
+    centralHallFrames: controller.centralHallFrames,
+    centralHallEnemySweepFrames: controller.centralHallEnemySweepFrames,
+    centralHallEnemySweepTurn: controller.centralHallEnemySweepTurn,
+    bridgeBrownScore: controller.bridgeBrownScore,
+    bridgeDoorScore: controller.bridgeDoorScore,
+    bridgeLaneVisible: Boolean(controller.bridgeLaneVisible),
+    finalRoomCandidateFrames: controller.finalRoomCandidateFrames,
+    finalRoomEntered: Boolean(controller.finalRoomEntered),
+    exitSwitchUseFrames: controller.exitSwitchUseFrames,
+    exitSwitchPressed: Boolean(controller.exitSwitchPressed),
+    enemyConfidence: controller.enemyConfidence,
+    targetConfidence: controller.targetConfidence,
+    enemyConfidencePeak: controller.enemyConfidencePeak,
+      enemyDefeatedCount: controller.enemyDefeatedCount
     });
   }
 

@@ -106,7 +106,16 @@
       && movingEvidence >= 0.08
       && danger < 0.32;
     if (routeStillViable) {
-      stuck = Math.min(stuck, 0.54);
+      stuck = Math.min(stuck, 0.42);
+    }
+
+    const preDoorDemoRouteStillViable = input.preDoorDemoRouteGraceActive
+      && input.firstDoorClosed
+      && depthEstimate >= 0.38
+      && danger < 0.32
+      && !input.firstDoorUseAttempted;
+    if (preDoorDemoRouteStillViable) {
+      stuck = Math.min(stuck, 0.36);
     }
 
     const firstDoorUseWindow = input.firstDoorClosed

@@ -202,6 +202,395 @@ public sealed class AutoplayPipelineDslTests
     }
 
     [Fact]
+    public void DoomPhilosophicalSensors_ExtractConfiguredPhenomenaAndMeaningVectors()
+    {
+        var frame = new SensorFrame
+        {
+            SensorTensor = AutoplaySensorTensor.FromChannels(
+                ("vision.wall", 0.7f),
+                ("vision.corner", 0.4f),
+                ("vision.open", 0.6f),
+                ("motion.delta", 0.5f),
+                ("motion.stuck", 0.8f),
+                ("semantic.corridor", 0.7f),
+                ("semantic.door", 0.6f),
+                ("vision.enemy", 0.9f),
+                ("system.audio", 0.5f),
+                ("system.health", 0.4f),
+                ("system.enabled", 1.0f),
+                ("system.ctg", 0.75f)),
+            Health = new HealthSignal { Health = 35, Source = "aisthesis.health" }
+        };
+        var phainesis = new DoomPhainesis();
+        var nous = new DoomNous();
+
+        var phainomenon = phainesis.Extract(frame);
+        var packet = nous.Vectorize(phainomenon);
+
+        Assert.True(new[]
+        {
+            "wallFlow",
+            "corridorFlow",
+            "gap",
+            "stuck",
+            "oscillation",
+            "looming",
+            "enemyPresence",
+            "damageLocalization",
+            "projectileFlow",
+            "threatField",
+            "explorationEntropy",
+            "itemBacktrack",
+            "goalDirection",
+            "safeZone",
+            "intentConsistency",
+            "movementStability",
+            "confidenceFusion"
+        }.All(phainomenon.Events.ContainsKey));
+        Assert.True(new[]
+        {
+            "wallFlowVector",
+            "gapVector",
+            "corridorVector",
+            "stuckVector",
+            "loomingVector",
+            "enemyVector",
+            "damageVector",
+            "projectileVector",
+            "threatVector",
+            "explorationVector",
+            "itemVector",
+            "goalVector",
+            "safeZoneVector",
+            "intentVector",
+            "stabilityVector",
+            "confidenceVector"
+        }.All(packet.MeaningVectors.ContainsKey));
+        Assert.True(phainomenon.EventScore("enemyPresence") > 0.8f);
+        Assert.True(packet.MeaningVectors["threatVector"] > 0.8f);
+    }
+
+    [Fact]
+    public void DoomPhilosophicalPipelineFactory_CreatesCompleteHealthVetoPipeline()
+    {
+        var pipeline = DoomPhilosophicalAutoplayPipelineFactory.Create();
+        var frame = new SensorFrame
+        {
+            SensorTensor = AutoplaySensorTensor.FromChannels(
+                ("vision.enemy", 0.8f),
+                ("motion.delta", 0.5f),
+                ("system.enabled", 1.0f)),
+            Health = new HealthSignal { Health = 0, IsLikelyFatal = true }
+        };
+
+        var result = pipeline.Execute(frame);
+
+        Assert.True(result.Vetoed);
+        Assert.Equal("health-death", result.Reason);
+        Assert.False(result.Action.MoveForward);
+        Assert.False(result.Action.Shoot);
+    }
+
+    [Fact]
+    public void DynamicPipelineEvaluator_UpdatesSensorEventVectorAndPriorityCarriers()
+    {
+        var compilation = DynamicPipelineCompiler.Compile(AutoplayPipelineDefinition.Default);
+        var evaluator = new DynamicPipelineEvaluator(compilation.Graph, _ => _ => false);
+        var context = new DynamicPipelineContext
+        {
+            Sensor = new SensorFusion([0.2f, 0.9f, 0.5f, 0.4f, 0.3f, 0.1f], 0.8f, 40, 0.2f, "corridor", false, 0, 32)
+            {
+                SensorTensor = AutoplaySensorTensor.FromChannels(
+                    ("semantic.corridor", 0.2f),
+                    ("vision.open", 0.2f),
+                    ("vision.enemy", 1.0f),
+                    ("system.combat", 1.0f),
+                    ("motion.delta", 0.7f),
+                    ("system.enabled", 1.0f))
+            }
+        };
+
+        var aisthesis = evaluator.RunAisthesis(context);
+        var phainesis = evaluator.RunPhainesis(aisthesis);
+        var meaning = evaluator.RunNous(phainesis);
+        var topos = evaluator.RunTopos(meaning);
+        var kairos = evaluator.RunKairos(topos);
+        var generated = evaluator.RunKinesis(kairos, new ActionCommand(false, false, false, false, 0, false, false));
+
+        Assert.True(aisthesis.SensorReadings["visual"] > 0);
+        Assert.True(phainesis.Events["looming"] > 0);
+        Assert.True(meaning.MeaningVectors["enemyVector"] > 0);
+        Assert.True(topos.ToposVectors["PathosVector"] > 0);
+        Assert.True(kairos.Priorities["pathos"] > 0);
+        Assert.Equal("pathos", kairos.SelectedAxis);
+        Assert.True(generated.MoveBackward || generated.TurnYaw != 0);
+    }
+
+    [Fact]
+    public void DoomRoutePlanner_EvaluatesRouteFlagsOutsideJs()
+    {
+        var planner = new DoomRoutePlanner();
+        var result = planner.Evaluate(new DoomRoutePlannerInput
+        {
+            Context = "open-space",
+            DepthSig = 0.9f,
+            FootObstacleScore = 0.62f,
+            MotionObstacleScore = 0.6f,
+            MotionForwardProgress = 0.05f,
+            SpawnCorridorGapScore = 0.12f,
+            SpawnLandmarkRouteEvidence = 0.24f,
+            SpawnSecretDoorScore = 0.20f,
+            SpawnWestStairScore = 0.10f,
+            BridgeDoorScore = 0.20f,
+            GapVector = 0.44f,
+            UseProbeScore = 0.60f,
+            UseProbeAlignment = 0.80f
+        });
+
+        Assert.True(result.RouteOpenSpaceLowGapScan);
+        Assert.False(result.RouteOpenSpaceLowGapEscape);
+        Assert.True(result.FirstDoorRouteEvidenceReady);
+        Assert.True(result.EastWindowRouteEvidenceReady);
+        Assert.Equal(0.20f, result.FirstDoorRouteEvidence, precision: 2);
+        Assert.Equal("open-space-low-gap-scan", result.CurrentRoute);
+        Assert.Equal(8, result.RecommendedYaw);
+        Assert.True(result.RouteConfidence > 0.23f);
+        Assert.True(result.UseProbeConfidence > 0.65f);
+
+        var alignedButUnseen = planner.Evaluate(new DoomRoutePlannerInput
+        {
+            UseProbeScore = 0.0f,
+            UseProbeAlignment = 0.96f
+        });
+        Assert.Equal(0.0f, alignedButUnseen.UseProbeConfidence, precision: 2);
+    }
+
+    [Fact]
+    public void DoomLandmarkNavigator_SelectsRouteFallbackYawFromRouteEvidence()
+    {
+        var routePlan = new DoomRoutePlanner().Evaluate(new DoomRoutePlannerInput
+        {
+            SpawnCorridorGapScore = 0.34f,
+            BridgeDoorScore = 0.10f
+        });
+        var navigator = new DoomLandmarkNavigator();
+
+        var result = navigator.Evaluate(new DoomLandmarkNavigatorInput
+        {
+            RoutePlan = routePlan,
+            SpawnCorridorGapTurn = "right",
+            SpawnLandmarkRouteTurn = "left",
+            SpawnGapYawDegrees = 14,
+            WallVector = 0.5f
+        });
+
+        Assert.Equal(14, result.SpawnCorridorGapYaw);
+        Assert.Equal(-14, result.LandmarkRouteYaw);
+        Assert.Equal(-14, result.RouteFallbackYaw);
+        Assert.Equal(-6, result.WallAwayYaw);
+        Assert.Equal(-14, result.RecommendedYaw);
+    }
+
+    [Fact]
+    public void DoomRoutePlanner_StrongerLandmarkVectorOverridesRawGapYaw()
+    {
+        var result = new DoomRoutePlanner().Evaluate(new DoomRoutePlannerInput
+        {
+            SpawnCorridorGapScore = 0.37f,
+            SpawnLandmarkRouteEvidence = 0.53f,
+            BridgeDoorScore = 0.10f,
+            GapVector = 0.37f,
+            CorridorVector = -0.53f
+        });
+
+        Assert.True(result.RecommendedYaw < 0);
+        Assert.Equal("first-door-route", result.CurrentRoute);
+        Assert.True(result.RouteConfidence >= 0.50f);
+    }
+
+    [Fact]
+    public void DoomRoutePlanner_DoesNotTreatOpenSpaceMidDepthFootNoiseAsWallContact()
+    {
+        var result = new DoomRoutePlanner().Evaluate(new DoomRoutePlannerInput
+        {
+            Context = "open-space",
+            DepthSig = 0.62f,
+            FootObstacleScore = 0.42f,
+            FootObstacleFlickerScore = 0.05f,
+            FootObstacleBounceFrames = 0,
+            MotionObstacleScore = 0.50f,
+            MotionForwardProgress = 0.36f,
+            SpawnCorridorGapScore = 0.36f,
+            SpawnLandmarkRouteEvidence = 0.32f,
+            SpawnSecretDoorScore = 0.20f,
+            SpawnWestStairScore = 0.10f
+        });
+
+        Assert.False(result.RouteFootObstacle);
+        Assert.False(result.RouteWallObstacle);
+        Assert.Equal("first-door-route", result.CurrentRoute);
+
+        var highTextureResult = new DoomRoutePlanner().Evaluate(new DoomRoutePlannerInput
+        {
+            Context = "open-space",
+            DepthSig = 1.0f,
+            FootObstacleScore = 0.65f,
+            FootObstacleFlickerScore = 0.0f,
+            FootObstacleBounceFrames = 0,
+            MotionObstacleScore = 0.65f,
+            MotionForwardProgress = 0.0f,
+            SpawnCorridorGapScore = 0.24f,
+            SpawnLandmarkRouteEvidence = 0.36f,
+            SpawnSecretDoorScore = 0.07f,
+            SpawnWestStairScore = 0.19f
+        });
+
+        Assert.False(highTextureResult.RouteFootObstacle);
+        Assert.False(highTextureResult.RouteWallObstacle);
+    }
+
+    [Fact]
+    public void PipelineStateDto_FromContext_ExposesCanonicalLayersAndKairosAxis()
+    {
+        var routePlan = new DoomRoutePlannerResult
+        {
+            FirstDoorRouteEvidence = 0.4f,
+            FirstDoorRouteEvidenceReady = true
+        };
+        var context = new DynamicPipelineContext
+        {
+            SensorReadings = new Dictionary<string, float>(StringComparer.Ordinal) { ["visual"] = 0.5f },
+            Events = new Dictionary<string, float>(StringComparer.Ordinal) { ["gap"] = 0.6f },
+            MeaningVectors = new Dictionary<string, float>(StringComparer.Ordinal) { ["gapVector"] = 0.6f },
+            ToposVectors = new Dictionary<string, float>(StringComparer.Ordinal) { ["LogosVector"] = 0.6f },
+            Priorities = new Dictionary<string, float>(StringComparer.Ordinal)
+            {
+                ["logos"] = 0.6f,
+                ["pathos"] = 0.2f,
+                ["ethos"] = 0.5f
+            },
+            SelectedAxis = "logos",
+            ActionRepeatFrames = 20,
+            MoveRepeatFrames = 20,
+            TurnRepeatFrames = 6,
+            RoutePlan = routePlan
+        };
+        var action = new ActionCommand(true, false, false, false, 0, false, false);
+
+        var state = PipelineStateDto.From(context, action);
+
+        Assert.Equal(0.5f, state.Aisthesis.SensorReadings["visual"], precision: 2);
+        Assert.True(state.Aisthesis.RoutePlan.FirstDoorRouteEvidenceReady);
+        Assert.Equal(0.6f, state.Noesis.PhainesisEvents["gap"], precision: 2);
+        Assert.Equal(0.6f, state.Krisis.ToposVectors["LogosVector"], precision: 2);
+        Assert.Equal("logos", state.Krisis.Kairos.SelectedAxis);
+        Assert.True(state.Krisis.Kairos.IsLogosDominant);
+        Assert.True(state.Kinesis.MoveForward);
+        Assert.Equal(20, state.Kinesis.ActionRepeatFrames);
+        Assert.Equal(20, state.Kinesis.MoveRepeatFrames);
+        Assert.Equal(6, state.Kinesis.TurnRepeatFrames);
+    }
+
+    [Fact]
+    public void DynamicPipelineDslCompiler_ResolvesKinesisRepeatCounters()
+    {
+        var predicate = AutoplayPipelineDslCompiler.CompileDynamicPredicate(
+            "actionRepeatFrames >= 20 && moveRepeatFrames >= 12 && turnRepeatFrames >= 6");
+        var aliasPredicate = AutoplayPipelineDslCompiler.CompileDynamicPredicate(
+            "kinesisActionRepeatFrames >= 20 && kinesisMoveRepeatFrames >= 12 && repeatTurnFrames >= 6");
+        var context = new DynamicPipelineContext
+        {
+            ActionRepeatFrames = 20,
+            MoveRepeatFrames = 12,
+            TurnRepeatFrames = 6
+        };
+
+        Assert.True(predicate(context));
+        Assert.True(aliasPredicate(context));
+    }
+
+    [Fact]
+    public void DoomHudDtos_FromPipelineState_ExposeGoalDebugAndAutoplayPackets()
+    {
+        var routePlan = new DoomRoutePlannerResult
+        {
+            RouteWallObstacle = true,
+            FirstDoorRouteEvidence = 0.42f,
+            FirstDoorRouteEvidenceReady = true,
+            RouteConfidence = 0.74f,
+            RecommendedYaw = 9,
+            UseProbeConfidence = 0.68f
+        };
+        var navigator = new DoomLandmarkNavigatorResult
+        {
+            RouteFallbackYaw = 12,
+            SpawnCorridorGapYaw = 12,
+            WallAwayYaw = -6
+        };
+        var context = new DynamicPipelineContext
+        {
+            SensorReadings = new Dictionary<string, float>(StringComparer.Ordinal)
+            {
+                ["visual"] = 0.44f,
+                ["movement"] = 0.18f,
+                ["collision"] = 1,
+                ["spatial"] = 0.42f
+            },
+            Events = new Dictionary<string, float>(StringComparer.Ordinal) { ["gap"] = 0.42f },
+            MeaningVectors = new Dictionary<string, float>(StringComparer.Ordinal) { ["gapVector"] = 0.42f },
+            ToposVectors = new Dictionary<string, float>(StringComparer.Ordinal) { ["LogosVector"] = 0.64f },
+            Priorities = new Dictionary<string, float>(StringComparer.Ordinal)
+            {
+                ["logos"] = 0.64f,
+                ["pathos"] = 0.12f,
+                ["ethos"] = 0.42f
+            },
+            SelectedAxis = "logos",
+            RoutePlan = routePlan
+        };
+        var action = new ActionCommand(true, false, false, false, 1, false, false);
+        var pipelineState = PipelineStateDto.From(context, action);
+
+        var state = DoomAutoplayStateDto.From(
+            "find-corridor-to-first-door",
+            "demo-spawn-map-centerline",
+            routePlan,
+            navigator,
+            pipelineState,
+            action);
+
+        Assert.Equal("FirstDoor", state.GoalState.Telos);
+        Assert.Equal("Logos", state.GoalState.PriorityAxis);
+        Assert.Equal("first-door-route", state.CurrentRoute);
+        Assert.Equal("first-door-route-evidence", state.CurrentLandmark);
+        Assert.Equal(0.74f, state.RouteConfidence, precision: 2);
+        Assert.Equal(9, state.RecommendedYaw);
+        Assert.True(state.DebugOverlay.KairosBlink);
+        Assert.Contains(state.DebugOverlay.Regions, region => region.Kind == "door" && region.Active);
+        Assert.Contains(state.DebugOverlay.Grid, cell => cell.Active);
+        Assert.Equal("right", state.DebugOverlay.UseProbe.Direction);
+        Assert.Equal(0.68f, state.DebugOverlay.UseProbe.Confidence, precision: 2);
+        Assert.Equal("forward", state.SuggestedAction.Move);
+        Assert.False(state.PipelineState.Kinesis.Zoe.Vetoed);
+    }
+
+    [Fact]
+    public void DoomKairos_PrefersLogosWhenEthosOnlySlightlyHigher()
+    {
+        var kairos = new DoomKairos();
+
+        var result = kairos.Prioritize(new ToposDecisionVector
+        {
+            LogosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["route"] = 0.52f },
+            EthosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["objective"] = 0.57f },
+            PathosVector = new Dictionary<string, float>(StringComparer.Ordinal) { ["danger"] = 0.10f }
+        });
+
+        Assert.Equal("logos", result.SelectedAxis);
+        Assert.Equal(0.52f, result.LogosPriority, precision: 2);
+    }
+
+    [Fact]
     public void DynamicPipelineCompiler_BuildsCanonicalFourLayerGraphFromProfileDsl()
     {
         var result = DynamicPipelineCompiler.Compile(new AutoplayPipelineDefinition
@@ -289,6 +678,8 @@ public sealed class AutoplayPipelineDslTests
         var philosophicalPackets = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalPipelinePackets.cs"));
         var philosophicalInterfaces = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalPipelineInterfaces.cs"));
         var philosophicalPipeline = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PhilosophicalAutoplayPipeline.cs"));
+        var routePlanner = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "DoomRoutePlanner.cs"));
+        var pipelineState = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "PipelineStateDto.cs"));
         var legacyDetAdapter = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "LegacyDetAdapter.cs"));
         var definitions = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineDsl.cs"));
         var stageDefinition = File.ReadAllText(Path.Combine(root, "src", "DoomProvider", "Autoplay", "AutoplayPipelineStageDefinition.cs"));
@@ -378,6 +769,10 @@ public sealed class AutoplayPipelineDslTests
         Assert.DoesNotContain("public sealed class PhilosophicalAutoplayPipeline", philosophicalInterfaces, StringComparison.Ordinal);
         Assert.Contains("public sealed class PhilosophicalAutoplayPipeline", philosophicalPipeline, StringComparison.Ordinal);
         Assert.Contains("zoe.Audit(action, frame.Health)", philosophicalPipeline, StringComparison.Ordinal);
+        Assert.Contains("public sealed class DoomRoutePlanner", routePlanner, StringComparison.Ordinal);
+        Assert.Contains("public sealed class DoomLandmarkNavigator", routePlanner, StringComparison.Ordinal);
+        Assert.Contains("public sealed record PipelineStateDto", pipelineState, StringComparison.Ordinal);
+        Assert.Contains("public sealed record PriorityAxisDto", pipelineState, StringComparison.Ordinal);
         Assert.Contains("public interface ILegacyDetAdapter", legacyDetAdapter, StringComparison.Ordinal);
         Assert.Contains("Obsolete", legacyDetAdapter, StringComparison.Ordinal);
         Assert.Contains("public sealed partial record AutoplayPipelineDefinition", definitions, StringComparison.Ordinal);

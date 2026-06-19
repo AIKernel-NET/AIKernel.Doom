@@ -135,6 +135,11 @@
         && logos + ethos >= pathos + 0.16
         && depthEstimate >= 0.34
         && routeEvidence >= 0.48);
+    const routeAdvanceProtected = shouldAdvanceFirstDoor
+      || (firstDoorContext
+        && routeEvidence >= 0.34
+        && danger < 0.32
+        && depthEstimate > 0.36);
 
     return {
       dominantAxis,
@@ -148,6 +153,7 @@
       firstDoorRouteEvidence: routeEvidence,
       contactUseReady,
       shouldAdvanceFirstDoor,
+      routeAdvanceProtected,
       depthEstimate,
       wallHugSide: firstDoor.wallHugSide === "left" || firstDoor.wallHugSide === "right" ? firstDoor.wallHugSide : "none",
       danger,

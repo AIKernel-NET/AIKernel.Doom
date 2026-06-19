@@ -4,7 +4,7 @@ public sealed record AutoplayPipelineDecision(
     string StrategyName,
     string StageId,
     string Objective,
-    int Priority,
+    float Priority,
     float Threshold,
     float EvidenceScore,
     IReadOnlyDictionary<string, float> SemanticScores,
@@ -16,7 +16,7 @@ public sealed record AutoplayPipelineDecision(
 public sealed record AutoplayPipelineStageEvaluation(
     string StageId,
     string Objective,
-    int Priority,
+    float Priority,
     float Threshold,
     float EvidenceScore,
     bool ConditionMatched,

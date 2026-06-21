@@ -2128,8 +2128,8 @@
       const gpuHud = this.resolveGpuHudOverlay(state);
       const probeTurn = this.resolveGpuHudProbeTurn();
       const compassHud = this.resolveGpuHudCompassState(state);
-      const radarHud = this.resolveEgoRadarHudState(state, compassHud);
       const enemyCircle = this.resolveGpuHudEnemyCircle(state);
+      const radarHud = this.resolveEgoRadarHudState(state, compassHud, enemyCircle);
       if (typeof provider.setHudOverlayEnabled === "function") {
         provider.setHudOverlayEnabled(Boolean(this.autoplayEnabled && this.visualSensorEnabled && state));
       }
@@ -2186,7 +2186,13 @@
         radarSuppressedAlpha: radarHud.suppressedAlpha,
         radarLostAlpha: radarHud.lostAlpha,
         radarHoldAlpha: radarHud.holdAlpha,
-        radarFlickerPhase: radarHud.flickerPhase
+        radarFlickerPhase: radarHud.flickerPhase,
+        enemyVisualYaw: radarHud.enemyVisualYaw,
+        enemyVisualAlpha: radarHud.enemyVisualAlpha,
+        enemyAudioYaw: radarHud.enemyAudioYaw,
+        enemyAudioAlpha: radarHud.enemyAudioAlpha,
+        enemySignalSuppressed: radarHud.enemySignalSuppressed,
+        enemySignalLost: radarHud.enemySignalLost
       });
 
       const gpuAisthesisState = this.createGpuAisthesisState(state, frame);
@@ -2242,7 +2248,83 @@
       };
     }
 
-    resolveEgoRadarHudState(state, compassHud = null) {
+    resolveRadarEnemyDirectionState(state, enemyCircle = null) {
+      const autoplayState = this.autoplayAutoplayState
+        || state?.autoplayState
+        || state?.AutoplayState
+        || {};
+      const circle = enemyCircle && typeof enemyCircle === "object" ? enemyCircle : null;
+      const circleType = String(circle?.type || circle?.Type || "").toLowerCase();
+      const circleConfidence = this.clampHudUnit(Number(circle?.confidence ?? circle?.Confidence ?? 0));
+      const circleYaw = Number(circle?.yaw ?? circle?.Yaw ?? 0);
+      const audio = autoplayState.auditorySnapshot
+        || autoplayState.AuditorySnapshot
+        || this.autoplayAuditorySnapshot
+        || state?.auditorySnapshot
+        || state?.AuditorySnapshot
+        || state?.audio
+        || state?.Audio
+        || {};
+      const left = Number(audio.leftEnergy ?? audio.LeftEnergy ?? 0);
+      const right = Number(audio.rightEnergy ?? audio.RightEnergy ?? 0);
+      const total = Math.max(0, left) + Math.max(0, right);
+      const balance = Number.isFinite(Number(audio.balance ?? audio.Balance))
+        ? Math.max(-1, Math.min(1, Number(audio.balance ?? audio.Balance)))
+        : (total > 0 ? Math.max(-1, Math.min(1, (right - left) / total)) : 0);
+      const inferredDirection = balance > 0.12 ? "right" : (balance < -0.12 ? "left" : "front");
+      const audioDirection = String(
+        autoplayState.audioEnemyDirection
+        ?? autoplayState.AudioEnemyDirection
+        ?? state?.audioEnemyDirection
+        ?? state?.AudioEnemyDirection
+        ?? this.autoplayAudioEnemyDirection
+        ?? inferredDirection
+      ).toLowerCase();
+      const direction = audioDirection === "left" || audioDirection === "right" || audioDirection === "front"
+        ? audioDirection
+        : inferredDirection;
+      const audioConfidence = this.clampHudUnit(Number(
+        autoplayState.audioEnemyConfidence
+        ?? autoplayState.AudioEnemyConfidence
+        ?? state?.audioEnemyConfidence
+        ?? state?.AudioEnemyConfidence
+        ?? this.autoplayAudioEnemyConfidence
+        ?? 0));
+      const energy = Math.max(
+        left,
+        right,
+        Number(audio.lowEnergy ?? audio.LowEnergy ?? 0),
+        Number(audio.midEnergy ?? audio.MidEnergy ?? 0),
+        Number(audio.highEnergy ?? audio.HighEnergy ?? 0));
+      const eventDetected = Boolean(audio.eventDetected ?? audio.EventDetected ?? this.autoplaySoundCueActive);
+      const audioAlpha = Math.max(
+        audioConfidence,
+        circleType === "audio" || circleType === "av" ? circleConfidence : 0,
+        eventDetected && energy >= 0.025 ? Math.min(0.72, energy * 0.75 + Math.abs(balance) * 0.18 + 0.18) : 0);
+      const visualAlpha = circleType === "visual" || circleType === "av"
+        ? circleConfidence
+        : this.clampHudUnit(Number(autoplayState.visualEnemyConfidence ?? autoplayState.VisualEnemyConfidence ?? state?.visualEnemyConfidence ?? state?.VisualEnemyConfidence ?? 0));
+      const visualYaw = Number.isFinite(circleYaw)
+        ? Math.max(-45, Math.min(45, circleYaw))
+        : Math.max(-45, Math.min(45, Number(autoplayState.visualEnemyYaw ?? autoplayState.VisualEnemyYaw ?? state?.visualEnemyYaw ?? 0)));
+      const audioYaw = direction === "right" ? 24 : (direction === "left" ? -24 : 0);
+      const suppressed = Boolean(
+        autoplayState.visualEnemySuppressed
+        || autoplayState.VisualEnemySuppressed
+        || state?.visualEnemySuppressed
+        || state?.VisualEnemySuppressed);
+
+      return {
+        visualYaw,
+        visualAlpha: this.clampHudUnit(visualAlpha),
+        audioYaw,
+        audioAlpha: this.clampHudUnit(audioAlpha),
+        signalSuppressed: suppressed ? 1 : 0,
+        signalLost: visualAlpha < 0.08 && audioAlpha < 0.08 && eventDetected ? 1 : 0
+      };
+    }
+
+    resolveEgoRadarHudState(state, compassHud = null, enemyCircle = null) {
       const now = Number(self.performance?.now?.() ?? Date.now());
       const previous = this.gpuRadarHudDisplayState || {};
       const compass = state?.compassSensor || state?.CompassSensor || this.autoplayCompassSensor || {};
@@ -2312,6 +2394,7 @@
       const flickerPhase = lowConfidence
         ? 0.30 + (0.70 * (0.5 + 0.5 * Math.sin(now / 1000 * 17.0)))
         : 1;
+      const enemy = this.resolveRadarEnemyDirectionState(state, enemyCircle);
 
       this.gpuRadarHudDisplayState = {
         northAngleDeg: Math.round(northAngleDeg * 100) / 100,
@@ -2324,6 +2407,12 @@
         lostAlpha: modeTarget === 0 ? 1 : 0,
         holdAlpha: held ? 1 : 0,
         flickerPhase,
+        enemyVisualYaw: enemy.visualYaw,
+        enemyVisualAlpha: enemy.visualAlpha,
+        enemyAudioYaw: enemy.audioYaw,
+        enemyAudioAlpha: enemy.audioAlpha,
+        enemySignalSuppressed: enemy.signalSuppressed,
+        enemySignalLost: enemy.signalLost,
         rawHeading,
         rawUsable,
         suppressed,
@@ -2432,16 +2521,79 @@
         || state?.enemyCircle
         || state?.EnemyCircle
         || null;
-      if (!circle || typeof circle !== "object") {
+      if (circle && typeof circle === "object") {
+        const confidence = this.clampHudUnit(Number(circle.confidence ?? circle.Confidence ?? 0));
+        if (Boolean(circle.active ?? circle.Active) && confidence >= 0.24) {
+          return circle;
+        }
+      }
+
+      const autoplayState = this.autoplayAutoplayState
+        || state?.autoplayState
+        || state?.AutoplayState
+        || {};
+      const audio = autoplayState.auditorySnapshot
+        || autoplayState.AuditorySnapshot
+        || this.autoplayAuditorySnapshot
+        || state?.auditorySnapshot
+        || state?.AuditorySnapshot
+        || state?.audio
+        || state?.Audio
+        || {};
+      const left = Number(audio.leftEnergy ?? audio.LeftEnergy ?? 0);
+      const right = Number(audio.rightEnergy ?? audio.RightEnergy ?? 0);
+      const total = Math.max(0, left) + Math.max(0, right);
+      const balance = Number.isFinite(Number(audio.balance ?? audio.Balance))
+        ? Math.max(-1, Math.min(1, Number(audio.balance ?? audio.Balance)))
+        : (total > 0 ? Math.max(-1, Math.min(1, (right - left) / total)) : 0);
+      const inferredDirection = balance > 0.12 ? "right" : (balance < -0.12 ? "left" : "front");
+      const audioDirection = String(
+        autoplayState.audioEnemyDirection
+        ?? autoplayState.AudioEnemyDirection
+        ?? state?.audioEnemyDirection
+        ?? state?.AudioEnemyDirection
+        ?? this.autoplayAudioEnemyDirection
+        ?? inferredDirection
+      ).toLowerCase();
+      const direction = audioDirection === "left" || audioDirection === "right" || audioDirection === "front"
+        ? audioDirection
+        : inferredDirection;
+      const audioConfidence = this.clampHudUnit(Number(
+        autoplayState.audioEnemyConfidence
+        ?? autoplayState.AudioEnemyConfidence
+        ?? state?.audioEnemyConfidence
+        ?? state?.AudioEnemyConfidence
+        ?? this.autoplayAudioEnemyConfidence
+        ?? 0));
+      const energy = Math.max(
+        left,
+        right,
+        Number(audio.lowEnergy ?? audio.LowEnergy ?? 0),
+        Number(audio.midEnergy ?? audio.MidEnergy ?? 0),
+        Number(audio.highEnergy ?? audio.HighEnergy ?? 0));
+      const eventDetected = Boolean(audio.eventDetected ?? audio.EventDetected ?? this.autoplaySoundCueActive);
+      const confidence = Math.max(
+        audioConfidence,
+        eventDetected && energy >= 0.025 ? Math.min(0.72, energy * 0.75 + Math.abs(balance) * 0.18 + 0.18) : 0);
+      if (confidence < 0.22) {
         return null;
       }
 
-      const confidence = this.clampHudUnit(Number(circle.confidence ?? circle.Confidence ?? 0));
-      if (!Boolean(circle.active ?? circle.Active) || confidence < 0.24) {
-        return null;
-      }
-
-      return circle;
+      const yaw = direction === "right" ? 18 : (direction === "left" ? -18 : 0);
+      return {
+        active: true,
+        type: "audio",
+        source: "audio-balance-radar",
+        yaw,
+        direction,
+        confidence: this.clampHudUnit(confidence),
+        visualConfidence: 0,
+        audioConfidence: this.clampHudUnit(confidence),
+        left: direction === "right" ? 63 : (direction === "left" ? 21 : 42),
+        top: 34,
+        width: 21,
+        height: 23
+      };
     }
 
     createGpuAisthesisState(state, frame) {

@@ -511,12 +511,12 @@ struct HudInfo {
   radarLostAlpha: f32,
   radarHoldAlpha: f32,
   radarFlickerPhase: f32,
-  radarPad0: f32,
-  radarPad1: f32,
-  radarPad2: f32,
-  radarPad3: f32,
-  radarPad4: f32,
-  radarPad5: f32,
+  enemyVisualYaw: f32,
+  enemyVisualAlpha: f32,
+  enemyAudioYaw: f32,
+  enemyAudioAlpha: f32,
+  enemySignalSuppressed: f32,
+  enemySignalLost: f32,
   radarPad6: f32,
   radarPad7: f32,
 };
@@ -701,12 +701,12 @@ struct HudInfo {
   radarLostAlpha: f32,
   radarHoldAlpha: f32,
   radarFlickerPhase: f32,
-  radarPad0: f32,
-  radarPad1: f32,
-  radarPad2: f32,
-  radarPad3: f32,
-  radarPad4: f32,
-  radarPad5: f32,
+  enemyVisualYaw: f32,
+  enemyVisualAlpha: f32,
+  enemyAudioYaw: f32,
+  enemyAudioAlpha: f32,
+  enemySignalSuppressed: f32,
+  enemySignalLost: f32,
   radarPad6: f32,
   radarPad7: f32,
 };
@@ -806,6 +806,13 @@ fn segmentMask(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>, width: f32
   return 1.0 - smoothstep(width, width * 1.8, dist);
 }
 
+fn sdLine(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>) -> f32 {
+  let pa = point - start;
+  let ba = finish - start;
+  let h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+
 fn radarMask(uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> f32 {
   let delta = vec2<f32>((uv.x - center.x) * aspect, uv.y - center.y);
   return 1.0 - smoothstep(0.0035, 0.0075, abs(length(delta) - radius));
@@ -839,12 +846,51 @@ fn addRadarNorthMarker(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radiu
   let left = base - tangent * 0.010;
   let right = base + tangent * 0.010;
   let edge = max(
-    segmentMask(uv, tip, left, 0.0024),
-    max(segmentMask(uv, tip, right, 0.0024), segmentMask(uv, left, right, 0.0024))
+    segmentMask(uv, tip, left, 0.0030),
+    max(segmentMask(uv, tip, right, 0.0030), segmentMask(uv, left, right, 0.0030))
   );
-  let glow = radarDotMask(uv, tip, 0.010, aspect);
-  let alpha = clamp((0.22 + confidence * 0.72) * alphaScale, 0.0, 1.0);
-  return alphaComposite(alphaComposite(color, vec4<f32>(theme, glow * alpha * 0.18)), vec4<f32>(theme, edge * alpha));
+  let glow = radarDotMask(uv, tip, 0.012, aspect);
+  let alpha = clamp((0.30 + confidence * 0.82) * alphaScale, 0.0, 1.0);
+  return alphaComposite(alphaComposite(color, vec4<f32>(theme, glow * alpha * 0.30)), vec4<f32>(theme, edge * alpha));
+}
+
+fn addRadarDirectionDot(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32, yawDegrees: f32, alpha: f32, markerColor: vec3<f32>, distanceScale: f32, ringRadius: f32) -> vec4<f32> {
+  let signal = clamp(alpha, 0.0, 1.0);
+  if (signal <= 0.01) {
+    return color;
+  }
+
+  let angle = clamp(yawDegrees, -90.0, 90.0) * 0.01745329252;
+  let direction = vec2<f32>(sin(angle) / aspect, -cos(angle));
+  let distance = radius * distanceScale;
+  let marker = center + direction * distance;
+  let radial = segmentMask(uv, center, marker, 0.0022);
+  let ring = radarCircleMask(uv, marker, ringRadius, aspect, 0.0032);
+  let dot = radarDotMask(uv, marker, ringRadius * 0.54, aspect);
+  var next = alphaComposite(color, vec4<f32>(markerColor, radial * 0.18 * signal));
+  next = alphaComposite(next, vec4<f32>(markerColor, ring * (0.42 + signal * 0.42)));
+  return alphaComposite(next, vec4<f32>(markerColor, dot * (0.38 + signal * 0.50)));
+}
+
+fn addRadarEnemyDirectionMarkers(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> vec4<f32> {
+  let visualAlpha = max(clamp(hud.enemyVisualAlpha, 0.0, 1.0), clamp(hud.enemyCircleVisual, 0.0, 1.0) * clamp(hud.enemyConfidence, 0.0, 1.0));
+  let audioRaw = max(clamp(hud.enemyAudioAlpha, 0.0, 1.0), clamp(hud.enemyCircleAudio, 0.0, 1.0) * clamp(hud.enemyConfidence, 0.0, 1.0));
+  let suppressPulse = mix(1.0, 0.42 + 0.58 * clamp(hud.radarFlickerPhase, 0.0, 1.0), clamp(hud.enemySignalSuppressed, 0.0, 1.0));
+  let audioAlpha = audioRaw * suppressPulse;
+  let lost = clamp(hud.enemySignalLost, 0.0, 1.0);
+  var next = color;
+  let audioAngle = clamp(hud.enemyAudioYaw, -90.0, 90.0) * 0.01745329252;
+  let visualAngle = clamp(hud.enemyVisualYaw, -90.0, 90.0) * 0.01745329252;
+  let audioPos = center + vec2<f32>(sin(audioAngle) / aspect, -cos(audioAngle)) * radius * 0.90;
+  let visualPos = center + vec2<f32>(sin(visualAngle) / aspect, -cos(visualAngle)) * radius * 0.66;
+  let fused = min(visualAlpha, audioAlpha);
+  let fusionDist = sdLine(uv, audioPos, visualPos);
+  let fusionLink = smoothstep(0.015, 0.002, fusionDist) * fused;
+  next = alphaComposite(next, vec4<f32>(0.24, 1.0, 0.54, fusionLink * 0.58));
+  next = addRadarDirectionDot(next, uv, center, radius, aspect, hud.enemyAudioYaw, audioAlpha, mix(vec3<f32>(1.0, 0.62, 0.12), vec3<f32>(0.56, 0.56, 0.58), lost), 0.90, 0.020);
+  next = addRadarDirectionDot(next, uv, center, radius, aspect, hud.enemyVisualYaw, visualAlpha, vec3<f32>(1.0, 0.16, 0.30), 0.66, 0.017);
+  next = addRadarDirectionDot(next, uv, center, radius, aspect, (hud.enemyVisualYaw + hud.enemyAudioYaw) * 0.5, fused, vec3<f32>(1.0, 0.36, 0.92), 0.78, 0.023);
+  return next;
 }
 
 fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
@@ -855,20 +901,20 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let usable = clamp(hud.compassUsable, 0.0, 1.0);
   let confidence = clamp(hud.compassConfidence, 0.0, 1.0);
   let mode = clamp(hud.radarMode, 0.0, 2.0);
-  let normalColor = vec3<f32>(0.18, 0.90, 1.0);
-  let suppressedColor = vec3<f32>(1.0, 0.65, 0.10);
-  let lostColor = vec3<f32>(1.0, 0.15, 0.16);
+  let normalColor = vec3<f32>(0.12, 0.95, 1.0);
+  let suppressedColor = vec3<f32>(1.0, 0.68, 0.08);
+  let lostColor = vec3<f32>(1.0, 0.10, 0.12);
   let activeColor = mix(suppressedColor, normalColor, step(1.5, mode));
   let theme = mix(activeColor, lostColor, 1.0 - step(0.5, mode));
   let flicker = mix(clamp(hud.radarFlickerPhase, 0.0, 1.0), 1.0, step(0.20, confidence));
   let lostStatic = (fract(sin(dot(uv + vec2<f32>(hud.timeSeconds * 0.021, hud.timeSeconds * 0.037), vec2<f32>(12.9898, 78.233))) * 43758.5453) - 0.5) * hud.radarLostAlpha;
   let signalAlpha = clamp(max(usable, hud.radarHoldAlpha * 0.36) * (0.62 + confidence * 0.38), 0.12, 1.0);
-  var next = alphaComposite(color, vec4<f32>(0.002, 0.010, 0.016, ring * 0.10));
-  next = alphaComposite(next, vec4<f32>(theme + vec3<f32>(lostStatic * 0.08), ring * (0.34 + confidence * 0.34) * max(signalAlpha, 0.25)));
+  var next = alphaComposite(color, vec4<f32>(0.002, 0.010, 0.016, ring * 0.14));
+  next = alphaComposite(next, vec4<f32>(theme + vec3<f32>(lostStatic * 0.08), ring * (0.46 + confidence * 0.40) * max(signalAlpha, 0.32)));
 
   let innerA = radarCircleMask(uv, center, radius * 0.34, aspect, 0.0026);
   let innerB = radarCircleMask(uv, center, radius * 0.66, aspect, 0.0024);
-  next = alphaComposite(next, vec4<f32>(theme, (innerA * 0.22 + innerB * 0.18) * signalAlpha));
+  next = alphaComposite(next, vec4<f32>(theme, (innerA * 0.30 + innerB * 0.26) * signalAlpha));
 
   let front = center + vec2<f32>(0.0, -radius);
   let rear = center + vec2<f32>(0.0, radius);
@@ -876,7 +922,7 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let right = center + vec2<f32>(radius / aspect, 0.0);
   let vertical = segmentMask(uv, front, rear, 0.0012);
   let horizontal = segmentMask(uv, left, right, 0.0012);
-  next = alphaComposite(next, vec4<f32>(theme, max(vertical, horizontal) * 0.22 * signalAlpha));
+  next = alphaComposite(next, vec4<f32>(theme, max(vertical, horizontal) * 0.30 * signalAlpha));
 
   let stick = vec2<f32>(
     clamp(hud.compassYaw, -1.0, 1.0) / aspect,
@@ -887,13 +933,14 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let stickLine = segmentMask(uv, center, stickEnd, 0.0048);
   let stickDot = radarDotMask(uv, stickEnd, 0.014, aspect);
   let stickColor = mix(theme, vec3<f32>(1.0, 0.90, 0.32), smoothstep(0.54, 1.0, stickPower));
-  next = alphaComposite(next, vec4<f32>(stickColor, stickLine * (0.22 + stickPower * 0.52)));
-  next = alphaComposite(next, vec4<f32>(stickColor, stickDot * (0.40 + stickPower * 0.42)));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickLine * (0.30 + stickPower * 0.62)));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickDot * (0.50 + stickPower * 0.48)));
 
+  next = addRadarEnemyDirectionMarkers(next, uv, center, radius, aspect);
   next = addRadarNorthMarker(next, uv, center, radius * 1.02, aspect, theme, confidence, flicker);
 
   let centerDot = radarDotMask(uv, center, 0.0065, aspect);
-  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.62));
+  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.72));
 }
 
 @compute @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE})
@@ -988,6 +1035,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         radarLostAlpha: 0,
         radarHoldAlpha: 0,
         radarFlickerPhase: 1,
+        enemyVisualYaw: 0,
+        enemyVisualAlpha: 0,
+        enemyAudioYaw: 0,
+        enemyAudioAlpha: 0,
+        enemySignalSuppressed: 0,
+        enemySignalLost: 0,
         rectangles: [],
         rectangleValues: [],
         rectangleSource: "none",
@@ -1925,7 +1978,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       renderer.hudInfoUpload[21] = clamp01(Number(radar.lostAlpha ?? radar.LostAlpha ?? state.radarLostAlpha ?? 0));
       renderer.hudInfoUpload[22] = clamp01(Number(radar.holdAlpha ?? radar.HoldAlpha ?? state.radarHoldAlpha ?? 0));
       renderer.hudInfoUpload[23] = clamp01(Number(radar.flickerPhase ?? radar.FlickerPhase ?? state.radarFlickerPhase ?? 1));
-      for (let index = 24; index < HUD_UNIFORM_FLOATS; index += 1) {
+      renderer.hudInfoUpload[24] = Math.max(-90, Math.min(90, Number(radar.enemyVisualYaw ?? radar.EnemyVisualYaw ?? state.enemyVisualYaw ?? 0)));
+      renderer.hudInfoUpload[25] = clamp01(Number(radar.enemyVisualAlpha ?? radar.EnemyVisualAlpha ?? state.enemyVisualAlpha ?? 0));
+      renderer.hudInfoUpload[26] = Math.max(-90, Math.min(90, Number(radar.enemyAudioYaw ?? radar.EnemyAudioYaw ?? state.enemyAudioYaw ?? 0)));
+      renderer.hudInfoUpload[27] = clamp01(Number(radar.enemyAudioAlpha ?? radar.EnemyAudioAlpha ?? state.enemyAudioAlpha ?? 0));
+      renderer.hudInfoUpload[28] = clamp01(Number(radar.enemySignalSuppressed ?? radar.EnemySignalSuppressed ?? state.enemySignalSuppressed ?? 0));
+      renderer.hudInfoUpload[29] = clamp01(Number(radar.enemySignalLost ?? radar.EnemySignalLost ?? state.enemySignalLost ?? 0));
+      for (let index = 30; index < HUD_UNIFORM_FLOATS; index += 1) {
         renderer.hudInfoUpload[index] = 0;
       }
       renderer.hudCellsUpload.fill(0);

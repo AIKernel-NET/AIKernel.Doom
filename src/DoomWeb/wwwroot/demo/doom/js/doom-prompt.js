@@ -1059,22 +1059,22 @@
           display: block;
           width: calc(var(--label-width, 23) * 1%);
           max-width: calc(var(--label-width, 23) * 1%);
-          font: 800 11.2px/1.12 ui-monospace, Consolas, monospace;
+          font: 900 11.6px/1.12 ui-monospace, Consolas, monospace;
           letter-spacing: 0;
           text-transform: uppercase;
           white-space: pre-line;
           overflow: visible;
           text-overflow: clip;
           z-index: 56;
-          color: rgba(180,238,255,.98);
-          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(64,210,255,.56);
+          color: rgba(196,244,255,1);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 12px rgba(64,210,255,.68);
         }
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-radar-label {
           display: block;
           width: calc(var(--label-width, 8) * 1%);
           max-width: calc(var(--label-width, 8) * 1%);
-          color: rgba(142,244,255,.86);
-          font: 800 7.5px/1 ui-monospace, Consolas, monospace;
+          color: rgba(166,248,255,.96);
+          font: 900 8px/1 ui-monospace, Consolas, monospace;
           letter-spacing: 0;
           text-transform: uppercase;
           text-align: center;
@@ -1084,7 +1084,7 @@
           background: transparent !important;
           border: 0 !important;
           box-shadow: none !important;
-          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 7px rgba(0,230,255,.52);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 9px rgba(0,230,255,.68);
           z-index: 55;
         }
         #doom-debug-overlay .is-priority-axis {

@@ -261,6 +261,7 @@
       this.healthSensorEnabled = true;
       this.sensorInputs = this.createSensorInputMap();
       this.compassHeading = 0;
+      this.gpuRadarHudDisplayState = null;
       this.previousVisionMotionGrid = null;
       this.previousVisionMotionBaseGrid = null;
       this.previousWallPatternMotionGrid = null;
@@ -427,6 +428,7 @@
           motorSensor: this.autoplayMotorSensor,
           movementSensor: this.autoplayMovementSensor,
           compassSensor: this.autoplayCompassSensor,
+          radarHud: this.gpuRadarHudDisplayState,
           spatialSensor: this.autoplaySpatialSensor,
           ctgCarrier: this.autoplayCtgCarrier,
           ctgObservedScores: this.autoplayCtgObservedScores,
@@ -2126,6 +2128,7 @@
       const gpuHud = this.resolveGpuHudOverlay(state);
       const probeTurn = this.resolveGpuHudProbeTurn();
       const compassHud = this.resolveGpuHudCompassState(state);
+      const radarHud = this.resolveEgoRadarHudState(state, compassHud);
       const enemyCircle = this.resolveGpuHudEnemyCircle(state);
       if (typeof provider.setHudOverlayEnabled === "function") {
         provider.setHudOverlayEnabled(Boolean(this.autoplayEnabled && this.visualSensorEnabled && state));
@@ -2168,10 +2171,22 @@
         useProbeTurn: probeTurn,
         enemyConfidence: this.clampHudUnit(Number(enemyCircle?.confidence ?? enemyCircle?.Confidence ?? 0)),
         depthEstimate: Math.max(0, Math.min(1.5, Number(frame.depthEstimate ?? this.autoplayDepthEstimate ?? 1))),
-        compassHeading: compassHud.heading,
-        compassUsable: compassHud.usable,
-        compassYaw: compassHud.yaw,
-        compassConfidence: compassHud.confidence
+        radarHud,
+        egoRadar: radarHud,
+        compassHeading: radarHud.northAngleDeg,
+        compassUsable: radarHud.usableAlpha,
+        compassYaw: radarHud.kinesisTurn,
+        compassConfidence: radarHud.confidence,
+        radarNorthAngleDeg: radarHud.northAngleDeg,
+        radarUsableAlpha: radarHud.usableAlpha,
+        radarKinesisTurn: radarHud.kinesisTurn,
+        radarConfidence: radarHud.confidence,
+        radarKinesisForward: radarHud.kinesisForward,
+        radarMode: radarHud.mode,
+        radarSuppressedAlpha: radarHud.suppressedAlpha,
+        radarLostAlpha: radarHud.lostAlpha,
+        radarHoldAlpha: radarHud.holdAlpha,
+        radarFlickerPhase: radarHud.flickerPhase
       });
 
       const gpuAisthesisState = this.createGpuAisthesisState(state, frame);
@@ -2225,6 +2240,98 @@
         yaw: Number.isFinite(yaw) ? Math.max(-90, Math.min(90, yaw)) : 0,
         confidence
       };
+    }
+
+    resolveEgoRadarHudState(state, compassHud = null) {
+      const now = Number(self.performance?.now?.() ?? Date.now());
+      const previous = this.gpuRadarHudDisplayState || {};
+      const compass = state?.compassSensor || state?.CompassSensor || this.autoplayCompassSensor || {};
+      const rawHeadingNumber = Number(compassHud?.heading ?? compass.heading ?? compass.Heading ?? this.compassHeading ?? 0);
+      const rawHeading = Number.isFinite(rawHeadingNumber)
+        ? this.normalizeCompassHeading(rawHeadingNumber)
+        : null;
+      const rawConfidence = this.clampHudUnit(Number(compassHud?.confidence ?? compass.confidence ?? compass.Confidence ?? 0));
+      const rawUsable = rawHeading !== null
+        && Boolean(compassHud?.usable ?? true)
+        && compass.headingUsable !== false
+        && compass.HeadingUsable !== false
+        && !compass.headingUncertain
+        && !compass.HeadingUncertain
+        && rawConfidence >= 0.02;
+      const suppressed = Boolean(
+        compass.contextResetActive
+        || compass.ContextResetActive
+        || compass.combatSurveyActive
+        || compass.CombatSurveyActive
+        || compass.wallFollowActive
+        || compass.WallFollowActive
+        || String(compass.headingReliability || compass.HeadingReliability || "").match(/wall|corridor|survey|reset|suppressed/i)
+      );
+      const action = this.autoplayLastAction || state?.action || state?.Action || {};
+      const move = String(action.move || action.Move || "").toLowerCase();
+      const turn = String(action.turn || action.Turn || "").toLowerCase();
+      const forwardTarget = move === "forward" || action.moveForward || action.forward || action.Forward
+        ? 1
+        : (move === "back" || move === "backward" || action.moveBack || action.back || action.Back ? -1 : 0);
+      const numericTurn = Number(action.turnYaw ?? action.yaw ?? action.Yaw ?? 0);
+      const turnFromYaw = Number.isFinite(numericTurn) ? Math.max(-1, Math.min(1, numericTurn / 45)) : 0;
+      const turnTarget = turn === "right" || action.turnRight || action.right || action.Right
+        ? 1
+        : (turn === "left" || action.turnLeft || action.left || action.Left ? -1 : turnFromYaw);
+      const previousHeading = Number.isFinite(previous.northAngleDeg)
+        ? this.normalizeCompassHeading(previous.northAngleDeg)
+        : rawHeading;
+      const dt = previous.updatedAt > 0
+        ? Math.max(16, Math.min(180, now - previous.updatedAt))
+        : 33;
+      const riseAlpha = 1 - Math.pow(0.5, dt / 100);
+      const decayAlpha = 1 - Math.pow(0.5, dt / 660);
+      const actionAlpha = 1 - Math.pow(0.5, dt / 90);
+      const holdUntil = rawUsable ? now + 1100 : Number(previous.holdUntil || 0);
+      const held = !rawUsable && now < holdUntil;
+      const headingTarget = rawHeading !== null ? rawHeading : previousHeading;
+      const northAngleDeg = headingTarget === null
+        ? 0
+        : (previousHeading === null
+          ? headingTarget
+          : this.normalizeCompassHeading(previousHeading + this.signedCompassDelta(previousHeading, headingTarget) * (rawUsable ? riseAlpha : Math.max(decayAlpha * 0.72, 0.035))));
+      const confidenceTarget = rawUsable
+        ? Math.max(rawConfidence, 0.20)
+        : (held ? Math.max(rawConfidence * 0.7, Number(previous.confidence || 0) * 0.62, 0.10) : 0);
+      const usableTarget = rawUsable
+        ? 1
+        : (held ? Math.max(Number(previous.usableAlpha || 0) * 0.70, 0.18) : 0);
+      const modeTarget = rawUsable && !suppressed
+        ? 2
+        : (rawUsable || held || suppressed ? 1 : 0);
+      const confidence = this.smoothHudScalar(Number(previous.confidence || 0), confidenceTarget, rawUsable ? riseAlpha : decayAlpha);
+      const usableAlpha = this.smoothHudScalar(Number(previous.usableAlpha || 0), usableTarget, rawUsable ? riseAlpha : decayAlpha);
+      const kinesisForward = this.smoothHudScalar(Number(previous.kinesisForward || 0), forwardTarget, actionAlpha);
+      const kinesisTurn = this.smoothHudScalar(Number(previous.kinesisTurn || 0), turnTarget, actionAlpha);
+      const lowConfidence = confidence < 0.20;
+      const flickerPhase = lowConfidence
+        ? 0.30 + (0.70 * (0.5 + 0.5 * Math.sin(now / 1000 * 17.0)))
+        : 1;
+
+      this.gpuRadarHudDisplayState = {
+        northAngleDeg: Math.round(northAngleDeg * 100) / 100,
+        usableAlpha: this.clampHudUnit(usableAlpha),
+        confidence: this.clampHudUnit(confidence),
+        kinesisForward: Math.max(-1, Math.min(1, kinesisForward)),
+        kinesisTurn: Math.max(-1, Math.min(1, kinesisTurn)),
+        mode: modeTarget,
+        suppressedAlpha: modeTarget === 1 ? 1 : 0,
+        lostAlpha: modeTarget === 0 ? 1 : 0,
+        holdAlpha: held ? 1 : 0,
+        flickerPhase,
+        rawHeading,
+        rawUsable,
+        suppressed,
+        held,
+        holdUntil,
+        updatedAt: now
+      };
+      return this.gpuRadarHudDisplayState;
     }
 
     createGpuHudCells(state, frame) {
@@ -2613,6 +2720,11 @@
       }
 
       return Math.max(0, Math.min(1, number));
+    }
+
+    smoothHudScalar(previous, target, alpha) {
+      const current = Number.isFinite(previous) ? previous : target;
+      return current + (target - current) * Math.max(0, Math.min(1, alpha));
     }
 
     createAutoplayState(indices, gpuVision) {

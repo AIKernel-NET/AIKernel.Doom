@@ -505,8 +505,20 @@ struct HudInfo {
   enemyCircleRadius: f32,
   enemyCircleVisual: f32,
   enemyCircleAudio: f32,
-  _enemyPad0: f32,
-  _enemyPad1: f32,
+  radarKinesisForward: f32,
+  radarMode: f32,
+  radarSuppressedAlpha: f32,
+  radarLostAlpha: f32,
+  radarHoldAlpha: f32,
+  radarFlickerPhase: f32,
+  radarPad0: f32,
+  radarPad1: f32,
+  radarPad2: f32,
+  radarPad3: f32,
+  radarPad4: f32,
+  radarPad5: f32,
+  radarPad6: f32,
+  radarPad7: f32,
 };
 
 @group(0) @binding(0) var frameSampler: sampler;
@@ -683,8 +695,20 @@ struct HudInfo {
   enemyCircleRadius: f32,
   enemyCircleVisual: f32,
   enemyCircleAudio: f32,
-  _enemyPad0: f32,
-  _enemyPad1: f32,
+  radarKinesisForward: f32,
+  radarMode: f32,
+  radarSuppressedAlpha: f32,
+  radarLostAlpha: f32,
+  radarHoldAlpha: f32,
+  radarFlickerPhase: f32,
+  radarPad0: f32,
+  radarPad1: f32,
+  radarPad2: f32,
+  radarPad3: f32,
+  radarPad4: f32,
+  radarPad5: f32,
+  radarPad6: f32,
+  radarPad7: f32,
 };
 
 @group(0) @binding(0) var<uniform> hud: HudInfo;
@@ -782,12 +806,22 @@ fn segmentMask(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>, width: f32
   return 1.0 - smoothstep(width, width * 1.8, dist);
 }
 
-fn compassMask(uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> f32 {
+fn radarMask(uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> f32 {
   let delta = vec2<f32>((uv.x - center.x) * aspect, uv.y - center.y);
   return 1.0 - smoothstep(0.0035, 0.0075, abs(length(delta) - radius));
 }
 
-fn compassNeedle(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, degrees: f32, aspect: f32, lengthScale: f32, needleColor: vec3<f32>, alpha: f32) -> vec4<f32> {
+fn radarCircleMask(uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32, width: f32) -> f32 {
+  let delta = vec2<f32>((uv.x - center.x) * aspect, uv.y - center.y);
+  return 1.0 - smoothstep(width, width * 1.85, abs(length(delta) - radius));
+}
+
+fn radarDotMask(uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> f32 {
+  let delta = vec2<f32>((uv.x - center.x) * aspect, uv.y - center.y);
+  return 1.0 - smoothstep(radius * 0.55, radius, length(delta));
+}
+
+fn radarNeedle(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, degrees: f32, aspect: f32, lengthScale: f32, needleColor: vec3<f32>, alpha: f32) -> vec4<f32> {
   let angle = degrees * 0.01745329252;
   let direction = vec2<f32>(sin(angle) / aspect, -cos(angle));
   let finish = center + direction * lengthScale;
@@ -796,26 +830,70 @@ fn compassNeedle(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, degrees: f3
   return alphaComposite(color, vec4<f32>(needleColor, mask * alpha));
 }
 
-fn addCompassHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
-  let center = vec2<f32>(0.912, 0.118);
+fn addRadarNorthMarker(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32, theme: vec3<f32>, confidence: f32, alphaScale: f32) -> vec4<f32> {
+  let angle = -hud.compassHeading * 0.01745329252;
+  let direction = vec2<f32>(sin(angle) / aspect, -cos(angle));
+  let tangent = vec2<f32>(cos(angle) / aspect, sin(angle));
+  let tip = center + direction * radius;
+  let base = center + direction * (radius - 0.025);
+  let left = base - tangent * 0.010;
+  let right = base + tangent * 0.010;
+  let edge = max(
+    segmentMask(uv, tip, left, 0.0024),
+    max(segmentMask(uv, tip, right, 0.0024), segmentMask(uv, left, right, 0.0024))
+  );
+  let glow = radarDotMask(uv, tip, 0.010, aspect);
+  let alpha = clamp((0.22 + confidence * 0.72) * alphaScale, 0.0, 1.0);
+  return alphaComposite(alphaComposite(color, vec4<f32>(theme, glow * alpha * 0.18)), vec4<f32>(theme, edge * alpha));
+}
+
+fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+  let center = vec2<f32>(0.885, 0.165);
   let aspect = f32(info.width) / max(1.0, f32(info.height));
-  let ring = compassMask(uv, center, 0.058, aspect);
+  let radius = 0.126;
+  let ring = radarMask(uv, center, radius, aspect);
   let usable = clamp(hud.compassUsable, 0.0, 1.0);
   let confidence = clamp(hud.compassConfidence, 0.0, 1.0);
-  let scanHeading = hud.timeSeconds * 104.0;
-  let heading = mix(scanHeading, hud.compassHeading, usable);
-  let ringColor = mix(vec3<f32>(1.0, 0.75, 0.18), vec3<f32>(0.26, 0.88, 1.0), usable);
-  var next = alphaComposite(color, vec4<f32>(0.004, 0.012, 0.018, ring * 0.16));
-  next = alphaComposite(next, vec4<f32>(ringColor, ring * (0.24 + confidence * 0.28)));
+  let mode = clamp(hud.radarMode, 0.0, 2.0);
+  let normalColor = vec3<f32>(0.18, 0.90, 1.0);
+  let suppressedColor = vec3<f32>(1.0, 0.65, 0.10);
+  let lostColor = vec3<f32>(1.0, 0.15, 0.16);
+  let activeColor = mix(suppressedColor, normalColor, step(1.5, mode));
+  let theme = mix(activeColor, lostColor, 1.0 - step(0.5, mode));
+  let flicker = mix(clamp(hud.radarFlickerPhase, 0.0, 1.0), 1.0, step(0.20, confidence));
+  let lostStatic = (fract(sin(dot(uv + vec2<f32>(hud.timeSeconds * 0.021, hud.timeSeconds * 0.037), vec2<f32>(12.9898, 78.233))) * 43758.5453) - 0.5) * hud.radarLostAlpha;
+  let signalAlpha = clamp(max(usable, hud.radarHoldAlpha * 0.36) * (0.62 + confidence * 0.38), 0.12, 1.0);
+  var next = alphaComposite(color, vec4<f32>(0.002, 0.010, 0.016, ring * 0.10));
+  next = alphaComposite(next, vec4<f32>(theme + vec3<f32>(lostStatic * 0.08), ring * (0.34 + confidence * 0.34) * max(signalAlpha, 0.25)));
 
-  let northMask = segmentMask(uv, center + vec2<f32>(0.0, -0.058), center + vec2<f32>(0.0, -0.044), 0.0020);
-  next = alphaComposite(next, vec4<f32>(0.95, 0.97, 0.82, northMask * 0.60));
-  next = compassNeedle(next, uv, center, heading, aspect, 0.047, ringColor, 0.58 + confidence * 0.34);
-  next = compassNeedle(next, uv, center, hud.compassYaw, aspect, 0.036, vec3<f32>(1.0, 0.88, 0.30), 0.54);
+  let innerA = radarCircleMask(uv, center, radius * 0.34, aspect, 0.0026);
+  let innerB = radarCircleMask(uv, center, radius * 0.66, aspect, 0.0024);
+  next = alphaComposite(next, vec4<f32>(theme, (innerA * 0.22 + innerB * 0.18) * signalAlpha));
 
-  let centerDelta = vec2<f32>((uv.x - center.x) * aspect, uv.y - center.y);
-  let centerDot = 1.0 - smoothstep(0.000, 0.007, length(centerDelta));
-  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.72));
+  let front = center + vec2<f32>(0.0, -radius);
+  let rear = center + vec2<f32>(0.0, radius);
+  let left = center + vec2<f32>(-radius / aspect, 0.0);
+  let right = center + vec2<f32>(radius / aspect, 0.0);
+  let vertical = segmentMask(uv, front, rear, 0.0012);
+  let horizontal = segmentMask(uv, left, right, 0.0012);
+  next = alphaComposite(next, vec4<f32>(theme, max(vertical, horizontal) * 0.22 * signalAlpha));
+
+  let stick = vec2<f32>(
+    clamp(hud.compassYaw, -1.0, 1.0) / aspect,
+    -clamp(hud.radarKinesisForward, -1.0, 1.0)
+  ) * radius * 0.58;
+  let stickEnd = center + stick;
+  let stickPower = clamp(length(vec2<f32>(stick.x * aspect, stick.y)) / (radius * 0.58), 0.0, 1.0);
+  let stickLine = segmentMask(uv, center, stickEnd, 0.0048);
+  let stickDot = radarDotMask(uv, stickEnd, 0.014, aspect);
+  let stickColor = mix(theme, vec3<f32>(1.0, 0.90, 0.32), smoothstep(0.54, 1.0, stickPower));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickLine * (0.22 + stickPower * 0.52)));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickDot * (0.40 + stickPower * 0.42)));
+
+  next = addRadarNorthMarker(next, uv, center, radius * 1.02, aspect, theme, confidence, flicker);
+
+  let centerDot = radarDotMask(uv, center, 0.0065, aspect);
+  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.62));
 }
 
 @compute @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE})
@@ -835,7 +913,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   }
 
   let pulse = 0.5 + 0.5 * sin(hud.timeSeconds * 9.0);
-  color = addCompassHud(color, uv);
+  color = addEgoRadarHud(color, uv);
   color = addLayerCard(color, uv, 0u, panel[0], ${wgslPanelMin("aisthesis")}, ${wgslPanelMax("aisthesis")});
   color = addLayerCard(color, uv, 1u, panel[1], ${wgslPanelMin("noesis")}, ${wgslPanelMax("noesis")});
   color = addLayerCard(color, uv, 2u, panel[2], ${wgslPanelMin("krisis")}, ${wgslPanelMax("krisis")});
@@ -883,14 +961,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       this.lastError = "";
       this.renderer = null;
       this.hudOverlayEnabled = false;
-      this.hudCompassDisplayState = {
-        heading: null,
-        yaw: 0,
-        confidence: 0,
-        usable: 0,
-        holdUntil: 0,
-        updatedAt: 0
-      };
       this.hudOverlayState = {
         contractVersion: 0,
         contractName: "none",
@@ -912,6 +982,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         compassUsable: 0,
         compassYaw: 0,
         compassConfidence: 0,
+        radarKinesisForward: 0,
+        radarMode: 0,
+        radarSuppressedAlpha: 0,
+        radarLostAlpha: 0,
+        radarHoldAlpha: 0,
+        radarFlickerPhase: 1,
         rectangles: [],
         rectangleValues: [],
         rectangleSource: "none",
@@ -1832,19 +1908,26 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       renderer.hudInfoUpload[4] = Math.max(-1, Math.min(1, Number(state.useProbeTurn || 0)));
       renderer.hudInfoUpload[5] = clamp01(Number(state.enemyConfidence || 0));
       renderer.hudInfoUpload[6] = Math.max(0, Math.min(1.5, Number(state.depthEstimate ?? 1)));
-      this.hudCompassDisplayState = resolveHudCompassDisplayState(this.hudCompassDisplayState, state, now);
-      renderer.hudInfoUpload[8] = this.hudCompassDisplayState.heading;
-      renderer.hudInfoUpload[9] = this.hudCompassDisplayState.usable;
-      renderer.hudInfoUpload[10] = this.hudCompassDisplayState.yaw;
-      renderer.hudInfoUpload[11] = this.hudCompassDisplayState.confidence;
+      const radar = state.radarHud || state.egoRadar || {};
+      renderer.hudInfoUpload[8] = normalizeRadarAngle(radar.northAngleDeg ?? radar.NorthAngleDeg ?? state.radarNorthAngleDeg ?? state.compassHeading ?? 0);
+      renderer.hudInfoUpload[9] = clamp01(Number(radar.usableAlpha ?? radar.UsableAlpha ?? state.radarUsableAlpha ?? state.compassUsable ?? 0));
+      renderer.hudInfoUpload[10] = Math.max(-1, Math.min(1, Number(radar.kinesisTurn ?? radar.KinesisTurn ?? state.radarKinesisTurn ?? state.compassYaw ?? 0)));
+      renderer.hudInfoUpload[11] = clamp01(Number(radar.confidence ?? radar.Confidence ?? state.radarConfidence ?? state.compassConfidence ?? 0));
       renderer.hudInfoUpload[12] = state.enemyCircleActive ? 1 : 0;
       renderer.hudInfoUpload[13] = clamp01(Number(state.enemyCircleX ?? 0.5));
       renderer.hudInfoUpload[14] = clamp01(Number(state.enemyCircleY ?? 0.5));
       renderer.hudInfoUpload[15] = Math.max(0.03, Math.min(0.16, Number(state.enemyCircleRadius ?? 0.08)));
       renderer.hudInfoUpload[16] = state.enemyCircleVisual ? 1 : 0;
       renderer.hudInfoUpload[17] = state.enemyCircleAudio ? 1 : 0;
-      renderer.hudInfoUpload[18] = 0;
-      renderer.hudInfoUpload[19] = 0;
+      renderer.hudInfoUpload[18] = Math.max(-1, Math.min(1, Number(radar.kinesisForward ?? radar.KinesisForward ?? state.radarKinesisForward ?? 0)));
+      renderer.hudInfoUpload[19] = Math.max(0, Math.min(2, Number(radar.mode ?? radar.Mode ?? state.radarMode ?? 0)));
+      renderer.hudInfoUpload[20] = clamp01(Number(radar.suppressedAlpha ?? radar.SuppressedAlpha ?? state.radarSuppressedAlpha ?? 0));
+      renderer.hudInfoUpload[21] = clamp01(Number(radar.lostAlpha ?? radar.LostAlpha ?? state.radarLostAlpha ?? 0));
+      renderer.hudInfoUpload[22] = clamp01(Number(radar.holdAlpha ?? radar.HoldAlpha ?? state.radarHoldAlpha ?? 0));
+      renderer.hudInfoUpload[23] = clamp01(Number(radar.flickerPhase ?? radar.FlickerPhase ?? state.radarFlickerPhase ?? 1));
+      for (let index = 24; index < HUD_UNIFORM_FLOATS; index += 1) {
+        renderer.hudInfoUpload[index] = 0;
+      }
       renderer.hudCellsUpload.fill(0);
       const cells = state.cells || [];
       const count = Math.min(HUD_CELL_COUNT, cells.length || 0);
@@ -2242,67 +2325,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     return Math.max(0, Math.min(1, value));
   }
 
-  function normalizeHudCompassHeading(value) {
+  function normalizeRadarAngle(value) {
     const number = Number(value);
     if (!Number.isFinite(number)) {
-      return null;
-    }
-
-    return ((number % 360) + 360) % 360;
-  }
-
-  function shortestHudCompassDelta(from, to) {
-    if (!Number.isFinite(from) || !Number.isFinite(to)) {
       return 0;
     }
 
-    return ((((to - from) % 360) + 540) % 360) - 180;
-  }
-
-  function smoothHudCompassScalar(previous, target, alpha) {
-    const current = Number.isFinite(previous) ? previous : target;
-    return current + (target - current) * Math.max(0, Math.min(1, alpha));
-  }
-
-  function resolveHudCompassDisplayState(previousState, hudState, nowSeconds) {
-    const previous = previousState || {};
-    const nowMs = Number(nowSeconds || 0) * 1000;
-    const rawHeading = normalizeHudCompassHeading(hudState?.compassHeading);
-    const previousHeading = normalizeHudCompassHeading(previous.heading);
-    const rawYaw = Math.max(-90, Math.min(90, Number(hudState?.compassYaw ?? previous.yaw ?? 0)));
-    const rawConfidence = clamp01(Number(hudState?.compassConfidence ?? 0));
-    const rawUsable = rawHeading !== null && Boolean(hudState?.compassUsable) && rawConfidence >= 0.02;
-    const dt = previous.updatedAt > 0 ? Math.max(16, Math.min(180, nowMs - previous.updatedAt)) : 33;
-    const riseAlpha = 1 - Math.pow(0.5, dt / 100);
-    const decayAlpha = 1 - Math.pow(0.5, dt / 660);
-    const holdUntil = rawUsable
-      ? nowMs + 1100
-      : Number(previous.holdUntil || 0);
-    const held = !rawUsable && nowMs < holdUntil;
-    const targetHeading = rawHeading !== null ? rawHeading : previousHeading;
-    const heading = targetHeading === null
-      ? 0
-      : (previousHeading === null
-        ? targetHeading
-        : normalizeHudCompassHeading(previousHeading + shortestHudCompassDelta(previousHeading, targetHeading) * (rawUsable ? riseAlpha : Math.max(decayAlpha * 0.72, 0.035))));
-    const confidenceTarget = rawUsable
-      ? Math.max(rawConfidence, 0.34)
-      : (held ? Math.max(rawConfidence * 0.7, Number(previous.confidence || 0) * 0.62, 0.14) : 0);
-    const usableTarget = rawUsable
-      ? 1
-      : (held ? Math.max(Number(previous.usable || 0) * 0.70, 0.22) : 0);
-    const yaw = smoothHudCompassScalar(Number(previous.yaw || 0), rawYaw, rawUsable ? riseAlpha : decayAlpha);
-    const confidence = smoothHudCompassScalar(Number(previous.confidence || 0), confidenceTarget, rawUsable ? riseAlpha : decayAlpha);
-    const usable = smoothHudCompassScalar(Number(previous.usable || 0), usableTarget, rawUsable ? riseAlpha : decayAlpha);
-
-    return {
-      heading: heading ?? 0,
-      yaw: Math.max(-90, Math.min(90, yaw)),
-      confidence: clamp01(confidence),
-      usable: clamp01(usable),
-      holdUntil,
-      updatedAt: nowMs
-    };
+    return ((number % 360) + 360) % 360;
   }
 
   function textureBytes(width, height, count = 1, bytesPerPixel = 4) {

@@ -1055,6 +1055,77 @@
           text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 8px rgba(255,72,54,.38);
           z-index: 50;
         }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis {
+          display: block;
+          width: calc(var(--label-width, 23) * 1%);
+          max-width: calc(var(--label-width, 23) * 1%);
+          font: 800 11.2px/1.12 ui-monospace, Consolas, monospace;
+          letter-spacing: 0;
+          text-transform: uppercase;
+          white-space: pre-line;
+          overflow: visible;
+          text-overflow: clip;
+          z-index: 56;
+          color: rgba(180,238,255,.98);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(64,210,255,.56);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-radar-label {
+          display: block;
+          width: calc(var(--label-width, 8) * 1%);
+          max-width: calc(var(--label-width, 8) * 1%);
+          color: rgba(142,244,255,.86);
+          font: 800 7.5px/1 ui-monospace, Consolas, monospace;
+          letter-spacing: 0;
+          text-transform: uppercase;
+          text-align: center;
+          white-space: nowrap;
+          overflow: visible;
+          text-overflow: clip;
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 7px rgba(0,230,255,.52);
+          z-index: 55;
+        }
+        #doom-debug-overlay .is-priority-axis {
+          border-width: 1px;
+          background: rgba(4,16,24,.11);
+          z-index: 46;
+        }
+        #doom-debug-overlay .is-priority-axis .debug-region-label {
+          font: 800 11.8px/1.14 ui-monospace, Consolas, monospace;
+          text-transform: uppercase;
+          letter-spacing: 0;
+          white-space: pre-line;
+          overflow: visible;
+          text-overflow: clip;
+        }
+        #doom-debug-overlay .is-priority-axis.is-axis-logos,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis.is-axis-logos {
+          color: rgba(156,230,255,.99);
+          border-color: rgba(70,205,255,.90);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(52,200,255,.58);
+        }
+        #doom-debug-overlay .is-priority-axis.is-axis-ethos,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis.is-axis-ethos {
+          color: rgba(178,255,192,.99);
+          border-color: rgba(64,245,112,.88);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(54,230,92,.55);
+        }
+        #doom-debug-overlay .is-priority-axis.is-axis-pathos,
+        #doom-debug-overlay .is-priority-axis.is-fire,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis.is-axis-pathos,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis.is-fire {
+          color: rgba(255,214,204,.99);
+          border-color: rgba(255,78,54,.92);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 11px rgba(255,66,44,.62);
+        }
+        #doom-debug-overlay .is-priority-axis.is-use,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-priority-axis.is-use {
+          color: rgba(255,235,168,.99);
+          border-color: rgba(255,200,64,.90);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(255,190,64,.56);
+        }
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door,
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door-candidate {
           color: rgba(255,210,210,.98);

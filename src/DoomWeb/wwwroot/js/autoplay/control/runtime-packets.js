@@ -677,6 +677,22 @@
   function gpuRectColor(kind, type) {
     const normalizedKind = String(kind || "diagnostic").toLowerCase();
     const normalizedType = String(type || "").toLowerCase();
+    if (normalizedKind.includes("objective-pathos")) {
+      return [1.00, 0.18, 0.10];
+    }
+
+    if (normalizedKind.includes("objective-ethos")) {
+      return [0.20, 0.95, 0.36];
+    }
+
+    if (normalizedKind.includes("objective-use")) {
+      return [1.00, 0.76, 0.18];
+    }
+
+    if (normalizedKind.includes("objective-logos") || normalizedKind.includes("objective")) {
+      return [0.20, 0.82, 1.00];
+    }
+
     if (normalizedKind === "enemy-circle" && normalizedType === "audio") {
       return [1.00, 0.62, 0.12];
     }
@@ -737,6 +753,7 @@
       || kind === "zoe"
       || kind === "enemy"
       || kind === "enemy-circle"
+      || kind.includes("objective")
       || kind === "door"
       || kind === "bridge";
   }
@@ -1017,8 +1034,9 @@
     const rect = Number.isFinite(left) && Number.isFinite(top) && Number.isFinite(width) && Number.isFinite(height)
       ? { left, top, width, height, anchor: "inside" }
       : null;
+    const className = region.className || region.ClassName || `is-${kind}`;
     return gpuLabel(
-      `is-${kind}`,
+      className,
       region.label || region.Label || kind.toUpperCase(),
       region.value || region.Value || "",
       String(region.priority || region.Priority || "mid").toLowerCase(),
@@ -1054,6 +1072,27 @@
         anchor: "below"
       }
     );
+  }
+
+  function appendGpuRadarLabels(labels) {
+    const radarLabels = [
+      ["is-radar-label is-radar-front", "FRONT", 84.9, 3.4, 7.2, 3.0],
+      ["is-radar-label is-radar-left", "L-TURN", 75.0, 15.5, 8.4, 3.0],
+      ["is-radar-label is-radar-right", "R-TURN", 92.3, 15.5, 8.4, 3.0],
+      ["is-radar-label is-radar-rear", "REAR", 84.9, 29.3, 7.2, 3.0]
+    ];
+    for (const [className, label, left, top, width, height] of radarLabels) {
+      appendGpuLabel(labels, gpuLabel(
+        className,
+        label,
+        "",
+        "low",
+        labels.length,
+        "ego-radar-js-label",
+        true,
+        { left, top, width, height, anchor: "inside" }
+      ));
+    }
   }
 
   function createGpuHudPanelValues(values, pipelineState, action) {
@@ -1103,6 +1142,7 @@
     }
     appendGpuRect(rects, gpuRectFromEnemyCircle(enemyCircle));
     appendGpuLabel(labels, gpuLabelFromEnemyCircle(enemyCircle, labels.length));
+    appendGpuRadarLabels(labels);
     for (const region of regions || []) {
       appendGpuRect(rects, gpuRectFromRegion(region));
       appendGpuLabel(labels, gpuLabelFromRegion(region, labels.length));
@@ -1410,6 +1450,28 @@
     return normalized === "pathos" ? "P" : (normalized === "ethos" ? "E" : "L");
   }
 
+  function priorityHudKind(axis, action) {
+    if (action?.fire) {
+      return "objective-pathos";
+    }
+
+    if (action?.use) {
+      return "objective-use";
+    }
+
+    const normalized = String(axis || "logos").toLowerCase();
+    return normalized === "pathos" || normalized === "ethos"
+      ? `objective-${normalized}`
+      : "objective-logos";
+  }
+
+  function priorityHudClassName(axis, action) {
+    const normalized = String(axis || "logos").toLowerCase();
+    const safeAxis = normalized === "pathos" || normalized === "ethos" ? normalized : "logos";
+    const actionClass = action?.fire ? " is-fire" : (action?.use ? " is-use" : "");
+    return `is-objective is-priority-axis is-axis-${safeAxis}${actionClass}`;
+  }
+
   function createGoalState(action, context, pipelineState) {
     const objective = action?.objective || "idle";
     const pipeline = action?.pipeline || action?.stage || "none";
@@ -1466,14 +1528,15 @@
 
     const regions = [
       {
-        kind: "objective",
+        kind: priorityHudKind(selectedAxis, action),
+        className: priorityHudClassName(selectedAxis, action),
         label: "PRIORITY:",
         value: goalState.priority,
-        left: 33,
-        top: 49,
-        width: 34,
-        height: 16,
-        priority: selectedAxis === "pathos" ? "high" : "mid",
+        left: 3.0,
+        top: 55.0,
+        width: 25.5,
+        height: 8.4,
+        priority: "high",
         active: true
       }
     ];

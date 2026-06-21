@@ -57,6 +57,7 @@
       || kind === "zoe"
       || kind === "enemy"
       || kind === "enemy-circle"
+      || kind.includes("objective")
       || kind === "door"
       || kind === "bridge";
   }
@@ -168,6 +169,29 @@
     return `${axis} ${clamp01(score).toFixed(2)}`;
   }
 
+  function resolvePriorityAxisClass(autoplay, priorityLabel = "") {
+    const packet = resolveKairosAxisPacket(autoplay);
+    const rawAxis = String(packet?.selectedAxis || packet?.SelectedAxis || "").toLowerCase();
+    const label = String(priorityLabel || "").toLowerCase();
+    const axis = rawAxis === "pathos" || rawAxis === "ethos" ? rawAxis : "logos";
+    const actionClass = label.includes("fire")
+      ? " is-fire"
+      : (label.includes("use") || label.includes("open") ? " is-use" : "");
+    return `is-axis-${axis}${actionClass}`;
+  }
+
+  function formatOverlayLabelText(className, label, value = "") {
+    const name = String(className || "");
+    const rawLabel = String(label || "");
+    const rawValue = String(value || "");
+    if (name.includes("is-priority-axis")) {
+      const title = rawLabel.replace(/:+$/, "").trim().toUpperCase() || "PRIORITY";
+      return rawValue ? `${title}\n${rawValue.toUpperCase()}` : title;
+    }
+
+    return rawValue ? `${rawLabel} ${rawValue}` : rawLabel;
+  }
+
   function createRegion(className, left, top, width, height, label, value = "", options = {}) {
     const region = document.createElement("div");
     const priority = options.priority ? `priority-${options.priority}` : "";
@@ -183,7 +207,7 @@
     if (!options.noLabel) {
       const labelNode = document.createElement("span");
       labelNode.className = "debug-region-label";
-      labelNode.textContent = value ? `${label} ${value}` : label;
+      labelNode.textContent = formatOverlayLabelText(className, label, value);
       region.appendChild(labelNode);
     }
 
@@ -240,7 +264,7 @@
     const node = document.createElement("div");
     const priority = options.priority ? `priority-${options.priority}` : "";
     node.className = `debug-gpu-label ${className} ${priority} ${options.active ? "is-detected" : ""}`.trim();
-    node.textContent = value ? `${label} ${value}` : label;
+    node.textContent = formatOverlayLabelText(className, label, value);
     node.dataset.labelSlot = String(options.slot ?? 0);
     node.dataset.gpuHudLabel = "true";
     node.dataset.gpuLabelLayout = "diagnostic";
@@ -667,8 +691,9 @@
         continue;
       }
       if (options.gpuBacked) {
+        const className = region.className || region.ClassName || `is-${kind}`;
         fragment.appendChild(createGpuTextLabel(
-          `is-${kind}`,
+          className,
           region.label || region.Label || kind.toUpperCase(),
           region.value || region.Value || "",
           {
@@ -687,8 +712,9 @@
         continue;
       }
 
+      const className = region.className || region.ClassName || `is-${kind}`;
       const node = createRegion(
-        `is-${kind}`,
+        className,
         Number(region.left ?? region.Left ?? 0),
         Number(region.top ?? region.Top ?? 0),
         Number(region.width ?? region.Width ?? 0),
@@ -991,10 +1017,45 @@
         active: options.active !== false,
         slot,
         priority: options.priority || "mid",
-        source: options.source || "gpu-hud-shader"
+        source: options.source || "gpu-hud-shader",
+        left: options.left,
+        top: options.top,
+        width: options.width,
+        height: options.height,
+        anchor: options.anchor
       }
     ));
     return slot + 1;
+  }
+
+  function appendRadarHudLabels(fragment, slot) {
+    const labels = [
+      ["is-radar-front", "FRONT", 84.9, 3.4, 7.2, 3.0],
+      ["is-radar-left", "L-TURN", 75.0, 15.5, 8.4, 3.0],
+      ["is-radar-right", "R-TURN", 92.3, 15.5, 8.4, 3.0],
+      ["is-radar-rear", "REAR", 84.9, 29.3, 7.2, 3.0]
+    ];
+    let nextSlot = slot;
+    for (const [className, label, left, top, width, height] of labels) {
+      fragment.appendChild(createGpuTextLabel(
+        `is-radar-label ${className}`,
+        label,
+        "",
+        {
+          active: true,
+          slot: nextSlot,
+          priority: "low",
+          source: "ego-radar-js-label",
+          left,
+          top,
+          width,
+          height,
+          anchor: "inside"
+        }
+      ));
+      nextSlot += 1;
+    }
+    return nextSlot;
   }
 
   function renderGpuRuntimeOverlay(fragment, autoplay, context) {
@@ -1004,11 +1065,18 @@
     }
 
     if (context.showPriority) {
-      slot = appendRuntimeGpuLabel(fragment, "is-objective", "PRIORITY:", context.priorityLabel, slot, {
+      slot = appendRuntimeGpuLabel(fragment, `is-objective is-priority-axis ${resolvePriorityAxisClass(autoplay, context.priorityLabel)}`, "PRIORITY:", context.priorityLabel, slot, {
         priority: "high",
-        active: Boolean(autoplay.enabled)
+        active: Boolean(autoplay.enabled),
+        left: 3.0,
+        top: 55.0,
+        width: 25.5,
+        height: 8.4,
+        anchor: "inside"
       });
     }
+
+    slot = appendRadarHudLabels(fragment, slot);
 
     const doorOpened = context.doorOpened;
     if (context.showEnemy && doorOpened && (Number(autoplay.enemyConfidence || 0) > 0.22 || Number(autoplay.enemyCenterCellConfidence || 0) > 0.14 || Number(autoplay.enemyAllRegionPeak || 0) > 0.28)) {
@@ -1239,7 +1307,16 @@
     appendCombatAlert(fragment, autoplay, activeDetections);
 
     if (showPriority) {
-      fragment.appendChild(createRegion("is-objective", 33, 49, 34, 16, "PRIORITY:", priorityLabel, { active: Boolean(autoplay.enabled), slot: 0, priority: "high" }));
+      fragment.appendChild(createRegion(
+        `is-objective is-priority-axis ${resolvePriorityAxisClass(autoplay, priorityLabel)}`,
+        61,
+        5.6,
+        23,
+        10,
+        "PRIORITY:",
+        priorityLabel,
+        { active: Boolean(autoplay.enabled), slot: 0, priority: "high" }
+      ));
     }
 
     if (showEnemy && doorOpened && (Number(autoplay.enemyConfidence || 0) > 0.22 || Number(autoplay.enemyCenterCellConfidence || 0) > 0.14 || Number(autoplay.enemyAllRegionPeak || 0) > 0.28)) {

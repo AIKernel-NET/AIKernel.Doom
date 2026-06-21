@@ -20,7 +20,7 @@
   const SPATIAL_OUTPUT_TARGET = "doom.gpu.spatial.reasoning";
   const HUD_GRID_SIZE = 9;
   const HUD_CELL_COUNT = HUD_GRID_SIZE * HUD_GRID_SIZE;
-  const HUD_UNIFORM_FLOAT_COUNT = 20;
+  const HUD_UNIFORM_FLOAT_COUNT = 32;
   const HUD_PANEL_VALUE_COUNT = 16;
   const HUD_RECT_COUNT = 16;
   const HUD_LABEL_COUNT = 16;

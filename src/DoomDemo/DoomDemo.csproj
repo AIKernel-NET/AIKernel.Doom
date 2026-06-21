@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Title>AIKernel.Doom.Demo</Title>
+    <Description>Prompt-style AIKernel boot sequence and CLI demo for DOOM as a WASM process.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DoomCapabilities\DoomCapabilities.csproj" />
+    <ProjectReference Include="..\DoomProvider\DoomProvider.csproj" />
+    <ProjectReference Include="..\DoomWasm\DoomWasm.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AIKernel.Core" Version="[$(AIKernelCorePackageVersion)]" />
+    <PackageReference Include="$(AIKernelProvidersPackageId)" Version="[$(AIKernelProvidersPackageVersion)]" />
+    <PackageReference Include="AIKernel.Wasm.Runtime" Version="[$(AIKernelWasmRuntimePackageVersion)]" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\samples\doom.rom" Link="samples\doom.rom" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

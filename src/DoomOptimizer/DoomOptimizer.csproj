@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Title>AIKernel.Doom.Optimizer</Title>
+    <Description>Observer ROM profile optimizer for the AIKernel.Doom autoplay demo.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DoomProvider\DoomProvider.csproj" />
+  </ItemGroup>
+</Project>

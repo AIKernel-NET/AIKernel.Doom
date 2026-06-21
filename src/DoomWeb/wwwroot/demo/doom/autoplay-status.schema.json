@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aikernel.net/schemas/doom/autoplay-status.schema.json",
+  "title": "AIKernel Doom Autoplay Status",
+  "type": "object",
+  "required": ["strategyName", "controlPipeline", "predictions", "lastError"],
+  "properties": {
+    "strategyName": { "type": "string" },
+    "controlPipeline": { "type": "string" },
+    "objective": { "type": "string", "minLength": 1 },
+    "controller": { "enum": ["control-runtime-shim", "bonsai", "fallback"] },
+    "predictions": { "type": "integer", "minimum": 0 },
+    "lastLatencyMs": { "type": "number", "minimum": 0 },
+    "lastError": { "type": "string" },
+    "safetyReason": { "type": "string" },
+    "stuckFrames": { "type": "integer", "minimum": 0 },
+    "recoveryFrames": { "type": "integer", "minimum": 0 },
+    "sensorTensor": { "$ref": "autoplay-sensor-tensor.schema.json" },
+    "semanticMemory": { "type": "object" },
+    "decisionTrace": {
+      "type": "object",
+      "required": ["version", "runtimeId", "controller", "entries"],
+      "properties": {
+        "version": { "const": "control-decision-trace-v1" },
+        "runtimeId": { "type": "string", "minLength": 1 },
+        "controller": { "type": "string", "minLength": 1 },
+        "strategyName": { "type": "string" },
+        "pipeline": { "type": "string" },
+        "stage": { "type": "string" },
+        "objective": { "type": "string" },
+        "priority": { "type": "number" },
+        "evidenceScore": { "type": "number" },
+        "predictions": { "type": "integer", "minimum": 0 },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["category", "code", "message", "level"],
+            "properties": {
+              "category": { "type": "string", "minLength": 1 },
+              "code": { "type": "string", "minLength": 1 },
+              "message": { "type": "string", "minLength": 1 },
+              "value": { "type": ["number", "null"] },
+              "level": { "type": "string", "minLength": 1 },
+              "selected": { "type": "boolean" },
+              "meta": { "type": "object" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "stageEvaluations": { "type": "array" },
+        "semanticScores": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "activeDetections": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "action": { "$ref": "autoplay-action.schema.json" }
+  },
+  "additionalProperties": true
+}

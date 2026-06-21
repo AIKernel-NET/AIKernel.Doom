@@ -1,0 +1,1580 @@
+#doom-demo {
+  position: relative;
+  left: 50%;
+  width: min(calc(100vw - 24px), 1720px);
+  max-width: none !important;
+  margin-inline: 0;
+  transform: translateX(-50%);
+  overflow: visible;
+}
+
+#doom-demo,
+#doom-demo * {
+  box-sizing: border-box;
+}
+
+#doom-demo .console-body {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.4vw, 18px);
+  min-height: auto;
+  max-height: none;
+  overflow: visible;
+  padding: clamp(12px, 1.8vw, 22px);
+}
+
+#doom-demo .console-body.is-doom-running {
+  display: flex;
+  grid-template-rows: none;
+  min-height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+#doom-demo #doom-screen-panel {
+  order: 10;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#doom-demo #doom-debug-bar {
+  order: 20;
+  width: 100%;
+}
+
+#doom-demo #output {
+  order: 30;
+  min-height: 92px;
+  max-height: clamp(140px, 22vh, 260px);
+}
+
+#doom-demo #wasm-prompt {
+  order: 40;
+}
+
+#doom-demo .prompt-legal {
+  order: 45;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+#doom-demo .prompt-legal a {
+  margin-left: 0;
+}
+
+#doom-demo #doom-approval-actions {
+  order: 46;
+}
+
+#doom-demo #runtime-status,
+#doom-demo #halted,
+#doom-demo #panic {
+  order: 60;
+}
+
+#doom-demo .console-body.is-doom-running #output,
+#doom-demo .console-body.is-doom-running .prompt-form,
+#doom-demo .console-body.is-doom-running .runtime-status,
+#doom-demo .console-body.is-doom-running .halted-message {
+  display: block;
+}
+
+#doom-demo .console-body.is-doom-running .prompt-legal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+#doom-demo .console-body.is-doom-running .doom-approval-actions:not(.is-visible) {
+  display: none;
+}
+
+#doom-demo #doom-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(10px, 1.4vw, 18px);
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+}
+
+#doom-demo .console-body.is-doom-running #doom-container,
+#doom-demo .console-body.is-doom-running .doom-screen-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#doom-demo .doom-screen-wrap {
+  position: relative;
+  width: min(100%, calc(78vh * 1.6), 1800px);
+  aspect-ratio: 16 / 10;
+  min-height: 0;
+  max-height: none;
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 197, 255, 0.32);
+  background: rgba(0, 0, 0, 0.72);
+}
+
+#doom-demo #doom-screen {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  background: #02040a;
+}
+
+#doom-demo #doom-debug-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#doom-demo #doom-controller {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  max-height: min(78vh, 860px);
+  overflow: auto;
+  border: 1px solid rgba(148, 197, 255, 0.28);
+  border-radius: 10px;
+  background: rgba(5, 10, 22, 0.68);
+  backdrop-filter: blur(10px);
+}
+
+#doom-demo .doom-screen-toolbar,
+#doom-demo .doom-debug-bar,
+#doom-demo #runtime-status,
+#doom-demo #output,
+#doom-demo .prompt-legal,
+#doom-demo .prompt-form,
+#doom-demo .halted-message,
+#doom-demo #panic {
+  border-radius: 10px;
+}
+
+#doom-demo .doom-debug-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "title"
+    "actions"
+    "sensors";
+  align-items: stretch;
+  gap: 10px;
+  padding: clamp(10px, 1.2vw, 16px);
+  border: 1px solid rgba(148, 197, 255, 0.22);
+  background: rgba(5, 10, 22, 0.42);
+}
+
+#doom-demo .doom-debug-actions,
+#doom-demo .doom-detection-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#doom-demo .doom-debug-help {
+  grid-area: help;
+}
+
+#doom-demo .doom-sensor-pipeline-title {
+  grid-area: title;
+  justify-self: start;
+}
+
+#doom-demo .doom-debug-actions {
+  grid-area: actions;
+  align-items: stretch;
+  width: 100%;
+}
+
+#doom-demo .doom-sensor-toggles {
+  grid-area: sensors;
+}
+
+#doom-demo .doom-debug-actions > button,
+#doom-demo .doom-detection-toggles > button,
+#doom-demo .doom-sensor-switch,
+#doom-demo [data-detection-toggle] {
+  min-height: 34px;
+  white-space: normal;
+  line-height: 1.18;
+}
+
+#doom-demo .doom-sensor-toggles {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) repeat(3, minmax(170px, 1fr));
+  grid-template-rows: auto auto;
+  grid-auto-rows: max-content;
+  gap: 10px;
+  align-items: start;
+}
+
+#doom-demo .doom-sensor-node {
+  min-width: 0;
+  min-height: 0;
+  align-self: start;
+  display: grid;
+  grid-template-rows: auto max-content;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 197, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(7, 14, 28, 0.34);
+  padding: 10px;
+}
+
+#doom-demo .doom-sensor-node.is-aisthesis {
+  align-self: start;
+}
+
+#doom-demo .doom-sensor-node.is-noesis,
+#doom-demo .doom-sensor-node.is-krisis,
+#doom-demo .doom-sensor-node.is-kinesis {
+  align-self: start !important;
+  height: fit-content;
+}
+
+#doom-demo .doom-sensor-stages {
+  display: grid;
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
+  gap: 8px;
+  align-content: start;
+}
+
+#doom-demo .doom-sensor-stage {
+  align-self: start;
+  min-height: 0;
+}
+
+#doom-demo .doom-sensor-node.is-aisthesis .doom-sensor-stages,
+#doom-demo .doom-sensor-node.is-krisis .doom-sensor-stages {
+  align-self: start;
+}
+
+#doom-demo .doom-sensor-node-header,
+#doom-demo .doom-sensor-stage-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+#doom-demo .doom-sensor-node-label,
+#doom-demo .doom-sensor-stage-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#doom-demo .doom-sensor-node-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+#doom-demo .doom-sensor-node.is-aisthesis .doom-sensor-node-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  align-items: stretch;
+}
+
+#doom-demo .doom-sensor-node.is-aisthesis .doom-sensor-switch,
+#doom-demo .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
+  width: 100%;
+  min-height: 42px;
+}
+
+#doom-demo .doom-sensor-switch,
+#doom-demo [data-detection-toggle],
+#doom-demo .doom-panel-signal-chip {
+  min-width: 0;
+  overflow: hidden;
+}
+
+#doom-demo .doom-panel-signal-chip strong,
+#doom-demo .doom-panel-signal-chip span,
+#doom-demo .sensor-title,
+#doom-demo .sensor-signal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#doom-demo .doom-controller-section {
+  border-radius: 8px;
+}
+
+#doom-demo .doom-controller-section > summary {
+  cursor: pointer;
+}
+
+#doom-demo .doom-controller-debug-log {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: clamp(240px, 34vh, 520px);
+}
+
+#doom-demo .doom-controller-debug-log ol {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 1px;
+  overflow: auto;
+}
+
+#doom-demo #doom-controller .doom-control-panel-grid {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  min-height: 0;
+}
+
+#doom-demo #doom-controller .doom-control-state-wrap,
+#doom-demo #doom-controller .doom-control-command-row,
+#doom-demo #doom-controller .doom-control-keypad {
+  min-width: 0;
+}
+
+#doom-demo #doom-controller .doom-control-panel-debug-log {
+  margin-top: 0;
+  min-width: 0;
+  max-height: clamp(240px, 34vh, 520px);
+}
+
+#doom-demo #doom-controller .doom-control-panel-debug-log .doom-controller-debug-log-head {
+  margin-bottom: 4px;
+}
+
+#doom-demo #doom-controller .doom-control-panel-debug-log .doom-control-log-entry,
+#doom-demo #doom-controller .doom-control-panel-debug-log .doom-control-log-empty {
+  grid-template-columns: 2.35em minmax(0, 1fr);
+  gap: 2px;
+  font-size: 0.5rem;
+  line-height: 1.02;
+}
+
+#doom-demo #doom-controller .doom-control-keypad {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#doom-demo #doom-controller .doom-control-panel-grid button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 1800px) {
+  #doom-demo {
+    width: min(calc(100vw - 32px), 1880px);
+    max-width: none !important;
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
+    grid-template-areas:
+      "screen debug"
+      "output debug"
+      "prompt debug"
+      "legal debug"
+      "actions debug"
+      "status debug";
+    align-items: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-screen-panel {
+    grid-area: screen;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-area: debug;
+    align-self: stretch;
+    max-height: min(82vh, 980px);
+    overflow: auto;
+    position: sticky;
+    top: 76px;
+  }
+
+  #doom-demo .console-body.is-doom-running #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    grid-area: legal;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-approval-actions {
+    grid-area: actions;
+  }
+
+  #doom-demo .console-body.is-doom-running #output {
+    grid-area: output;
+  }
+
+  #doom-demo .console-body.is-doom-running #runtime-status,
+  #doom-demo .console-body.is-doom-running #halted,
+  #doom-demo .console-body.is-doom-running #panic {
+    grid-area: status;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-screen-wrap {
+    width: 100%;
+    max-height: min(72vh, 920px);
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-toggles {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-node.is-aisthesis {
+    grid-row: auto;
+  }
+}
+
+@media (min-width: 2200px) {
+  #doom-demo {
+    width: min(calc(100vw - 64px), 2040px);
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns: minmax(0, 1fr) minmax(460px, 620px);
+  }
+}
+
+@media (max-width: 1180px) {
+  #doom-demo #doom-container {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo #doom-controller {
+    max-height: none;
+  }
+
+  #doom-demo .doom-sensor-toggles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #doom-demo .doom-sensor-node.is-aisthesis {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  #doom-demo {
+    left: auto;
+    width: 100%;
+    transform: none;
+  }
+
+  #doom-demo .console-body {
+    padding: 10px;
+  }
+
+  #doom-demo .doom-screen-wrap {
+    min-height: 220px;
+    aspect-ratio: 16 / 10;
+  }
+
+  #doom-demo .doom-sensor-toggles {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .doom-sensor-node.is-aisthesis .doom-sensor-node-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .doom-debug-actions,
+  #doom-demo .doom-detection-toggles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #doom-demo .doom-debug-actions > button,
+  #doom-demo .doom-detection-toggles > button {
+    width: 100%;
+  }
+}
+
+/* 2026-06-21 responsive/GPU HUD polish.
+   Keep the Doom embed self-contained because index.html and demo/doom are
+   deployed together, while other site directories are deployed independently. */
+@media (max-width: 1279px) {
+  #doom-demo {
+    left: auto;
+    width: 100%;
+    transform: none;
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-screen-panel {
+    order: 10;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container,
+  #doom-demo .console-body.is-doom-running #doom-container:has(#doom-controller:not([hidden])) {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller {
+    max-height: none;
+    overflow: visible;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    order: 20;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-toggles,
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-node,
+  #doom-demo .console-body.is-doom-running .doom-sensor-node.is-aisthesis {
+    grid-row: auto;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    order: 30;
+    display: grid;
+    grid-template-areas:
+      "log"
+      "prompt";
+    gap: 8px;
+    width: 100%;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    grid-area: log;
+    max-height: clamp(132px, 24vh, 220px);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    order: 40;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-approval-actions {
+    order: 45;
+  }
+
+  #doom-demo .console-body.is-doom-running #runtime-status,
+  #doom-demo .console-body.is-doom-running #halted,
+  #doom-demo .console-body.is-doom-running #panic {
+    order: 60;
+  }
+}
+
+@media (min-width: 1500px) {
+  #doom-demo {
+    width: min(calc(100vw - 28px), 1840px);
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    display: grid;
+    grid-template-columns: minmax(820px, 1fr) minmax(340px, 460px);
+    grid-template-areas:
+      "screen debug"
+      "output debug"
+      "prompt debug"
+      "legal debug"
+      "actions debug"
+      "status debug";
+    align-items: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-screen-panel {
+    grid-area: screen;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-area: debug;
+    align-self: start;
+    max-height: calc(100vh - 92px);
+    overflow: auto;
+    position: sticky;
+    top: 82px;
+  }
+
+  #doom-demo .console-body.is-doom-running #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    grid-area: legal;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-approval-actions {
+    grid-area: actions;
+  }
+
+  #doom-demo .console-body.is-doom-running #output {
+    grid-area: output;
+  }
+
+  #doom-demo .console-body.is-doom-running #runtime-status,
+  #doom-demo .console-body.is-doom-running #halted,
+  #doom-demo .console-body.is-doom-running #panic {
+    grid-area: status;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-toggles {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller {
+    max-height: min(58vh, 700px);
+    overflow: hidden;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-grid {
+    grid-template-columns: minmax(128px, 0.48fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "state debug-log"
+      "commands debug-log"
+      "keys debug-log";
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-state-wrap {
+    grid-area: state;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-command-row {
+    grid-area: commands;
+    align-content: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-keypad {
+    grid-area: keys;
+    align-content: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-debug-log {
+    grid-area: debug-log;
+    align-self: stretch;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (min-width: 2100px) {
+  #doom-demo {
+    width: min(calc(100vw - 72px), 2080px);
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns: minmax(1040px, 1fr) minmax(480px, 620px);
+  }
+}
+
+@media (min-width: 2400px) and (min-height: 1180px) {
+  #doom-demo {
+    --doom-xlarge-screen-height: min(52vh, 700px);
+    --doom-xlarge-screen-width: min(100%, 1120px);
+    width: min(calc(100vw - 72px), 2360px);
+  }
+
+  #doom-demo .console-body {
+    gap: 16px;
+    padding: 18px;
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(460px, 560px);
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas:
+      "screen screen"
+      "debug debug"
+      "output output"
+      "legal legal"
+      "actions actions"
+      "status status";
+    align-items: start;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-screen-wrap {
+    width: 100%;
+    max-height: var(--doom-xlarge-screen-height);
+    margin-inline: auto;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container {
+    grid-template-columns: minmax(0, var(--doom-xlarge-screen-width));
+    justify-content: center;
+    align-items: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-screen-wrap {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container:has(#doom-controller:not([hidden])) {
+    grid-template-columns: minmax(0, var(--doom-xlarge-screen-width)) minmax(340px, 440px);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    max-height: var(--doom-xlarge-screen-height);
+    overflow: hidden;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-controller-debug-log {
+    grid-area: debug-log;
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    margin-top: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-controller-debug-log-head {
+    flex: 0 0 auto;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-controller-debug-log ol {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "help"
+      "actions"
+      "sensors";
+    gap: 12px;
+    align-self: start;
+    justify-self: stretch;
+    max-height: none;
+    position: static;
+    top: auto;
+    width: 100%;
+    max-width: none;
+    overflow: visible;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-help {
+    grid-area: help;
+    align-self: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions {
+    grid-area: actions;
+    align-self: stretch;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #doom-demo .console-body.is-doom-running #wasm-prompt {
+    grid-area: prompt;
+    align-self: start;
+    position: static;
+    width: 100%;
+    margin-top: 0;
+    transform: none;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: output;
+    display: grid;
+    grid-template-areas:
+      "log"
+      "prompt";
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    grid-area: log;
+    height: auto;
+    min-height: 96px;
+    max-height: clamp(128px, 12vh, 190px);
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running #output {
+    grid-area: output;
+    align-self: start;
+    height: var(--doom-xlarge-screen-height);
+    min-height: 0;
+    max-height: var(--doom-xlarge-screen-height);
+    margin-top: 0;
+    margin-bottom: 0;
+    overflow: auto;
+    position: static;
+    top: auto;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    justify-self: start;
+    justify-content: flex-start;
+    align-items: flex-start;
+    width: min(100%, 980px);
+    max-width: 980px;
+    text-align: left;
+  }
+
+  #doom-demo .console-body.is-doom-running #runtime-status,
+  #doom-demo .console-body.is-doom-running #halted,
+  #doom-demo .console-body.is-doom-running #panic {
+    align-self: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions,
+  #doom-demo .console-body.is-doom-running .doom-detection-toggles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-toggles {
+    grid-area: sensors;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    margin-top: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-sensor-node,
+  #doom-demo .console-body.is-doom-running .doom-sensor-node.is-aisthesis {
+    grid-row: auto;
+    min-height: 0;
+  }
+}
+
+@media (min-width: 1500px) and (max-width: 2399.98px) {
+  #doom-demo {
+    --doom-desktop-screen-height: min(52vh, 620px);
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+    grid-template-areas:
+      "screen console"
+      "debug debug"
+      "legal legal"
+      "actions actions"
+      "status status";
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-screen-panel {
+    grid-area: screen;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container:has(#doom-controller:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    align-items: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-screen-wrap {
+    grid-column: 1;
+    grid-row: 1;
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    max-height: var(--doom-desktop-screen-height);
+    overflow: hidden;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-grid {
+    grid-template-columns: minmax(126px, 0.46fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "state debug-log"
+      "commands debug-log"
+      "keys debug-log";
+    height: auto;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-state-wrap {
+    grid-area: state;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-command-row {
+    grid-area: commands;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-keypad {
+    grid-area: keys;
+    align-content: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-debug-log {
+    grid-area: debug-log;
+    align-self: stretch;
+    height: 100%;
+    min-height: 0;
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-area: debug;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "help"
+      "actions"
+      "sensors";
+    gap: 12px;
+    align-items: start;
+    align-self: start;
+    justify-self: stretch;
+    position: static;
+    top: auto;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-help {
+    grid-area: help;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions {
+    grid-area: actions;
+    align-self: start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions > button {
+    flex: 0 1 148px;
+    min-width: 112px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-area: sensors;
+    grid-template-columns: 1.04fr repeat(3, minmax(0, 1fr));
+    width: 100%;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console;
+    display: grid;
+    grid-template-areas:
+      "log"
+      "prompt";
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+    align-self: stretch;
+    min-height: 0;
+    height: var(--doom-desktop-screen-height);
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    grid-area: log;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    overflow: auto;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running #output {
+    grid-area: output;
+    align-self: stretch;
+    max-height: clamp(118px, 13vh, 176px);
+  }
+
+  #doom-demo .console-body.is-doom-running #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    grid-area: legal;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-approval-actions {
+    grid-area: actions;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1499.98px) {
+  #doom-demo {
+    --doom-desktop-screen-height: min(50vh, 560px);
+  }
+
+  #doom-demo .console-body.is-doom-running {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    grid-template-areas:
+      "screen console"
+      "debug debug"
+      "legal legal"
+      "actions actions"
+      "status status";
+    align-items: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-screen-panel {
+    grid-area: screen;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-container:has(#doom-controller:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    align-items: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-screen-wrap {
+    grid-column: 1;
+    grid-row: 1;
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+    max-height: var(--doom-desktop-screen-height);
+    overflow: hidden;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-grid {
+    grid-template-columns: minmax(116px, 0.44fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "state debug-log"
+      "commands debug-log"
+      "keys debug-log";
+    height: auto;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-state-wrap {
+    grid-area: state;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-command-row {
+    grid-area: commands;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-keypad {
+    grid-area: keys;
+    align-content: start;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-controller .doom-control-panel-debug-log {
+    grid-area: debug-log;
+    align-self: stretch;
+    height: 100%;
+    min-height: 0;
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-area: debug;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "help"
+      "actions"
+      "sensors";
+    gap: 12px;
+    align-items: start;
+    justify-self: stretch;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    position: static;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-help {
+    grid-area: help;
+  }
+
+  #doom-demo .console-body.is-doom-running .doom-debug-actions {
+    grid-area: actions;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-area: sensors;
+    grid-template-columns: 1.04fr repeat(3, minmax(0, 1fr));
+    width: 100%;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console;
+    display: grid;
+    grid-template-areas:
+      "log"
+      "prompt";
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+    align-self: stretch;
+    min-height: 0;
+    height: var(--doom-desktop-screen-height);
+    max-height: var(--doom-desktop-screen-height);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    grid-area: log;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    font-size: 0.7rem;
+    line-height: 1.34;
+    overflow: auto;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running #output {
+    grid-area: output;
+    max-height: clamp(108px, 13vh, 158px);
+  }
+
+  #doom-demo .console-body.is-doom-running #wasm-prompt {
+    grid-area: prompt;
+  }
+
+  #doom-demo .console-body.is-doom-running .prompt-legal {
+    grid-area: legal;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-approval-actions {
+    grid-area: actions;
+  }
+}
+
+#doom-demo #doom-screen-panel,
+#doom-demo #doom-debug-bar,
+#doom-demo #wasm-prompt,
+#doom-demo #output,
+#doom-demo #runtime-status,
+#doom-demo .prompt-legal,
+#doom-demo #doom-controller,
+#doom-demo .doom-controller-section,
+#doom-demo .doom-sensor-node {
+  min-width: 0;
+}
+
+#doom-demo .doom-debug-bar button.doom-sensor-switch .sensor-compass-needle {
+  opacity: var(--compass-signal-opacity, 1);
+  transition: opacity 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+#doom-demo .doom-debug-bar button.doom-sensor-switch .sensor-compass-needle.is-decaying {
+  border-color: rgba(142, 228, 255, 0.42);
+  background: radial-gradient(circle at 12px 50%, rgba(142, 228, 255, 0.18), rgba(5, 10, 18, 0.34) 70%);
+}
+
+#doom-demo .doom-debug-bar button.doom-sensor-switch .sensor-compass-needle.is-decaying .sensor-compass-arrow {
+  animation: none !important;
+  color: rgb(142, 228, 255);
+  text-shadow: 0 0 10px rgba(84, 215, 255, 0.78);
+}
+
+#doom-demo .doom-debug-bar button.doom-sensor-switch .sensor-compass-needle.is-decaying .sensor-compass-readout {
+  color: rgba(212, 239, 255, 0.82);
+}
+
+#doom-demo #doom-debug-overlay .doom-thought-grid-card[data-hud-panel] {
+  contain: layout paint;
+}
+
+#doom-demo #doom-debug-overlay .doom-thought-grid-card[data-hud-panel] > div {
+  max-width: 100%;
+}
+
+#doom-demo #doom-aik-console-stack {
+  display: grid;
+  grid-template-areas:
+    "log"
+    "prompt";
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+#doom-demo #doom-aik-console-stack #output {
+  grid-area: log !important;
+  width: 100%;
+  min-width: 0;
+}
+
+#doom-demo #doom-aik-console-stack #wasm-prompt {
+  grid-area: prompt !important;
+  width: 100%;
+  min-width: 0;
+}
+
+#doom-demo #wasm-prompt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+#doom-demo #wasm-prompt .prompt-submit,
+#doom-demo #wasm-command-run {
+  justify-self: end;
+  min-width: 70px;
+}
+
+@media (min-width: 1280px) and (max-width: 1499.98px) {
+  #doom-demo .console-body.is-doom-running {
+    grid-template-areas:
+      "screen console"
+      "debug debug"
+      "legal legal"
+      "actions actions"
+      "status status";
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1499.98px) {
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    max-height: none;
+    font-size: 0.7rem;
+    line-height: 1.34;
+  }
+}
+
+@media (min-width: 1500px) and (max-width: 2399.98px) {
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    max-height: none;
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+}
+
+@media (min-width: 1280px) {
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, clamp(340px, 22vw, 520px));
+    grid-template-areas:
+      "screen console"
+      "debug debug"
+      "legal legal"
+      "actions actions"
+      "status status";
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console;
+    height: var(--doom-desktop-screen-height, var(--doom-xlarge-screen-height, min(52vh, 620px)));
+    max-height: var(--doom-desktop-screen-height, var(--doom-xlarge-screen-height, min(52vh, 620px)));
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.7fr) minmax(280px, 1fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+    align-content: start;
+    grid-auto-rows: max-content;
+    min-height: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node {
+    min-height: 0;
+    height: max-content !important;
+    align-self: start !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-stages {
+    grid-template-rows: none !important;
+    grid-auto-rows: max-content !important;
+    align-content: start !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-stage {
+    align-self: start !important;
+    min-height: 0 !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node[data-sensor-panel="aisthesis"] {
+    grid-column: 1 / 2 !important;
+    grid-row: 1 / 2 !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node[data-sensor-panel="noesis"] {
+    grid-column: 2 / 3 !important;
+    grid-row: 1 / 2 !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node[data-sensor-panel="krisis"] {
+    grid-column: 3 / 4 !important;
+    grid-row: 1 / 2 !important;
+    height: fit-content !important;
+    align-self: start !important;
+    max-height: max-content;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node[data-sensor-panel="kinesis"] {
+    grid-column: 1 / 4 !important;
+    grid-row: 2 / 3 !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-sensor-node-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1599.98px) {
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-template-columns: minmax(250px, 0.9fr) minmax(0, 1.45fr) minmax(250px, 0.92fr);
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node {
+    padding: 7px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-sensor-switch,
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
+    min-height: 36px;
+  }
+}
+
+@media (min-width: 2400px) and (min-height: 1180px) {
+  #doom-demo .console-body.is-doom-running {
+    grid-template-areas:
+      "screen console"
+      "debug debug"
+      "legal legal"
+      "actions actions"
+      "status status";
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console;
+  }
+}
+
+/* Final public layout tightening: keep the command console compact and put
+   debug actions beside the SENSOR PIPELINE title to preserve vertical space. */
+@media (min-width: 1280px) {
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-template-rows: auto auto !important;
+    align-self: start !important;
+    height: auto !important;
+    max-height: var(--doom-desktop-screen-height, var(--doom-xlarge-screen-height, min(52vh, 620px))) !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    min-height: 112px !important;
+    max-height: clamp(132px, 20vh, 240px) !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    align-self: start !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "title actions"
+      "sensors sensors";
+    gap: 7px 9px;
+    align-items: center;
+    padding-top: 7px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-debug-help {
+    display: none !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-pipeline-title {
+    grid-area: title;
+    align-self: center;
+    white-space: nowrap;
+    margin: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-debug-actions {
+    grid-area: actions;
+    align-self: center;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-debug-actions > button {
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 28px;
+    padding: 5px 9px;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1499.98px) {
+  #doom-demo .console-body.is-doom-running {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "screen"
+      "console"
+      "debug"
+      "legal"
+      "actions"
+      "status" !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack {
+    grid-area: console !important;
+    width: 100%;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #output {
+    min-height: 92px !important;
+    max-height: clamp(112px, 16vh, 176px) !important;
+    font-size: 0.68rem;
+    line-height: 1.22;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+    min-height: 46px;
+  }
+}
+
+@media (max-width: 1279.98px) {
+  #doom-demo .console-body.is-doom-running #doom-debug-bar {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "title"
+      "actions"
+      "sensors" !important;
+    gap: 9px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-pipeline-title {
+    grid-area: title !important;
+    margin: 0;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-debug-actions {
+    grid-area: actions !important;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 7px;
+    width: 100%;
+    margin: 0;
+    align-self: stretch;
+    justify-content: stretch;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-debug-actions > button {
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+    grid-area: sensors !important;
+    margin-top: 0;
+  }
+}
+
+#doom-demo {
+  left: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-inline: auto !important;
+  transform: none !important;
+}
+
+@media (max-width: 520px) {
+  #doom-demo .console-body {
+    padding: 8px;
+  }
+
+  #doom-demo .doom-debug-actions,
+  #doom-demo .doom-detection-toggles {
+    grid-template-columns: 1fr;
+  }
+
+  #doom-demo .doom-screen-wrap {
+    min-height: 190px;
+    border-radius: 8px;
+  }
+}

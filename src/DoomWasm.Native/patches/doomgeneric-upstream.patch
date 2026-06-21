@@ -1,0 +1,79 @@
+diff --git a/doomgeneric/d_main.c b/doomgeneric/d_main.c
+index 9012e5f..b532cda 100644
+--- a/doomgeneric/d_main.c
++++ b/doomgeneric/d_main.c
+@@ -304,6 +304,14 @@ void D_Display (void)
+ 	I_FinishUpdate ();              // page flip or blit buffer
+ 	return;
+     }
++
++#ifdef AIKERNEL_DOOM_WASM
++    // AIKernel drives frames cooperatively from JavaScript.  The vanilla wipe
++    // path runs a synchronous loop until the transition completes, which can
++    // monopolize the WASM worker during menu -> episode -> skill transitions.
++    I_FinishUpdate ();
++    return;
++#endif
+     
+     // wipe update
+     wipe_EndScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
+@@ -437,7 +445,9 @@ void D_DoomLoop (void)
+ 
+     main_loop_started = true;
+ 
++#ifndef AIKERNEL_DOOM_WASM
+     TryRunTics();
++#endif
+ 
+     I_SetWindowTitle(gamedescription);
+     I_GraphicsCheckCommandLine();
+@@ -455,7 +465,9 @@ void D_DoomLoop (void)
+         wipegamestate = gamestate;
+     }
+ 
++#ifndef AIKERNEL_DOOM_WASM
+     doomgeneric_Tick();
++#endif
+ }
+ 
+ 
+diff --git a/doomgeneric/i_sound.c b/doomgeneric/i_sound.c
+index c80a9d1..8ee078d 100644
+--- a/doomgeneric/i_sound.c
++++ b/doomgeneric/i_sound.c
+@@ -18,7 +18,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
+-#if defined(FEATURE_SOUND) && !defined(__DJGPP__)
++#if defined(FEATURE_SOUND) && !defined(__DJGPP__) && !defined(AIKERNEL_DOOM_WASM)
+ #include <SDL_mixer.h>
+ #endif
+ 
+diff --git a/doomgeneric/m_misc.c b/doomgeneric/m_misc.c
+index 54b2613..2fb7106 100644
+--- a/doomgeneric/m_misc.c
++++ b/doomgeneric/m_misc.c
+@@ -47,6 +47,7 @@
+ #include "v_video.h"
+ #include "w_wad.h"
+ #include "z_zone.h"
++#include "aik_doom_wad.h"
+ 
+ //
+ // Create a directory
+@@ -67,6 +68,14 @@ boolean M_FileExists(char *filename)
+ {
+     FILE *fstream;
+ 
++    if (filename != NULL
++     && aik_doom_wad_status() == AIK_DOOM_OK
++     && (strcasecmp(filename, "doom1.wad") == 0
++      || strcasecmp(filename, "aikernel.wad") == 0))
++    {
++        return true;
++    }
++
+     fstream = fopen(filename, "r");
+ 
+     if (fstream != NULL)

@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DoomCapabilities/DoomCapabilities.csproj" />
+    <Project Path="src/DoomDemo/DoomDemo.csproj" />
+    <Project Path="src/DoomOptimizer/DoomOptimizer.csproj" />
+    <Project Path="src/DoomProvider/DoomProvider.csproj" />
+    <Project Path="src/DoomWeb/DoomWeb.csproj" />
+    <Project Path="src/DoomWasm.Native/DoomWasm.Native.csproj" />
+    <Project Path="src/DoomWasm/DoomWasm.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AIKernel.Doom.Architecture.Tests/AIKernel.Doom.Architecture.Tests.csproj" />
+  </Folder>
+</Solution>

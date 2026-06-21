@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AIKernel.Doom Terms and License Notices</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #07111f;
+            --panel: #0d1a2b;
+            --text: #ecf6ff;
+            --muted: #a8bad0;
+            --accent: #63c5ff;
+            --warn: #ffd18a;
+            --line: rgba(143, 202, 255, 0.2);
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.6;
+        }
+
+        main {
+            width: min(920px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 42px 0 64px;
+        }
+
+        h1,
+        h2 {
+            letter-spacing: 0;
+            line-height: 1.2;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 2rem;
+        }
+
+        h2 {
+            margin: 30px 0 10px;
+            font-size: 1.18rem;
+            color: var(--accent);
+        }
+
+        p,
+        li {
+            color: var(--muted);
+        }
+
+        a {
+            color: var(--accent);
+        }
+
+        .notice {
+            margin: 22px 0;
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+        }
+
+        .warn {
+            color: var(--warn);
+        }
+
+        code {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.07);
+            border-radius: 4px;
+            padding: 0.08rem 0.3rem;
+        }
+
+        .translation {
+            margin-top: 48px;
+            padding-top: 32px;
+            border-top: 1px solid var(--line);
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>AIKernel.Doom Terms and License Notices</h1>
+        <p>
+            This page summarizes runtime consent, third-party rights, hosted asset notices, redistribution notices,
+            and asset responsibilities for the AIKernel.Doom public prompt.
+        </p>
+        <p>
+            Read this notice before typing <code>yes</code> in the suspended prompt.
+        </p>
+
+        <div class="notice">
+            <p class="warn">
+                No commercial DOOM WAD is bundled here. This deployment hosts only the unmodified shareware
+                DOOM1.WAD identified in the WAD manifest. Do not upload, substitute, mirror, redistribute, or use
+                commercial WAD files unless you have the legal right to use them.
+            </p>
+        </div>
+
+        <p>
+            This notice is provided for transparency and is not legal advice. Operators and users are responsible
+            for verifying all third-party rights, license terms, redistribution permissions, trademark obligations,
+            hosting requirements, and production-use obligations.
+        </p>
+
+        <h2>Runtime Consent</h2>
+        <p>
+            The AIKernel.Doom demo remains suspended until the user explicitly approves by typing
+            <code>yes</code>.
+        </p>
+        <p>
+            Approval allows this deployment to download, cache, load, validate, and use the configured runtime
+            files, including:
+        </p>
+        <ul>
+            <li>the hosted shareware <code>DOOM1.WAD</code> asset</li>
+            <li>the hosted <code>Bonsai-1.7B-Q1_0.gguf</code> model file</li>
+            <li>the <code>doom.wasm</code> runtime artifact</li>
+            <li>related manifests, notices, and demo metadata</li>
+        </ul>
+        <p>
+            The <code>Bonsai-1.7B-Q1_0.gguf</code> model file is redistributed by this deployment from the
+            upstream Hugging Face model repository identified in the model manifest.
+        </p>
+        <p>
+            The expected protected download/cache size for this deployment is approximately 253 MB for the core
+            hosted runtime files, or approximately 270 MB when auxiliary model metadata in this deployment is
+            included. This is under 300 MB in the current deployment.
+        </p>
+        <p>
+            The exact transferred size can vary depending on browser cache state, compression, model file size,
+            WAD file size, WASM artifact size, manifest size, notice files, and deployment configuration.
+        </p>
+        <p>
+            No download or loading of hosted WAD data, model files, or other large runtime assets is started
+            before explicit approval.
+        </p>
+        <p>
+            Rejecting the prompt, closing the prompt, or entering anything other than an accepted confirmation
+            keeps the DOOM runtime suspended and prevents the protected download/load sequence.
+        </p>
+
+        <h2>DOOM Engine Source</h2>
+        <p>
+            The WASM port is based on doomgeneric from
+            <a href="https://github.com/ozkl/doomgeneric" target="_blank" rel="noopener noreferrer">ozkl/doomgeneric</a>.
+        </p>
+        <p>
+            doomgeneric is distributed under the GNU General Public License v2.0. The source code license,
+            copyright notices, and GPL notices from that project must be preserved when the source is fetched,
+            modified, compiled, or redistributed.
+        </p>
+        <p>
+            Because this deployment distributes a compiled <code>doom.wasm</code> artifact derived from
+            GPL-covered DOOM engine source, the corresponding source code, AIKernel.Doom patches, build scripts,
+            and license notices must be made available as required by the applicable GPL terms.
+        </p>
+        <p>
+            The corresponding source distribution for this deployment should include, or link to, at least:
+        </p>
+        <ul>
+            <li>the doomgeneric source version used for the build</li>
+            <li>AIKernel.Doom source files that modify, patch, wrap, or integrate doomgeneric</li>
+            <li>Emscripten / WASM build scripts</li>
+            <li>patches applied to the DOOM engine source</li>
+            <li><code>doom.wasm</code> build instructions</li>
+            <li>GPL license text</li>
+            <li>copyright and attribution notices</li>
+        </ul>
+        <p>
+            If this deployment provides a separate source bundle or source repository, the deployment manifest or
+            this page should identify its location.
+        </p>
+        <p>
+            This deployment identifies the corresponding source recipe in the public AIKernel.Doom repository and
+            in the deployment manifest at <code>/demo/doom/module.json</code>. The current
+            <code>doom.wasm</code> build uses doomgeneric commit
+            <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code>.
+        </p>
+        <ul>
+            <li>Upstream source: <code>https://github.com/ozkl/doomgeneric</code> at commit <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code></li>
+            <li>Source fetch scripts: <code>AIKernel.Doom/src/DoomWasm.Native/tools/fetch-doomgeneric.ps1</code> and <code>fetch-doomgeneric.sh</code></li>
+            <li>AIKernel overlay source: <code>AIKernel.Doom/src/DoomWasm.Native/src</code></li>
+            <li>WASM build scripts: <code>AIKernel.Doom/src/DoomWasm.Native/build.ps1</code>, <code>build.sh</code>, and <code>Makefile</code></li>
+            <li>Patch record: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-aikernel.patch</code></li>
+            <li>Applicable upstream patch: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-upstream.patch</code></li>
+            <li>Native audio bridge overlay: <code>AIKernel.Doom/src/DoomWasm.Native/src/aik_doom_sound.c</code></li>
+        </ul>
+
+        <h2>DOOM WAD Asset Notice</h2>
+        <p>
+            Game data is separate from the DOOM engine.
+        </p>
+        <p>
+            This deployment hosts and redistributes an unmodified copy of the shareware <code>DOOM1.WAD</code>
+            file for the AIKernel.Doom public demo runtime.
+        </p>
+        <p>
+            The hosted WAD was extracted from the source archive:
+            <a href="https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip" target="_blank" rel="noopener noreferrer">shareware_doom_iwad.zip</a>.
+        </p>
+        <p>
+            The runtime path used by this deployment is:
+            <code>/demo/doom/DOOM1.WAD</code>
+        </p>
+        <p>
+            The hosted file is intended to be the shareware <code>DOOM1.WAD</code> IWAD only. DOOM1.WAD is the
+            IWAD used by the shareware version of Doom and contains the shareware episode data.
+        </p>
+        <p>
+            This deployment does not host, mirror, include, or redistribute registered DOOM, Ultimate DOOM,
+            DOOM II, Final DOOM, TNT, Plutonia, or any other commercial or proprietary DOOM IWAD.
+        </p>
+        <p>
+            Commercial WAD files must not be uploaded, substituted, mirrored, redistributed, or used with this
+            public demo unless the operator and user have the legal right to do so.
+        </p>
+        <p>
+            This deployment does not claim ownership of DOOM, DOOM1.WAD, id Software trademarks,
+            Bethesda/Microsoft trademarks, Doomworld, or any third-party game data.
+        </p>
+        <p>
+            The hosted DOOM1.WAD is redistributed only as an unmodified shareware asset for demo execution. The
+            original shareware terms, copyright notices, and any notices included with the source archive should
+            be preserved and made available alongside this notice where applicable.
+        </p>
+        <p>
+            The deployment manifest identifies the hosted file, source archive, hosted path, file size, checksum,
+            version when known, redistribution status, and validation policy.
+        </p>
+        <p>
+            For the unmodified shareware DOOM1.WAD v1.9, the expected metadata is:
+        </p>
+        <ul>
+            <li>file name: <code>DOOM1.WAD</code></li>
+            <li>source archive: <code>shareware_doom_iwad.zip</code></li>
+            <li>hosted path: <code>/demo/doom/DOOM1.WAD</code></li>
+            <li>type: <code>IWAD</code></li>
+            <li>variant: <code>shareware</code></li>
+            <li>expected size: <code>4,196,020 bytes</code></li>
+            <li>expected MD5: <code>f0cefca49926d00903cf57551d901abe</code></li>
+            <li>expected SHA-1: <code>5b2e249b9c5133ec987b3ea77596381dc0d6bc1d</code></li>
+            <li>expected SHA-256: <code>1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771</code></li>
+        </ul>
+        <p>
+            The runtime should validate the hosted WAD against the configured manifest before loading it. If the
+            file does not match the expected unmodified shareware WAD metadata, the runtime should fail closed and
+            keep the DOOM demo suspended.
+        </p>
+        <p>
+            DoomWiki may be referenced for technical background about the shareware IWAD. DoomWiki is referenced
+            for technical background only and is not treated as a license grant or redistribution authorization for
+            this deployment.
+        </p>
+
+        <h2>Bonsai-1.7B Model Redistribution Notice</h2>
+        <p>
+            This deployment redistributes a copy of the Bonsai-1.7B GGUF model file obtained from Hugging Face.
+        </p>
+        <p>
+            Hosted model file:
+            <code>/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf</code>
+        </p>
+        <p>
+            Upstream model repository:
+            <code>prism-ml/Bonsai-1.7B-gguf</code>
+        </p>
+        <p>
+            The upstream Hugging Face model repository identifies the model license as Apache-2.0 and provides the
+            <code>Bonsai-1.7B-Q1_0.gguf</code> model file.
+        </p>
+        <p>
+            This deployment does not claim ownership of the Bonsai-1.7B model weights.
+        </p>
+        <p>
+            The model file is mirrored here only for the AIKernel.Doom public demo runtime. Use, download, caching,
+            inference, redistribution, and further mirroring of this model remain subject to the upstream model
+            license, model card, NOTICE file, attribution requirements, and any applicable Hugging Face or
+            rights-holder terms.
+        </p>
+        <p>
+            This deployment preserves and publishes the following files or equivalent notices:
+        </p>
+        <ul>
+            <li><code>/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf</code></li>
+            <li><code>/models/bonsai1.7b/LICENSE</code></li>
+            <li><code>/models/bonsai1.7b/NOTICE.txt</code></li>
+            <li><code>/models/bonsai1.7b/manifest.json</code></li>
+        </ul>
+        <p>
+            The manifest identifies the upstream repository, exact filename, format, quantization, file size,
+            checksum, license identifier, notice file path, and redistribution status.
+        </p>
+        <p>
+            The mirrored model distribution includes or makes available the upstream Apache-2.0 license text and
+            <code>NOTICE.txt</code> file.
+        </p>
+        <p>
+            If the hosted model file is modified, converted, renamed, repacked, requantized, or otherwise changed
+            from the upstream file, the manifest and notices must clearly identify the change.
+        </p>
+        <p>
+            Users and operators are responsible for verifying that their use, caching, redistribution, inference,
+            or further mirroring of the model complies with the applicable license and terms.
+        </p>
+
+        <h2>Hosted Asset Integrity and Manifest Validation</h2>
+        <p>
+            Hosted assets should be described by machine-readable manifests.
+        </p>
+        <p>
+            Each hosted asset manifest should identify:
+        </p>
+        <ul>
+            <li>asset name</li>
+            <li>asset kind</li>
+            <li>local path</li>
+            <li>public runtime path</li>
+            <li>upstream source or source archive</li>
+            <li>version or revision when known</li>
+            <li>file format</li>
+            <li>file size</li>
+            <li>checksum</li>
+            <li>license identifier</li>
+            <li>notice file path</li>
+            <li>redistribution status</li>
+            <li>validation policy</li>
+            <li>cache policy</li>
+        </ul>
+        <p>
+            The runtime should validate configured size and checksum values before loading protected hosted assets.
+        </p>
+        <p>
+            If validation fails, the runtime should fail closed, keep the DOOM runtime suspended, and avoid loading
+            the affected asset.
+        </p>
+        <h2>Emscripten and WebAssembly Tooling</h2>
+        <p>
+            The <code>doom.wasm</code> artifact is produced with Emscripten.
+        </p>
+        <p>
+            Emscripten, LLVM, Binaryen, WASI-related components, and related WebAssembly tooling carry their own
+            open-source licenses. Toolchain notices should be preserved in build documentation, source
+            distributions, and release artifacts where required.
+        </p>
+
+        <h2>AIKernel and WebGPU Compute</h2>
+        <p>
+            AIKernel.Doom uses AIKernel packages and <code>WebGpuComputeProvider</code> for the rendering path and
+            Bonsai supervisor execution surface.
+        </p>
+        <p>
+            Browser and host WebGPU availability may vary by browser, device, operating system, driver, and
+            secure-context availability. When WebGPU is unavailable, disabled, or unsupported, the provider may use
+            a deterministic CPU fallback path where configured.
+        </p>
+
+        <h2>No Warranty</h2>
+        <p>
+            AIKernel.Doom is provided for development, interoperability testing, and demonstration purposes.
+        </p>
+        <p>
+            The demo is provided as-is, without warranties of any kind, including fitness for a particular purpose,
+            availability, correctness, legal compliance, or non-infringement.
+        </p>
+        <p>
+            This notice is not legal advice. Operators and users are responsible for verifying all third-party
+            licenses, model terms, asset rights, export restrictions, hosting obligations, attribution
+            requirements, redistribution permissions, trademark obligations, and production-use obligations before
+            redistribution, public hosting, commercial use, or production use.
+        </p>
+
+        <section class="translation" lang="ja">
+            <h1>AIKernel.Doom 利用規約およびライセンス表示</h1>
+            <p>
+                このページは、AIKernel.Doom の公開プロンプトに関する、実行時の同意、第三者の権利、
+                ホストされるアセットに関する表示、再配布に関する表示、およびアセットに関する責任を
+                まとめたものです。
+            </p>
+            <p>
+                サスペンドされたプロンプトで <code>yes</code> と入力する前に、この表示を確認してください。
+            </p>
+
+            <div class="notice">
+                <p class="warn">
+                    本デプロイには商用 DOOM WAD は同梱されていません。本デプロイがホストするのは、
+                    WAD マニフェストで識別される未改変の shareware 版 <code>DOOM1.WAD</code> のみです。
+                    商用 WAD ファイルを使用する法的権利を有していない限り、商用 WAD ファイルを
+                    アップロード、差し替え、ミラー配信、再配布、または使用しないでください。
+                </p>
+            </div>
+
+            <p>
+                この表示は透明性のために提供されるものであり、法的助言ではありません。運用者および
+                ユーザーは、第三者の権利、ライセンス条項、再配布許可、商標上の義務、
+                ホスティング要件、および本番利用に関する義務を確認する責任を負います。
+            </p>
+
+            <h2>実行時の同意</h2>
+            <p>
+                AIKernel.Doom デモは、ユーザーが <code>yes</code> と入力して明示的に承認するまで、
+                サスペンドされた状態を維持します。
+            </p>
+            <p>
+                承認すると、本デプロイは、以下を含む設定済みの実行時ファイルをダウンロード、
+                キャッシュ、ロード、検証、および使用できるようになります。
+            </p>
+            <ul>
+                <li>ホストされている shareware 版 <code>DOOM1.WAD</code> アセット</li>
+                <li>ホストされている <code>Bonsai-1.7B-Q1_0.gguf</code> モデルファイル</li>
+                <li><code>doom.wasm</code> 実行時アーティファクト</li>
+                <li>関連するマニフェスト、表示文書、およびデモ用メタデータ</li>
+            </ul>
+            <p>
+                <code>Bonsai-1.7B-Q1_0.gguf</code> モデルファイルは、モデルマニフェストで識別される
+                上流の Hugging Face モデルリポジトリから取得され、本デプロイにより再配布されます。
+            </p>
+            <p>
+                本デプロイにおける保護対象のダウンロード／キャッシュサイズの想定値は、コアとなる
+                ホスト済み実行時ファイルで約 253 MB、補助的なモデルメタデータを含めると約 270 MB
+                です。現在のデプロイでは 300 MB 未満です。
+            </p>
+            <p>
+                実際の転送サイズは、ブラウザのキャッシュ状態、圧縮、モデルファイルサイズ、
+                WAD ファイルサイズ、WASM アーティファクトサイズ、マニフェストサイズ、表示文書、
+                およびデプロイ構成によって変動する場合があります。
+            </p>
+            <p>
+                明示的な承認が行われる前に、ホストされている WAD データ、モデルファイル、または
+                その他の大容量実行時アセットのダウンロードやロードは開始されません。
+            </p>
+            <p>
+                プロンプトを拒否する、プロンプトを閉じる、または受け入れられる確認入力以外を
+                入力した場合、DOOM ランタイムはサスペンドされた状態を維持し、保護された
+                ダウンロード／ロードシーケンスは開始されません。
+            </p>
+
+            <h2>DOOM エンジンソース</h2>
+            <p>
+                WASM 移植版は、<code>ozkl/doomgeneric</code> の <code>doomgeneric</code> をベースにしています。
+            </p>
+            <p>
+                <code>doomgeneric</code> は GNU General Public License v2.0 に基づいて配布されています。
+                当該プロジェクトのソースコードライセンス、著作権表示、および GPL 表示は、
+                ソースコードの取得、改変、コンパイル、または再配布時に保持されなければなりません。
+            </p>
+            <p>
+                本デプロイは、GPL の対象となる DOOM エンジンソースに由来するコンパイル済みの
+                <code>doom.wasm</code> アーティファクトを配布するため、適用される GPL 条項に従い、
+                対応するソースコード、AIKernel.Doom のパッチ、ビルドスクリプト、およびライセンス表示を
+                利用可能にする必要があります。
+            </p>
+            <p>
+                本デプロイに対応するソース配布には、少なくとも以下を含める、またはそれらへのリンクを
+                提供する必要があります。
+            </p>
+            <ul>
+                <li>ビルドに使用された <code>doomgeneric</code> のソースバージョン</li>
+                <li><code>doomgeneric</code> を変更、パッチ適用、ラップ、または統合する AIKernel.Doom のソースファイル</li>
+                <li>Emscripten / WASM ビルドスクリプト</li>
+                <li>DOOM エンジンソースに適用されたパッチ</li>
+                <li><code>doom.wasm</code> のビルド手順</li>
+                <li>GPL ライセンス本文</li>
+                <li>著作権表示および帰属表示</li>
+            </ul>
+            <p>
+                本デプロイが個別のソースバンドルまたはソースリポジトリを提供する場合、
+                デプロイマニフェストまたはこのページでその場所を識別する必要があります。
+            </p>
+            <p>
+                本デプロイの対応ソースの再現手順は、公開される AIKernel.Doom リポジトリと
+                <code>/demo/doom/module.json</code> のデプロイマニフェストから識別できます。
+                現在の <code>doom.wasm</code> は doomgeneric commit
+                <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code> を使用してビルドされています。
+            </p>
+            <ul>
+                <li>Upstream source: <code>https://github.com/ozkl/doomgeneric</code> commit <code>dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284</code></li>
+                <li>Source fetch scripts: <code>AIKernel.Doom/src/DoomWasm.Native/tools/fetch-doomgeneric.ps1</code> and <code>fetch-doomgeneric.sh</code></li>
+                <li>AIKernel overlay source: <code>AIKernel.Doom/src/DoomWasm.Native/src</code></li>
+                <li>WASM build scripts: <code>AIKernel.Doom/src/DoomWasm.Native/build.ps1</code>, <code>build.sh</code>, <code>Makefile</code></li>
+                <li>Patch record: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-aikernel.patch</code></li>
+                <li>Applicable upstream patch: <code>AIKernel.Doom/src/DoomWasm.Native/patches/doomgeneric-upstream.patch</code></li>
+                <li>Native audio bridge overlay: <code>AIKernel.Doom/src/DoomWasm.Native/src/aik_doom_sound.c</code></li>
+            </ul>
+
+            <h2>DOOM WAD アセットに関する表示</h2>
+            <p>ゲームデータは DOOM エンジンとは別のものです。</p>
+            <p>
+                本デプロイは、AIKernel.Doom 公開デモの実行時に使用するため、shareware 版
+                <code>DOOM1.WAD</code> ファイルの未改変コピーをホストし、再配布します。
+            </p>
+            <p>
+                ホストされている WAD は、以下のソースアーカイブから抽出されたものです。
+            </p>
+            <p><code>shareware_doom_iwad.zip</code></p>
+            <p>本デプロイで使用される実行時パスは以下です。</p>
+            <p><code>/demo/doom/DOOM1.WAD</code></p>
+            <p>
+                ホストされているファイルは、shareware 版 <code>DOOM1.WAD</code> IWAD のみであることを
+                意図しています。<code>DOOM1.WAD</code> は shareware 版 Doom で使用される IWAD であり、
+                shareware エピソードデータを含みます。
+            </p>
+            <p>
+                本デプロイは、registered DOOM、Ultimate DOOM、DOOM II、Final DOOM、TNT、Plutonia、
+                またはその他の商用もしくはプロプライエタリな DOOM IWAD をホスト、ミラー配信、
+                同梱、または再配布しません。
+            </p>
+            <p>
+                商用 WAD ファイルは、運用者およびユーザーがそれを行う法的権利を有していない限り、
+                この公開デモにアップロード、差し替え、ミラー配信、再配布、または使用してはなりません。
+            </p>
+            <p>
+                本デプロイは、DOOM、<code>DOOM1.WAD</code>、id Software の商標、Bethesda/Microsoft の商標、
+                Doomworld、または第三者のゲームデータについて、所有権を主張しません。
+            </p>
+            <p>
+                ホストされている <code>DOOM1.WAD</code> は、デモ実行のための未改変 shareware アセットとしてのみ
+                再配布されます。元の shareware 条項、著作権表示、およびソースアーカイブに含まれる表示が
+                ある場合、それらは保持され、該当する場合はこの表示とともに利用可能にされる必要があります。
+            </p>
+            <p>
+                デプロイマニフェストは、ホストされているファイル、ソースアーカイブ、ホスト先パス、
+                ファイルサイズ、チェックサム、判明している場合のバージョン、再配布ステータス、
+                および検証ポリシーを識別します。
+            </p>
+            <p>
+                未改変の shareware 版 <code>DOOM1.WAD</code> v1.9 について、期待されるメタデータは以下のとおりです。
+            </p>
+            <ul>
+                <li>ファイル名: <code>DOOM1.WAD</code></li>
+                <li>ソースアーカイブ: <code>shareware_doom_iwad.zip</code></li>
+                <li>ホスト先パス: <code>/demo/doom/DOOM1.WAD</code></li>
+                <li>種別: <code>IWAD</code></li>
+                <li>バリアント: <code>shareware</code></li>
+                <li>期待されるサイズ: <code>4,196,020 bytes</code></li>
+                <li>期待される MD5: <code>f0cefca49926d00903cf57551d901abe</code></li>
+                <li>期待される SHA-1: <code>5b2e249b9c5133ec987b3ea77596381dc0d6bc1d</code></li>
+                <li>期待される SHA-256: <code>1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771</code></li>
+            </ul>
+            <p>
+                ランタイムは、ホストされている WAD をロードする前に、設定済みマニフェストに照らして
+                検証する必要があります。ファイルが期待される未改変 shareware WAD のメタデータと一致しない場合、
+                ランタイムはフェイルクローズし、DOOM デモをサスペンドされた状態に維持する必要があります。
+            </p>
+            <p>
+                DoomWiki は、shareware IWAD に関する技術的背景として参照される場合があります。
+                DoomWiki は技術的背景の参照としてのみ扱われ、本デプロイに対するライセンス許諾または
+                再配布許可として扱われるものではありません。
+            </p>
+
+            <h2>Bonsai-1.7B モデル再配布に関する表示</h2>
+            <p>
+                本デプロイは、Hugging Face から取得した Bonsai-1.7B GGUF モデルファイルのコピーを再配布します。
+            </p>
+            <p>ホストされているモデルファイル:</p>
+            <p><code>/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf</code></p>
+            <p>上流のモデルリポジトリ:</p>
+            <p><code>prism-ml/Bonsai-1.7B-gguf</code></p>
+            <p>
+                上流の Hugging Face モデルリポジトリは、モデルライセンスを Apache-2.0 として識別し、
+                <code>Bonsai-1.7B-Q1_0.gguf</code> モデルファイルを提供しています。
+            </p>
+            <p>本デプロイは、Bonsai-1.7B モデル重みについて所有権を主張しません。</p>
+            <p>
+                このモデルファイルは、AIKernel.Doom 公開デモの実行時に使用する目的でのみ、ここにミラーされています。
+                このモデルの使用、ダウンロード、キャッシュ、推論、再配布、およびさらなるミラー配信は、
+                上流のモデルライセンス、モデルカード、NOTICE ファイル、帰属表示要件、および適用される
+                Hugging Face または権利者の条件に従います。
+            </p>
+            <p>本デプロイは、以下のファイルまたは同等の表示を保持し、公開します。</p>
+            <ul>
+                <li><code>/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf</code></li>
+                <li><code>/models/bonsai1.7b/LICENSE</code></li>
+                <li><code>/models/bonsai1.7b/NOTICE.txt</code></li>
+                <li><code>/models/bonsai1.7b/manifest.json</code></li>
+            </ul>
+            <p>
+                マニフェストは、上流リポジトリ、正確なファイル名、形式、量子化、ファイルサイズ、
+                チェックサム、ライセンス識別子、表示ファイルのパス、および再配布ステータスを識別します。
+            </p>
+            <p>
+                ミラーされたモデル配布には、上流の Apache-2.0 ライセンス本文および
+                <code>NOTICE.txt</code> ファイルが含まれるか、または利用可能にされます。
+            </p>
+            <p>
+                ホストされているモデルファイルが、上流ファイルから改変、変換、リネーム、再パッケージ、
+                再量子化、またはその他の変更を受けた場合、マニフェストおよび表示文書は、
+                その変更を明確に識別しなければなりません。
+            </p>
+            <p>
+                ユーザーおよび運用者は、このモデルの使用、キャッシュ、再配布、推論、またはさらなる
+                ミラー配信が、適用されるライセンスおよび条件に準拠していることを確認する責任を負います。
+            </p>
+
+            <h2>ホストアセットの完全性およびマニフェスト検証</h2>
+            <p>ホストされるアセットは、機械可読なマニフェストによって記述される必要があります。</p>
+            <p>各ホストアセットのマニフェストは、以下を識別する必要があります。</p>
+            <ul>
+                <li>アセット名</li>
+                <li>アセット種別</li>
+                <li>ローカルパス</li>
+                <li>公開実行時パス</li>
+                <li>上流ソースまたはソースアーカイブ</li>
+                <li>判明している場合のバージョンまたはリビジョン</li>
+                <li>ファイル形式</li>
+                <li>ファイルサイズ</li>
+                <li>チェックサム</li>
+                <li>ライセンス識別子</li>
+                <li>表示ファイルのパス</li>
+                <li>再配布ステータス</li>
+                <li>検証ポリシー</li>
+                <li>キャッシュポリシー</li>
+            </ul>
+            <p>
+                ランタイムは、保護対象のホストアセットをロードする前に、設定済みのサイズおよび
+                チェックサム値を検証する必要があります。
+            </p>
+            <p>
+                検証に失敗した場合、ランタイムはフェイルクローズし、DOOM ランタイムをサスペンド状態に維持し、
+                影響を受けるアセットのロードを回避する必要があります。
+            </p>
+
+            <h2>Emscripten および WebAssembly ツール群</h2>
+            <p><code>doom.wasm</code> アーティファクトは Emscripten によって生成されています。</p>
+            <p>
+                Emscripten、LLVM、Binaryen、WASI 関連コンポーネント、および関連する WebAssembly ツール群には、
+                それぞれ独自のオープンソースライセンスが適用されます。ツールチェーンに関する表示は、
+                必要に応じて、ビルドドキュメント、ソース配布物、およびリリースアーティファクト内で
+                保持される必要があります。
+            </p>
+
+            <h2>AIKernel および WebGPU Compute</h2>
+            <p>
+                AIKernel.Doom は、レンダリングパスおよび Bonsai supervisor の実行サーフェスとして、
+                AIKernel パッケージおよび <code>WebGpuComputeProvider</code> を使用します。
+            </p>
+            <p>
+                ブラウザおよびホスト環境における WebGPU の利用可否は、ブラウザ、デバイス、
+                オペレーティングシステム、ドライバ、およびセキュアコンテキストの可用性によって
+                変動する場合があります。WebGPU が利用できない、無効化されている、またはサポートされていない場合、
+                Provider は設定に応じて決定論的な CPU fallback パスを使用することがあります。
+            </p>
+
+            <h2>無保証</h2>
+            <p>AIKernel.Doom は、開発、相互運用性テスト、およびデモンストレーション目的で提供されます。</p>
+            <p>
+                本デモは現状有姿で提供され、特定目的への適合性、可用性、正確性、法令遵守、
+                または非侵害性を含む、いかなる種類の保証も伴いません。
+            </p>
+            <p>
+                この表示は法的助言ではありません。運用者およびユーザーは、再配布、公開ホスティング、
+                商用利用、または本番利用の前に、すべての第三者ライセンス、モデル条件、アセット権利、
+                輸出規制、ホスティング義務、帰属表示要件、再配布許可、商標上の義務、および
+                本番利用に関する義務を確認する責任を負います。
+            </p>
+        </section>
+    </main>
+</body>
+</html>

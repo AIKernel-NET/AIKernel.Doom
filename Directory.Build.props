@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <StablePackageVersion>0.1.2</StablePackageVersion>
+    <LocalPackageVersionPrefix>0.1.2</LocalPackageVersionPrefix>
+    <LocalPackageBuildNumber Condition="'$(LocalPackageBuildNumber)' == ''">0</LocalPackageBuildNumber>
+    <UseLocalPackageVersion Condition="'$(UseLocalPackageVersion)' == ''">false</UseLocalPackageVersion>
+    <Version Condition="'$(UseLocalPackageVersion)' == 'true'">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</Version>
+    <Version Condition="'$(UseLocalPackageVersion)' != 'true'">$(StablePackageVersion)</Version>
+    <PackageVersion>$(Version)</PackageVersion>
+    <AssemblyVersion>$(StablePackageVersion)</AssemblyVersion>
+    <FileVersion>$(StablePackageVersion)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <AIKernelPackageVersion>[0.1.2]</AIKernelPackageVersion>
+    <AIKernelCorePackageVersion>0.1.2</AIKernelCorePackageVersion>
+    <AIKernelProvidersPackageVersion>0.1.2</AIKernelProvidersPackageVersion>
+    <AIKernelWasmRuntimePackageVersion>0.1.2</AIKernelWasmRuntimePackageVersion>
+    <AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.2</AIKernelWasmWebGpuComputeProviderPackageVersion>
+    <AIKernelProvidersPackageId>AIKernel.Providers.Standard</AIKernelProvidersPackageId>
+  </PropertyGroup>
+</Project>

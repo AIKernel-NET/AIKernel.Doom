@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aikernel.net/schemas/doom/autoplay-state.schema.json",
+  "title": "AIKernel Doom Autoplay State",
+  "type": "object",
+  "required": ["frame", "depthSig", "health", "contextDict", "soundEvent", "stuckTicks", "qDelta"],
+  "properties": {
+    "frame": { "type": "integer", "minimum": 0 },
+    "depthSig": { "type": "number", "minimum": 0, "maximum": 1.5 },
+    "health": { "type": "integer", "minimum": 0 },
+    "faceSig": { "type": "number" },
+    "contextDict": { "type": "string" },
+    "objective": { "type": "string", "minLength": 1 },
+    "soundEvent": { "type": "boolean" },
+    "stuckTicks": { "type": "integer", "minimum": 0 },
+    "qDelta": { "type": "integer" },
+    "recoveryFrames": { "type": "integer", "minimum": 0 },
+    "wallVector": { "type": "number", "minimum": -1, "maximum": 1 },
+    "doorConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "corridorConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "enemyConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "safeZoneConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "bridgeConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "computerRoomConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "sensorTensor": { "$ref": "autoplay-sensor-tensor.schema.json" },
+    "semanticMemory": { "type": "object" },
+    "activeDetections": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "screen6Regions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "type": "number" }
+    }
+  },
+  "additionalProperties": true
+}

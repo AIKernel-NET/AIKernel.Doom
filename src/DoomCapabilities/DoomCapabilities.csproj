@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>AIKernel.Doom.Capabilities</Title>
+    <Description>doom.start, doom.stop, and doom.status capability invoker for AIKernel.Doom.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DoomProvider\DoomProvider.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AIKernel.Core" Version="[$(AIKernelCorePackageVersion)]" />
+    <PackageReference Include="$(AIKernelProvidersPackageId)" Version="[$(AIKernelProvidersPackageVersion)]" />
+    <PackageReference Include="AIKernel.Wasm.Runtime" Version="[$(AIKernelWasmRuntimePackageVersion)]" />
+  </ItemGroup>
+</Project>

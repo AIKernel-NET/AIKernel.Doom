@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>AIKernel.Doom.Wasm</Title>
+    <Description>DOOM WASM ROM metadata and asset resolution support for AIKernel.Doom.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AIKernel.Core" Version="[$(AIKernelCorePackageVersion)]" />
+    <PackageReference Include="$(AIKernelProvidersPackageId)" Version="[$(AIKernelProvidersPackageVersion)]" />
+    <PackageReference Include="AIKernel.Wasm.Runtime" Version="[$(AIKernelWasmRuntimePackageVersion)]" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,34 @@
+{
+  "moduleId": "aikernel-doom-web-runtime",
+  "version": "0.1.2",
+  "entry": "doom.wasm",
+  "wasm": {
+    "hostedFile": "doom.wasm",
+    "sizeBytes": 419632,
+    "sha256": "d0e432c3c9bf8e562a5b36c9eab3381270d7a67bc46a01ebd3f90bb10bfe35ee"
+  },
+  "wad": {
+    "hostedFile": "DOOM1.WAD",
+    "hostedPath": "/demo/doom/DOOM1.WAD"
+  },
+  "source": {
+    "repository": "https://github.com/AIKernel-NET/AIKernel.Doom",
+    "doomgenericRepository": "https://github.com/ozkl/doomgeneric",
+    "doomgenericCommit": "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284",
+    "fetchScripts": [
+      "src/DoomWasm.Native/tools/fetch-doomgeneric.ps1",
+      "src/DoomWasm.Native/tools/fetch-doomgeneric.sh"
+    ],
+    "overlaySource": "src/DoomWasm.Native/src",
+    "buildScripts": [
+      "src/DoomWasm.Native/build.ps1",
+      "src/DoomWasm.Native/build.sh",
+      "src/DoomWasm.Native/Makefile"
+    ],
+    "patches": [
+      "src/DoomWasm.Native/patches/doomgeneric-aikernel.patch",
+      "src/DoomWasm.Native/patches/doomgeneric-upstream.patch"
+    ],
+    "licenseNotice": "src/DoomWeb/wwwroot/demo/doom/terms-and-licenses.html"
+  }
+}

@@ -1,0 +1,136 @@
+# デバッグとテレメトリ
+
+[English](debugging-and-telemetry.md)
+
+このデモは Observer-first の開発ループで育てています。制御判断は、画面、phase、detector、action、profile、ログ、スクリーンショットの証跡と結びつけて検証します。
+
+## デバッグ UI
+
+Web runtime には次のデバッグ操作があります。
+
+- `Copy Logs`: 現在のコンソールログを clipboard へコピー。
+- `Phase + Logs`: `doom.phase.check` と Copy Logs を 1 回で実行。
+- `Overlay`: 検知 overlay の表示切り替え。
+- `Manual Move`: AutoPlay を維持しつつ、移動だけ手動化。
+- `Sense Only`: 検知だけ実行し、入力を出さない。
+- `Audio Off` / `Audio On`: debug audio playback の mute を切り替えます。
+  既定は mute で、利用可能な場合のみ外部 WASM audio bridge を使います。
+- `DET:` buttons: `Motion`、`Objective`、`Door`、`Wall`、`Enemy`、`Computer`、`Foot`、`HUD` の ON / OFF。
+
+toolbar は 2 行構成です。
+
+- 上段は操作行で、log capture、manual movement、sense-only mode、debug
+  audio playback などを置きます。
+- 下段は sensor 行で、`sensorInputs` map と同期する汎用
+  `data-sensor-toggle` button を列挙します。現在の既定は
+  `Aisthesis Visual`、`Aisthesis Audio`、`Kinesis Motor`、`Kinesis Movement`、`Phantasia Compass`、
+  `Phantasia Spatial`、`Aisthesis Health` です。
+
+検知ボタンは overlay の枠線色に合わせた色を持ち、OFF のときはグレーになります。これにより、現在の phase でどの detector が使われているかを視覚的に確認できます。
+
+## Overlay
+
+Overlay はデフォルト ON です。開発者は、AI がどの領域を見て、何を検知し、どの目的へ向かっているかを直接画面上で確認できます。
+
+表示する情報の例:
+
+- 3x3 region
+- motion score
+- door confidence
+- enemy confidence
+- objective
+- phase
+- wall / corner / foot obstacle
+- HUD health / ammo
+- L/R auditory energy
+- spatial event icon
+
+高優先度の検知は濃く表示し、低優先度の補助情報は薄く表示します。これにより、action arbiter がどの判断を優先しているかを把握できます。
+
+## Auditory / Spatial HUD
+
+debug HUD は stereo auditory evidence を表示しますが、制御判断は持ちません。
+
+- L/R gauge は left / right channel energy を可視化します。
+- event icon は WASM spatial kernel が提供する `spatialSnapshot.hudX` /
+  `spatialSnapshot.hudY` を使って配置します。
+- `doom-prompt.js` は gauge と icon を描画するだけで、spatial direction は計算しません。
+- `doom.js` は `auditorySnapshot`、`spatialSnapshot`、`ctgCarrier` を runtime
+  status へコピーするだけです。
+- `health-death` retry intent は `retry=active|idle/cooldown/reason` として
+  表示します。この retry bridge は DoomWeb runtime dispatch の責務であり、
+  CTG / Gate rule を複製しません。
+- CTG / Gate result は DoomWeb の外側に置きます。
+
+## Runtime Status
+
+`doom.status` は、現在の実行状態を 1 行の telemetry として出力します。
+
+代表的なフィールド:
+
+- `runtime`
+- `wasm`
+- `wad`
+- `model`
+- `loop`
+- `autoplay`
+- `pipeline`
+- `strategy`
+- `vision`
+- `zeroCopy`
+- `safety`
+- `mobility`
+- `milestones`
+- `darkArea`
+- `court`
+- `gap`
+- `corridor`
+- `bridge`
+- `enemy`
+- `regions9`
+- `motion9`
+- `health`
+- `ammo`
+- `fps`
+- `gpuWait`
+
+この形式は、人間が読むだけでなく、optimizer runner が Observer ROM として解析することも想定しています。
+
+## 証跡採取
+
+誤判定を報告するときは、次の 3 点を揃えると再現性が高くなります。
+
+1. スクリーンショット。
+2. Copy Logs の出力。
+3. 現在の操作モードと目的。
+
+例:
+
+```text
+ドア前にいるが開けない。
+Manual Move では開くため、AutoPlay の移動入力が Use を阻害している可能性がある。
+```
+
+このような観察と `doom.status` を組み合わせることで、phase rule と detector threshold を安全に修正できます。
+
+## よくある失敗
+
+### ドア前で回転して戻る
+
+`corner-exit` や `wall-detach` が `door-probe` より強い可能性があります。Door phase では、移動回避を弱め、Use discipline を優先します。
+
+### Use 連打でドアが閉まる
+
+Use は pulse + cooldown で制御します。開いた直後に再度 Use を送らないようにします。
+
+### コンピュータ制御室を誤検知する
+
+色だけではなく、dark area、red light、map hint、transition、enemy alert を組み合わせます。
+
+### 敵を壁と誤判定する
+
+Enemy detector は全領域で検知し、中央領域に入ったときだけ発砲します。第一ドア前では enemy detector を OFF にします。
+
+### 開幕で迷走する
+
+OpeningHome phase では、右奥スキャン、青床、通路入口 signature、中庭救済を使い、戦闘と Use を OFF にします。

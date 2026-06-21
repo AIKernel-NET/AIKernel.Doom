@@ -56,6 +56,11 @@
         m: "Review terms and licenses before approval. / 起動前に利用規約とライセンスを確認してください。"
       },
       {
+        t: "[ AI  ]",
+        c: "log-warn",
+        m: "AI behavior models may be updated without notice; perception, cognition, and action can change between demo runs. / AIの知覚・認知・行動モデルは予告なく更新され、デモ実行ごとに挙動が変化する場合があります。"
+      },
+      {
         t: "[ WAIT ]",
         c: "log-warn",
         m: "doom.wasm generation remains gated by Emscripten and a pinned doomgeneric checkout."
@@ -420,7 +425,7 @@
       } else if (state === "ready") {
         halted.hidden = false;
         halted.classList.add("is-visible");
-        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>Review the terms and licenses, then choose GPU mode or CPU mode. If you type <code>yes</code> in the aik console, the demo starts in GPU mode by default.</span><span>利用規約とライセンスを確認し、GPUモードまたはCPUモードを選択してください。aik コンソールで <code>yes</code> と入力した場合、デモは既定でGPUモードで開始します。</span><span>This demo requires approximately 1GB of free VRAM for stable GPU rendering. Due to WebGPU and browser limitations, GPU processing may cause a temporary screen blackout if the GPU driver resets. If your system has limited VRAM, consider starting in CPU mode.</span><span>安定したGPU描画には約1GBの空きVRAMが必要です。WebGPUとブラウザの制限により、GPUドライバがリセットされると一時的に画面がブラックアウトする場合があります。VRAMに余裕がない場合は、CPUモードで開始することを検討してください。</span>";
+        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>Review the terms and licenses, then choose GPU mode or CPU mode. If you type <code>yes</code> in the aik console, the demo starts in GPU mode by default.</span><span>利用規約とライセンスを確認し、GPUモードまたはCPUモードを選択してください。aik コンソールで <code>yes</code> と入力した場合、デモは既定でGPUモードで開始します。</span><span>This demo requires approximately 1GB of free VRAM for stable GPU rendering. Due to WebGPU and browser limitations, GPU processing may cause a temporary screen blackout if the GPU driver resets. If your system has limited VRAM, consider starting in CPU mode.</span><span>安定したGPU描画には約1GBの空きVRAMが必要です。WebGPUとブラウザの制限により、GPUドライバがリセットされると一時的に画面がブラックアウトする場合があります。VRAMに余裕がない場合は、CPUモードで開始することを検討してください。</span><span>This demo's AI perception, cognition, and behavior models may be updated without notice, so behavior can change between demo runs.</span><span>このデモの AI は知覚・認知・行動モデルが予告なく更新される場合があるため、デモ実行ごとに挙動が変化することがあります。</span>";
       }
     }
 

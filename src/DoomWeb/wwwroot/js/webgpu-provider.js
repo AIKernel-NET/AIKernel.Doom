@@ -95,6 +95,68 @@
     };
   }
 
+  function ensureDoomGpuModeState() {
+    const root = typeof window !== "undefined" ? window : self;
+    const mode = root.AIKernelDoomGpuMode || {};
+    if (typeof mode.useGpuRendering !== "boolean") {
+      mode.useGpuRendering = true;
+    }
+    if (typeof mode.gpuPermanentlyDisabled !== "boolean") {
+      mode.gpuPermanentlyDisabled = false;
+    }
+    mode.reason = String(mode.reason || "");
+    mode.updatedAt = Number(mode.updatedAt || 0);
+    root.AIKernelDoomGpuMode = mode;
+    root.useGpuRendering = mode.useGpuRendering;
+    root.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+    return mode;
+  }
+
+  function isDoomGpuRenderingEnabled() {
+    const mode = ensureDoomGpuModeState();
+    return mode.useGpuRendering !== false && mode.gpuPermanentlyDisabled !== true;
+  }
+
+  function setDoomGpuRenderingMode(useGpu, reason = "") {
+    const root = typeof window !== "undefined" ? window : self;
+    const mode = ensureDoomGpuModeState();
+    if (useGpu && mode.gpuPermanentlyDisabled) {
+      return mode;
+    }
+
+    mode.useGpuRendering = Boolean(useGpu);
+    if (!useGpu) {
+      mode.gpuPermanentlyDisabled = true;
+    }
+    mode.reason = String(reason || (useGpu ? "startup-gpu" : "cpu-fallback"));
+    mode.updatedAt = Date.now();
+    root.AIKernelDoomGpuMode = mode;
+    root.useGpuRendering = mode.useGpuRendering;
+    root.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+    try {
+      if (typeof root.dispatchEvent === "function" && typeof root.CustomEvent === "function") {
+        root.dispatchEvent(new root.CustomEvent("aikernel-doom-gpu-mode-changed", {
+          detail: {
+            useGpuRendering: mode.useGpuRendering,
+            gpuPermanentlyDisabled: mode.gpuPermanentlyDisabled,
+            reason: mode.reason,
+            updatedAt: mode.updatedAt
+          }
+        }));
+      }
+    } catch {
+    }
+    return mode;
+  }
+
+  ensureDoomGpuModeState();
+  if (!window.AIKernelDoomSetGpuRenderingMode) {
+    window.AIKernelDoomSetGpuRenderingMode = setDoomGpuRenderingMode;
+  }
+  if (!window.AIKernelDoomIsGpuRenderingEnabled) {
+    window.AIKernelDoomIsGpuRenderingEnabled = isDoomGpuRenderingEnabled;
+  }
+
   async function requestPreferredWebGpuAdapter(gpu) {
     const preferredOptions = cloneWebGpuAdapterRequestOptions();
     try {
@@ -992,7 +1054,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       this.name = "WebGpuComputeProvider";
       this.backendName = "browser-webgpu";
       this.supported = Boolean(navigator.gpu);
-      this.usingCpuFallback = !this.supported;
+      this.usingCpuFallback = !this.supported || !isDoomGpuRenderingEnabled();
+      this.gpuPermanentlyDisabled = !isDoomGpuRenderingEnabled();
+      this.fallbackReason = ensureDoomGpuModeState().reason || "";
       this.initialized = false;
       this.initializing = null;
       this.adapter = null;
@@ -1107,6 +1171,15 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       }
 
       this.initializing = (async () => {
+        if (!isDoomGpuRenderingEnabled()) {
+          this.usingCpuFallback = true;
+          this.gpuPermanentlyDisabled = true;
+          this.fallbackReason = ensureDoomGpuModeState().reason || "GPU rendering disabled by startup selection.";
+          this.lastError = this.fallbackReason;
+          this.initialized = true;
+          return this.status();
+        }
+
         if (!navigator.gpu) {
           this.usingCpuFallback = true;
           this.lastError = "navigator.gpu is unavailable.";
@@ -1128,8 +1201,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           this.adapterInfo = await resolveWebGpuAdapterInfo(this.adapter);
           this.adapterSummary = summarizeWebGpuAdapterInfo(this.adapterInfo);
           this.device = await this.adapter.requestDevice();
+          this.attachDeviceLostHandler(this.device);
           this.queue = this.device.queue;
           this.usingCpuFallback = false;
+          this.gpuPermanentlyDisabled = false;
+          this.fallbackReason = "";
           this.initialized = true;
           this.lastError = "";
           return this.status();
@@ -1154,6 +1230,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       }
 
       try {
+        this.attachCanvasContextLostHandlers(canvas);
         if (this.renderer?.canvas === canvas && this.renderer.width === width && this.renderer.height === height) {
           return true;
         }
@@ -1461,12 +1538,114 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         this.setDoomFrameTexture(frameTexture);
         return true;
       } catch (error) {
-        this.renderer = null;
-        this.usingCpuFallback = true;
-        this.lastError = error instanceof Error ? error.message : String(error);
-        this.setDoomFrameTexture(null);
+        this.handleGpuLost("renderer-init", error);
         return false;
       }
+    }
+
+    attachDeviceLostHandler(device) {
+      if (!device?.lost || device.__aikernelDoomLostHandlerAttached) {
+        return;
+      }
+
+      device.__aikernelDoomLostHandlerAttached = true;
+      device.lost.then(info => {
+        console.error("WebGPU device lost:", info?.reason || info);
+        this.handleGpuLost("webgpu", info);
+      }).catch(error => {
+        console.error("WebGPU device lost handler failed:", error);
+        this.handleGpuLost("webgpu", error);
+      });
+    }
+
+    attachCanvasContextLostHandlers(canvas) {
+      if (!canvas || canvas.__aikernelDoomContextLostHandlersAttached) {
+        return;
+      }
+
+      canvas.__aikernelDoomContextLostHandlersAttached = true;
+      canvas.addEventListener("webglcontextlost", event => {
+        event.preventDefault();
+        console.error("WebGL context lost");
+        this.handleGpuLost("webgl", null);
+      });
+    }
+
+    destroyGpuResource(resource) {
+      try {
+        resource?.destroy?.();
+      } catch {
+      }
+    }
+
+    disposeGpuResources() {
+      const renderer = this.renderer;
+      if (renderer) {
+        [
+          renderer.indexBuffer,
+          renderer.paletteBuffer,
+          renderer.infoBuffer,
+          renderer.hudInfoBuffer,
+          renderer.hudCellsBuffer,
+          renderer.hudPanelBuffer,
+          renderer.hudRectBuffer,
+          renderer.gpuAisthesisInfoBuffer,
+          renderer.gpuAisthesisMatrixBuffer,
+          renderer.gpuAisthesisFeatureBuffer,
+          renderer.gpuSpatialInfoBuffer,
+          renderer.gpuSpatialOutputBuffer,
+          renderer.frameTexture,
+          renderer.gpuAisthesisMaskTexture
+        ].forEach(resource => this.destroyGpuResource(resource));
+
+        (renderer.hudPanelTextures || []).forEach(resource => this.destroyGpuResource(resource));
+        (renderer.hudCompositeTextures || []).forEach(resource => this.destroyGpuResource(resource));
+      }
+
+      try {
+        this.device?.destroy?.();
+      } catch {
+      }
+
+      this.renderer = null;
+      this.device = null;
+      this.queue = null;
+      this.adapter = null;
+      this.initializing = null;
+      this.setDoomFrameTexture(null);
+      this.setHudCompositeTexture(null);
+      this.frameTextures.clear();
+    }
+
+    dispatchGpuLost(kind, info) {
+      window.dispatchEvent(new CustomEvent("aikernel-doom-gpu-lost", {
+        detail: {
+          kind,
+          info,
+          reason: this.fallbackReason || this.lastError || "gpu-lost",
+          status: this.status()
+        }
+      }));
+    }
+
+    handleGpuLost(kind = "webgpu", info = null) {
+      if (this.gpuPermanentlyDisabled) {
+        return this.status();
+      }
+
+      const detailReason = info?.reason || info?.message || (typeof info === "string" ? info : "");
+      this.gpuPermanentlyDisabled = true;
+      this.usingCpuFallback = true;
+      this.fallbackReason = `gpu-lost:${kind}${detailReason ? `:${detailReason}` : ""}`;
+      this.lastError = "GPU failure detected. Switching to CPU mode.";
+      setDoomGpuRenderingMode(false, this.fallbackReason);
+      this.disposeGpuResources();
+      this.dispatchGpuLost(kind, info);
+      return this.status();
+    }
+
+    forceCpuFallback(kind = "forced", info = null) {
+      return this.handleGpuLost(kind, info);
     }
 
     updatePalette(paletteBytes) {
@@ -2036,6 +2215,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return false;
       }
 
+      try {
       const renderer = this.renderer;
       const count = Math.min(renderer.framePixels, indices.length);
       for (let index = 0; index < count; index += 1) {
@@ -2165,13 +2345,17 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         this.setHudCompositeTexture(renderer.hudCompositeTextures[renderer.hudCompositeIndex]);
       }
       return true;
+      } catch (error) {
+        this.handleGpuLost("render", error);
+        return false;
+      }
     }
 
     setFrameState(target, state) {
       this.frameStates.set(target || FRAME_TARGET, Object.assign({
         providerId: this.providerId,
-        backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
-        zeroCopy: Boolean(this.frameTextures.get(target || FRAME_TARGET)),
+        backend: (this.usingCpuFallback || !isDoomGpuRenderingEnabled()) ? "cpu-fallback" : this.backendName,
+        zeroCopy: Boolean(this.frameTextures.get(target || FRAME_TARGET)) && isDoomGpuRenderingEnabled(),
         updatedAt: performance.now()
       }, state || {}));
     }
@@ -2195,7 +2379,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     createBonsaiVisionBinding(target) {
       const name = target || FRAME_TARGET;
       const texture = this.frameTextures.get(name);
-      if (texture && !this.usingCpuFallback) {
+      if (texture && !this.usingCpuFallback && isDoomGpuRenderingEnabled()) {
         return {
           providerId: this.providerId,
           backend: this.backendName,
@@ -2210,7 +2394,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
       return {
         providerId: this.providerId,
-        backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
+        backend: (this.usingCpuFallback || !isDoomGpuRenderingEnabled()) ? "cpu-fallback" : this.backendName,
         kind: "webgpu-state-buffer",
         zeroCopy: false,
         state: this.frameStates.get(name) || null
@@ -2238,6 +2422,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     status() {
+      if (!isDoomGpuRenderingEnabled()) {
+        this.usingCpuFallback = true;
+        this.gpuPermanentlyDisabled = true;
+        this.fallbackReason = this.fallbackReason || ensureDoomGpuModeState().reason || "GPU rendering disabled.";
+      }
+
       const compositeReady = Boolean(this.renderer?.hudCompositeTextures?.length === 2 && this.renderer?.blitPipeline) && !this.usingCpuFallback;
       const compositeActive = Boolean(this.renderer?.hudCompositeReady && this.hudOverlayEnabled && this.hudOverlayState?.enabled !== false && !this.usingCpuFallback);
       const gpuAisthesisState = this.gpuAisthesisState || {};
@@ -2277,6 +2467,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
         supported: this.supported,
         initialized: this.initialized,
+        useGpuRendering: isDoomGpuRenderingEnabled(),
+        gpuPermanentlyDisabled: Boolean(this.gpuPermanentlyDisabled || ensureDoomGpuModeState().gpuPermanentlyDisabled),
+        fallbackReason: this.fallbackReason || ensureDoomGpuModeState().reason || "",
         adapterReady: Boolean(this.adapter),
         deviceReady,
         adapterPowerPreference: this.adapterRequestOptions?.powerPreference || WEBGPU_ADAPTER_POWER_PREFERENCE,
@@ -2925,4 +3118,25 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
   window.webGpuComputeProvider = window.WebGpuComputeProvider;
   window.aikernelWebGpuComputeProvider = window.WebGpuComputeProvider;
+
+  function releaseGpuResourcesForPageTransition(reason = "page-transition") {
+    const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
+    if (!provider || provider.__aikernelDoomPageReleaseComplete) {
+      return;
+    }
+
+    provider.__aikernelDoomPageReleaseComplete = true;
+    provider.lastError = reason;
+    provider.usingCpuFallback = true;
+    try {
+      provider.disposeGpuResources?.();
+    } catch {
+    }
+  }
+
+  if (!window.__aikernelDoomGpuPageReleaseHooked) {
+    window.__aikernelDoomGpuPageReleaseHooked = true;
+    window.addEventListener("pagehide", () => releaseGpuResourcesForPageTransition("pagehide"), { capture: true });
+    window.addEventListener("beforeunload", () => releaseGpuResourcesForPageTransition("beforeunload"), { capture: true });
+  }
 })();

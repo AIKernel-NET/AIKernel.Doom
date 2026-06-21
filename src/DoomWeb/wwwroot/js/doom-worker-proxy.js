@@ -381,6 +381,7 @@
       };
       this.requests = new Map();
       this.nextId = 1;
+      this.gpuModeState = normalizeGpuModeState();
       const cacheKey = (() => {
         try {
           return new URL(globalThis.location.href).searchParams.get("doomdev") || "dev";
@@ -406,6 +407,13 @@
         this.rejectAll(message);
         this.onStatusChange(this.statusCache, "worker-error");
       };
+      this.gpuModeListener = event => {
+        this.postGpuMode(event?.detail || window.AIKernelDoomGpuMode);
+      };
+      this.pageReleaseListener = () => this.disposeWorkerGpuResources("page-transition");
+      window.addEventListener("aikernel-doom-gpu-mode-changed", this.gpuModeListener);
+      window.addEventListener("pagehide", this.pageReleaseListener, { capture: true });
+      window.addEventListener("beforeunload", this.pageReleaseListener, { capture: true });
 
       const offscreen = this.canvas.transferControlToOffscreen();
       this.worker.postMessage({
@@ -413,8 +421,34 @@
         canvas: offscreen,
         moduleUrl: options.moduleUrl,
         modelManifestUrl: options.modelManifestUrl,
-        autoplayProfileUrl: options.autoplayProfileUrl
+        autoplayProfileUrl: options.autoplayProfileUrl,
+        gpuMode: this.gpuModeState
       }, [offscreen]);
+    }
+
+    postGpuMode(mode) {
+      this.gpuModeState = normalizeGpuModeState(mode);
+      if (this.worker) {
+        this.worker.postMessage({
+          type: "gpu-mode",
+          gpuMode: this.gpuModeState
+        });
+      }
+    }
+
+    disposeWorkerGpuResources(reason = "page-transition") {
+      if (!this.worker || this.gpuResourcesReleasePosted) {
+        return;
+      }
+
+      this.gpuResourcesReleasePosted = true;
+      try {
+        this.worker.postMessage({
+          type: "dispose-gpu",
+          reason
+        });
+      } catch {
+      }
     }
 
     handleMessage(message) {
@@ -516,7 +550,14 @@
       const promise = new Promise((resolve, reject) => {
         this.requests.set(id, { resolve, reject });
       });
-      this.worker.postMessage({ type: "call", id, method, args: args || [] });
+      this.gpuModeState = normalizeGpuModeState();
+      this.worker.postMessage({
+        type: "call",
+        id,
+        method,
+        args: args || [],
+        gpuMode: this.gpuModeState
+      });
       return promise;
     }
 
@@ -601,6 +642,17 @@
       window.OffscreenCanvas &&
       canvas?.transferControlToOffscreen
     );
+  }
+
+  function normalizeGpuModeState(mode) {
+    const source = mode || window.AIKernelDoomGpuMode || {};
+    const useGpuRendering = source.useGpuRendering !== false;
+    return {
+      useGpuRendering,
+      gpuPermanentlyDisabled: source.gpuPermanentlyDisabled === true || !useGpuRendering,
+      reason: String(source.reason || (useGpuRendering ? "startup-gpu" : "startup-cpu")),
+      updatedAt: Number(source.updatedAt || Date.now())
+    };
   }
 
   window.createAIKernelDoomRuntime = function createAIKernelDoomRuntime(options) {

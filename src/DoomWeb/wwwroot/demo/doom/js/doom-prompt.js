@@ -43,12 +43,12 @@
       {
         t: "[MODEL]",
         c: "log-ok",
-        m: `Bonsai-1.7B q1_0 GGUF redistribution manifest mounted from ${doomSharedModel.manifestUrl}.`
+        m: `Bonsai-1.7B q1_0 GGUF redistribution manifest configured at ${doomSharedModel.manifestUrl}; download remains gated by approval. / Bonsai-1.7B q1_0 GGUF の再配布マニフェストは ${doomSharedModel.manifestUrl} に設定済みです。ダウンロードは同意後まで開始しません。`
       },
       {
         t: "[GPU  ]",
-        c: "log-info",
-        m: "WebGpuComputeProvider owns DOOM framebuffer rendering and the Bonsai supervisor execution surface."
+        c: "log-warn",
+        m: "GPU mode requires approximately 1GB of free VRAM for stable rendering; CPU mode skips WebGPU initialization. / GPUモードの安定動作には約1GBの空きVRAMが必要です。CPUモードではWebGPU初期化を行いません。"
       },
       {
         t: "[LEGAL]",
@@ -68,7 +68,7 @@
       {
         t: "--------",
         c: "log-muted",
-        m: "AIKERNEL.DOOM WAITING FOR EXPLICIT USER APPROVAL. Type yes in the aik console or use the approval button. / aik コンソールで yes と入力するか、承認ボタンで同意して起動できます。"
+        m: "AIKERNEL.DOOM WAITING FOR EXPLICIT USER APPROVAL. Choose GPU mode or CPU mode below; console yes starts GPU mode by default. / AIKernel.Doom は明示的な同意を待機しています。下のボタンでGPUまたはCPUモードを選択してください。aik コンソールの yes は既定でGPUモードを開始します。"
       }
     ];
 
@@ -83,7 +83,7 @@
     const approvalAccept = document.getElementById("doom-approval-accept");
     const approvalDecline = document.getElementById("doom-approval-decline");
     const runtimeStatus = document.getElementById("runtime-status");
-    const doomScreen = document.getElementById("doom-screen");
+    let doomScreen = document.getElementById("doom-screen");
     const doomScreenPanel = document.getElementById("doom-screen-panel");
     const doomFps = document.getElementById("doom-fps");
     const doomController = document.getElementById("doom-controller");
@@ -113,6 +113,8 @@
     let doomAudioEventBadge = null;
     let doomAudioPlaybackToggle = document.getElementById("doom-audio-playback-toggle");
     let doomToposDetailToggle = document.getElementById("doom-topos-detail-toggle");
+    let doomCpuRadarHud = null;
+    let doomCpuRadarCanvas = null;
     let doomGpuContractsScriptLoading = null;
     let doomGpuPathStatusScriptLoading = null;
     let doomSensorPanelScriptLoading = null;
@@ -227,8 +229,14 @@
         return "dev";
       }
     })();
-    const doomRuntime = window.createAIKernelDoomRuntime
-      ? window.createAIKernelDoomRuntime({
+    let doomRuntime = null;
+    function ensureDoomRuntime() {
+      if (doomRuntime) {
+        return doomRuntime;
+      }
+
+      doomRuntime = window.createAIKernelDoomRuntime
+        ? window.createAIKernelDoomRuntime({
         canvas: doomScreen,
         moduleUrl: "/demo/doom/module.json",
         modelManifestUrl: doomSharedModel.manifestUrl,
@@ -236,8 +244,11 @@
         log: appendConsoleLine,
         onStatusChange: queueRuntimeStatusUpdate
       })
-      : null;
-    window.AIKernelDoomRuntime = doomRuntime;
+        : null;
+      window.AIKernelDoomRuntime = doomRuntime;
+      return doomRuntime;
+    }
+    window.AIKernelDoomRuntime = null;
     let doomHasStarted = false;
 
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -316,11 +327,74 @@
       followConsoleOutput(Boolean(options.pageFollow));
     }
 
+    function ensureGpuModeState() {
+      const mode = window.AIKernelDoomGpuMode || {};
+      if (typeof mode.useGpuRendering !== "boolean") {
+        mode.useGpuRendering = true;
+      }
+      if (typeof mode.gpuPermanentlyDisabled !== "boolean") {
+        mode.gpuPermanentlyDisabled = false;
+      }
+      mode.reason = String(mode.reason || "");
+      mode.updatedAt = Number(mode.updatedAt || 0);
+      window.AIKernelDoomGpuMode = mode;
+      window.useGpuRendering = mode.useGpuRendering;
+      window.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+      return mode;
+    }
+
+    function setStartupGpuMode(useGpu, reason = "") {
+      const setter = window.AIKernelDoomSetGpuRenderingMode;
+      const mode = typeof setter === "function"
+        ? setter(Boolean(useGpu), reason || (useGpu ? "startup-gpu" : "startup-cpu"))
+        : ensureGpuModeState();
+      if (typeof setter !== "function") {
+        mode.useGpuRendering = Boolean(useGpu);
+        if (!useGpu) {
+          mode.gpuPermanentlyDisabled = true;
+        }
+        mode.reason = reason || (useGpu ? "startup-gpu" : "startup-cpu");
+        mode.updatedAt = Date.now();
+        window.AIKernelDoomGpuMode = mode;
+        window.useGpuRendering = mode.useGpuRendering;
+        window.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+        try {
+          window.dispatchEvent(new CustomEvent("aikernel-doom-gpu-mode-changed", {
+            detail: {
+              useGpuRendering: mode.useGpuRendering,
+              gpuPermanentlyDisabled: mode.gpuPermanentlyDisabled,
+              reason: mode.reason,
+              updatedAt: mode.updatedAt
+            }
+          }));
+        } catch {
+        }
+      }
+
+      const activeGpu = mode.useGpuRendering !== false && mode.gpuPermanentlyDisabled !== true;
+      appendConsoleLine("[ GPU ]", activeGpu ? "log-ok" : "log-warn", activeGpu
+        ? "Startup mode selected: GPU rendering. WebGPU pipelines will initialize after approval."
+        : "Startup mode selected: CPU rendering. WebGPU initialization will be skipped.");
+      return ensureGpuModeState();
+    }
+
+    function syncApprovalModeButtons() {
+      if (approvalAccept) {
+        approvalAccept.textContent = "Start in GPU Mode / GPUで開始";
+        approvalAccept.setAttribute("aria-label", "Start AIKernel.Doom in GPU mode");
+      }
+      if (approvalDecline) {
+        approvalDecline.textContent = "Start in CPU Mode / CPUで開始";
+        approvalDecline.setAttribute("aria-label", "Start AIKernel.Doom in CPU mode");
+      }
+    }
+
     function setApprovalUiState(state = "ready") {
       if (!approvalActions) {
         return;
       }
 
+      syncApprovalModeButtons();
       const waiting = state === "ready" || state === "suspended" || state === "failed";
       const busy = state === "loading";
       const hidden = state === "hidden" || state === "running";
@@ -346,7 +420,7 @@
       } else if (state === "ready") {
         halted.hidden = false;
         halted.classList.add("is-visible");
-        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>The public demo asks for consent before downloading DOOM1.WAD, Bonsai-1.7B, and doom.wasm. Type <code>yes</code> in the aik console or use the approval button. Current protected size estimate: about 270MB, under 300MB.</span><span>利用規約とライセンスを確認し、aik コンソールで <code>yes</code> と入力するか承認ボタンで同意すると、約300MBのデータ取得を許可して Doom デモを起動します。</span>";
+        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>Review the terms and licenses, then choose GPU mode or CPU mode. If you type <code>yes</code> in the aik console, the demo starts in GPU mode by default.</span><span>利用規約とライセンスを確認し、GPUモードまたはCPUモードを選択してください。aik コンソールで <code>yes</code> と入力した場合、デモは既定でGPUモードで開始します。</span><span>This demo requires approximately 1GB of free VRAM for stable GPU rendering. Due to WebGPU and browser limitations, GPU processing may cause a temporary screen blackout if the GPU driver resets. If your system has limited VRAM, consider starting in CPU mode.</span><span>安定したGPU描画には約1GBの空きVRAMが必要です。WebGPUとブラウザの制限により、GPUドライバがリセットされると一時的に画面がブラックアウトする場合があります。VRAMに余裕がない場合は、CPUモードで開始することを検討してください。</span>";
       }
     }
 
@@ -1021,6 +1095,35 @@
           padding: 0 !important;
         }
         #doom-debug-overlay.is-visible { display: block; }
+        #doom-debug-overlay .doom-cpu-radar-hud {
+          position: absolute;
+          right: 3.1%;
+          top: 4.2%;
+          width: clamp(82px, 19%, 142px);
+          aspect-ratio: 1;
+          z-index: 57;
+          pointer-events: none;
+          opacity: .96;
+          contain: layout paint;
+          filter: drop-shadow(0 2px 6px rgba(0,0,0,.72));
+        }
+        #doom-debug-overlay .doom-cpu-radar-hud canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+        #doom-debug-overlay .doom-cpu-radar-caption {
+          position: absolute;
+          left: 50%;
+          bottom: -13px;
+          transform: translateX(-50%);
+          color: rgba(190,248,255,.92);
+          font: 800 7.5px/1 ui-monospace, Consolas, monospace;
+          letter-spacing: 0;
+          text-transform: uppercase;
+          text-shadow: 0 1px 2px rgba(0,0,0,.95), 0 0 8px rgba(0,220,255,.44);
+          white-space: nowrap;
+        }
         #doom-debug-overlay.is-gpu-backed { mix-blend-mode: normal; }
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label {
           position: absolute;
@@ -2860,15 +2963,16 @@
       }
 
       ensureDoomDebugOverlayHost();
-      doomDebugOverlay.classList.toggle("is-visible", doomDebugOverlayEnabled);
+      const gpuHudActive = syncGpuHudOverlay(status);
+      const cpuRadarActive = shouldRenderCpuRadarHud(status, gpuHudActive);
+      doomDebugOverlay.classList.toggle("is-visible", doomDebugOverlayEnabled || cpuRadarActive);
       if (!doomDebugOverlayEnabled) {
-        const gpuHudActive = syncGpuHudOverlay(status);
         doomDebugOverlay.replaceChildren();
+        drawCpuRadarHud(status, gpuHudActive);
         updateDoomDetectionSummary(status, gpuHudActive);
         return;
       }
 
-      const gpuHudActive = syncGpuHudOverlay(status);
       doomDebugOverlay.classList.toggle("is-gpu-backed", gpuHudActive);
       doomDebugOverlay.dataset.cssOverlayMode = gpuHudActive ? "reduced" : "full";
       updateDoomDetectionSummary(status, gpuHudActive);
@@ -2876,6 +2980,7 @@
       const overlayRenderer = self.AIKernelDoomDebugOverlay;
       if (typeof overlayRenderer?.renderDebugOverlay === "function") {
         overlayRenderer.renderDebugOverlay(doomDebugOverlay, status, { detectionVisibility: doomDetectionVisibility, gpuBacked: gpuHudActive, gpuHud: status?.gpuHud || null });
+        drawCpuRadarHud(status, gpuHudActive);
         return;
       }
 
@@ -2883,6 +2988,7 @@
         if (typeof panel?.renderDebugOverlay === "function") {
           const latestStatus = doomRuntime?.status?.() || status;
           panel.renderDebugOverlay(doomDebugOverlay, latestStatus, { detectionVisibility: doomDetectionVisibility, gpuBacked: gpuHudActive, gpuHud: latestStatus?.gpuHud || null });
+          drawCpuRadarHud(latestStatus, gpuHudActive);
         }
       });
     }
@@ -2918,6 +3024,304 @@
       provider.setHudOverlayEnabled(Boolean(ready && (doomDebugOverlayEnabled || autoplayActive)));
       const nextStatus = typeof provider.status === "function" ? provider.status() : providerStatus;
       return runtimeCompositeActive || Boolean(nextStatus?.hudCompositeActive || nextStatus?.hudOverlayActive || (ready && (doomDebugOverlayEnabled || autoplayActive) && nextStatus?.hudOverlayEnabled));
+    }
+
+    function firstFiniteNumber(values, fallback = 0) {
+      for (const value of values) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+          return numeric;
+        }
+      }
+
+      return fallback;
+    }
+
+    function clampUnit(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(1, numeric));
+    }
+
+    function normalizeRadarYaw(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return 0;
+      }
+
+      let yaw = numeric % 360;
+      if (yaw > 180) {
+        yaw -= 360;
+      } else if (yaw < -180) {
+        yaw += 360;
+      }
+
+      return yaw;
+    }
+
+    function directionToRadarYaw(direction, fallback = 0) {
+      const text = String(direction || "").toLowerCase();
+      if (text.includes("left")) {
+        return -70;
+      }
+
+      if (text.includes("right")) {
+        return 70;
+      }
+
+      if (text.includes("rear") || text.includes("back")) {
+        return 180;
+      }
+
+      if (text.includes("front") || text.includes("center") || text.includes("forward")) {
+        return 0;
+      }
+
+      return fallback;
+    }
+
+    function shouldRenderCpuRadarHud(status = {}, gpuHudActive = false) {
+      if (gpuHudActive) {
+        return false;
+      }
+
+      const mode = window.AIKernelDoomGpuMode || {};
+      const gpuHud = status?.gpuHud || status?.autoplay?.gpuHud || {};
+      const rendererText = `${status?.renderer || ""} ${status?.gpuDelegate || ""} ${gpuHud.providerBackend || ""}`;
+      const cpuSelected = mode.useGpuRendering === false
+        || mode.gpuPermanentlyDisabled === true
+        || status?.useGpuRendering === false
+        || status?.usingCpuFallback === true
+        || gpuHud.providerUsingCpuFallback === true
+        || gpuHud.providerGpuPermanentlyDisabled === true
+        || /cpu/i.test(rendererText);
+      const active = status?.state === "running" || status?.autoplay?.enabled || status?.loopActive;
+      return Boolean(cpuSelected && active);
+    }
+
+    function ensureCpuRadarHudHost() {
+      if (!doomDebugOverlay) {
+        return null;
+      }
+
+      if (doomCpuRadarHud && doomCpuRadarHud.isConnected && doomCpuRadarCanvas) {
+        return doomCpuRadarHud;
+      }
+
+      doomCpuRadarHud = document.createElement("div");
+      doomCpuRadarHud.className = "doom-cpu-radar-hud";
+      doomCpuRadarHud.dataset.renderer = "cpu-canvas";
+
+      doomCpuRadarCanvas = document.createElement("canvas");
+      doomCpuRadarCanvas.width = 160;
+      doomCpuRadarCanvas.height = 160;
+      doomCpuRadarCanvas.setAttribute("aria-label", "CPU fallback ego radar");
+      doomCpuRadarHud.appendChild(doomCpuRadarCanvas);
+
+      const caption = document.createElement("div");
+      caption.className = "doom-cpu-radar-caption";
+      caption.textContent = "CPU RADAR";
+      doomCpuRadarHud.appendChild(caption);
+
+      doomDebugOverlay.appendChild(doomCpuRadarHud);
+      return doomCpuRadarHud;
+    }
+
+    function resolveCpuRadarPacket(status = {}) {
+      const autoplay = status?.autoplay || {};
+      const radar = autoplay.radarHud || autoplay.egoRadar || status.radarHud || status.egoRadar || {};
+      const compass = autoplay.compassSensor || {};
+      const action = autoplay.action || autoplay.currentAction || {};
+      const move = String(action.move || action.Move || "").toLowerCase();
+      const turn = String(action.turn || action.Turn || "").toLowerCase();
+      const forwardFromAction = move === "forward" || action.forward || action.moveForward
+        ? 1
+        : (move === "back" || move === "backward" || action.back || action.moveBack ? -1 : 0);
+      const turnFromAction = turn === "right" || action.right || action.turnRight
+        ? 1
+        : (turn === "left" || action.left || action.turnLeft ? -1 : 0);
+      const audioYawFallback = directionToRadarYaw(autoplay.audioEnemyDirection, firstFiniteNumber([autoplay.enemyCombatYaw], 0));
+      const visualYawFallback = firstFiniteNumber([autoplay.visualEnemyYaw, autoplay.enemyCombatYaw], 0);
+      const mode = firstFiniteNumber([radar.mode, radar.Mode], 2);
+
+      return {
+        northAngleDeg: normalizeRadarYaw(firstFiniteNumber([radar.northAngleDeg, radar.NorthAngleDeg, compass.heading, compass.Heading], 0)),
+        confidence: clampUnit(firstFiniteNumber([radar.confidence, radar.Confidence, compass.confidence, compass.Confidence], 0)),
+        usableAlpha: clampUnit(firstFiniteNumber([radar.usableAlpha, radar.UsableAlpha], radar.rawUsable === false ? 0 : 1)),
+        kinesisForward: Math.max(-1, Math.min(1, firstFiniteNumber([radar.kinesisForward, radar.KinesisForward], forwardFromAction))),
+        kinesisTurn: Math.max(-1, Math.min(1, firstFiniteNumber([radar.kinesisTurn, radar.KinesisTurn], turnFromAction))),
+        mode,
+        suppressedAlpha: clampUnit(firstFiniteNumber([radar.suppressedAlpha, radar.SuppressedAlpha], mode === 1 ? 1 : 0)),
+        lostAlpha: clampUnit(firstFiniteNumber([radar.lostAlpha, radar.LostAlpha], mode === 0 ? 1 : 0)),
+        flickerPhase: clampUnit(firstFiniteNumber([radar.flickerPhase, radar.FlickerPhase], 1)),
+        enemyVisualYaw: normalizeRadarYaw(firstFiniteNumber([radar.enemyVisualYaw, radar.EnemyVisualYaw], visualYawFallback)),
+        enemyVisualAlpha: clampUnit(firstFiniteNumber([radar.enemyVisualAlpha, radar.EnemyVisualAlpha], autoplay.visualEnemyVisible ? Math.max(autoplay.enemyConfidence || 0, 0.45) : autoplay.enemyConfidence || 0)),
+        enemyAudioYaw: normalizeRadarYaw(firstFiniteNumber([radar.enemyAudioYaw, radar.EnemyAudioYaw], audioYawFallback)),
+        enemyAudioAlpha: clampUnit(firstFiniteNumber([radar.enemyAudioAlpha, radar.EnemyAudioAlpha], autoplay.audioEnemyConfidence || 0)),
+        enemySignalSuppressed: Boolean(radar.enemySignalSuppressed || radar.EnemySignalSuppressed),
+        enemySignalLost: Boolean(radar.enemySignalLost || radar.EnemySignalLost)
+      };
+    }
+
+    function radarPoint(center, radius, yawDeg, scale = 1) {
+      const angle = Number(yawDeg || 0) * Math.PI / 180;
+      return {
+        x: center.x + Math.sin(angle) * radius * scale,
+        y: center.y - Math.cos(angle) * radius * scale
+      };
+    }
+
+    function drawCpuRadarCircle(ctx, point, radius, color, alpha, glow = 0) {
+      const a = clampUnit(alpha);
+      if (a <= 0.015) {
+        return;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = Math.max(1, radius * 0.28);
+      if (glow > 0) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = glow;
+      }
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = Math.min(1, a * 0.85);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius * 1.85, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCpuRadarHud(status = {}, gpuHudActive = false) {
+      if (!shouldRenderCpuRadarHud(status, gpuHudActive)) {
+        doomCpuRadarHud?.remove?.();
+        doomCpuRadarHud = null;
+        doomCpuRadarCanvas = null;
+        return false;
+      }
+
+      const host = ensureCpuRadarHudHost();
+      const canvas = doomCpuRadarCanvas;
+      const ctx = canvas?.getContext?.("2d");
+      if (!host || !canvas || !ctx) {
+        return false;
+      }
+
+      const cssSize = Math.max(82, Math.round(host.getBoundingClientRect().width || 128));
+      const dpr = Math.max(1, Math.min(2, Number(window.devicePixelRatio || 1)));
+      const pixelSize = Math.round(cssSize * dpr);
+      if (canvas.width !== pixelSize || canvas.height !== pixelSize) {
+        canvas.width = pixelSize;
+        canvas.height = pixelSize;
+      }
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssSize, cssSize);
+
+      const radar = resolveCpuRadarPacket(status);
+      const center = { x: cssSize / 2, y: cssSize / 2 };
+      const radius = cssSize * 0.42;
+      const lost = radar.lostAlpha > 0.35 || radar.mode <= 0 || radar.confidence < 0.05;
+      const suppressed = !lost && (radar.suppressedAlpha > 0.35 || radar.mode === 1);
+      const theme = lost
+        ? { main: "rgba(255,78,84,.88)", grid: "rgba(255,78,84,.28)", fill: "rgba(56,8,10,.16)" }
+        : (suppressed
+          ? { main: "rgba(255,178,48,.92)", grid: "rgba(255,178,48,.28)", fill: "rgba(42,28,4,.15)" }
+          : { main: "rgba(34,235,255,.92)", grid: "rgba(34,235,255,.25)", fill: "rgba(0,30,38,.14)" });
+      const confidenceAlpha = clampUnit(radar.confidence * (radar.confidence < 0.20 ? Math.max(0.30, radar.flickerPhase) : 1));
+
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = theme.fill;
+      ctx.strokeStyle = theme.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      for (const scale of [0.33, 0.66]) {
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, radius * scale, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y - radius);
+      ctx.lineTo(center.x, center.y + radius);
+      ctx.moveTo(center.x - radius, center.y);
+      ctx.lineTo(center.x + radius, center.y);
+      ctx.stroke();
+      ctx.strokeStyle = theme.main;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      const north = radarPoint(center, radius, radar.northAngleDeg, 1);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.18, confidenceAlpha);
+      ctx.fillStyle = theme.main;
+      ctx.shadowColor = theme.main;
+      ctx.shadowBlur = 7 * confidenceAlpha;
+      ctx.font = `900 ${Math.max(9, cssSize * 0.085)}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("▲", north.x, north.y);
+      ctx.restore();
+
+      const move = {
+        x: center.x + radar.kinesisTurn * radius * 0.55,
+        y: center.y - radar.kinesisForward * radius * 0.55
+      };
+      ctx.save();
+      ctx.strokeStyle = "rgba(190,248,255,.75)";
+      ctx.fillStyle = "rgba(190,248,255,.92)";
+      ctx.lineWidth = Math.max(2, cssSize * 0.018);
+      ctx.shadowColor = "rgba(64,220,255,.55)";
+      ctx.shadowBlur = 7;
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(move.x, move.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(move.x, move.y, Math.max(2.2, cssSize * 0.025), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const visual = radarPoint(center, radius, radar.enemyVisualYaw, 0.62);
+      const audio = radarPoint(center, radius, radar.enemyAudioYaw, 0.88);
+      if (radar.enemyVisualAlpha > 0.06 && radar.enemyAudioAlpha > 0.06) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(radar.enemyVisualAlpha, radar.enemyAudioAlpha) * 0.82;
+        ctx.strokeStyle = "rgba(64,255,146,.86)";
+        ctx.lineWidth = Math.max(1, cssSize * 0.010);
+        ctx.shadowColor = "rgba(64,255,146,.55)";
+        ctx.shadowBlur = 7;
+        ctx.beginPath();
+        ctx.moveTo(visual.x, visual.y);
+        ctx.lineTo(audio.x, audio.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+      drawCpuRadarCircle(ctx, audio, Math.max(2.4, cssSize * 0.025), "rgba(255,186,64,.96)", radar.enemyAudioAlpha, 7);
+      drawCpuRadarCircle(ctx, visual, Math.max(2.6, cssSize * 0.027), "rgba(255,78,88,.98)", radar.enemyVisualAlpha, 8);
+
+      ctx.save();
+      ctx.fillStyle = theme.main;
+      ctx.globalAlpha = .88;
+      ctx.font = `800 ${Math.max(6, cssSize * 0.047)}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("F", center.x, center.y - radius - 7);
+      ctx.restore();
+      return true;
     }
 
     function ensureDoomSpatialHud() {
@@ -4388,20 +4792,39 @@
       }
 
       const responses = {
-        "help": "commands: yes, doom.status, doom.phase.check, doom.gui.selftest, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio test, doom.audio status, doom.sensor <visual|audio|motor|movement|compass|spatial|health> <toggle|on|off>, doom.autoplay toggle, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
-        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button.",
+        "help": "commands: yes, doom.gpu cpu, doom.gpu gpu, doom.gpu status, doom.status, doom.phase.check, doom.gui.selftest, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio test, doom.audio status, doom.sensor <visual|audio|motor|movement|compass|spatial|health> <toggle|on|off>, doom.autoplay toggle, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
+        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. Choose GPU/CPU below or type yes for GPU mode.",
         "doom.stop": "ok: no active public runtime process is running.",
         "wasm.exports": "main, doom_init, doom_tick, doom_render, doom_input, doom_input_action, doom_mount_wad, doom_wad_status, malloc, free",
-        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. Type yes in the aik console or use the approval button.",
+        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. Choose GPU/CPU below or type yes for GPU mode.",
         "legal": "open /demo/doom/terms-and-licenses.html in a new tab before approval"
       };
 
+      if (wasmApprovalPending && (normalized === "doom.gpu cpu" || normalized === "gpu cpu")) {
+        setStartupGpuMode(false, "startup-cpu");
+        appendConsoleLine("[ RESP ]", "log-warn", "CPU mode armed. Type yes to start without WebGPU initialization.");
+        return false;
+      }
+
+      if (wasmApprovalPending && (normalized === "doom.gpu gpu" || normalized === "gpu gpu")) {
+        const mode = setStartupGpuMode(true, "startup-gpu");
+        const activeGpu = mode.useGpuRendering !== false && mode.gpuPermanentlyDisabled !== true;
+        appendConsoleLine("[ RESP ]", activeGpu ? "log-ok" : "log-warn", activeGpu
+          ? "GPU mode armed. Type yes to start with WebGPU initialization."
+          : "GPU mode cannot be re-enabled in this session after CPU/fallback was selected.");
+        return false;
+      }
+
       if (["yes", "y", "approve", "accept"].includes(normalized)) {
+        if (!window.AIKernelDoomGpuMode || window.AIKernelDoomGpuMode.useGpuRendering !== false) {
+          ensureGpuModeState();
+        }
         wasmApprovalPending = false;
         setApprovalUiState("loading");
         downloadProgressTracker.reset();
         appendConsoleLine("[  OK  ]", "log-ok", "approval recorded: hosted WAD/model/WASM download and load accepted.");
-        if (!doomRuntime) {
+        const runtime = ensureDoomRuntime();
+        if (!runtime) {
           halted.innerHTML = "[ FAILED ] AIKERNEL.DOOM BROWSER RUNTIME UNAVAILABLE.<span>Doom browser runtime script is missing.</span>";
           setApprovalUiState("failed");
           appendConsoleLine("[ FAIL ]", "log-fail", "Doom browser runtime script is unavailable.");
@@ -4413,7 +4836,7 @@
         promptSubmit.disabled = true;
         let gameStarted = false;
         try {
-          const status = await doomRuntime.prepare();
+          const status = await runtime.prepare();
           doomScreenPanel.hidden = false;
           halted.innerHTML = "[ READY ] AIKERNEL.DOOM USER APPROVAL RECORDED.<span>Hosted WAD/model/WASM download and validation completed.</span><span>Auto start is launching doom.start and doom.autoplay on.</span>";
           updateRuntimeStatus(status, "ready");
@@ -4482,8 +4905,8 @@
         await loadDoomGpuPathStatusScript();
         const gpu = readDoomDebugGpuStatus();
         const rows = Array.isArray(gpu.path?.rows) ? gpu.path.rows : [];
-        appendConsoleLine("[ GPU ]", gpu.runtime.usingCpuFallback ? "log-warn" : "log-info", `runtime renderer=${gpu.runtime.renderer}; delegate=${gpu.runtime.gpuDelegate}; fallback=${gpu.runtime.usingCpuFallback}; error=${gpu.runtime.lastError || "none"}.`);
-        appendConsoleLine("[ GPU ]", gpu.provider?.usingCpuFallback ? "log-warn" : "log-info", `provider=${gpu.provider?.name || "none"}; backend=${gpu.provider?.backend || "unknown"}; initialized=${Boolean(gpu.provider?.initialized)}; renderer=${Boolean(gpu.provider?.rendererInitialized)}; zeroCopy=${Boolean(gpu.provider?.zeroCopy)}; memory=${Number(gpu.provider?.estimatedGpuMemoryMB || gpu.provider?.gpuMemory?.totalMB || 0).toFixed(2)}MB.`);
+        appendConsoleLine("[ GPU ]", gpu.runtime.usingCpuFallback ? "log-warn" : "log-info", `runtime renderer=${gpu.runtime.renderer}; delegate=${gpu.runtime.gpuDelegate}; useGpu=${gpu.runtime.useGpuRendering !== false}; fallback=${gpu.runtime.usingCpuFallback}; reason=${gpu.runtime.gpuModeReason || "none"}; error=${gpu.runtime.lastError || "none"}.`);
+        appendConsoleLine("[ GPU ]", gpu.provider?.usingCpuFallback ? "log-warn" : "log-info", `provider=${gpu.provider?.name || "none"}; backend=${gpu.provider?.backend || "unknown"}; useGpu=${gpu.provider?.useGpuRendering !== false}; disabled=${Boolean(gpu.provider?.gpuPermanentlyDisabled)}; reason=${gpu.provider?.fallbackReason || "none"}; initialized=${Boolean(gpu.provider?.initialized)}; renderer=${Boolean(gpu.provider?.rendererInitialized)}; zeroCopy=${Boolean(gpu.provider?.zeroCopy)}; memory=${Number(gpu.provider?.estimatedGpuMemoryMB || gpu.provider?.gpuMemory?.totalMB || 0).toFixed(2)}MB.`);
         if (rows.length > 0) {
           rows.forEach(row => appendConsoleLine(`[ ${row.label} ]`, row.tone === "gpu" ? "log-ok" : (row.tone === "warn" ? "log-warn" : "log-info"), row.value));
         }
@@ -5752,6 +6175,19 @@
       syncDetectionToggleButtons();
     });
 
+    window.addEventListener("aikernel-doom-canvas-replaced", event => {
+      const replacement = event?.detail?.canvas || document.getElementById("doom-screen");
+      if (replacement) {
+        doomScreen = replacement;
+      }
+    });
+
+    window.addEventListener("aikernel-doom-gpu-lost", event => {
+      const detail = event?.detail || {};
+      appendConsoleLine("[ GPU ]", "log-warn", `GPU rendering disabled. Falling back to CPU mode (${detail.reason || detail.kind || "gpu-lost"}).`);
+      updateRuntimeStatus(doomRuntime?.status?.() || latestRuntimeStatus || {}, "gpu-fallback");
+    });
+
     doomController.addEventListener("pointerdown", (event) => {
       const button = event.target.closest("button[data-doom-key]");
       if (!button) {
@@ -5836,11 +6272,13 @@
     }
 
     approvalAccept?.addEventListener("click", () => {
+      setStartupGpuMode(true, "startup-gpu");
       runApprovalUiCommand("yes");
     });
 
     approvalDecline?.addEventListener("click", () => {
-      runApprovalUiCommand("no");
+      setStartupGpuMode(false, "startup-cpu");
+      runApprovalUiCommand("yes");
     });
 
     promptInput.addEventListener("keydown", (event) => {

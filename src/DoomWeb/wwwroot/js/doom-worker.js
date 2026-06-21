@@ -84,6 +84,43 @@
     self.postMessage(Object.assign({ type }, payload || {}), transfer || []);
   }
 
+  function applyGpuModeState(gpuMode) {
+    if (!gpuMode || typeof gpuMode !== "object") {
+      return;
+    }
+
+    const useGpuRendering = gpuMode.useGpuRendering !== false;
+    const reason = String(gpuMode.reason || (useGpuRendering ? "startup-gpu" : "startup-cpu"));
+    if (typeof self.AIKernelDoomSetGpuRenderingMode === "function") {
+      self.AIKernelDoomSetGpuRenderingMode(useGpuRendering, reason);
+      return;
+    }
+
+    const mode = self.AIKernelDoomGpuMode || {};
+    mode.useGpuRendering = useGpuRendering;
+    mode.gpuPermanentlyDisabled = gpuMode.gpuPermanentlyDisabled === true || !useGpuRendering;
+    mode.reason = reason;
+    mode.updatedAt = Number(gpuMode.updatedAt || Date.now());
+    self.AIKernelDoomGpuMode = mode;
+    self.useGpuRendering = mode.useGpuRendering;
+    self.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+  }
+
+  function disposeWorkerGpuResources(reason = "page-transition") {
+    const provider = self.WebGpuComputeProvider || self.webGpuComputeProvider || self.aikernelWebGpuComputeProvider;
+    if (!provider || provider.__aikernelDoomWorkerReleaseComplete) {
+      return;
+    }
+
+    provider.__aikernelDoomWorkerReleaseComplete = true;
+    provider.lastError = reason;
+    provider.usingCpuFallback = true;
+    try {
+      provider.disposeGpuResources?.();
+    } catch {
+    }
+  }
+
   function numberOrZero(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : 0;
@@ -161,6 +198,7 @@
 
     if (message.type === "init") {
       try {
+        applyGpuModeState(message.gpuMode);
         runtime = new self.AIKernelDoomRuntime({
           canvas: message.canvas,
           moduleUrl: message.moduleUrl,
@@ -180,7 +218,18 @@
       return;
     }
 
+    if (message.type === "gpu-mode") {
+      applyGpuModeState(message.gpuMode);
+      return;
+    }
+
+    if (message.type === "dispose-gpu") {
+      disposeWorkerGpuResources(message.reason || "page-transition");
+      return;
+    }
+
     if (message.type === "call") {
+      applyGpuModeState(message.gpuMode);
       invoke(message.id, message.method, message.args);
       return;
     }

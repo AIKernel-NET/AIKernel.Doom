@@ -63,6 +63,64 @@
       DEFAULT_MODEL_MANIFEST_URL;
   }
 
+  function ensureDoomGpuModeState() {
+    const root = typeof window !== "undefined" ? window : self;
+    const mode = root.AIKernelDoomGpuMode || {};
+    if (typeof mode.useGpuRendering !== "boolean") {
+      mode.useGpuRendering = true;
+    }
+    if (typeof mode.gpuPermanentlyDisabled !== "boolean") {
+      mode.gpuPermanentlyDisabled = false;
+    }
+    mode.reason = String(mode.reason || "");
+    mode.updatedAt = Number(mode.updatedAt || 0);
+    root.AIKernelDoomGpuMode = mode;
+    root.useGpuRendering = mode.useGpuRendering;
+    root.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+    return mode;
+  }
+
+  function isDoomGpuRenderingEnabled() {
+    const mode = ensureDoomGpuModeState();
+    return mode.useGpuRendering !== false && mode.gpuPermanentlyDisabled !== true;
+  }
+
+  function setDoomGpuRenderingMode(useGpu, reason = "") {
+    const root = typeof window !== "undefined" ? window : self;
+    const mode = ensureDoomGpuModeState();
+    if (useGpu && mode.gpuPermanentlyDisabled) {
+      return mode;
+    }
+
+    mode.useGpuRendering = Boolean(useGpu);
+    if (!useGpu) {
+      mode.gpuPermanentlyDisabled = true;
+    }
+    mode.reason = String(reason || (useGpu ? "startup-gpu" : "cpu-fallback"));
+    mode.updatedAt = Date.now();
+    root.AIKernelDoomGpuMode = mode;
+    root.useGpuRendering = mode.useGpuRendering;
+    root.gpuPermanentlyDisabled = mode.gpuPermanentlyDisabled;
+    try {
+      if (typeof root.dispatchEvent === "function" && typeof root.CustomEvent === "function") {
+        root.dispatchEvent(new root.CustomEvent("aikernel-doom-gpu-mode-changed", {
+          detail: {
+            useGpuRendering: mode.useGpuRendering,
+            gpuPermanentlyDisabled: mode.gpuPermanentlyDisabled,
+            reason: mode.reason,
+            updatedAt: mode.updatedAt
+          }
+        }));
+      }
+    } catch {
+    }
+    return mode;
+  }
+
+  ensureDoomGpuModeState();
+  window.AIKernelDoomSetGpuRenderingMode = setDoomGpuRenderingMode;
+  window.AIKernelDoomIsGpuRenderingEnabled = isDoomGpuRenderingEnabled;
+
   ensureBrowserWebGpuComputeProvider();
 
   function requireDoomWasmState(name) {
@@ -219,6 +277,7 @@
       this.frameImage = null;
       this.frame32 = null;
       this.webGpuFrameRenderer = false;
+      this.gpuFallbackHandled = false;
       this.framebufferPtr = 0;
       this.framebufferView = null;
       this.framebufferMemory = null;
@@ -366,6 +425,11 @@
         run: false
       };
       this.autoplayLastError = "";
+      this.gpuFallbackListener = event => {
+        const detail = event?.detail || {};
+        this.handleGpuLost(detail.kind || "webgpu", detail.info || detail.reason || null, { fromProvider: true });
+      };
+      window.addEventListener("aikernel-doom-gpu-lost", this.gpuFallbackListener);
     }
 
     status() {
@@ -373,6 +437,7 @@
       return {
         state: this.state,
         renderer: this.renderer,
+        usingCpuFallback: Boolean(gpuHudStatus.providerUsingCpuFallback || !isDoomGpuRenderingEnabled()),
         wasmLoaded: Boolean(this.instance),
         wadLoaded: Boolean(this.wadBytes),
         wadMounted: this.wadMounted,
@@ -593,6 +658,9 @@
         } : null,
         downloadProgress: this.cloneDownloadProgress(),
         framebuffer: `${WIDTH}x${HEIGHT} paletted-8bit`,
+        useGpuRendering: isDoomGpuRenderingEnabled(),
+        gpuPermanentlyDisabled: Boolean(ensureDoomGpuModeState().gpuPermanentlyDisabled),
+        gpuModeReason: ensureDoomGpuModeState().reason || "",
         lastError: this.lastError
       };
     }
@@ -628,6 +696,8 @@
         adapterSummary: providerStatus?.adapterSummary || "unknown",
         providerRendererInitialized: Boolean(providerStatus?.rendererInitialized),
         providerUsingCpuFallback: Boolean(providerStatus?.usingCpuFallback),
+        providerGpuPermanentlyDisabled: Boolean(providerStatus?.gpuPermanentlyDisabled),
+        providerFallbackReason: providerStatus?.fallbackReason || "",
         providerLastError: providerStatus?.lastError || "",
         providerZeroCopy: Boolean(providerStatus?.zeroCopy),
         rawTextureReady: Boolean(providerStatus?.rawTextureReady),
@@ -934,6 +1004,76 @@
       return this.status();
     }
 
+    ensureCpuCanvasContext(reason = "cpu-renderer") {
+      if (this.context && this.frameImage && (this.frame32 || !IS_LITTLE_ENDIAN)) {
+        return true;
+      }
+
+      this.webGpuFrameRenderer = false;
+      this.renderer = reason === "startup-cpu"
+        ? "canvas-fallback(cpu-selected)"
+        : "canvas-fallback(cpu)";
+      this.canvas.width = WIDTH;
+      this.canvas.height = HEIGHT;
+      this.canvas.hidden = false;
+      this.context = this.canvas.getContext("2d", { alpha: false });
+
+      if (!this.context && typeof document !== "undefined") {
+        const previous = this.canvas;
+        const replacement = document.createElement("canvas");
+        Array.from(previous.attributes || []).forEach(attribute => {
+          replacement.setAttribute(attribute.name, attribute.value);
+        });
+        replacement.id = previous.id || "doom-screen";
+        replacement.className = previous.className || "";
+        replacement.width = WIDTH;
+        replacement.height = HEIGHT;
+        replacement.hidden = false;
+        replacement.tabIndex = previous.tabIndex >= 0 ? previous.tabIndex : 0;
+        previous.replaceWith(replacement);
+        this.canvas = replacement;
+        this.context = replacement.getContext("2d", { alpha: false });
+        window.dispatchEvent(new CustomEvent("aikernel-doom-canvas-replaced", {
+          detail: { canvas: replacement, reason }
+        }));
+      }
+
+      if (!this.context) {
+        throw new Error("2D canvas context is unavailable.");
+      }
+
+      this.frameImage = this.context.createImageData(WIDTH, HEIGHT);
+      this.frame32 = IS_LITTLE_ENDIAN ? new Uint32Array(this.frameImage.data.buffer) : null;
+      return true;
+    }
+
+    handleGpuLost(kind = "webgpu", info = null, options = {}) {
+      if (this.gpuFallbackHandled && !isDoomGpuRenderingEnabled()) {
+        return this.status();
+      }
+
+      this.gpuFallbackHandled = true;
+      const detailReason = info?.reason || info?.message || (typeof info === "string" ? info : "");
+      const reason = `gpu-lost:${kind}${detailReason ? `:${detailReason}` : ""}`;
+      const mode = setDoomGpuRenderingMode(false, reason);
+      this.webGpuFrameRenderer = false;
+      this.renderer = "canvas-fallback(cpu-after-gpu-lost)";
+      const provider = resolveWebGpuProvider();
+      if (!options.fromProvider && provider && typeof provider.forceCpuFallback === "function" && !provider.gpuPermanentlyDisabled) {
+        provider.forceCpuFallback(kind, info);
+      }
+
+      try {
+        this.ensureCpuCanvasContext("gpu-lost");
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+      }
+
+      this.log("[ GPU ]", "log-warn", `GPU rendering disabled. Falling back to CPU mode (${mode.reason || reason}).`);
+      this.emitStatus("gpu-fallback");
+      return this.status();
+    }
+
     async ensureCanvas() {
       if (!this.canvas) {
         throw new Error("doom-screen canvas is missing.");
@@ -942,9 +1082,15 @@
       this.canvas.width = WIDTH;
       this.canvas.height = HEIGHT;
       this.canvas.hidden = false;
-      const provider = await ensureDoomRendererProvider(this.log);
-      if (!this.webGpuFrameRenderer && typeof provider?.initializeDoomRenderer === "function") {
-        this.webGpuFrameRenderer = await provider.initializeDoomRenderer(this.canvas, WIDTH, HEIGHT, this.paletteCache.rgbaBytes);
+      let provider = null;
+      if (isDoomGpuRenderingEnabled()) {
+        provider = await ensureDoomRendererProvider(this.log);
+        if (!this.webGpuFrameRenderer && typeof provider?.initializeDoomRenderer === "function") {
+          this.webGpuFrameRenderer = await provider.initializeDoomRenderer(this.canvas, WIDTH, HEIGHT, this.paletteCache.rgbaBytes);
+        }
+      } else {
+        this.webGpuFrameRenderer = false;
+        this.log("[ GPU ]", "log-warn", "CPU rendering mode selected; WebGPU renderer initialization skipped.");
       }
 
       this.renderer = this.webGpuFrameRenderer ? "WebGpuComputeProvider(texture)" : resolveRendererName();
@@ -955,13 +1101,7 @@
         return;
       }
 
-      this.context = this.canvas.getContext("2d", { alpha: false });
-      if (!this.context) {
-        throw new Error("2D canvas context is unavailable.");
-      }
-
-      this.frameImage = this.context.createImageData(WIDTH, HEIGHT);
-      this.frame32 = IS_LITTLE_ENDIAN ? new Uint32Array(this.frameImage.data.buffer) : null;
+      this.ensureCpuCanvasContext(isDoomGpuRenderingEnabled() ? "gpu-unavailable" : "startup-cpu");
     }
 
     async loadRuntime() {
@@ -1022,8 +1162,13 @@
         this.log("[AUTOPLAY]", "log-warn", `autoplay profile unavailable: ${error instanceof Error ? error.message : String(error)}; using built-in defaults.`);
         return null;
       });
-      this.setDownloadPhase("provider", "Initializing WebGPU provider");
-      await initializeWebGpuProvider();
+      if (isDoomGpuRenderingEnabled()) {
+        this.setDownloadPhase("provider", "Initializing WebGPU provider");
+        await initializeWebGpuProvider();
+      } else {
+        this.setDownloadPhase("provider", "CPU rendering mode selected");
+        this.log("[ GPU ]", "log-warn", "CPU mode selected; WebGPU provider initialization skipped.");
+      }
       const modelLabel = this.modelManifest.name || this.modelManifest.upstreamFilename || "Bonsai-1.7B model";
       this.registerDownloadAsset("bonsai-model", modelLabel, this.modelManifest.sizeBytes);
       await fetchBinary(this.modelManifest.hostedFile, {
@@ -1036,7 +1181,7 @@
       this.bonsaiSupervisor?.configure(this.modelManifest, this.autoplayProfile);
       this.initializeWasmAutoplayController();
       this.log("[MODEL]", "log-ok", `${this.modelManifest.name || "Bonsai-1.7B"} downloaded and validated.`);
-      this.log("[ GPU ]", "log-ok", `Bonsai supervisor GPU delegate active: ${resolveGpuDelegateName()}.`);
+      this.log("[ GPU ]", isDoomGpuRenderingEnabled() ? "log-ok" : "log-warn", `Bonsai supervisor execution surface: ${resolveGpuDelegateName()}.`);
       this.emitStatus("model-ready");
     }
 
@@ -4330,12 +4475,23 @@
       }
 
       const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
-      if (this.webGpuFrameRenderer && typeof provider?.renderPalettedFrame === "function" && provider.renderPalettedFrame(indices)) {
-        await this.waitForGpuQueue();
-        await yieldToUi();
-        return;
+      if (this.webGpuFrameRenderer && isDoomGpuRenderingEnabled() && typeof provider?.renderPalettedFrame === "function") {
+        try {
+          if (provider.renderPalettedFrame(indices)) {
+            await this.waitForGpuQueue();
+            await yieldToUi();
+            return;
+          }
+        } catch (error) {
+          this.handleGpuLost("render", error);
+        }
       }
 
+      if (this.webGpuFrameRenderer && typeof provider?.status === "function" && provider.status()?.usingCpuFallback) {
+        this.handleGpuLost("provider-fallback", provider.status()?.lastError || null, { fromProvider: true });
+      }
+
+      this.ensureCpuCanvasContext("frame-cpu-fallback");
       if (this.frame32) {
         const palette = this.paletteCache.rgba32;
         for (let index = 0; index < FRAME_BYTES; index += 1) {
@@ -4386,6 +4542,11 @@
     }
 
     async waitForGpuQueue() {
+      if (!isDoomGpuRenderingEnabled()) {
+        this.lastGpuWaitMs = 0;
+        return;
+      }
+
       const queue = resolveWebGpuQueue();
       if (!queue?.onSubmittedWorkDone) {
         this.lastGpuWaitMs = 0;
@@ -4513,6 +4674,10 @@
   }
 
   async function initializeWebGpuProvider() {
+    if (!isDoomGpuRenderingEnabled()) {
+      return { usingCpuFallback: true, useGpuRendering: false, lastError: ensureDoomGpuModeState().reason || "GPU rendering disabled." };
+    }
+
     const provider = await ensureDoomRendererProvider();
     if (typeof provider?.initialize === "function") {
       await provider.initialize();
@@ -4678,7 +4843,9 @@
       name: "WebGpuComputeProvider",
       backendName: "browser-webgpu",
       supported: Boolean(navigator.gpu),
-      usingCpuFallback: !navigator.gpu,
+      usingCpuFallback: !navigator.gpu || !isDoomGpuRenderingEnabled(),
+      gpuPermanentlyDisabled: !isDoomGpuRenderingEnabled(),
+      fallbackReason: ensureDoomGpuModeState().reason || "",
       initialized: false,
       initializing: null,
       adapter: null,
@@ -4696,6 +4863,15 @@
         }
 
         this.initializing = (async () => {
+          if (!isDoomGpuRenderingEnabled()) {
+            this.usingCpuFallback = true;
+            this.gpuPermanentlyDisabled = true;
+            this.fallbackReason = ensureDoomGpuModeState().reason || "GPU rendering disabled by startup selection.";
+            this.lastError = this.fallbackReason;
+            this.initialized = true;
+            return this.status();
+          }
+
           if (!navigator.gpu) {
             this.usingCpuFallback = true;
             this.lastError = "navigator.gpu is unavailable.";
@@ -4717,6 +4893,7 @@
             this.adapterInfo = await resolveWebGpuAdapterInfo(this.adapter);
             this.adapterSummary = summarizeWebGpuAdapterInfo(this.adapterInfo);
             this.device = await this.adapter.requestDevice();
+            this.attachDeviceLostHandler(this.device);
             this.queue = this.device.queue;
             this.usingCpuFallback = false;
             this.initialized = true;
@@ -4735,10 +4912,72 @@
 
         return this.initializing;
       },
+      attachDeviceLostHandler(device) {
+        if (!device?.lost || device.__aikernelDoomLostHandlerAttached) {
+          return;
+        }
+
+        device.__aikernelDoomLostHandlerAttached = true;
+        device.lost.then(info => {
+          this.handleGpuLost("webgpu", info);
+        }).catch(error => {
+          this.handleGpuLost("webgpu", error);
+        });
+      },
+      attachCanvasContextLostHandlers(canvas) {
+        if (!canvas || canvas.__aikernelDoomContextLostHandlersAttached) {
+          return;
+        }
+
+        canvas.__aikernelDoomContextLostHandlersAttached = true;
+        canvas.addEventListener("webglcontextlost", event => {
+          event.preventDefault();
+          this.handleGpuLost("webgl", null);
+        });
+      },
+      disposeGpuResources() {
+        try {
+          this.device?.destroy?.();
+        } catch {
+        }
+        this.device = null;
+        this.queue = null;
+        this.adapter = null;
+        this.initializing = null;
+        frameTextures.clear();
+      },
+      dispatchGpuLost(kind, info) {
+        window.dispatchEvent(new CustomEvent("aikernel-doom-gpu-lost", {
+          detail: {
+            kind,
+            info,
+            reason: this.fallbackReason || this.lastError || "gpu-lost",
+            status: this.status()
+          }
+        }));
+      },
+      handleGpuLost(kind = "webgpu", info = null) {
+        if (this.gpuPermanentlyDisabled) {
+          return this.status();
+        }
+
+        const detailReason = info?.reason || info?.message || (typeof info === "string" ? info : "");
+        this.gpuPermanentlyDisabled = true;
+        this.usingCpuFallback = true;
+        this.fallbackReason = `gpu-lost:${kind}${detailReason ? `:${detailReason}` : ""}`;
+        this.lastError = "GPU failure detected. Switching to CPU mode.";
+        setDoomGpuRenderingMode(false, this.fallbackReason);
+        this.disposeGpuResources();
+        this.dispatchGpuLost(kind, info);
+        return this.status();
+      },
+      forceCpuFallback(kind = "forced", info = null) {
+        return this.handleGpuLost(kind, info);
+      },
       setFrameState(target, state) {
         frameStates.set(target || RAW_FRAMEBUFFER_TARGET, Object.assign({
           providerId: this.providerId,
-          backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
+          backend: (this.usingCpuFallback || !isDoomGpuRenderingEnabled()) ? "cpu-fallback" : this.backendName,
           zeroCopy: false,
           updatedAt: performance.now()
         }, state || {}));
@@ -4753,7 +4992,7 @@
       createBonsaiVisionBinding(target) {
         const name = target || RAW_FRAMEBUFFER_TARGET;
         const texture = frameTextures.get(name);
-        if (texture && !this.usingCpuFallback) {
+        if (texture && !this.usingCpuFallback && isDoomGpuRenderingEnabled()) {
           return {
             providerId: this.providerId,
             backend: this.backendName,
@@ -4765,7 +5004,7 @@
 
         return {
           providerId: this.providerId,
-          backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
+          backend: (this.usingCpuFallback || !isDoomGpuRenderingEnabled()) ? "cpu-fallback" : this.backendName,
           kind: "webgpu-state-buffer",
           zeroCopy: false,
           state: frameStates.get(name) || null
@@ -4781,6 +5020,12 @@
         return frameStates.get(target || RAW_FRAMEBUFFER_TARGET) || null;
       },
       status() {
+        if (!isDoomGpuRenderingEnabled()) {
+          this.usingCpuFallback = true;
+          this.gpuPermanentlyDisabled = true;
+          this.fallbackReason = this.fallbackReason || ensureDoomGpuModeState().reason || "GPU rendering disabled.";
+        }
+
         const deviceReady = Boolean(this.device && this.queue && !this.usingCpuFallback);
         return {
           providerId: this.providerId,
@@ -4788,6 +5033,9 @@
           backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
           supported: this.supported,
           initialized: this.initialized,
+          useGpuRendering: isDoomGpuRenderingEnabled(),
+          gpuPermanentlyDisabled: Boolean(this.gpuPermanentlyDisabled || ensureDoomGpuModeState().gpuPermanentlyDisabled),
+          fallbackReason: this.fallbackReason || ensureDoomGpuModeState().reason || "",
           adapterReady: Boolean(this.adapter),
           deviceReady,
           adapterPowerPreference: this.adapterRequestOptions?.powerPreference || WEBGPU_ADAPTER_POWER_PREFERENCE,
@@ -4840,6 +5088,10 @@
   }
 
   function resolveRendererName() {
+    if (!isDoomGpuRenderingEnabled()) {
+      return "canvas-fallback(cpu-selected)";
+    }
+
     const provider = resolveWebGpuProvider();
     if (provider) {
       const status = typeof provider.status === "function" ? provider.status() : provider;
@@ -4856,6 +5108,10 @@
   }
 
   function resolveGpuDelegateName() {
+    if (!isDoomGpuRenderingEnabled()) {
+      return "CPU mode(WebGPU disabled)";
+    }
+
     const provider = resolveWebGpuProvider();
     if (provider) {
       const status = typeof provider.status === "function" ? provider.status() : provider;
@@ -4871,6 +5127,10 @@
   }
 
   function resolveWebGpuQueue() {
+    if (!isDoomGpuRenderingEnabled()) {
+      return null;
+    }
+
     const provider = resolveWebGpuProvider();
     return provider?.device?.queue || provider?.queue || navigator.gpu?.queue || null;
   }

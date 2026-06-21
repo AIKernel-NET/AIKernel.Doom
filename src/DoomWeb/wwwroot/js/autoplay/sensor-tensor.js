@@ -228,7 +228,7 @@
     set("semantic.mapDark", controller?.mapDarkSectorMatch ? 1 : 0);
     set("semantic.mapEnemy", controller?.mapEnemyZoneMatch ? 1 : 0);
     set("system.ammo", controller?.ammoLikelyEmpty ? 0 : 1);
-    set("system.health", controller?.healthLikelyDead ? 0 : 1);
+    set("system.health", controller?.healthLikelyDead ? 0 : Number(controller?.healthEstimatedPercent ?? 100) / 100);
     set("system.audio", controller?.soundCueActive || controller?.auditorySnapshot?.eventDetected ? 1 : 0);
     set("system.combat", controller?.combatContextActive || Number(controller?.enemyAlertFrames || 0) > 0 ? 1 : 0);
     set("system.priority", Number(controller?.strategyPriority || 0) / 100);

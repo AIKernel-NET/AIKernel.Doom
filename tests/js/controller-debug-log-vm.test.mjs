@@ -50,8 +50,34 @@ assert(entries[3].category === "control" && entries[3].message.includes("autopla
 assert(adapter.entryMatches(entries[0], "priority"), "priority filter should match priority entries");
 assert(adapter.categoryGlyph(entries[1]) === "T", "glyph helper should render telos as T");
 
+const actionEntry = adapter.actionEntryFromStatus({
+  state: "running",
+  frameCount: 123,
+  autoplay: {
+    enabled: true,
+    predictions: 42,
+    controlPipeline: "ComputerRoom",
+    objective: "reach-central-hall",
+    strategyContext: "post-door-straight",
+    action: { move: "forward", turn: "right", run: true, use: false, fire: false },
+    actionRepeatFrames: 18,
+    moveRepeatFrames: 18,
+    repeatTurnFrames: 4,
+    useCooldown: 7
+  }
+}, "autoplay-tick");
+
+assert(actionEntry.category === "action", "runtime action entry should use action category");
+assert(actionEntry.commandSignature === "forward+turn:right+run", "action signature should preserve movement command");
+assert(actionEntry.message.includes("#42 forward+turn:right+run"), "action entry should expose prediction and command sequence");
+assert(actionEntry.message.includes("rep=18"), "action entry should expose same-action repeat frames");
+assert(actionEntry.message.includes("stage=post-door-straight"), "action entry should expose decision stage");
+assert(adapter.entryMatches(actionEntry, "action"), "action filter should match command trace entries");
+assert(adapter.categoryGlyph(actionEntry) === "A", "glyph helper should render action entries as A");
+
 console.log("CONTROLLER_DEBUG_LOG_VM_TEST_OK", {
   entries: entries.length,
   first: entries[0].label,
-  control: entries[3].label
+  control: entries[3].label,
+  action: actionEntry.commandSignature
 });

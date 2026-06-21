@@ -259,6 +259,18 @@
     } else if (objective === "reach-central-hall" || objective === "cross-bridge") {
       x = turnToX(input.bridgeLaneTurn) || 0;
       y = 0.9;
+    } else if (objective === "engage-front-enemy") {
+      x = turnToX(input.enemyAlertTurn) || turnToX(input.audioEnemyDirection) || (number(input.faceSig) < -0.08 ? -0.28 : (number(input.faceSig) > 0.08 ? 0.28 : 0));
+      y = number(input.enemyConfidence) >= 0.35 || number(input.audioEnemyConfidence) >= 0.35 ? 0.18 : 0.42;
+    } else if (objective === "secure-central-hall") {
+      x = turnToX(input.bridgeLaneTurn) || 0;
+      y = 0.54;
+    } else if (objective === "reach-final-room") {
+      x = turnToX(input.bridgeLaneTurn) || 0;
+      y = 0.92;
+    } else if (objective === "press-exit-switch" || objective === "level-clear") {
+      x = turnToX(input.firstDoorUseTurn) || turnToX(input.bridgeLaneTurn) || 0;
+      y = objective === "press-exit-switch" ? 0.34 : 0;
     } else if (objective === "retry-after-death") {
       x = 0;
       y = 0;

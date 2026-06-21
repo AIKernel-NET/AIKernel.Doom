@@ -200,6 +200,45 @@ const damageEvaluated = phainesis.evaluatePhainomenon({
 });
 assert(damageEvaluated.damageLocalization.active === true, "evaluatePhainomenon should detect damage localization");
 
+const audioEnemyEvaluated = phainesis.evaluatePhainomenon({
+  frames: [
+    { audioEnergy: 0.16, audioMidEnergy: 0.14, audioHighEnergy: 0.08, audioBalance: 0.42, audioEventDetected: true, audioEventType: "native-sfx", enemyConfidence: 0.03 },
+    { audioEnergy: 0.22, audioMidEnergy: 0.2, audioHighEnergy: 0.1, audioBalance: 0.62, audioEventDetected: true, audioEventType: "native-sfx", enemyConfidence: 0.03 }
+  ]
+});
+assert(audioEnemyEvaluated.enemyPresence.active === true, "combat-like audio should raise enemy presence without visual confirmation");
+assert(audioEnemyEvaluated.enemyPresence.direction === "right", "stereo balance should localize audio enemy to the right");
+assert(audioEnemyEvaluated.threatField.direction === "right", "audio enemy localization should feed threat field direction");
+
+const terminalMaskedEnemyEvaluated = phainesis.evaluatePhainomenon({
+  frames: [
+    {
+      audioEnergy: 0.18,
+      audioMidEnergy: 0.17,
+      audioHighEnergy: 0.08,
+      audioBalance: 0.58,
+      audioEventDetected: true,
+      audioEventType: "native-sfx",
+      enemyConfidence: 0.38,
+      computerRoomScore: 0.34,
+      computerPanelScore: 0.62,
+      computerDarkPanelScore: 0.28,
+      baseDirection: "front"
+    }
+  ]
+});
+assert(terminalMaskedEnemyEvaluated.enemyPresence.active === true, "Computer terminal visual decoys should not suppress real combat audio");
+assert(terminalMaskedEnemyEvaluated.enemyPresence.visualSuppressed === true, "Computer terminal visual decoys should be masked from visual enemy vectors");
+assert(terminalMaskedEnemyEvaluated.enemyPresence.direction === "right", "Side combat audio should drive enemy direction when the front view is a terminal decoy");
+assert(terminalMaskedEnemyEvaluated.enemyPresence.source === "audio-terminal-mask", "Terminal mask should be visible as an enemy source reason");
+
+const useAudioEvaluated = phainesis.evaluatePhainomenon({
+  frames: [
+    { audioEnergy: 0.24, audioMidEnergy: 0.22, audioHighEnergy: 0.12, audioBalance: 0.65, audioEventDetected: true, audioEventType: "use-success-gate", enemyConfidence: 0.03 }
+  ]
+});
+assert(useAudioEvaluated.enemyPresence.active === false, "Use success/failure audio should not be classified as an enemy");
+
 const itemEvaluated = phainesis.evaluatePhainomenon({
   frames: [
     { healthActiveCells: 7, healthZeroScore: 0.5, projectileScore: 0.03, enemyConfidence: 0.03, audioEnergy: 0.05 }

@@ -87,6 +87,50 @@
     return flags.routeWallObstacle ? "wall-pressure" : "none";
   }
 
+  function evaluateTopology(input, flags, recommendedYaw, routeConfidence) {
+    const wallPressure = clamp01(Math.max(
+      input.footObstacleScore,
+      input.motionObstacleScore,
+      flags.routeWallObstacle ? 0.82 : 0,
+      flags.routeFootObstacle ? 0.62 : 0,
+      flags.routeBarrelLaneRisk ? 0.78 : 0,
+      flags.routeBarrelLaneDetourRequired ? 0.86 : 0));
+    const ambiguousLandmark = input.spawnLandmarkRouteEvidence >= 0.34
+      && input.spawnLandmarkRouteEvidence <= 0.48
+      && input.spawnCorridorGapScore < 0.30;
+    const barrelZoneEvidence = clamp01(
+      (flags.routeBarrelLaneRisk ? 0.52 : 0)
+      + (flags.routeBarrelLaneDetourRequired ? 0.62 : 0)
+      + input.footObstacleScore * 0.34
+      + input.motionObstacleScore * 0.22
+      + (1 - input.spawnCorridorGapScore) * 0.16
+      + (ambiguousLandmark ? 0.18 : 0));
+    const yawSign = recommendedYaw > 0 ? 1 : (recommendedYaw < 0 ? -1 : 0);
+    const corridorStrength = clamp01(Math.max(
+      input.spawnCorridorGapScore,
+      input.spawnLandmarkRouteEvidence,
+      flags.firstDoorRouteEvidence,
+      routeConfidence));
+    const centerlineDirectionX = yawSign === 0
+      ? 0
+      : clamp(-yawSign * Math.max(barrelZoneEvidence, wallPressure) * 0.8, -1, 1);
+    const centerlineDirectionY = clamp01(1 - barrelZoneEvidence);
+    const corridorDirectionHintX = yawSign === 0
+      ? 0
+      : clamp(yawSign * corridorStrength, -1, 1);
+    const corridorDirectionHintY = corridorStrength;
+    const centerCorridorAlignment = clamp(
+      centerlineDirectionX * corridorDirectionHintX + centerlineDirectionY * corridorDirectionHintY,
+      -1,
+      1);
+    return {
+      routeTopologyWallDistanceNormalized: clamp01(1 - wallPressure * 0.78),
+      routeTopologyBarrelZoneEvidence: barrelZoneEvidence,
+      routeTopologyCenterCorridorAlignment: centerCorridorAlignment,
+      routeDeadEndRisk: barrelZoneEvidence > 0.90 && centerCorridorAlignment < -0.30
+    };
+  }
+
   function evaluateRoutePlan(rawInput = {}) {
     const input = {
       depthSig: clamp(rawInput.depthSig, 0, 1.5),
@@ -101,6 +145,8 @@
       spawnSecretDoorScore: clamp01(rawInput.spawnSecretDoorScore),
       spawnWestStairScore: clamp01(rawInput.spawnWestStairScore),
       bridgeDoorScore: clamp01(rawInput.bridgeDoorScore),
+      firstDoorVisionScore: clamp01(rawInput.firstDoorVisionScore),
+      firstDoorVisionRedScore: clamp01(rawInput.firstDoorVisionRedScore),
       wallVector: clamp(number(rawInput.wallVector, 0), -1, 1),
       gapVector: clamp(number(rawInput.gapVector, 0), -1, 1),
       corridorVector: clamp(number(rawInput.corridorVector, 0), -1, 1),
@@ -154,8 +200,36 @@
       && input.spawnLandmarkRouteEvidence >= 0.20;
     const routeOpenSpaceLowGapEscape = routeOpenSpaceLowGapScan
       && routeFootClearRequired;
-    const firstDoorRouteEvidence = Math.max(input.bridgeDoorScore, input.spawnCorridorGapScore);
-    const firstDoorRouteEvidenceReady = input.bridgeDoorScore >= 0.18 || input.spawnCorridorGapScore >= 0.30;
+    const routeBarrelLaneRisk = openSpaceFootNoise
+      && input.depthSig >= 0.80
+      && input.footObstacleScore >= 0.55
+      && input.motionObstacleScore >= 0.55
+      && input.motionForwardProgress >= 0.45
+      && input.spawnCorridorGapScore >= 0.30
+      && input.spawnCorridorGapScore < 0.40
+      && input.spawnLandmarkRouteEvidence >= 0.35
+      && input.spawnSecretDoorScore < 0.72
+      && input.useProbeScore < 0.22;
+    const routeBarrelLaneDetourRequired = openSpaceFootNoise
+      && input.depthSig >= 0.80
+      && input.footObstacleScore >= 0.55
+      && input.motionObstacleScore >= 0.55
+      && input.motionForwardProgress >= 0.45
+      && input.spawnCorridorGapScore >= 0.14
+      && input.spawnCorridorGapScore < 0.30
+      && input.spawnLandmarkRouteEvidence >= 0.38
+      && input.spawnSecretDoorScore < 0.72
+      && input.useProbeScore < 0.22;
+    const firstDoorVisualRouteEvidence = input.firstDoorVisionScore >= 0.38
+      && input.firstDoorVisionRedScore >= 0.05
+      && input.bridgeDoorScore >= 0.12
+      && input.spawnSecretDoorScore < 0.42
+      ? clamp01(input.firstDoorVisionScore * 0.72 + input.bridgeDoorScore * 0.28)
+      : 0;
+    const firstDoorRouteEvidence = Math.max(input.bridgeDoorScore, input.spawnCorridorGapScore, firstDoorVisualRouteEvidence);
+    const firstDoorRouteEvidenceReady = input.bridgeDoorScore >= 0.18
+      || input.spawnCorridorGapScore >= 0.30
+      || firstDoorVisualRouteEvidence >= 0.34;
     const eastWindowRouteEvidenceReady = input.spawnSecretDoorScore < 0.42 || input.spawnCorridorGapScore >= 0.30;
     const routeConfidence = clamp01(Math.max(
       firstDoorRouteEvidence,
@@ -181,6 +255,8 @@
       routeWallObstaclePriorityAllowed,
       routeOpenSpaceLowGapScan,
       routeOpenSpaceLowGapEscape,
+      routeBarrelLaneRisk,
+      routeBarrelLaneDetourRequired,
       firstDoorRouteEvidence,
       firstDoorRouteEvidenceReady,
       eastWindowRouteEvidenceReady,
@@ -189,9 +265,28 @@
       recommendedYaw,
       useProbeConfidence
     };
+    const topology = evaluateTopology(input, flags, recommendedYaw, routeConfidence);
+    const routeDeadEndTrimRequired = Boolean(topology.routeDeadEndRisk)
+      && !routeTextureWallOcclusion
+      && input.useProbeScore < 0.22;
+    const routeCorridorBridgeEvidence = clamp01(input.bridgeDoorScore * 0.45
+      + input.spawnCorridorGapScore * 0.25
+      + input.spawnLandmarkRouteEvidence * 0.30);
+    const routeCorridorBridgeLock = input.context === "corridor"
+      && input.depthSig > 0.28
+      && input.depthSig <= 0.86
+      && input.bridgeDoorScore >= 0.28
+      && input.spawnCorridorGapScore >= 0.34
+      && input.spawnLandmarkRouteEvidence >= 0.46
+      && input.spawnSecretDoorScore < 0.80
+      && input.useProbeScore < 0.22
+      && !routeTextureWallOcclusion;
     const currentRoute = chooseRoute(input, flags);
     const currentLandmark = chooseLandmark(input, flags);
-    return Object.assign(flags, {
+    return Object.assign(flags, topology, {
+      routeDeadEndTrimRequired,
+      routeCorridorBridgeEvidence,
+      routeCorridorBridgeLock,
       currentRoute,
       currentLandmark,
       routeActionHint: chooseAction(flags),

@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const version = "20260618-sensorpanel1";
+  const version = "20260621-sensorpanel3";
 
   const sensorDescriptors = Object.freeze({
     visual: Object.freeze({ label: "Visual", signal: "9x9 frame", panel: "aisthesis", stage: "primary" }),

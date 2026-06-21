@@ -24,6 +24,8 @@ const sandbox = {
 };
 sandbox.window = sandbox.self;
 const context = vm.createContext(sandbox);
+const gpuPathStatusSource = readFileSync(path.join(repoRoot, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-gpu-path-status.js"), "utf8");
+vm.runInContext(gpuPathStatusSource, context, { filename: "doom-gpu-path-status.js" });
 const source = readFileSync(path.join(repoRoot, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-runtime-format.js"), "utf8");
 vm.runInContext(source, context, { filename: "doom-runtime-format.js" });
 

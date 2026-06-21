@@ -10,7 +10,14 @@ namespace AIKernel.Doom.Provider.Autoplay;
 public sealed record DynamicPipelineEvaluationResult(
     ActionCommand Action,
     bool ZoeVetoed,
-    string SvcEvent);
+    string SvcEvent)
+{
+    /// <summary>
+    /// EN: Evaluated dynamic pipeline context after Aisthesis, Phainesis, Nous, Topos, and Kairos projection.
+    /// JA: Aisthesis、Phainesis、Nous、Topos、Kairos の射影後の評価済み dynamic pipeline context です。
+    /// </summary>
+    public DynamicPipelineContext Context { get; init; } = new();
+}
 
 /// <summary>
 /// EN: Executes the canonical Aisthesis-to-Zoe dynamic pipeline graph for Doom autoplay.
@@ -58,7 +65,7 @@ public sealed class DynamicPipelineEvaluator
         var decision = RunTopos(meaning);
         var priority = RunKairos(decision);
         var generated = RunKinesis(priority, proposedAction);
-        return RunZoe(context, generated, vetoRules);
+        return RunZoe(priority, generated, vetoRules);
     }
 
     /// <summary>
@@ -71,7 +78,10 @@ public sealed class DynamicPipelineEvaluator
 
         return context with
         {
-            SensorReadings = BuildSensorReadings(context.Sensor)
+            SensorReadings = BuildSensorReadings(
+                context.Sensor,
+                context.LowHealthThreshold,
+                context.CriticalHealthThreshold)
         };
     }
 
@@ -212,11 +222,17 @@ public sealed class DynamicPipelineEvaluator
                 return new DynamicPipelineEvaluationResult(
                     SafeAction(),
                     ZoeVetoed: true,
-                    SvcEvent: $"zoe-veto:{veto.Expression}");
+                    SvcEvent: $"zoe-veto:{veto.Expression}")
+                {
+                    Context = context
+                };
             }
         }
 
-        return new DynamicPipelineEvaluationResult(proposedAction, ZoeVetoed: false, SvcEvent: "none");
+        return new DynamicPipelineEvaluationResult(proposedAction, ZoeVetoed: false, SvcEvent: "none")
+        {
+            Context = context
+        };
     }
 
     private void EnsureCanonicalGraph()
@@ -244,9 +260,27 @@ public sealed class DynamicPipelineEvaluator
             }
         };
 
-    private static IReadOnlyDictionary<string, float> BuildSensorReadings(SensorFusion sensor)
+    private static IReadOnlyDictionary<string, float> BuildSensorReadings(
+        SensorFusion sensor,
+        int lowHealthThreshold,
+        int criticalHealthThreshold)
     {
         var tensor = sensor.SensorTensor.IsEmpty ? BuildTensor(sensor) : sensor.SensorTensor;
+        var visualEnemy = VisualEnemyConfidence(tensor);
+        var audioEnemy = AudioEnemyConfidence(tensor);
+        var visualEnemyCentered = visualEnemy >= 0.28f && Math.Abs(sensor.FaceSig) <= 0.12f;
+        var visualEnemyYaw = visualEnemyCentered
+            ? 0
+            : Math.Clamp(sensor.FaceSig * 48f, -18f, 18f);
+        var bridgeConfidence = tensor.SemanticScore("bridge");
+        var computerRoomConfidence = tensor.SemanticScore("computer-room");
+        var health = Math.Clamp(float.IsFinite(sensor.Health) ? sensor.Health : 100, 0, 100);
+        var healthRisk = health <= 0 ? 1 : Clamp01((100 - health) / 100f);
+        var lowThreshold = Math.Max(1, lowHealthThreshold);
+        var criticalThreshold = Math.Max(1, Math.Min(lowThreshold, criticalHealthThreshold));
+        var lowHealth = health > 0 && health < lowThreshold ? 1 : 0;
+        var criticalHealth = health > 0 && health < criticalThreshold ? 1 : 0;
+        var fatalHealth = health <= 0 ? 1 : 0;
         return new Dictionary<string, float>(StringComparer.Ordinal)
         {
             ["visual"] = Max(tensor.Get("vision.target"), tensor.Get("vision.open"), tensor.Get("vision.wall"), tensor.Get("semantic.door")),
@@ -254,9 +288,30 @@ public sealed class DynamicPipelineEvaluator
             ["movement"] = Max(tensor.Get("motion.forward"), tensor.Get("motion.turn"), tensor.Get("motion.delta")),
             ["compass"] = Clamp01(1 - Math.Abs(sensor.FaceSig)),
             ["collision"] = Max(tensor.Get("motion.obstacle"), tensor.Get("motion.stuck"), Clamp01(sensor.StuckTicks / 12f)),
-            ["health"] = Clamp01(sensor.Health / 100f),
+            ["health"] = Clamp01(health / 100f),
+            ["healthRisk"] = healthRisk,
+            ["lowHealth"] = lowHealth,
+            ["lowHealthGoalFirst"] = lowHealth,
+            ["criticalHealth"] = criticalHealth,
+            ["fatalHealth"] = fatalHealth,
             ["spatial"] = Max(tensor.Get("semantic.corridor"), tensor.Get("vision.open"), tensor.Get("semantic.bridge")),
-            ["topos"] = Max(tensor.Get("system.priority"), tensor.Get("system.ctg"))
+            ["topos"] = Max(tensor.Get("system.priority"), tensor.Get("system.ctg")),
+            ["bridgeConfidence"] = bridgeConfidence,
+            ["computerRoomConfidence"] = computerRoomConfidence,
+            ["bridgeGreenHazard"] = bridgeConfidence,
+            ["bridgeLaneVisible"] = bridgeConfidence >= 0.18f ? 1 : 0,
+            ["computerRoomCombatContext"] = computerRoomConfidence >= 0.28f ? 1 : 0,
+            ["visualEnemyConfidence"] = visualEnemy,
+            ["audioEnemyConfidence"] = audioEnemy,
+            ["audioEnemyStrong"] = audioEnemy >= 0.24f ? 1 : 0,
+            ["audioEnemyFront"] = audioEnemy >= 0.24f ? 1 : 0,
+            ["audioEnemyLeft"] = 0,
+            ["audioEnemyRight"] = 0,
+            ["visualEnemyVisible"] = visualEnemy >= 0.28f ? 1 : 0,
+            ["visualEnemyCentered"] = visualEnemyCentered ? 1 : 0,
+            ["visualEnemyYaw"] = visualEnemyYaw,
+            ["visualEnemyFireReady"] = visualEnemy >= 0.36f && visualEnemyCentered ? 1 : 0,
+            ["enemyCombatYaw"] = visualEnemy >= 0.28f && !visualEnemyCentered ? visualEnemyYaw : 0
         };
     }
 
@@ -348,6 +403,22 @@ public sealed class DynamicPipelineEvaluator
 
     private static float Max(params float[] values)
         => values.Length == 0 ? 0 : Clamp01(values.Max());
+
+    private static float VisualEnemyConfidence(AutoplaySensorTensor tensor)
+    {
+        var visual = Max(tensor.Get("vision.enemy"), tensor.Get("semantic.mapenemy"));
+        var terminalSurface = Max(tensor.Get("semantic.computer"), tensor.Get("vision.dark"));
+        return terminalSurface >= 0.24f && tensor.Get("system.combat") < 0.18f
+            ? Math.Min(visual, 0.10f)
+            : visual;
+    }
+
+    private static float AudioEnemyConfidence(AutoplaySensorTensor tensor)
+    {
+        var audio = tensor.Get("system.audio");
+        var combat = Max(tensor.Get("system.combat"), tensor.Get("semantic.mapenemy"), tensor.Get("vision.enemy") * 0.5f);
+        return Clamp01(audio * combat);
+    }
 
     private static float Clamp01(float value)
         => Math.Clamp(float.IsFinite(value) ? value : 0, 0, 1);

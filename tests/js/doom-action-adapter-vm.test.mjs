@@ -59,8 +59,8 @@ const nativeResult = adapter.applyAction({
 
 assert(nativeResult.mode === "native-action", "native ABI path should be selected when available");
 assert(nativeCalls.length === 1, "native ABI should be called once");
-assert(nativeCalls[0].move === 1 && nativeCalls[0].turn === -1, "native ABI should receive normalized move/turn axes");
-assert(nativeCalls[0].fire === 1 && nativeCalls[0].strafe === 1, "native ABI should receive fire/strafe flags");
+assert(nativeCalls[0].move === 0 && nativeCalls[0].turn === 0, "Use pulse should neutralize native move/turn axes");
+assert(nativeCalls[0].fire === 0 && nativeCalls[0].strafe === 0, "Use pulse should suppress fire/strafe flags");
 assert(nativeQueued.length === 1 && nativeQueued[0].name === "use", "native ABI path should queue use/run only when not manually held");
 
 const fallbackQueued = [];
@@ -80,8 +80,16 @@ const fallbackResult = adapter.applyAction({
 
 assert(fallbackResult.mode === "key-events", "fallback key path should be used without native ABI");
 assert(fallbackQueued.every(item => !["forward", "back", "left", "right", "strafe"].includes(item.name)), "manual move mode should not queue movement keys");
-assert(fallbackQueued.some(item => item.name === "fire" && item.pressed === true), "fallback path should queue fire");
+assert(fallbackQueued.some(item => item.name === "fire" && item.pressed === false), "Use pulse should release fire while opening a door");
 assert(fallbackQueued.some(item => item.name === "use" && item.pressed === true), "fallback path should queue pulsed use");
+
+const fireQueued = [];
+adapter.applyAction({ move: "none", turn: "none", fire: true, use: false }, {
+  resolveUsePulse: () => false,
+  queueInput: (keycode, pressed, name) => fireQueued.push({ keycode, pressed, name }),
+  isManualInputActive: () => false
+});
+assert(fireQueued.some(item => item.name === "fire" && item.pressed === true), "fallback path should queue fire when Use is not active");
 
 const yawOnlyPlan = adapter.createInputPlan({ move: "none", turn: "none", turnYaw: -9 }, { normalized: true });
 assert(yawOnlyPlan.turn === -1, "numeric turnYaw should recover the turn axis when turn text is none");

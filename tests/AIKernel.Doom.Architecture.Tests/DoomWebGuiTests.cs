@@ -28,7 +28,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("runApprovalUiCommand(\"yes\")", script, StringComparison.Ordinal);
         Assert.Contains("runApprovalUiCommand(\"no\")", script, StringComparison.Ordinal);
         Assert.Contains("runWasmCommand(command, { echo: false, source: \"approval-ui\" })", script, StringComparison.Ordinal);
-        Assert.Contains("Type yes in the aik console or use the approval button below", script, StringComparison.Ordinal);
+        Assert.Contains("Type yes in the aik console or use the approval button", script, StringComparison.Ordinal);
         Assert.DoesNotContain("hintWord=yes", script, StringComparison.Ordinal);
     }
 
@@ -41,11 +41,266 @@ public sealed class DoomWebGuiTests
         Assert.Contains("getSchemaDefinitions", script, StringComparison.Ordinal);
         Assert.Contains("sendSchemaDefinitions", script, StringComparison.Ordinal);
         Assert.Contains("captureGameFrame", script, StringComparison.Ordinal);
+        Assert.Contains("captureRawGameFrame", script, StringComparison.Ordinal);
+        Assert.Contains("captureAnalysisFrame", script, StringComparison.Ordinal);
+        Assert.Contains("captureDisplayFrame", script, StringComparison.Ordinal);
+        Assert.Contains("captureGpuAisthesisFeatures", script, StringComparison.Ordinal);
+        Assert.Contains("captureGpuSpatialReasoningOutput", script, StringComparison.Ordinal);
+        Assert.Contains("window.AIKernelDoomDebugCapture", script, StringComparison.Ordinal);
+        Assert.Contains("getLastPublishedCapture", script, StringComparison.Ordinal);
+        Assert.Contains("analysis-raw-framebuffer", script, StringComparison.Ordinal);
+        Assert.Contains("debug-display-fallback", script, StringComparison.Ordinal);
+        Assert.Contains("analysisSafe", script, StringComparison.Ordinal);
         Assert.Contains("getAnalysisLogs", script, StringComparison.Ordinal);
         Assert.Contains("getSensorTensor", script, StringComparison.Ordinal);
         Assert.Contains("runGuiSelfTest", script, StringComparison.Ordinal);
         Assert.Contains("doomSchemaDefinitionUrls", script, StringComparison.Ordinal);
         Assert.Contains("/demo/doom/autoplay-sensor-tensor.schema.json", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomPrompt_DoesNotStealKeyboardFromTextInputs()
+    {
+        var script = ReadDoomPromptScript();
+
+        Assert.Contains("function isEditableKeyboardTarget(target)", script, StringComparison.Ordinal);
+        Assert.Contains("input, textarea, select, [contenteditable='true'], [contenteditable='']", script, StringComparison.Ordinal);
+        Assert.Contains("if (event.defaultPrevented || isEditableKeyboardTarget(event.target))", script, StringComparison.Ordinal);
+        Assert.Contains("return document.activeElement === doomScreen;", script, StringComparison.Ordinal);
+        Assert.Contains("if (!shouldHandleDoomKeyboardEvent(event))", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomWebGpuProvider_SeparatesRawFramebufferAndHudCompositeTargets()
+    {
+        var script = ReadDoomWebGpuProviderScript();
+        var contracts = ReadDoomGpuContractsScript();
+
+        Assert.Contains("const RAW_FRAMEBUFFER_TARGET = \"doom\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const RAW_FRAMEBUFFER_WIRE_NAME = \"raw-framebuffer\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_COMPOSITE_TARGET = \"doom-hud\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_COMPOSITE_WIRE_NAME = \"hud-composite-offscreen\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_CELLS_TARGET = \"doom.hud.cells9x9\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PANEL_VALUES_TARGET = \"doom.hud.panel.values\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PRIORITY_RECTS_TARGET = \"doom.hud.priority.rects\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PANEL_BORDER_PIXELS = 1", contracts, StringComparison.Ordinal);
+        Assert.Contains("hudPanelRects: HUD_PANEL_RECTS", contracts, StringComparison.Ordinal);
+        Assert.Contains("aisthesis: Object.freeze({ left: 0.020, top: 0.700, right: 0.255, bottom: 0.970 })", contracts, StringComparison.Ordinal);
+        Assert.Contains("const AISTHESIS_INFO_TARGET = \"doom.gpu.aisthesis.info\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const AISTHESIS_MATRIX_TARGET = \"doom.gpu.aisthesis.matrix\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const AISTHESIS_FEATURE_TARGET = \"doom.gpu.aisthesis.features\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const SPATIAL_INFO_TARGET = \"doom.gpu.spatial.info\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("const SPATIAL_OUTPUT_TARGET = \"doom.gpu.spatial.reasoning\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("rawFramebufferFrameTarget: rawFramebufferTarget", contracts, StringComparison.Ordinal);
+        Assert.Contains("hudCompositeFrameTarget: hudCompositeTarget", contracts, StringComparison.Ordinal);
+        Assert.Contains("frameToken", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_COMPOSITE_TARGET = GPU_CONTRACTS.hudCompositeTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_COMPOSITE_MAX_FPS = 30", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_COMPOSITE_MIN_INTERVAL_MS", script, StringComparison.Ordinal);
+        Assert.Contains("doom.frame.rgba8unorm", script, StringComparison.Ordinal);
+        Assert.Contains("doom.hud.composite.${index}", script, StringComparison.Ordinal);
+        Assert.Contains("GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC", script, StringComparison.Ordinal);
+        Assert.Contains("hudCompositeTextures", script, StringComparison.Ordinal);
+        Assert.Contains("hudCompositePresentBindGroups", script, StringComparison.Ordinal);
+        Assert.Contains("doom.hud.composite.pass", script, StringComparison.Ordinal);
+        Assert.Contains("doom.hud.composite.present.pass", script, StringComparison.Ordinal);
+        Assert.Contains("this.setFrameState(HUD_COMPOSITE_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("this.setDoomFrameTexture(renderer.frameTexture)", script, StringComparison.Ordinal);
+        Assert.Contains("getHudCompositeTexture()", script, StringComparison.Ordinal);
+        Assert.Contains("rawFramebufferTarget: FRAME_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("displayTarget: compositeReady ? HUD_COMPOSITE_TARGET : FRAME_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("displaySource: compositeActive ? HUD_COMPOSITE_WIRE_NAME : RAW_FRAMEBUFFER_WIRE_NAME", script, StringComparison.Ordinal);
+        Assert.Contains("rawCaptureTarget: FRAME_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME", script, StringComparison.Ordinal);
+        Assert.Contains("analysisOverlayExcluded: true", script, StringComparison.Ordinal);
+        Assert.Contains("cssOverlayMode: compositeActive ? \"reduced\" : \"full\"", script, StringComparison.Ordinal);
+        Assert.Contains("setGpuAisthesisState(state)", script, StringComparison.Ordinal);
+        Assert.Contains("gpuAisthesis:", script, StringComparison.Ordinal);
+        Assert.Contains("zeroCopyReady", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_INFO_FLOATS = GPU_CONTRACTS.aisthesisInfoFloatCount", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_FEATURE_FLOATS = GPU_CONTRACTS.aisthesisFeatureFloatCount", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_INFO_TARGET = GPU_CONTRACTS.aisthesisInfoTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MATRIX_FLOATS = GPU_CONTRACTS.aisthesisMatrixFloatCount", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_INFO_FLOATS = GPU_CONTRACTS.spatialInfoFloatCount", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_OUTPUT_FLOATS = GPU_CONTRACTS.spatialOutputFloatCount", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MATRIX_TARGET = GPU_CONTRACTS.aisthesisMatrixTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_FEATURE_TARGET = GPU_CONTRACTS.aisthesisFeatureTarget", script, StringComparison.Ordinal);
+        Assert.Contains("doom.gpu.aisthesis.compute", script, StringComparison.Ordinal);
+        Assert.Contains("doom.gpu.aisthesis.compute.pass", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_REASONING_SHADER", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_INFO_TARGET = GPU_CONTRACTS.spatialInfoTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_OUTPUT_TARGET = GPU_CONTRACTS.spatialOutputTarget", script, StringComparison.Ordinal);
+        Assert.Contains("doom.gpu.spatial.reasoning.compute", script, StringComparison.Ordinal);
+        Assert.Contains("doom.gpu.spatial.reasoning.compute.pass", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_CONTRACTS = requireGpuContracts()", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_OUTPUT_FIELDS = GPU_CONTRACTS.spatialOutputFields", script, StringComparison.Ordinal);
+        Assert.Contains("function requireGpuContracts()", script, StringComparison.Ordinal);
+        Assert.Contains("\"maskHeat\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("\"maskRed\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("\"maskEdge\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("\"maskCorner\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("@group(0) @binding(4) var maskTexture: texture_2d<f32>", script, StringComparison.Ordinal);
+        Assert.Contains("fn maskMax() -> vec4<f32>", script, StringComparison.Ordinal);
+        Assert.Contains("let mask = maskMax()", script, StringComparison.Ordinal);
+        Assert.Contains("let maskHeat = mask.r", script, StringComparison.Ordinal);
+        Assert.Contains("matrixMax(1.0)", script, StringComparison.Ordinal);
+        Assert.Contains("setGpuSpatialReasoningState(state)", script, StringComparison.Ordinal);
+        Assert.Contains("writeGpuSpatialReasoningBuffers", script, StringComparison.Ordinal);
+        Assert.Contains("renderer.gpuSpatialInfoUpload[9] = state.maskTextureReady ? 1 : 0", script, StringComparison.Ordinal);
+        Assert.Contains("readGpuSpatialReasoningOutput(options = {})", script, StringComparison.Ordinal);
+        Assert.Contains("gpuSpatialReasoning:", script, StringComparison.Ordinal);
+        Assert.Contains("@compute @workgroup_size(${HUD_GRID_SIZE}, ${HUD_GRID_SIZE}, 1)", script, StringComparison.Ordinal);
+        Assert.Contains("var<workgroup> lumaCells: array<f32, ${HUD_CELL_COUNT}>", script, StringComparison.Ordinal);
+        Assert.Contains("@builtin(local_invocation_id) localId", script, StringComparison.Ordinal);
+        Assert.Contains("workgroupBarrier()", script, StringComparison.Ordinal);
+        Assert.Contains("@group(0) @binding(5) var<storage, read_write> gpuHeatCells", script, StringComparison.Ordinal);
+        Assert.Contains("@group(0) @binding(6) var outputMask: texture_storage_2d<rgba8unorm, write>", script, StringComparison.Ordinal);
+        Assert.Contains("gpuHeatCells[cellIndex] = clamp(heatValue", script, StringComparison.Ordinal);
+        Assert.Contains("{ binding: 5, resource: { buffer: hudCellsBuffer } }", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MASK_TARGET = GPU_CONTRACTS.aisthesisMaskTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MASK_WIRE_NAME = GPU_CONTRACTS.aisthesisMaskWireName", script, StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MASK_LAYOUT = GPU_CONTRACTS.aisthesisMaskLayout", script, StringComparison.Ordinal);
+        Assert.Contains("const AISTHESIS_MASK_TARGET = \"doom.gpu.aisthesis.mask9x9\"", contracts, StringComparison.Ordinal);
+        Assert.Contains("label: GPU_AISTHESIS_MASK_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("textureStore(", script, StringComparison.Ordinal);
+        Assert.Contains("{ binding: 6, resource: gpuAisthesisMaskTexture.createView() }", script, StringComparison.Ordinal);
+        Assert.Contains("{ binding: 4, resource: gpuAisthesisMaskTexture.createView() }", script, StringComparison.Ordinal);
+        Assert.Contains("features[16] = clamp(cornerMax", script, StringComparison.Ordinal);
+        Assert.Contains("readGpuAisthesisFeatures(options = {})", script, StringComparison.Ordinal);
+        Assert.Contains("doom.gpu.aisthesis.features.readback", script, StringComparison.Ordinal);
+        Assert.Contains("this.gpuAisthesisLastSummary = null", script, StringComparison.Ordinal);
+        Assert.Contains("this.gpuAisthesisLastSummary = {", script, StringComparison.Ordinal);
+        Assert.Contains("GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ", script, StringComparison.Ordinal);
+        Assert.Contains("copyBufferToBuffer(renderer.gpuAisthesisFeatureBuffer", script, StringComparison.Ordinal);
+        Assert.Contains("GPUMapMode?.READ", script, StringComparison.Ordinal);
+        Assert.Contains("summarizeGpuAisthesisFeatures(values)", script, StringComparison.Ordinal);
+        Assert.Contains("cornerMaximum: read(16)", script, StringComparison.Ordinal);
+        Assert.Contains("flattenGpuAisthesisMatrices", script, StringComparison.Ordinal);
+        Assert.Contains("const projectedMatrixValues = state.matrixValues || state.MatrixValues || []", script, StringComparison.Ordinal);
+        Assert.Contains("matrixSource: hasProjectedMatrixValues && projectedMatrixValues.length > 0 ? \"dto-flat\" : \"js-fallback-flatten\"", script, StringComparison.Ordinal);
+        Assert.Contains("writeGpuAisthesisBuffers", script, StringComparison.Ordinal);
+        Assert.Contains("renderer.gpuAisthesisInfoUpload[0] = state.enabled ? 1 : 0", script, StringComparison.Ordinal);
+        Assert.Contains("renderer.gpuAisthesisInfoUpload[11] = gpuAisthesisOutputCode(state.output)", script, StringComparison.Ordinal);
+        Assert.Contains("renderer.gpuAisthesisInfoUpload[13] = state.maskTextureEnabled ? 1 : 0", script, StringComparison.Ordinal);
+        Assert.Contains("this.queue.writeBuffer(renderer.gpuAisthesisInfoBuffer, 0, renderer.gpuAisthesisInfoUpload)", script, StringComparison.Ordinal);
+        Assert.Contains("finiteGpuScalar(values[index])", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("renderer.gpuAisthesisMatrixUpload[index] = clamp01", script, StringComparison.Ordinal);
+        Assert.Contains("infoBufferReady: Boolean(this.renderer?.gpuAisthesisInfoBuffer)", script, StringComparison.Ordinal);
+        Assert.Contains("infoFloatCount: GPU_AISTHESIS_INFO_FLOATS", script, StringComparison.Ordinal);
+        Assert.Contains("const gpuAisthesisComputeReady = Boolean(this.renderer?.gpuAisthesisComputePipeline", script, StringComparison.Ordinal);
+        Assert.Contains("computeReady: gpuAisthesisComputeReady", script, StringComparison.Ordinal);
+        Assert.Contains("gpuComputeActive: gpuAisthesisGpuComputeActive", script, StringComparison.Ordinal);
+        Assert.Contains("cpuPackingFallback: gpuAisthesisCpuPackingFallback", script, StringComparison.Ordinal);
+        Assert.Contains("featureBufferReady: Boolean(this.renderer?.gpuAisthesisFeatureBuffer)", script, StringComparison.Ordinal);
+        Assert.Contains("featureReadbackReady: Boolean(this.renderer?.gpuAisthesisFeatureBuffer", script, StringComparison.Ordinal);
+        Assert.Contains("featureFloatCount: GPU_AISTHESIS_FEATURE_FLOATS", script, StringComparison.Ordinal);
+        Assert.Contains("lastSummary: this.gpuAisthesisLastSummary", script, StringComparison.Ordinal);
+        Assert.Contains("heatCellsGpuWritable: Boolean(this.renderer?.hudCellsBuffer", script, StringComparison.Ordinal);
+        Assert.Contains("heatCellsTarget: HUD_CELLS_TARGET", script, StringComparison.Ordinal);
+        Assert.Contains("maskTextureReady: Boolean(this.renderer?.gpuAisthesisMaskTexture", script, StringComparison.Ordinal);
+        Assert.Contains("maskTextureInputReady: Boolean(this.renderer?.gpuAisthesisMaskTexture)", script, StringComparison.Ordinal);
+        Assert.Contains("maskTextureTarget: gpuAisthesisState?.maskTextureTarget", script, StringComparison.Ordinal);
+        Assert.Contains("normalizeGpuTextureTarget", script, StringComparison.Ordinal);
+        Assert.Contains("hudCompositeMaxFps: HUD_COMPOSITE_MAX_FPS", script, StringComparison.Ordinal);
+        Assert.Contains("hudCompositeDoubleBuffered", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_RECT_COUNT = GPU_CONTRACTS.hudRectCount", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_RECT_STRIDE = GPU_CONTRACTS.hudRectStride", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PANEL_RECTS = GPU_CONTRACTS.hudPanelRects", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PANEL_BORDER_PIXELS = Number(GPU_CONTRACTS.hudPanelBorderPixels || 1)", script, StringComparison.Ordinal);
+        Assert.Contains("fn pixelSize(width: f32) -> vec2<f32>", script, StringComparison.Ordinal);
+        Assert.Contains("width / max(1.0, f32(info.width))", script, StringComparison.Ordinal);
+        Assert.Contains("color = addLayerCard(color, uv, 0u, panel[0], ${wgslPanelMin(\"aisthesis\")}", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 20", contracts, StringComparison.Ordinal);
+        Assert.Contains("enemyCircleActive: f32", script, StringComparison.Ordinal);
+        Assert.Contains("enemyCircleX: f32", script, StringComparison.Ordinal);
+        Assert.Contains("enemyCircleY: f32", script, StringComparison.Ordinal);
+        Assert.Contains("enemyCenter = vec2<f32>(clamp(hud.enemyCircleX", script, StringComparison.Ordinal);
+        Assert.Contains("hud.enemyConfidence * hud.enemyCircleActive", script, StringComparison.Ordinal);
+        Assert.Contains("Object.prototype.hasOwnProperty.call(state, \"enemyCircle\")", script, StringComparison.Ordinal);
+        Assert.Contains("function enemyYawToScreenX(circle, visual, audio, confidence)", script, StringComparison.Ordinal);
+        Assert.Contains("enemyYawToScreenX(circle, visual, audio, confidence)", script, StringComparison.Ordinal);
+        Assert.Contains("const hasExplicitCenter = hasOwnAny(circle", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("uv - vec2<f32>(0.5, 0.50)", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PANEL_FIELDS = GPU_CONTRACTS.hudPanelFields", script, StringComparison.Ordinal);
+        Assert.Contains("const HUD_PRIORITY_RECTS_TARGET = GPU_CONTRACTS.hudPriorityRectsTarget", script, StringComparison.Ordinal);
+        Assert.Contains("@group(0) @binding(4) var<storage, read> rects: array<f32>;", script, StringComparison.Ordinal);
+        Assert.Contains("function writeHudRect", script, StringComparison.Ordinal);
+        Assert.Contains("const projectedRectangleValues = state.rectangleValues || state.RectangleValues", script, StringComparison.Ordinal);
+        Assert.Contains("next.rectangleSource = hasProjectedRectangles ? \"dto-flat\" : \"js-fallback-pack\"", script, StringComparison.Ordinal);
+        Assert.Contains("next.contractVersion = Number(state.contractVersion ?? state.ContractVersion", script, StringComparison.Ordinal);
+        Assert.Contains("next.analysisCaptureSource = String(state.analysisCaptureSource || state.AnalysisCaptureSource", script, StringComparison.Ordinal);
+        Assert.Contains("next.rectangleBufferLayout = normalizeGpuFlatBufferLayout(", script, StringComparison.Ordinal);
+        Assert.Contains("next.panelBufferLayout = normalizeGpuFlatBufferLayout(", script, StringComparison.Ordinal);
+        Assert.Contains("const matrixBufferLayout = normalizeGpuFlatBufferLayout(", script, StringComparison.Ordinal);
+        Assert.Contains("const stateVectorBufferLayout = normalizeGpuFlatBufferLayout(", script, StringComparison.Ordinal);
+        Assert.Contains("matrixKindSummary: String(state.matrixKindSummary || state.MatrixKindSummary", script, StringComparison.Ordinal);
+        Assert.Contains("bufferLayoutSummary: String(state.bufferLayoutSummary || state.BufferLayoutSummary", script, StringComparison.Ordinal);
+        Assert.Contains("featureFlagSummary: String(state.featureFlagSummary || state.FeatureFlagSummary", script, StringComparison.Ordinal);
+        Assert.Contains("outputLayoutSummary: String(state.outputLayoutSummary || state.OutputLayoutSummary", script, StringComparison.Ordinal);
+        Assert.Contains("normalizeGpuFrameTarget", script, StringComparison.Ordinal);
+        Assert.Contains("normalizeGpuReadbackPolicy", script, StringComparison.Ordinal);
+        Assert.Contains("normalizeGpuFrameToken", script, StringComparison.Ordinal);
+        Assert.Contains("hudRectSource: this.hudOverlayState?.rectangleSource", script, StringComparison.Ordinal);
+        Assert.Contains("hudContractVersion: Number(this.hudOverlayState?.contractVersion", script, StringComparison.Ordinal);
+        Assert.Contains("hudReadbackPolicy: this.hudOverlayState?.readbackPolicy", script, StringComparison.Ordinal);
+        Assert.Contains("hudRectangleBufferLayout: this.hudOverlayState?.rectangleBufferLayout", script, StringComparison.Ordinal);
+        Assert.Contains("hudRawFrameTarget: this.hudOverlayState?.rawFrameTarget", script, StringComparison.Ordinal);
+        Assert.Contains("hudFrameToken: this.hudOverlayState?.frameToken", script, StringComparison.Ordinal);
+        Assert.Contains("rectangles: []", script, StringComparison.Ordinal);
+        Assert.Contains("resolveGpuHudOverlay(state)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("createGpuHudRectangleValues(state)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("contractVersion: Number(gpuHud?.contractVersion ?? gpuHud?.ContractVersion ?? 1)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("rectangleBufferLayout: gpuHud?.rectangleBufferLayout || gpuHud?.RectangleBufferLayout", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("rawFrameTarget: gpuHud?.rawFrameTarget || gpuHud?.RawFrameTarget", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("readback: gpuHud?.readback || gpuHud?.Readback", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("matrixBufferLayout: {", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("rectangleValues: this.createGpuHudRectangleValues(state)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("resolveGpuHudEnemyCircle(state)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("enemyCircle,", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("enemyConfidence: this.clampHudUnit(Number(enemyCircle?.confidence", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("normalizeGpuHudDirectRect(rect)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("createGpuAisthesisState(state, frame)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const GPU_CONTRACTS = requireDoomGpuContracts()", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MASK_TARGET = GPU_CONTRACTS.aisthesisMaskTarget", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const GPU_AISTHESIS_MASK_LAYOUT = GPU_CONTRACTS.aisthesisMaskLayout", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("function requireDoomGpuContracts()", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("GPU_CONTRACTS.aisthesisMaskTextureTarget()", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("maskTextureTarget: GPU_AISTHESIS_MASK_TARGET", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("maskTextureLayout: GPU_AISTHESIS_MASK_LAYOUT", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("provider.setGpuAisthesisState(gpuAisthesisState)", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("createGpuSpatialReasoningState(state, frame", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("maskTextureSource: aisthesis?.maskTextureTarget", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("fields: GPU_SPATIAL_OUTPUT_FIELDS", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("mask-texture-reduce", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("\"maskHeat\"", ReadDoomGpuContractsScript(), StringComparison.Ordinal);
+        Assert.Contains("provider.setGpuSpatialReasoningState(this.createGpuSpatialReasoningState", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("readGpuAisthesisFeatures(options = {})", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("readGpuSpatialReasoningOutput(options = {})", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const projectedCells = gpuHud?.cells || gpuHud?.Cells", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const projectedRects = gpuHud?.rectangles || gpuHud?.Rectangles || []", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const projectedValues = gpuHud?.rectangleValues || gpuHud?.RectangleValues", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("const projectedValues = gpuHud?.panelValues || gpuHud?.PanelValues || []", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.DoesNotContain("normalizeGpuHudCandidateRect", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.DoesNotContain("normalizeGpuHudRegionRect", ReadDoomRuntimeScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.infoBufferReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.computeReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.featureBufferReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.featureReadbackReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.heatCellsGpuWritable", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuAisthesis?.maskTextureReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("providerGpuSpatial?.maskTextureInputReady", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("resolveGpuSpatialReasoningSummary", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomGpuContracts?.hudPanelRects || fallbackHudPanelRects", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("border:${aligned ? \"0\"", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("background:${aligned ? \"transparent\"", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("white-space:${aligned ? \"pre-wrap\" : \"pre-wrap\"}", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("this.gpuSpatialReasoningLastSummary = null", script, StringComparison.Ordinal);
+        Assert.Contains("this.gpuSpatialReasoningLastSummary = {", script, StringComparison.Ordinal);
+        Assert.Contains("lastSummary: this.gpuSpatialReasoningLastSummary", script, StringComparison.Ordinal);
+        Assert.Contains("route=${formatScore(lastSummary.routeScore", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("mask=${formatScore(lastSummary.maskHeat", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("luma=${formatScore(lastSummary.lumaAverage", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
+        Assert.Contains("gpu=${zeroCopy ? \"zero\" : \"dto\"}${controlText}", ReadDoomPipelinePanelScript(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -97,14 +352,18 @@ public sealed class DoomWebGuiTests
     }
 
     [Fact]
-    public void DoomPrompt_FocusesAikConsoleUntilGameStarts()
+    public void DoomPrompt_FocusesAikConsoleUntilExplicitGameFocus()
     {
         var script = ReadDoomPromptScript();
 
         Assert.Contains("function focusAikConsole", script, StringComparison.Ordinal);
         Assert.Contains("promptInput.focus({ preventScroll: true })", script, StringComparison.Ordinal);
         Assert.DoesNotContain("promptForm?.scrollIntoView?", script, StringComparison.Ordinal);
-        Assert.Contains("release-console:", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("release-console:", script, StringComparison.Ordinal);
+        Assert.Contains("const allowKeyboardFocus = reason === \"user-game-focus\"", script, StringComparison.Ordinal);
+        Assert.Contains("reason === \"debug-focus-game\"", script, StringComparison.Ordinal);
+        Assert.Contains("reason.indexOf(\"manual-keyboard\") >= 0", script, StringComparison.Ordinal);
+        Assert.Contains("`focus=display:${reason}`", script, StringComparison.Ordinal);
         Assert.Contains("focusDoomViewport(\"approved-running\")", script, StringComparison.Ordinal);
         Assert.Contains("const consoleBody = document.querySelector(\".console-body\")", script, StringComparison.Ordinal);
         Assert.Contains("consoleBody?.classList.toggle(\"is-doom-running\", gameSurfaceVisible)", script, StringComparison.Ordinal);
@@ -158,8 +417,10 @@ public sealed class DoomWebGuiTests
 
         Assert.Contains("onStatusChange: queueRuntimeStatusUpdate", script, StringComparison.Ordinal);
         Assert.Contains("function queueRuntimeStatusUpdate", script, StringComparison.Ordinal);
+        Assert.Contains("function attachGpuHudStatus", script, StringComparison.Ordinal);
         Assert.Contains("function requireRuntimeStatusFlowAdapter", script, StringComparison.Ordinal);
-        Assert.Contains("runtimeStatusFlow.queue(status, reason", script, StringComparison.Ordinal);
+        Assert.Contains("runtimeStatusFlow.queue(attachGpuHudStatus(status), reason", script, StringComparison.Ordinal);
+        Assert.Contains("gpuHud: autoplay.gpuHud || latestAutoplay.gpuHud || gpuHud", script, StringComparison.Ordinal);
         Assert.Contains("let latestRuntimeStatus = null", script, StringComparison.Ordinal);
         Assert.Contains("latestRuntimeStatus = status || latestRuntimeStatus", script, StringComparison.Ordinal);
         Assert.Contains("runtimeStatusFlow.snapshot().droppedFrames", script, StringComparison.Ordinal);
@@ -194,16 +455,25 @@ public sealed class DoomWebGuiTests
         var panel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-sensor-panel.js"));
         var pipelinePanel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-pipeline-panel.js"));
         var goalPanel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-goal-panel.js"));
+        var gpuPathStatus = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-gpu-path-status.js"));
+        var objectiveStatusPanel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-objective-status-panel.js"));
         var debugOverlay = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-debug-overlay.js"));
+        var debugCapture = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-debug-capture.js"));
+        var doomRuntime = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom.js"));
+        var webGpuProvider = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "webgpu-provider.js"));
+        var gpuContracts = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "gpu-contracts.js"));
         var pipelineTrace = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "cognition", "pipeline-trace.js"));
         var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-sensor-panel-vm.test.mjs"));
         var pipelineVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-pipeline-panel-vm.test.mjs"));
         var pipelineTraceVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-pipeline-trace-vm.test.mjs"));
         var goalPanelVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-goal-panel-vm.test.mjs"));
+        var gpuPathStatusVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-gpu-path-status-vm.test.mjs"));
+        var objectiveStatusPanelVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-objective-status-panel-vm.test.mjs"));
         var debugOverlayVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-debug-overlay-vm.test.mjs"));
+        var debugCaptureVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-debug-capture-vm.test.mjs"));
 
         Assert.Contains("self.AIKernelDoomSensorPanel", panel, StringComparison.Ordinal);
-        Assert.Contains("20260618-sensorpanel1", panel, StringComparison.Ordinal);
+        Assert.Contains("20260621-sensorpanel3", panel, StringComparison.Ordinal);
         Assert.Contains("Aisthesis", panel, StringComparison.Ordinal);
         Assert.Contains("Phainesis", panel, StringComparison.Ordinal);
         Assert.Contains("Nous", panel, StringComparison.Ordinal);
@@ -214,11 +484,22 @@ public sealed class DoomWebGuiTests
         Assert.Contains("Zoe", panel, StringComparison.Ordinal);
         Assert.Contains("loadDoomSensorPanelScript", prompt, StringComparison.Ordinal);
         Assert.Contains("refreshSensorPanelDescriptors", prompt, StringComparison.Ordinal);
-        Assert.Contains("doom-sensor-panel.js?v=20260618-sensorpanel1", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-sensor-panel.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
         Assert.Contains("loadDoomGoalPanelScript", prompt, StringComparison.Ordinal);
-        Assert.Contains("doom-goal-panel.js?v=20260619-goalpanel2", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-goal-panel.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
+        Assert.Contains("loadDoomObjectiveStatusPanelScript", prompt, StringComparison.Ordinal);
+        Assert.Contains("loadDoomGpuPathStatusScript", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-gpu-path-status.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-objective-status-panel.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
         Assert.Contains("loadDoomDebugOverlayScript", prompt, StringComparison.Ordinal);
-        Assert.Contains("doom-debug-overlay.js?v=20260619-debugoverlay3", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-debug-overlay.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
+        Assert.Contains("loadDoomDebugCaptureScript", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-debug-capture.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
+        Assert.Contains("loadDoomGpuContractsScript", prompt, StringComparison.Ordinal);
+        Assert.Contains("autoplay/gpu-contracts.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
+        Assert.Contains("source: gpuContractValue(\"aisthesisFeatureTarget\", \"doom.gpu.aisthesis.features\")", prompt, StringComparison.Ordinal);
+        Assert.Contains("source: gpuContractValue(\"spatialOutputTarget\", \"doom.gpu.spatial.reasoning\")", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-sensor-pipeline-title", prompt, StringComparison.Ordinal);
         Assert.Contains("sensorRow.dataset.sensorPanelVersion = sensorPanelVersion", prompt, StringComparison.Ordinal);
         Assert.Contains("node.dataset.sensorPanel = panel.key", prompt, StringComparison.Ordinal);
         Assert.Contains("stageNode.dataset.sensorStage = stage.key || \"\"", prompt, StringComparison.Ordinal);
@@ -226,18 +507,101 @@ public sealed class DoomWebGuiTests
         Assert.Contains("phainesis=${phainesisText}", prompt, StringComparison.Ordinal);
         Assert.Contains("phainesis=${detections}", prompt, StringComparison.Ordinal);
         Assert.Contains("autoplay.phainomenon || autoplay.nousDetectorResult", prompt, StringComparison.Ordinal);
-        Assert.Contains("doom-pipeline-panel.js?v=20260619-pipelinepanel6", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-pipeline-panel.js?v=${encodeURIComponent(doomDevCacheKey)}", prompt, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomGoalPanel", goalPanel, StringComparison.Ordinal);
         Assert.Contains("20260619-goalpanel2", goalPanel, StringComparison.Ordinal);
         Assert.Contains("resolveTelosObjective", goalPanel, StringComparison.Ordinal);
         Assert.Contains("resolvePriorityAction", goalPanel, StringComparison.Ordinal);
         Assert.Contains("DOOM_GOAL_PANEL_VM_TEST_OK", goalPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("20260621-gpupathstatus8", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function adapterText", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("adapterPowerPreference", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("gpuComputeActive", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function resolveGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function normalizeCanonicalGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("gpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("canonical C# GPU path DTO should be used", gpuPathStatusVmTest, StringComparison.Ordinal);
+        Assert.Contains("DOOM_GPU_PATH_STATUS_VM_TEST_OK", gpuPathStatusVmTest, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomObjectiveStatusPanel", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("20260621-objectivestatus-gpu1", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("AIKernelDoomGpuPathStatus", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("function resolveRows", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("function renderObjectiveStatusPanel", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("DOOM_OBJECTIVE_STATUS_PANEL_VM_TEST_OK", objectiveStatusPanelVmTest, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomDebugOverlay", debugOverlay, StringComparison.Ordinal);
-        Assert.Contains("20260619-debugoverlay3", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("20260621-debugoverlay-gpu1", debugOverlay, StringComparison.Ordinal);
         Assert.Contains("function renderDebugOverlay", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("function createGpuTextLabel", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("function renderGpuRuntimeOverlay", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("dataset.gpuHudLabel = \"true\"", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("gpuBacked", debugOverlay, StringComparison.Ordinal);
+        Assert.Contains("debug-gpu-label", prompt, StringComparison.Ordinal);
+        Assert.Contains("#doom-debug-overlay.is-gpu-backed .debug-region", prompt, StringComparison.Ordinal);
         Assert.Contains("DOOM_DEBUG_OVERLAY_VM_TEST_OK", debugOverlayVmTest, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomDebugCaptureModule", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("20260621-debugcapture3", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("function createDebugCapture", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("analysis-raw-framebuffer", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("debug-display-fallback", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("debug-gpu-aisthesis-readback", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("debug-gpu-spatial-reasoning-readback", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("captureGpuAisthesisFeatures", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("captureGpuSpatialReasoningOutput", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("function contractValue(name, fallback)", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("displayCanvasFallbackSource()}-suppressed", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("captureTarget: capture?.captureTarget || rawFramebufferTarget()", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("powerPreference: WEBGPU_ADAPTER_POWER_PREFERENCE", doomRuntime, StringComparison.Ordinal);
+        Assert.Contains("powerPreference: WEBGPU_ADAPTER_POWER_PREFERENCE", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("adapterPowerPreference", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("source: capture?.source || aisthesisFeatureSource()", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("source: capture?.source || spatialReasoningSource()", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("displayTarget: capture?.displayTarget || capture?.hudComposite?.displayTarget || \"\"", debugCapture, StringComparison.Ordinal);
+        Assert.Contains("DOOM_DEBUG_CAPTURE_VM_TEST_OK", debugCaptureVmTest, StringComparison.Ordinal);
+        Assert.Contains("Analysis capture should keep the raw framebuffer target", debugCaptureVmTest, StringComparison.Ordinal);
+        Assert.Contains("Analysis capture should report the HUD-composited display target separately", debugCaptureVmTest, StringComparison.Ordinal);
+        Assert.Contains("GPU Aisthesis feature capture should expose explicit readback results", debugCaptureVmTest, StringComparison.Ordinal);
+        Assert.Contains("GPU Spatial Reasoning capture should expose explicit readback results", debugCaptureVmTest, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomPipelinePanel", pipelinePanel, StringComparison.Ordinal);
-        Assert.Contains("20260619-pipelinepanel6", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("20260621-pipelinepanel-gpu6", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("doomToposHud.style.cssText = \"position:absolute;right:10px;top:10px;z-index:160", prompt, StringComparison.Ordinal);
+        Assert.Contains("z-index:160;margin:0;padding:10px", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("z-index:160;width:232px", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("const fallbackHudPanelRects = Object.freeze", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("function resolveHudPanelRects()", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("function cssRect(rect)", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("node.dataset.ctgLayout = \"gpu-panel\"", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("position:absolute;inset:0;z-index:160", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("left: 0.020, top: 0.700, right: 0.255, bottom: 0.970", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("aligned ? cssRect(rect)", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("z-index: 60;", prompt, StringComparison.Ordinal);
+        Assert.Contains("background: transparent !important;", prompt, StringComparison.Ordinal);
+        Assert.Contains("box-shadow: none !important;", prompt, StringComparison.Ordinal);
+        Assert.Contains("background: rgba(8,18,28,.085);", prompt, StringComparison.Ordinal);
+        Assert.Contains("background: rgba(0,0,0,.045);", prompt, StringComparison.Ordinal);
+        Assert.Contains("background: rgba(12,16,24,.38);", prompt, StringComparison.Ordinal);
+        Assert.Contains("background: rgba(5,7,8,.06);", prompt, StringComparison.Ordinal);
+        Assert.Contains("background:${aligned ? \"transparent\"", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("background:${vetoed ? \"rgba(56,5,7,.26)\"", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("allowDisplayFallback", prompt, StringComparison.Ordinal);
+        Assert.Contains("doom-raw-frame-capture", prompt, StringComparison.Ordinal);
+        Assert.Contains("publishGameFrameCapture", prompt, StringComparison.Ordinal);
+        Assert.Contains("[CTG SIMPLE]", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("function resolveGpuPathSummary", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("GPU Path: ${gpuPathSummary.text}", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("function resolveGpuHudSummary", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("GPU HUD: ${gpuHudSummary}", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("[G] ${gpuPathSummary.shortText}", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("hud=${source}${compositeActive ? \" cmp\" : \"\"}", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("matrixSource === \"dto-flat\" ? \" flat\"", pipelinePanel, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 20", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("compassHeading: f32", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("fn addCompassHud", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("color = addCompassHud(color, uv)", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("renderer.hudInfoUpload[8]", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("resolveGpuHudCompassState", doomRuntime, StringComparison.Ordinal);
+        Assert.Contains("compassHeading: compassHud.heading", doomRuntime, StringComparison.Ordinal);
+        Assert.Contains("renderPipelineDetailGrid", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("rear-landmark-avoidance", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("[CTG OBSERVED]", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("[Hodos]", pipelinePanel, StringComparison.Ordinal);
@@ -249,6 +613,8 @@ public sealed class DoomWebGuiTests
         Assert.Contains("self.AIKernelDoomPipelineTrace", pipelineTrace, StringComparison.Ordinal);
         Assert.Contains("function buildTrace(input = {})", pipelineTrace, StringComparison.Ordinal);
         Assert.Contains("DOOM_PIPELINE_PANEL_VM_TEST_OK", pipelineVmTest, StringComparison.Ordinal);
+        Assert.Contains("Simple mode should expose unified GPU path status", pipelineVmTest, StringComparison.Ordinal);
+        Assert.Contains("PipelineState detail should render the unified GPU path status", pipelineVmTest, StringComparison.Ordinal);
         Assert.Contains("DOOM_PIPELINE_TRACE_VM_TEST_OK", pipelineTraceVmTest, StringComparison.Ordinal);
         Assert.DoesNotContain("det=${", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("function createDebugRegion", prompt, StringComparison.Ordinal);
@@ -279,11 +645,11 @@ public sealed class DoomWebGuiTests
         Assert.Contains("pushControllerDebugLog", script, StringComparison.Ordinal);
         Assert.Contains("setControllerDebugMessage", script, StringComparison.Ordinal);
         Assert.Contains("syncControllerDebugLog(status, reason)", script, StringComparison.Ordinal);
-        Assert.Contains("autoplay.decisionTrace", script, StringComparison.Ordinal);
-        Assert.Contains("setControllerDebugLogEntries(traceEntries, { autoLimit: true })", script, StringComparison.Ordinal);
-        Assert.Contains("category: \"priority\"", script, StringComparison.Ordinal);
-        Assert.Contains("label: \"TELOS\"", script, StringComparison.Ordinal);
-        Assert.Contains("label: \"OBJECTIVE\"", script, StringComparison.Ordinal);
+        Assert.Contains("controllerDebugActionEntryFromStatus(status, reason)", script, StringComparison.Ordinal);
+        Assert.Contains("pushControllerDebugLog(controllerDebugActionEntryFromStatus(status, reason)", script, StringComparison.Ordinal);
+        Assert.Contains("category: ACTION_CATEGORY", adapter, StringComparison.Ordinal);
+        Assert.Contains("label: \"ACT\"", adapter, StringComparison.Ordinal);
+        Assert.Contains("repeatFrames: repeat", adapter, StringComparison.Ordinal);
         Assert.Contains("window.AIKernelDoomControllerDebugLog", adapter, StringComparison.Ordinal);
         Assert.Contains("entriesFromDecisionTrace", adapter, StringComparison.Ordinal);
         Assert.Contains("normalizeEntry", adapter, StringComparison.Ordinal);
@@ -291,6 +657,29 @@ public sealed class DoomWebGuiTests
         Assert.Contains("CONTROLLER_DEBUG_LOG_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.DoesNotContain("function normalizeControllerDebugLevel", script, StringComparison.Ordinal);
         Assert.DoesNotContain("replace(/[^a-z0-9._-]+/g", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomPrompt_RestoresObjectiveStatusSideCard()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var script = ReadDoomPromptScript();
+        var panel = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-objective-status-panel.js"));
+        var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "doom-objective-status-panel-vm.test.mjs"));
+
+        Assert.Contains("Objective / Status", script, StringComparison.Ordinal);
+        Assert.Contains("function updateDoomObjectiveStatusPanel", script, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomObjectiveStatusPanel", script, StringComparison.Ordinal);
+        Assert.Contains("loadDoomObjectiveStatusPanelScript()?.then", script, StringComparison.Ordinal);
+        Assert.Contains("renderObjectiveStatusPanel(doomRuntimePanel, status, options)", script, StringComparison.Ordinal);
+        Assert.Contains("doom-objective-status-grid", panel, StringComparison.Ordinal);
+        Assert.Contains("doom-objective-status-row", panel, StringComparison.Ordinal);
+        Assert.Contains("label: \"TELOS\"", panel, StringComparison.Ordinal);
+        Assert.Contains("label: \"OBJECTIVE\"", panel, StringComparison.Ordinal);
+        Assert.Contains("label: \"PRIORITY\"", panel, StringComparison.Ordinal);
+        Assert.Contains("label: \"PROGRESS\"", panel, StringComparison.Ordinal);
+        Assert.Contains("DOOM_OBJECTIVE_STATUS_PANEL_VM_TEST_OK", vmTest, StringComparison.Ordinal);
+        Assert.True(script.Split("updateDoomObjectiveStatusPanel(status);", StringSplitOptions.None).Length >= 4);
     }
 
     [Fact]
@@ -326,6 +715,41 @@ public sealed class DoomWebGuiTests
         Assert.Contains("event.target.closest(\"#doom-autoplay-toggle\")", script, StringComparison.Ordinal);
         Assert.Contains("createOptimisticAutoplayStatus", script, StringComparison.Ordinal);
         Assert.Contains("setControllerDebugMessage", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomPrompt_DoesNotCaptureKeyboardUnlessDoomScreenIsFocused()
+    {
+        var script = ReadDoomPromptScript();
+
+        Assert.Contains("const keyboardDoomInputs = new Set();", script, StringComparison.Ordinal);
+        Assert.Contains("function shouldHandleDoomKeyboardEvent(event)", script, StringComparison.Ordinal);
+        Assert.Contains("return document.activeElement === doomScreen;", script, StringComparison.Ordinal);
+        Assert.Contains("if (!shouldHandleDoomKeyboardEvent(event))", script, StringComparison.Ordinal);
+        Assert.Contains("keyboardDoomInputs.add(name);", script, StringComparison.Ordinal);
+        Assert.Contains("!keyboardDoomInputs.has(name)", script, StringComparison.Ordinal);
+        Assert.Contains("keyboardDoomInputs.delete(name);", script, StringComparison.Ordinal);
+        Assert.Contains("renderDoomState(doomRuntime?.status?.() || { state: \"unknown\" }, `focus=display:${reason}`);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("return focusDoomViewport(`release-console:${reason}`);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomPrompt_ExposesReadOnlyDebugRuntimeBridge()
+    {
+        var script = ReadDoomPromptScript();
+
+        Assert.Contains("function readDoomDebugRuntimeStatus()", script, StringComparison.Ordinal);
+        Assert.Contains("function readDoomDebugGpuStatus()", script, StringComparison.Ordinal);
+        Assert.Contains("function refreshDoomDebugRuntimeBridge(reason = \"status\")", script, StringComparison.Ordinal);
+        Assert.Contains("window.AIKernelDoomDebugRuntime = Object.freeze", script, StringComparison.Ordinal);
+        Assert.Contains("version: \"20260621-debug-runtime1\"", script, StringComparison.Ordinal);
+        Assert.Contains("status: readDoomDebugRuntimeStatus", script, StringComparison.Ordinal);
+        Assert.Contains("gpuStatus: readDoomDebugGpuStatus", script, StringComparison.Ordinal);
+        Assert.Contains("refreshDoomDebugRuntimeBridge(\"initial\")", script, StringComparison.Ordinal);
+        Assert.Contains("normalized === \"doom.gpu status\"", script, StringComparison.Ordinal);
+        Assert.Contains("runtime renderer=${gpu.runtime.renderer}; delegate=${gpu.runtime.gpuDelegate}", script, StringComparison.Ordinal);
+        Assert.Contains("provider=${gpu.provider?.name || \"none\"}; backend=${gpu.provider?.backend || \"unknown\"}", script, StringComparison.Ordinal);
+        Assert.True(script.Split("refreshDoomDebugRuntimeBridge(reason);", StringSplitOptions.None).Length >= 4);
     }
 
     [Fact]
@@ -462,6 +886,7 @@ public sealed class DoomWebGuiTests
         var decisionTrace = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "decision-trace.js"));
         var pipelineGraph = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "pipeline-graph.js"));
         var zoeVeto = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "zoe-veto.js"));
+        var gpuContracts = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "gpu-contracts.js"));
         var runtimePackets = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "control", "runtime-packets.js"));
         var worker = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker.js"));
         var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "control-runtime-vm.test.mjs"));
@@ -509,10 +934,24 @@ public sealed class DoomWebGuiTests
         Assert.Contains("self.AIKernelDoomControlZoeVeto", zoeVeto, StringComparison.Ordinal);
         Assert.Contains("function applyZoeVeto", zoeVeto, StringComparison.Ordinal);
         Assert.Contains("function normalizeVetoRules", zoeVeto, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomGpuContracts", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("aisthesisMaskTextureTarget", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("spatialOutputFields", gpuContracts, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomControlRuntimePackets", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function actionFromStage", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function idleAction", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function statusFromAction", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function createGpuHudOverlay", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function createGpuHudPanelValues", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("cells: normalizeVision9x9Projection(values)", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function createGpuAisthesis", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("const GPU_CONTRACTS = requireGpuContracts()", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("GPU_CONTRACTS.aisthesisMaskTextureTarget()", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("const GPU_SPATIAL_OUTPUT_FIELDS = GPU_CONTRACTS.spatialOutputFields", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("function createGpuSpatialMatrices", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("labels", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("gpuAisthesis", runtimePackets, StringComparison.Ordinal);
+        Assert.Contains("gpuHud,", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function initializedStatus", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("function requirePipelineGraph", runtimePackets, StringComparison.Ordinal);
         Assert.Contains("return requirePipelineGraph(\"compileCanonicalGraph\")(profile)", runtimePackets, StringComparison.Ordinal);
@@ -526,6 +965,8 @@ public sealed class DoomWebGuiTests
         Assert.Contains("requireRuntimePackets(\"idleAction\")", shim, StringComparison.Ordinal);
         Assert.Contains("requireRuntimePackets(\"statusFromAction\")", shim, StringComparison.Ordinal);
         Assert.Contains("requireRuntimePackets(\"initializedStatus\")", shim, StringComparison.Ordinal);
+        Assert.Contains("src/DoomWeb/wwwroot/js/autoplay/gpu-contracts.js", vmTest, StringComparison.Ordinal);
+        Assert.Contains("src/DoomWeb/wwwroot/js/autoplay/gpu-contracts.js", runtimePacketsVmTest, StringComparison.Ordinal);
         Assert.DoesNotContain("function turnFromYaw", shim, StringComparison.Ordinal);
         Assert.DoesNotContain("const moveBackward = evaluateWhen", shim, StringComparison.Ordinal);
         Assert.DoesNotContain("const initializedTrace", shim, StringComparison.Ordinal);
@@ -543,6 +984,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("CONTROL_ARBITRATION_VM_TEST_OK", arbitrationVmTest, StringComparison.Ordinal);
         Assert.Contains("CONTROL_RUNTIME_PACKETS_VM_TEST_OK", runtimePacketsVmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/sensor-tensor.js", vmTest, StringComparison.Ordinal);
+        Assert.Contains("autoplay/control/route-loop-budget.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/doom-context.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/evidence.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("autoplay/control/arbitration.js", vmTest, StringComparison.Ordinal);
@@ -552,18 +994,19 @@ public sealed class DoomWebGuiTests
         Assert.Contains("autoplay/control/runtime-packets.js", vmTest, StringComparison.Ordinal);
         Assert.Contains("same-priority arbitration should be deterministic", vmTest, StringComparison.Ordinal);
         Assert.Contains("sensor tensor bridge evidence should select bridge route", vmTest, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/objective-routing.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/expression-dsl.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/doom-context.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/evidence.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/arbitration.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/decision-trace.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/pipeline-graph.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/zoe-veto.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control/runtime-packets.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/control-runtime.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/combat-route.js\")", worker, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/cognition/pipeline-trace.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/objective-routing.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/expression-dsl.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/route-loop-budget.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/doom-context.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/evidence.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/arbitration.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/decision-trace.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/pipeline-graph.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/zoe-veto.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control/runtime-packets.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/control-runtime.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/cognition/combat-route.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/cognition/pipeline-trace.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("const controlRuntimeFactory = self.AIKernelDoomControlRuntime?.create", runtime, StringComparison.Ordinal);
         Assert.Contains("this.autoplayControllerKind = \"control-runtime-shim\"", runtime, StringComparison.Ordinal);
         Assert.Contains("this.controlRuntime.predict(wasmState)", runtime, StringComparison.Ordinal);
@@ -594,7 +1037,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("const desired = {", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("for (const [name, keycode] of Object.entries(AUTOPLAY_KEYS))", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("for (const keycode of Object.values(AUTOPLAY_KEYS))", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-action-adapter.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/doom-action-adapter.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_ACTION_ADAPTER_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("native ABI path should be selected", vmTest, StringComparison.Ordinal);
         Assert.Contains("manual move mode should not queue movement keys", vmTest, StringComparison.Ordinal);
@@ -625,7 +1068,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("this.autoplayRetryCooldownFrames", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayRetryReason", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayHealthRetryFrames", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-retry-dispatch.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/doom-retry-dispatch.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_RETRY_DISPATCH_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("third retry frame should schedule retry dispatch", vmTest, StringComparison.Ordinal);
     }
@@ -653,7 +1096,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("Object.keys(this.sensorInputs).sort()", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("movement-vector", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("sensor !== false", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-sensor-inputs.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/doom-sensor-inputs.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_SENSOR_INPUTS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("vision alias should normalize to visual", vmTest, StringComparison.Ordinal);
     }
@@ -680,7 +1123,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("async function validateBinaryBytes", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("async function readBinaryResponse", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("async function sha256", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/autoplay/doom-binary-assets.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/doom-binary-assets.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_BINARY_ASSETS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("invalid cache entry should emit refresh progress", vmTest, StringComparison.Ordinal);
     }
@@ -711,7 +1154,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("function parseSidedefs", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("function summarizeNearestDoor", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("function isDoorSpecial", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-wad-metadata.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/doom-wad-metadata.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_WAD_METADATA_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("missing map should return null", vmTest, StringComparison.Ordinal);
     }
@@ -735,7 +1178,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("function fdWrite", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("wasi_snapshot_preview1: {", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("emscripten_sleep: () => 0", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-wasm-imports.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/doom-wasm-imports.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_WASM_IMPORTS_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("proc_exit should throw an explicit error", vmTest, StringComparison.Ordinal);
     }
@@ -761,7 +1204,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("new Int16Array(this.exports.memory.buffer", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.exports.doom_audio_consume_frames(frames)", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("bridge.playPcm({", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-native-audio.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/doom-native-audio.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_NATIVE_AUDIO_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("muted native audio should still drain without playback", vmTest, StringComparison.Ordinal);
     }
@@ -788,7 +1231,7 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("const bridgeSnapshot = this.readBridgeAuditorySnapshot()", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("Date.parse(snapshot.timestamp || \"\")", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("uploadGpuAudioSnapshot(\"doom.audio\", audio)", runtime, StringComparison.Ordinal);
-        Assert.Contains("scriptUrl(\"/demo/doom/js/doom-auditory-runtime.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/doom-auditory-runtime.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_AUDITORY_RUNTIME_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("fresh higher-energy bridge snapshot should be preferred", vmTest, StringComparison.Ordinal);
     }
@@ -830,6 +1273,10 @@ public sealed class DoomWebGuiTests
         Assert.Contains("IControlRuntimeAdapter", adapter, StringComparison.Ordinal);
         Assert.Contains("ControlStateTensorPacket", statePacket, StringComparison.Ordinal);
         Assert.Contains("ControlActionPacket", actionPacket, StringComparison.Ordinal);
+        Assert.Contains("PipelineStateDto", actionPacket, StringComparison.Ordinal);
+        Assert.Contains("DoomGoalStateDto", actionPacket, StringComparison.Ordinal);
+        Assert.Contains("DoomDebugOverlayDto", actionPacket, StringComparison.Ordinal);
+        Assert.Contains("DoomAutoplayStateDto", actionPacket, StringComparison.Ordinal);
         Assert.Contains("ControlDecisionTracePacket", tracePacket, StringComparison.Ordinal);
         Assert.Contains("SemanticScore(string symbol)", statePacket, StringComparison.Ordinal);
         Assert.Contains("ControlRuntimeAdapter", issue, StringComparison.Ordinal);
@@ -1551,6 +1998,57 @@ public sealed class DoomWebGuiTests
             "doom",
             "js",
             "doom-runtime-status-flow.js");
+        return File.ReadAllText(path);
+    }
+
+    private static string ReadDoomWebGpuProviderScript()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(AppContext.BaseDirectory),
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "js",
+            "webgpu-provider.js");
+        return File.ReadAllText(path);
+    }
+
+    private static string ReadDoomRuntimeScript()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(AppContext.BaseDirectory),
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "js",
+            "doom.js");
+        return File.ReadAllText(path);
+    }
+
+    private static string ReadDoomGpuContractsScript()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(AppContext.BaseDirectory),
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "js",
+            "autoplay",
+            "gpu-contracts.js");
+        return File.ReadAllText(path);
+    }
+
+    private static string ReadDoomPipelinePanelScript()
+    {
+        var path = Path.Combine(
+            FindRepoRoot(AppContext.BaseDirectory),
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "demo",
+            "doom",
+            "js",
+            "doom-pipeline-panel.js");
         return File.ReadAllText(path);
     }
 

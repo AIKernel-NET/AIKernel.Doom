@@ -54,7 +54,9 @@ public sealed record AutoplayOptimizationProfile
 
     public int CombatYawDegrees { get; init; } = 18;
 
-    public int LowHealthThreshold { get; init; } = 18;
+    public int LowHealthThreshold { get; init; } = 50;
+
+    public int CriticalHealthThreshold { get; init; } = 18;
 
     public int EmergencyEscapeYawDegrees { get; init; } = 34;
 

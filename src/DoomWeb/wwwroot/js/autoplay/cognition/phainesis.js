@@ -9,6 +9,7 @@
   const COMBAT_FACE_DANGER_DELTA = 0.32;
   const KINESIS_STUCK_REPEAT_FRAMES = 18;
   const KINESIS_STUCK_HISTORY_FRAMES = 6;
+  const ENEMY_AUDIO_MIN_ENERGY = 0.08;
   const EVENT_SCORE_NAMES = [
     "wallFlow",
     "corridorFlow",
@@ -386,17 +387,74 @@
     const rawVisual = clamp01(Number(latest.enemyConfidence || 0));
     const trusted = clamp01(Number(latest.trustedEnemyThreat || 0));
     const trustedEvidence = Boolean(latest.trustedCombatEvidence) || trusted >= 0.26;
-    const audioEnergy = Math.max(Number(latest.audioMidEnergy || 0), Number(latest.audioHighEnergy || 0));
-    const audio = trustedEvidence || rawVisual >= 0.5
-      ? clamp01(audioEnergy * 0.35)
-      : 0;
-    const visual = trustedEvidence ? Math.max(rawVisual, trusted) : Math.min(rawVisual, 0.12);
+    const audio = detectAuditoryEnemyPresence(latest, frames);
+    const terminalSurface = Math.max(
+      Number(latest.computerPanelScore || 0),
+      Number(latest.computerDarkPanelScore || 0),
+      Number(latest.computerRoomScore || 0) * 0.72);
+    const sideAudio = audio.probability >= 0.24 && audio.direction && audio.direction !== "front";
+    const terminalVisualDecoy = terminalSurface >= 0.24
+      && rawVisual <= 0.46
+      && trusted < 0.28
+      && (sideAudio || Number(latest.computerRoomScore || 0) >= 0.18);
+    const visualBase = trustedEvidence ? Math.max(rawVisual, trusted) : Math.min(rawVisual, 0.12);
+    const visual = terminalVisualDecoy ? Math.min(visualBase, 0.10) : visualBase;
     const recent = trustedEvidence ? recentMax(frames, "trustedEnemyThreat", 6) * 0.24 : 0;
-    const probability = clamp01(Math.max(visual, visual * 0.76 + audio + recent));
+    const probability = clamp01(Math.max(visual, audio.probability, visual * 0.72 + (audio.probability * 0.48) + recent));
+    const visualDirection = latest.baseDirection || latest.projectileDirection || null;
+    const direction = probability >= 0.28
+      ? (visual >= 0.28 && !terminalVisualDecoy ? visualDirection : (audio.direction || visualDirection))
+      : null;
     return {
       active: probability >= 0.28,
-      direction: probability >= 0.28 ? (latest.baseDirection || latest.projectileDirection || null) : null,
-      probability: round2(probability)
+      direction,
+      probability: round2(probability),
+      audioProbability: round2(audio.probability),
+      visualSuppressed: terminalVisualDecoy,
+      source: terminalVisualDecoy && audio.probability > 0
+        ? "audio-terminal-mask"
+        : (audio.probability > visual ? "audio" : (trustedEvidence ? "trusted-visual" : "visual"))
+    };
+  }
+
+  function detectAuditoryEnemyPresence(latest, frames) {
+    const eventType = normalizeAudioEventType(latest.audioEventType);
+    if (isDoorUseAudioEvent(eventType)) {
+      return { probability: 0, direction: null };
+    }
+
+    const totalEnergy = Math.max(
+      Number(latest.audioEnergy || 0),
+      Number(latest.audioLowEnergy || 0),
+      Number(latest.audioMidEnergy || 0),
+      Number(latest.audioHighEnergy || 0));
+    const midHigh = Math.max(Number(latest.audioMidEnergy || 0), Number(latest.audioHighEnergy || 0));
+    const lowThreat = Number(latest.audioLowEnergy || 0) * 0.54;
+    const eventDetected = Boolean(latest.audioEventDetected);
+    const eventLikelyCombat = eventType === "native-sfx"
+      || eventType === "doom-native-sfx"
+      || eventType === "spatial-event"
+      || eventType === "attention"
+      || eventType === "contact";
+    const postDoorContext = Number(latest.computerRoomScore || 0) >= 0.12
+      || Number(latest.bridgeDoorScore || 0) >= 0.12
+      || Number(latest.trustedEnemyThreat || 0) >= 0.18;
+    if (totalEnergy < ENEMY_AUDIO_MIN_ENERGY && !(eventDetected && eventLikelyCombat && totalEnergy >= 0.035 && postDoorContext)) {
+      return { probability: 0, direction: null };
+    }
+
+    const weightedBalance = weightedAudioBalance(frames, 8);
+    const balance = Math.abs(weightedBalance) >= 0.08
+      ? weightedBalance
+      : clampSigned(Number(latest.audioBalance || 0));
+    const sideConfidence = clamp01(0.45 + Math.min(0.42, Math.abs(balance) * 0.86));
+    const bandThreat = clamp01(Math.max(midHigh * 0.94, lowThreat, totalEnergy * 0.72));
+    const eventBonus = eventDetected && eventLikelyCombat ? 0.14 : 0;
+    const contextBonus = postDoorContext ? 0.08 : 0;
+    const probability = clamp01((bandThreat * sideConfidence) + eventBonus + contextBonus);
+    return {
+      probability,
+      direction: audioDirection(balance, probability)
     };
   }
 
@@ -841,6 +899,29 @@
     }
 
     return null;
+  }
+
+  function normalizeAudioEventType(value) {
+    return String(value || "none").trim().toLowerCase();
+  }
+
+  function isDoorUseAudioEvent(eventType) {
+    return eventType === "use-success-gate"
+      || eventType === "use-failed-voice"
+      || eventType === "use-response";
+  }
+
+  function audioDirection(balance, probability) {
+    const value = Number(balance || 0);
+    if (value > 0.12) {
+      return "right";
+    }
+
+    if (value < -0.12) {
+      return "left";
+    }
+
+    return Number(probability || 0) >= 0.36 ? "front" : null;
   }
 
   function round2(value) {

@@ -205,7 +205,8 @@
     darkZoneConfirmFrames: DARK_ZONE_CONFIRM_FRAMES,
     doorTransitionArmedFrames: 720,
     combatYawDegrees: 18,
-    lowHealthThreshold: 18,
+    lowHealthThreshold: 50,
+    criticalHealthThreshold: 18,
     emergencyEscapeYawDegrees: 34,
     wallAwayYawDegrees: 10,
     openCruiseYawDegrees: 7,
@@ -514,6 +515,7 @@
       this.healthZeroScore = 0;
       this.healthActiveColumns = 0;
       this.healthActiveCells = 0;
+      this.healthEstimatedPercent = 100;
       this.doorOpenedCount = 0;
       this.enemyDefeatedCount = 0;
       this.combatFireFrames = 0;
@@ -755,6 +757,7 @@
         this.healthZeroScore = 0;
         this.healthActiveColumns = 0;
         this.healthActiveCells = 0;
+        this.healthEstimatedPercent = 100;
         this.doorOpenedCount = 0;
         this.enemyDefeatedCount = 0;
         this.combatFireFrames = 0;
@@ -916,6 +919,7 @@
         healthZeroScore: round2(this.healthZeroScore),
         healthActiveColumns: this.healthActiveColumns,
         healthActiveCells: this.healthActiveCells,
+        healthEstimatedPercent: this.healthEstimatedPercent,
         milestones: {
           doorOpened: this.doorOpenedCount,
           enemyDefeated: this.enemyDefeatedCount,
@@ -1078,11 +1082,17 @@
       this.mode = "predicting";
       try {
         const external = resolveExternalPredictor();
+        const predictorState = Object.assign({}, state || {}, {
+          kinesisActionRepeatFrames: this.kinesisActionRepeatFrames,
+          actionRepeatFrames: this.kinesisActionRepeatFrames,
+          repeatActionFrames: this.repeatActionFrames,
+          repeatTurnFrames: this.repeatTurnFrames
+        });
         const action = external
-          ? await external.predict(state)
-          : await heuristicPredict(state, this.lastAction);
+          ? await external.predict(predictorState)
+          : await heuristicPredict(predictorState, this.lastAction);
 
-        this.lastAction = this.applyControlRules(action, state);
+        this.lastAction = this.applyControlRules(action, predictorState);
         this.predictions += 1;
         this.lastLatencyMs = Math.round(now() - startedAt);
         this.mode = "idle";
@@ -5458,12 +5468,19 @@
     controller.healthZeroScore = healthState.zeroScore || 0;
     controller.healthActiveColumns = healthState.activeColumns || 0;
     controller.healthActiveCells = healthState.activeCells || 0;
+    controller.healthEstimatedPercent = Number.isFinite(Number(healthState.estimatedPercent))
+      ? Math.max(0, Math.min(100, Math.round(Number(healthState.estimatedPercent))))
+      : 100;
     controller.healthSensorSnapshot = createHealthSensorSnapshot({
       active: healthSensorEnabled,
       likelyDead: controller.healthLikelyDead,
       zeroScore: controller.healthZeroScore,
       activeColumns: controller.healthActiveColumns,
       activeCells: controller.healthActiveCells,
+      estimatedPercent: controller.healthEstimatedPercent,
+      value: controller.healthEstimatedPercent,
+      health: controller.healthEstimatedPercent,
+      lowHealthThreshold: profileNumber(controller.profile, "lowHealthThreshold", 50),
       signature: controller.healthSignature,
       faceSignature: controller.faceSignature,
       faceDeathScore,
@@ -5721,6 +5738,15 @@
         || (controller.computerDarkPanelScore >= 0.30 && controller.computerPanelScore >= 0.16))
       && controller.gameplayLuma > 0
       && controller.gameplayLuma <= 108;
+    const computerRoomWhiteWallRecovery = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && controller.blueFloorScore < blueFloorHomeThreshold
+      && controller.computerRoomScore >= 0.10
+      && controller.computerDarkPanelScore >= 0.24
+      && controller.computerPanelScore >= 0.16
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 112
+      && !controller.healthLikelyDead;
     const computerRoomPanelAfterDoor = controller.doorOpenedCount > 0
       && controller.darkZoneEntered
       && controller.computerRoomScore >= 0.14
@@ -5737,14 +5763,65 @@
         || controller.bridgeDoorScore >= 0.10
         || controller.darkAreaScore >= 0.05)
       && !controller.healthLikelyDead;
+    const postDoorTerminalSurface = Math.max(
+      controller.computerPanelScore,
+      controller.computerDarkPanelScore,
+      controller.computerRoomScore);
+    const postDoorWeakComputerPanelCue = controller.doorOpenedCount > 0
+      && depthEstimate >= 0.82
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 112
+      && postDoorTerminalSurface >= 0.32
+      && controller.computerRoomScore >= 0.08
+      && (postDoorBridgeCue >= 0.18
+        || controller.computerRedLightScore >= 0.03
+        || controller.darkAreaScore >= 0.02
+        || controller.bridgeBrownScore >= 0.12
+        || controller.bridgeDoorScore >= 0.03)
+      && !controller.healthLikelyDead;
     const visualPostDoorRecovery = controller.doorOpenedCount === 0
       && controller.firstDoorCorridorLocated
       && !controller.firstDoorUseAttempted
-      && computerRoomVisualAfterDoor
+      && (computerRoomVisualAfterDoor || computerRoomWhiteWallRecovery)
       && controller.blueFloorScore < blueFloorHomeThreshold
       && controller.predictions >= firstDoorSpawnScanFrames + 120;
+    const postDoorAudioType = normalizeAuditoryEventType(auditorySnapshot?.eventType || controller.auditorySnapshot?.eventType);
+    const postDoorAudioEnergy = Math.max(
+      Number(auditorySnapshot?.leftEnergy || 0),
+      Number(auditorySnapshot?.rightEnergy || 0),
+      Number(auditorySnapshot?.lowEnergy || 0),
+      Number(auditorySnapshot?.midEnergy || 0),
+      Number(auditorySnapshot?.highEnergy || 0),
+      Number(controller.auditorySnapshot?.leftEnergy || 0),
+      Number(controller.auditorySnapshot?.rightEnergy || 0),
+      Number(controller.auditorySnapshot?.lowEnergy || 0),
+      Number(controller.auditorySnapshot?.midEnergy || 0),
+      Number(controller.auditorySnapshot?.highEnergy || 0));
+    const firstDoorAudioFailure = controller.auditorySnapshot?.eventType === "use-failed-voice"
+      || auditorySnapshot?.eventType === "use-failed-voice";
+    const firstDoorNativeSfxCue = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && !firstDoorAudioFailure
+      && (postDoorAudioType === "native-sfx"
+        || postDoorAudioType === "doom-native-sfx"
+        || postDoorAudioType === "use-success-gate"
+        || postDoorAudioType === "use-response")
+      && postDoorAudioEnergy >= 0.002
+      && (controller.firstDoorUseAttempted
+        || controller.firstDoorUsePulsed
+        || controller.pendingUseResponseFrames > 0
+        || controller.doorTransitionArmedFrames > 0
+        || controller.firstDoorTransitionFrames > 0);
+    const postDoorAudioSpatialCue = firstDoorNativeSfxCue
+      && (computerRoomVisualAfterDoor
+        || computerRoomWhiteWallRecovery
+        || controller.computerRoomScore >= 0.10
+        || controller.computerDarkPanelScore >= 0.20
+        || controller.computerPanelScore >= 0.12
+        || hostileZoneSignal);
     const firstDoorLikelyOpened = controller.firstDoorTransitionFrames >= 10
       || visualPostDoorRecovery
+      || postDoorAudioSpatialCue
       || (controller.firstDoorCorridorLocated
         && controller.firstDoorUseAttempted
         && controller.mapDoorSectorMatch
@@ -5756,9 +5833,8 @@
         && controller.doorTransitionArmedFrames > 0
         && computerRoomVisualAfterDoor);
     const firstDoorAudioSuccess = controller.auditorySnapshot?.eventType === "use-success-gate"
-      || auditorySnapshot?.eventType === "use-success-gate";
-    const firstDoorAudioFailure = controller.auditorySnapshot?.eventType === "use-failed-voice"
-      || auditorySnapshot?.eventType === "use-failed-voice";
+      || auditorySnapshot?.eventType === "use-success-gate"
+      || postDoorAudioSpatialCue;
     const firstDoorOpeningConfirmed = controller.doorOpenedCount === 0
       && controller.firstDoorCorridorLocated
       && firstDoorAudioSuccess
@@ -5770,6 +5846,7 @@
         || controller.darkZoneFrames >= Math.max(2, Math.floor(darkZoneConfirmFrames * 0.5))
         || (controller.mapDoorSectorMatch && (controller.mapDarkSectorMatch || darkZoneCandidate || computerRoomVisualAfterDoor))
         || (controller.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal)
+        || postDoorAudioSpatialCue
         || visualPostDoorRecovery);
     if (firstDoorOpeningConfirmed) {
       controller.doorOpenedCount = 1;
@@ -5809,6 +5886,9 @@
       && isTrustedEnemyDepth(controller.enemyAlertCluster, controller.enemyAlertDepth, controller.enemyAlertPeakConfidence);
     const firstDoorTopologyAllowsComputerRoom = controller.doorOpenedCount > 0
       || controller.darkZoneEntered
+      || visualPostDoorRecovery
+      || postDoorAudioSpatialCue
+      || computerRoomWhiteWallRecovery
       || controller.firstDoorTransitionFrames >= 10
       || (controller.firstDoorUseAttempted && controller.doorTransitionArmedFrames > 0);
     const combatTransitionStable = !combatContextActive
@@ -5820,7 +5900,8 @@
     const computerRoomCandidate = !controller.topologicalTransitionBlocked
       && (((firstDoorLikelyOpened || postDoorTopologyStable) && (computerRoomVisualAfterDoor || computerRoomPanelAfterDoor))
         || computerRoomCombatAfterDoor
-        || computerRoomRouteAfterDoor);
+        || computerRoomRouteAfterDoor
+        || postDoorWeakComputerPanelCue);
     if (computerRoomCandidate) {
       controller.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, controller.computerRoomFrames + 1);
     } else {
@@ -6163,6 +6244,9 @@
     let gameplayLumaCount = 0;
     let darkAreaTotal = 0;
     let blueFloorTotal = 0;
+    let blueFloorLowerTotal = 0;
+    let blueFloorLowerMax = 0;
+    let blueFloorLowerCount = 0;
     let courtyardLowerLeft = 0;
     let courtyardLowerRight = 0;
     let courtyardUpperLeft = 0;
@@ -6229,7 +6313,13 @@
         const darkScore = scoreDarkPaletteIndex(value, rgbaBytes);
         lumaGrid[row * SAMPLE_COLUMNS + column] = darkScore.luma;
         darkAreaTotal += darkScore.score;
-        blueFloorTotal += scoreBlueFloorPaletteIndex(value, rgbaBytes);
+        const blueFloorCell = scoreBlueFloorPaletteIndex(value, rgbaBytes);
+        blueFloorTotal += blueFloorCell;
+        if (row >= Math.floor(SAMPLE_ROWS * 0.50)) {
+          blueFloorLowerTotal += blueFloorCell;
+          blueFloorLowerMax = Math.max(blueFloorLowerMax, blueFloorCell);
+          blueFloorLowerCount += 1;
+        }
         if (row >= Math.floor(SAMPLE_ROWS * 0.56)) {
           const courtyardLower = scoreCourtyardLowerPaletteIndex(value, rgbaBytes);
           if (column < SAMPLE_COLUMNS / 2) {
@@ -6499,7 +6589,10 @@
     const courtyardTurn = Math.abs(courtyardLeft - courtyardRight) < 0.08
       ? "none"
       : (courtyardRight > courtyardLeft ? "right" : "left");
-    const blueFloorScore = sample.length ? round2(blueFloorTotal / sample.length) : 0;
+    const blueFloorAverage = sample.length ? blueFloorTotal / sample.length : 0;
+    const blueFloorLowerAverage = blueFloorLowerCount ? blueFloorLowerTotal / blueFloorLowerCount : 0;
+    const blueFloorLocal = (blueFloorLowerAverage * 0.72) + (blueFloorLowerMax * 0.28);
+    const blueFloorScore = round2(clamp01(Math.max(blueFloorAverage, blueFloorLocal * 0.72)));
     const spawnSecretDoorAverage = spawnSecretDoorCount ? spawnSecretDoorTotal / spawnSecretDoorCount : 0;
     const spawnSecretDoorScore = round2(clamp01(Math.max(spawnSecretDoorAverage * 1.7, spawnSecretDoorMax * 0.68)));
     const spawnSecretDoorCenter = spawnSecretDoorTotal > 0
@@ -6576,6 +6669,7 @@
       healthSample,
       healthSignature: healthState.signature,
       healthLikelyDead: healthState.likelyDead,
+      healthEstimatedPercent: healthState.estimatedPercent,
       faceSample,
       faceAverage: faceSample.length ? Math.round(faceTotal / faceSample.length) : 0,
       statusBarAverage: statusSample.length ? Math.round(statusTotal / statusSample.length) : 0,
@@ -7073,42 +7167,53 @@
         likelyDead: false,
         zeroScore: 0,
         activeColumns: 0,
-        activeCells: 0
+        activeCells: 0,
+        estimatedPercent: 100
       };
     }
 
-    let bright = 0;
+    let activeCells = 0;
     let maxBucket = 0;
     const buckets = new Set();
     for (let index = 0; index < healthSample.length; index += 1) {
       const value = Number(healthSample[index] || 0);
-      const bucket = Math.floor(value / WALL_QUANTIZATION_STEP);
+      const bucket = Math.max(
+        Number(quantizedHealth?.[index] || 0),
+        Math.floor(value / WALL_QUANTIZATION_STEP));
       maxBucket = Math.max(maxBucket, bucket);
       if (bucket > 0) {
         buckets.add(bucket);
-      }
-      if (value >= 32) {
-        bright += 1;
+        activeCells += 1;
       }
     }
 
     const horizontalSpread = countActiveColumns(quantizedHealth || [], HEALTH_SAMPLE_COLUMNS);
-    const sparseDigits = bright > 0 && bright <= 11;
+    const sparseDigits = activeCells > 0 && activeCells <= 11;
     const compactColumns = horizontalSpread > 0 && horizontalSpread <= 4;
     const limitedBuckets = buckets.size <= 5;
     const hasRedDigitSignal = maxBucket >= 3;
+    const noHudSignal = activeCells === 0 && maxBucket === 0;
     const zeroScore = clamp01(
-      (sparseDigits ? 0.34 : 0)
+      (noHudSignal ? 0.26 : 0)
+      + (sparseDigits ? 0.34 : 0)
       + (compactColumns ? 0.28 : 0)
       + (limitedBuckets ? 0.18 : 0)
       + (hasRedDigitSignal ? 0.2 : 0));
     const likelyDead = zeroScore >= 0.78;
+    const density = activeCells / Math.max(1, healthSample.length);
+    const spread = horizontalSpread / Math.max(1, HEALTH_SAMPLE_COLUMNS);
+    const estimatedPercent = likelyDead
+      ? 0
+      : Math.round(clamp01(Math.max(
+        (density * 0.76) + (spread * 0.24),
+        noHudSignal ? 0 : (1 - zeroScore) * 0.82)) * 100);
     return {
       signature,
       likelyDead,
       zeroScore,
       activeColumns: horizontalSpread,
-      activeCells: bright,
+      activeCells,
+      estimatedPercent,
       faceDeathScore: 0,
       freezeScore: 0,
       retryReason: likelyDead ? "health-zero-score" : "none"
@@ -7361,27 +7466,36 @@
         const redDoorBand = row >= 2 && row <= 4;
         const floorRedRisk = row >= 6
           ? redEvidence
-          : (row === 5 ? redEvidence * (belowAvg > rawAvg + 10 ? 0.82 : 0.58) : 0);
+          : (row === 5 ? redEvidence * (belowAvg > rawAvg + 10 ? 0.92 : 0.72) : 0);
+        const floorRedCandidate = row >= 5
+          && redEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD * 0.68;
         const doorRedEvidence = redDoorBand ? redEvidence : 0;
         const redGate = clamp01(doorRedEvidence / FIRST_DOOR_RED_ACCENT_THRESHOLD);
+        const darkRedRectangle = redDoorBand
+          && doorRedEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD * 0.78
+          && uniformPatch >= 0.42
+          && quantizedPatch >= 0.42
+          && centerWeight >= 0.34;
         const orangeWallPenalty = redGate < 0.72 && doorAvg >= 0.24
           ? (centerWeight >= 0.78 ? 0.08 : 0.18)
           : 0;
-        const score = clamp01(
+        const baseScore = clamp01(
           (doorAvg * 0.24)
           + (doorPeak * 0.08)
-          + (doorRedEvidence * 0.24)
+          + (doorRedEvidence * (darkRedRectangle ? 0.34 : 0.24))
           + (darkPanelEvidence * 0.18)
           + (quantizedPatch * 0.11)
           + (uniformPatch * 0.07)
           + (edgePattern * 0.14)
           + (centerWeight * 0.06)
           + (midLowerWeight * 0.06)
+          + (darkRedRectangle ? 0.06 : 0)
           - orangeWallPenalty
-          - (floorRedRisk * 0.3));
+          - (floorRedRisk * 0.48));
+        const score = floorRedCandidate ? Math.min(baseScore, 0.2) : baseScore;
         const kind = floorRedRisk >= FIRST_DOOR_RED_ACCENT_THRESHOLD
           ? "first-door-floor-red"
-          : (doorRedEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD && edgePattern >= 0.22
+          : (doorRedEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD && (edgePattern >= 0.22 || darkRedRectangle)
           ? "first-door-9x9-patch"
           : (darkPanelBand && darkPanelEvidence >= 0.24 && centerWeight >= 0.55 && midLowerWeight >= 0.66
             ? "first-door-dark-panel"
@@ -7477,12 +7591,22 @@
     const verticalContinuity = clamp01((96 - (Math.max(topCenter, middleCenter, lowerCenter) - Math.min(topCenter, middleCenter, lowerCenter))) / 96);
     const sideGap = rightColumn + 8 < centerColumn ? "right" : (leftColumn + 8 < centerColumn ? "left" : "none");
     const gapTurn = spawnCorridorGapTurn === "left" || spawnCorridorGapTurn === "right" ? spawnCorridorGapTurn : sideGap;
-    const edgePenalty = gapTurn !== "none" && Number(spawnCorridorGapScore || 0) >= 0.18 ? 0.34 : 0;
+    const redPanelEvidence = clamp01(Number(frame.firstDoorVision9x9RedScore || 0));
+    const visionDoorEvidence = clamp01(Number(frame.firstDoorVision9x9Score || 0));
+    const redAlignmentGate = clamp01(redPanelEvidence / FIRST_DOOR_RED_ACCENT_THRESHOLD);
+    const redCenteredBonus = redPanelEvidence >= FIRST_DOOR_RED_ACCENT_THRESHOLD * 0.78
+      ? redPanelEvidence * 0.28
+      : 0;
+    const edgePenalty = gapTurn !== "none" && Number(spawnCorridorGapScore || 0) >= 0.18
+      ? Math.max(0.08, 0.34 - (redAlignmentGate * 0.24))
+      : 0;
     const score = clamp01(
       (centerDominance * 0.38)
       + (lowerContact * 0.24)
       + (verticalContinuity * 0.22)
       + (clamp01(Number(frame.bridgeDoorScore || 0)) * 0.16)
+      + (visionDoorEvidence * 0.08)
+      + redCenteredBonus
       - edgePenalty);
 
     if (score >= 0.58) {
@@ -7492,7 +7616,9 @@
     return {
       score: round2(score),
       turn: gapTurn,
-      reason: gapTurn === "none" ? "center-weak" : "edge-gap"
+      reason: redCenteredBonus > 0.01
+        ? "red-panel"
+        : (gapTurn === "none" ? "center-weak" : "edge-gap")
     };
   }
 
@@ -7845,6 +7971,9 @@
       audioMidEnergy: audio.midEnergy,
       audioHighEnergy: audio.highEnergy,
       audioDominantBand: audio.dominantBand,
+      audioEventDetected: Boolean(audio.eventDetected),
+      audioEventType: audio.eventType,
+      audioDirection: audio.balance > 0.12 ? "right" : (audio.balance < -0.12 ? "left" : "front"),
       movementSpeed: movement.speed,
       motionForwardProgress: controller.motionForwardProgress,
       motorForward: motor.vectorY,
@@ -7865,6 +7994,8 @@
       spawnCorridorGapScore: controller.spawnCorridorGapScore || frame?.spawnCorridorGapScore || 0,
       spawnLandmarkRouteEvidence: controller.spawnLandmarkRouteEvidence || 0,
       computerRoomScore: controller.computerRoomScore || frame?.computerRoomScore || 0,
+      computerPanelScore: controller.computerPanelScore || frame?.computerPanelScore || 0,
+      computerDarkPanelScore: controller.computerDarkPanelScore || frame?.computerDarkPanelScore || 0,
       bridgeDoorScore: controller.bridgeDoorScore || frame?.bridgeDoorScore || 0,
       healthActiveCells: health.activeCells,
       healthZeroScore: health.zeroScore,

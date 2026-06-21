@@ -17,17 +17,37 @@
   function applyZoeVeto(action, state, profile, helpers = {}) {
     const evaluateWhen = requireFunction(helpers.evaluateWhen, "helpers.evaluateWhen");
     const buildContext = requireFunction(helpers.buildContext, "helpers.buildContext");
+    const parameters = profile?.parameters || {};
+    const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(number(
+      state?.lowHealthThreshold ?? parameters.lowHealthThreshold,
+      50))));
+    const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, Math.round(number(
+      state?.criticalHealthThreshold ?? parameters.criticalHealthThreshold,
+      18))));
+    const health = number(state?.healthSensor?.value ?? state?.healthSensor?.health ?? state?.health, 100);
+    const fallbackRisk = health <= 0
+      ? 1
+      : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold));
+    const lethalRisk = number(state?.lethalRisk, fallbackRisk);
     const vetoRules = normalizeVetoRules(profile?.pipeline?.kinesis?.zoe?.vetoRules, [
-      "hp < 10",
-      "lethalRisk > 0.7"
+      "hp <= 0",
+      "criticalHealth && lethalRisk > 0.65",
+      "lethalRisk > 0.90"
     ]);
-    const health = number(state?.health, 100);
-    const healthState = {
+    const healthState = Object.assign({}, state || {}, {
       health,
       hp: health,
-      lethalRisk: number(state?.lethalRisk, health <= 0 ? 1 : Math.max(0, Math.min(1, (10 - health) / 10)))
-    };
-    const context = buildContext({ parameters: {}, pipeline: {} }, healthState);
+      lowHealthThreshold,
+      criticalHealthThreshold,
+      lowHealth: health > 0 && health < lowHealthThreshold,
+      criticalHealth: health > 0 && health < criticalHealthThreshold,
+      lowHealthGoalFirst: health > 0 && health < lowHealthThreshold,
+      lethalRisk
+    });
+    const context = buildContext({
+      parameters,
+      pipeline: profile?.pipeline || {}
+    }, healthState);
 
     for (const rule of vetoRules) {
       if (evaluateWhen(context, rule)) {

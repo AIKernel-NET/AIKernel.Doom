@@ -53,25 +53,35 @@
       : normalizeAction(action, options.previousAction, options.normalizeAction);
     const aiMoveAllowed = !Boolean(options.manualMove);
     const usePressed = Boolean(options.usePressed);
-    const turn = turnDirection(normalized);
+    const kinesis = usePressed
+      ? Object.assign({}, normalized, {
+        move: "none",
+        turn: "none",
+        turnYaw: 0,
+        fire: false,
+        strafe: false,
+        run: false
+      })
+      : normalized;
+    const turn = turnDirection(kinesis);
     const desired = {
-      forward: aiMoveAllowed && normalized.move === "forward",
-      back: aiMoveAllowed && normalized.move === "back",
+      forward: aiMoveAllowed && kinesis.move === "forward",
+      back: aiMoveAllowed && kinesis.move === "back",
       left: aiMoveAllowed && turn === "left",
       right: aiMoveAllowed && turn === "right",
-      fire: Boolean(normalized.fire),
-      strafe: aiMoveAllowed && Boolean(normalized.strafe),
+      fire: Boolean(kinesis.fire),
+      strafe: aiMoveAllowed && Boolean(kinesis.strafe),
       use: usePressed,
-      run: Boolean(normalized.run)
+      run: Boolean(kinesis.run)
     };
 
     return {
-      normalized,
+      normalized: kinesis,
       aiMoveAllowed,
-      move: moveAxis(normalized),
-      turn: turnAxis(normalized),
-      fire: normalized.fire ? 1 : 0,
-      strafe: normalized.strafe ? 1 : 0,
+      move: moveAxis(kinesis),
+      turn: turnAxis(kinesis),
+      fire: kinesis.fire ? 1 : 0,
+      strafe: kinesis.strafe ? 1 : 0,
       desired
     };
   }

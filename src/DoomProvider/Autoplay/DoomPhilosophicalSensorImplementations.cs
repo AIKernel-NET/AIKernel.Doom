@@ -16,6 +16,8 @@ public sealed class DoomPhainesis : IPhainesis
 
         var tensor = frame.SensorTensor;
         var healthRisk = HealthRisk(frame.Health);
+        var lowHealth = frame.Health.Health > 0 && frame.Health.Health < 50;
+        var criticalHealth = frame.Health.IsLikelyFatal || (frame.Health.Health > 0 && frame.Health.Health < 18);
         var enemy = tensor.SemanticScore("enemy");
         var corridor = tensor.SemanticScore("corridor");
         var door = tensor.SemanticScore("door");
@@ -27,10 +29,14 @@ public sealed class DoomPhainesis : IPhainesis
         var stall = Math.Max(tensor.Get("motion.stall"), Math.Max(tensor.Get("motion.inputstall"), tensor.Get("motion.stuck")));
         var audio = tensor.Get("system.audio");
         var combat = Math.Max(enemy, tensor.Get("system.combat"));
+        var audioEnemy = Clamp01(audio * Math.Max(tensor.Get("system.combat"), enemy));
+        var visualEnemy = tensor.Get("semantic.computer") >= 0.24f && tensor.Get("system.combat") < 0.18f
+            ? Math.Min(tensor.Get("vision.enemy"), 0.10f)
+            : tensor.Get("vision.enemy");
         var delta = tensor.Get("motion.delta");
         var movement = Math.Max(tensor.Get("motion.forward"), Math.Max(tensor.Get("motion.turn"), delta));
         var goal = Max(door, corridor, tensor.SemanticScore("bridge"), tensor.SemanticScore("computer-room"));
-        var threat = Max(enemy, combat, healthRisk, Clamp01(delta * enemy));
+        var threat = Max(visualEnemy, audioEnemy, combat, healthRisk, Clamp01(delta * enemy));
         var stability = Clamp01(1 - Math.Max(stall, obstacle));
 
         return new Phainomenon
@@ -43,7 +49,11 @@ public sealed class DoomPhainesis : IPhainesis
                 ["stuck"] = Max(stall, Clamp01(obstacle * (1 - movement))),
                 ["oscillation"] = Clamp01(tensor.Get("motion.turn") * (1 - stability)),
                 ["looming"] = Max(Clamp01(enemy * delta), Clamp01(combat * delta)),
-                ["enemyPresence"] = enemy,
+                ["enemyPresence"] = Max(visualEnemy, audioEnemy),
+                ["visualEnemyVisible"] = visualEnemy >= 0.28f ? 1 : 0,
+                ["audioEnemyConfidence"] = audioEnemy,
+                ["audioEnemyStrong"] = audioEnemy >= 0.24f ? 1 : 0,
+                ["audioEnemyFront"] = audioEnemy >= 0.24f ? 1 : 0,
                 ["damageLocalization"] = Clamp01(healthRisk * Math.Max(audio, combat)),
                 ["projectileFlow"] = Clamp01(Max(delta, tensor.Get("vision.target")) * combat),
                 ["threatField"] = threat,
@@ -54,8 +64,12 @@ public sealed class DoomPhainesis : IPhainesis
                 ["intentConsistency"] = Clamp01(tensor.Get("system.enabled") * stability),
                 ["movementStability"] = stability,
                 ["confidenceFusion"] = Average(tensor.Get("system.enabled"), tensor.Get("system.ctg"), stability),
+                ["healthRisk"] = healthRisk,
+                ["lowHealthGoalFirst"] = lowHealth ? 1 : 0,
+                ["criticalHealth"] = criticalHealth ? 1 : 0,
+                ["fatalHealth"] = frame.Health.IsLikelyFatal || frame.Health.Health <= 0 ? 1 : 0,
                 ["damage"] = healthRisk,
-                ["enemySeen"] = enemy,
+                ["enemySeen"] = visualEnemy,
                 ["audioEvent"] = audio
             }
         };
@@ -109,6 +123,9 @@ public sealed class DoomNous : INous
                 ["intentVector"] = phainomenon.EventScore("intentConsistency"),
                 ["stabilityVector"] = phainomenon.EventScore("movementStability"),
                 ["confidenceVector"] = phainomenon.EventScore("confidenceFusion"),
+                ["healthRiskVector"] = phainomenon.EventScore("healthRisk"),
+                ["lowHealthVector"] = phainomenon.EventScore("lowHealthGoalFirst"),
+                ["criticalHealthVector"] = phainomenon.EventScore("criticalHealth"),
                 ["enemySeenVector"] = phainomenon.EventScore("enemySeen"),
                 ["damageEventVector"] = phainomenon.EventScore("damage"),
                 ["audioEventVector"] = phainomenon.EventScore("audioEvent")
@@ -146,14 +163,15 @@ public sealed class DoomTopos : ITopos
             ["enemy"] = Math.Max(Score(vectors, "enemyVector"), Score(vectors, "enemySeenVector")),
             ["damage"] = Math.Max(Score(vectors, "damageVector"), Score(vectors, "damageEventVector")),
             ["projectile"] = Score(vectors, "projectileVector"),
-            ["threat"] = Score(vectors, "threatVector")
+            ["threat"] = Score(vectors, "threatVector"),
+            ["health"] = Math.Max(Score(vectors, "healthRiskVector"), Score(vectors, "criticalHealthVector"))
         };
         var ethos = new Dictionary<string, float>(StringComparer.Ordinal)
         {
             ["exploration"] = Score(vectors, "explorationVector"),
             ["item"] = Score(vectors, "itemVector"),
             ["goal"] = Score(vectors, "goalVector"),
-            ["safeZone"] = Score(vectors, "safeZoneVector"),
+            ["safeZone"] = Math.Max(Score(vectors, "safeZoneVector"), Score(vectors, "lowHealthVector")),
             ["intent"] = Score(vectors, "intentVector"),
             ["confidence"] = Score(vectors, "confidenceVector")
         };

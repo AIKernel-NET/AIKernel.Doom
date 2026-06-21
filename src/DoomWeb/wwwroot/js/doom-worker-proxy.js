@@ -339,6 +339,26 @@
 
   ensureAIKernelDoomAudioBridge();
 
+  function resolveDoomScriptBase() {
+    const fallback = "/js/";
+    try {
+      const currentScript = document.currentScript;
+      if (currentScript?.src) {
+        return new URL(".", currentScript.src).pathname;
+      }
+
+      const script = Array.from(document.scripts || [])
+        .reverse()
+        .find(item => /(?:^|\/)doom-worker-proxy\.js(?:\?|$)/.test(item.src || ""));
+      if (script?.src) {
+        return new URL(".", script.src).pathname;
+      }
+    } catch {
+    }
+
+    return fallback;
+  }
+
   class AIKernelDoomWorkerProxy {
     constructor(options) {
       this.canvas = options.canvas;
@@ -368,7 +388,8 @@
           return "dev";
         }
       })();
-      this.worker = new Worker(`/demo/doom/js/doom-worker.js?v=${encodeURIComponent(cacheKey)}`, { name: "AIKernel.Doom" });
+      const scriptBase = resolveDoomScriptBase();
+      this.worker = new Worker(`${scriptBase}doom-worker.js?v=${encodeURIComponent(cacheKey)}`, { name: "AIKernel.Doom" });
       this.ready = new Promise((resolve, reject) => {
         this.resolveReady = resolve;
         this.rejectReady = reject;
@@ -539,9 +560,11 @@
 
     async captureSenseOnlyFrame() {
       const capture = await this.call("captureSenseOnlyFrame");
-      if (!capture.imageDataUrl && this.canvas && typeof this.canvas.toDataURL === "function") {
+      if (!capture.imageDataUrl && !capture.overlayExcluded && this.canvas && typeof this.canvas.toDataURL === "function") {
         try {
           capture.imageDataUrl = this.canvas.toDataURL("image/png");
+          capture.captureSource = "display-canvas-fallback";
+          capture.overlayExcluded = false;
         } catch {
         }
       }

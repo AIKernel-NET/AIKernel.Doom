@@ -28,7 +28,41 @@ internal static class AutoplayPipelineActionTemplates
             ["strafeLeft"] = "$enableStrafeRun && combatYaw > 0",
             ["strafeRight"] = "$enableStrafeRun && combatYaw < 0",
             ["turnYaw"] = "combatYaw",
-            ["attackKey"] = "depthSig < 0.82 || soundEvent"
+            ["attackKey"] = "ammoLikelyEmpty == false && depthSig < 0.82 || ammoLikelyEmpty == false && soundEvent"
+        };
+
+    public static Dictionary<string, string> VisualCombat()
+        => new(StringComparer.Ordinal)
+        {
+            ["moveForward"] = "visualEnemyCentered && depthSig > 0.58",
+            ["moveBackward"] = "false",
+            ["strafeLeft"] = "false",
+            ["strafeRight"] = "false",
+            ["turnYaw"] = "visualEnemyYaw",
+            ["attackKey"] = "ammoLikelyEmpty == false && visualEnemyFireReady"
+        };
+
+    public static Dictionary<string, string> AuditoryCombat()
+        => new(StringComparer.Ordinal)
+        {
+            ["moveForward"] = "audioEnemyFront && depthSig > 0.55",
+            ["moveBackward"] = "false",
+            ["strafeLeft"] = "false",
+            ["strafeRight"] = "false",
+            ["turnYaw"] = "enemyCombatYaw",
+            ["attackKey"] = "ammoLikelyEmpty == false && audioEnemyFront || ammoLikelyEmpty == false && visualEnemyFireReady || ammoLikelyEmpty == false && visualEnemyConfidence >= 0.35 || ammoLikelyEmpty == false && absFaceSig >= $combatFaceThreshold"
+        };
+
+    public static Dictionary<string, string> StraightAdvance()
+        => new(StringComparer.Ordinal)
+        {
+            ["moveForward"] = "depthSig > $blockedDepth",
+            ["moveBackward"] = "false",
+            ["strafeLeft"] = "false",
+            ["strafeRight"] = "false",
+            ["turnYaw"] = "0",
+            ["useKey"] = "false",
+            ["attackKey"] = "false"
         };
 
     public static Dictionary<string, string> OpenCruise()

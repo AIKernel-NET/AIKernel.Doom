@@ -42,6 +42,7 @@
         "doorTransitionArmedFrames": { "type": "integer", "minimum": 0 },
         "combatYawDegrees": { "type": "integer" },
         "lowHealthThreshold": { "type": "integer", "minimum": 0 },
+        "criticalHealthThreshold": { "type": "integer", "minimum": 0 },
         "emergencyEscapeYawDegrees": { "type": "integer" },
         "wallAwayYawDegrees": { "type": "integer" },
         "openCruiseYawDegrees": { "type": "integer" },

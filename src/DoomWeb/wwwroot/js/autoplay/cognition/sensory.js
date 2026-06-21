@@ -189,6 +189,12 @@
     const freezeScore = clamp01(Number(overrides.freezeScore ?? 0));
     const activeCells = Number(overrides.activeCells || 0);
     const activeColumns = Number(overrides.activeColumns || 0);
+    const estimatedPercent = Math.max(0, Math.min(100, Math.round(Number(
+      overrides.estimatedPercent
+        ?? overrides.value
+        ?? overrides.health
+        ?? (Boolean(overrides.likelyDead) ? 0 : 100)))));
+    const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(Number(overrides.lowHealthThreshold ?? 50))));
     const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
     const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
     const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, freezeScore * 0.55)));
@@ -208,6 +214,11 @@
       zeroScore: round2(zeroScore),
       activeColumns,
       activeCells,
+      estimatedPercent,
+      value: estimatedPercent,
+      health: estimatedPercent,
+      lowHealth: estimatedPercent > 0 && estimatedPercent < lowHealthThreshold,
+      lowHealthThreshold,
       likelyDead,
       confidence: round2(confidence),
       retryRequested,
@@ -226,6 +237,11 @@
       zeroScore: 0,
       activeColumns: 0,
       activeCells: 0,
+      estimatedPercent: 100,
+      value: 100,
+      health: 100,
+      lowHealth: false,
+      lowHealthThreshold: 50,
       faceDeathScore: 0,
       freezeScore: 0,
       retryReason: "sensor-cutoff"

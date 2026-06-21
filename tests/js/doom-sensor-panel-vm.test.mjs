@@ -32,7 +32,7 @@ const context = vm.createContext(sandbox);
 loadScript(context, "src/DoomWeb/wwwroot/demo/doom/js/doom-sensor-panel.js");
 
 const panel = context.self.AIKernelDoomSensorPanel;
-assert(panel?.version === "20260618-sensorpanel1", "sensor panel module should expose the cache-busted layout version");
+assert(panel?.version === "20260621-sensorpanel3", "sensor panel module should expose the cache-busted layout version");
 assert(Array.isArray(panel.panelLayout), "sensor panel module should expose panelLayout");
 
 const panelKeys = panel.panelLayout.map(item => item.key).join("|");
@@ -42,6 +42,9 @@ const stageKeys = panel.panelLayout.flatMap(item => item.stages.map(stage => sta
 assert(stageKeys === "primary|phainesis|nous|topos|kairos|motion|zoe", "pipeline stages should follow the formal execution order after Aisthesis");
 
 const aisthesis = panel.panelLayout.find(item => item.key === "aisthesis");
+for (const item of panel.panelLayout) {
+  assert(!("gridColumn" in item) && !("gridRow" in item), "responsive CSS should own sensor panel grid placement");
+}
 const aisthesisSensors = aisthesis.stages[0].items.map(item => `${item.type}:${item.key || item.label}`).join("|");
 assert(aisthesisSensors.includes("sensor:visual"), "Aisthesis should contain Visual");
 assert(aisthesisSensors.includes("sensor:audio"), "Aisthesis should contain Audio");

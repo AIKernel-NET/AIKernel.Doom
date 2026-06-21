@@ -5,6 +5,7 @@
     return {
       sequence: [],
       waitFrames: 0,
+      settleFrames: 0,
       cooldownFrames: 0,
       reason: "none",
       healthRetryFrames: 0
@@ -12,13 +13,14 @@
   }
 
   function active(state) {
-    return Boolean((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0);
+    return Boolean((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0 || (state?.settleFrames || 0) > 0);
   }
 
   function snapshot(state) {
     return {
       active: active(state),
       cooldownFrames: state?.cooldownFrames || 0,
+      settleFrames: state?.settleFrames || 0,
       reason: state?.reason || "none"
     };
   }
@@ -28,8 +30,10 @@
       return snapshot(state);
     }
 
+    host.releaseInputs?.();
     state.sequence = [];
     state.waitFrames = 0;
+    state.settleFrames = 0;
     state.cooldownFrames = 0;
     state.reason = "none";
     if (typeof host.queueInput === "function") {
@@ -84,6 +88,10 @@
       : 0;
 
     if (!healthRetryRequested) {
+      if (state.settleFrames > 0) {
+        return { scheduled: false, reason: "settling" };
+      }
+
       if (active(state)) {
         clear(state, host);
       }
@@ -101,6 +109,7 @@
 
     state.reason = status?.healthSensor?.retryReason || "health-death";
     host.releaseInputs?.();
+    host.resetSensors?.("pre-retry-reset", state.reason);
     state.sequence = buildRetrySequence({
       keys: host.keys,
       enterKey: host.enterKey,
@@ -113,11 +122,13 @@
   }
 
   function completeIfDone(state, host = {}) {
-    if ((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0) {
+    if ((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0 || (state?.settleFrames || 0) > 0) {
       return false;
     }
 
     state.cooldownFrames = host.cooldownFrames || 180;
+    state.settleFrames = host.settleFrames || 60;
+    host.resetSensors?.("post-retry-reset", state.reason || "none");
     host.logCompleted?.(state.reason || "none");
     return true;
   }
@@ -131,6 +142,21 @@
       state.waitFrames -= 1;
       host.releaseMoveInputs?.();
       completeIfDone(state, host);
+      return true;
+    }
+
+    if (state.settleFrames > 0) {
+      state.settleFrames -= 1;
+      if (typeof host.releaseInputs === "function") {
+        host.releaseInputs();
+      } else {
+        host.releaseMoveInputs?.();
+      }
+
+      if (state.settleFrames <= 0) {
+        host.logSettled?.(state.reason || "none");
+      }
+
       return true;
     }
 

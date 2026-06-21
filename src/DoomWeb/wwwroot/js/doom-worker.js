@@ -18,49 +18,64 @@
       return "dev";
     }
   })();
-  const scriptUrl = (path) => `${path}?v=${encodeURIComponent(workerCacheKey)}`;
+  function resolveWorkerScriptBase() {
+    try {
+      const url = new URL(self.location.href);
+      return url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1) || "/js/";
+    } catch {
+      return "/js/";
+    }
+  }
+
+  const workerScriptBase = resolveWorkerScriptBase();
+  const scriptUrl = (path) => {
+    const relativePath = String(path || "").replace(/^\/js\//, "").replace(/^\//, "");
+    return `${workerScriptBase}${relativePath}?v=${encodeURIComponent(workerCacheKey)}`;
+  };
 
   importScripts(
-    scriptUrl("/demo/doom/js/autoplay-profile.js"),
-    scriptUrl("/demo/doom/js/webgpu-provider.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/semantics.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/combat-route.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/routing.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/topos.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/ctg.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/sensory.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/vision-palette.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/phainesis.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/nous.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/phantasia.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/kairos.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/kinesis.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/zoe.js"),
-    scriptUrl("/demo/doom/js/autoplay/cognition/pipeline-trace.js"),
-    scriptUrl("/demo/doom/js/autoplay/sensor-tensor.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/objective-routing.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/expression-dsl.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/route-planner.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/doom-context.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/evidence.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/arbitration.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/decision-trace.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/pipeline-graph.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/zoe-veto.js"),
-    scriptUrl("/demo/doom/js/autoplay/control/runtime-packets.js"),
-    scriptUrl("/demo/doom/js/autoplay/wasm-state.js"),
-    scriptUrl("/demo/doom/js/autoplay/control-runtime.js"),
-    scriptUrl("/demo/doom/js/autoplay/doom-sensor-inputs.js"),
-    scriptUrl("/demo/doom/js/autoplay/doom-action-adapter.js"),
-    scriptUrl("/demo/doom/js/autoplay/doom-retry-dispatch.js"),
-    scriptUrl("/demo/doom/js/autoplay/doom-binary-assets.js"),
-    scriptUrl("/demo/doom/js/doom-wasm-imports.js"),
-    scriptUrl("/demo/doom/js/doom-native-audio.js"),
-    scriptUrl("/demo/doom/js/doom-auditory-runtime.js"),
-    scriptUrl("/demo/doom/js/doom-wad-metadata.js"),
-    scriptUrl("/demo/doom/js/bonsai.js"),
-    scriptUrl("/demo/doom/js/doom-debug-audio.js"),
-    scriptUrl("/demo/doom/js/doom.js")
+    scriptUrl("/js/autoplay-profile.js"),
+    scriptUrl("/js/autoplay/gpu-contracts.js"),
+    scriptUrl("/js/webgpu-provider.js"),
+    scriptUrl("/js/autoplay/cognition/semantics.js"),
+    scriptUrl("/js/autoplay/cognition/combat-route.js"),
+    scriptUrl("/js/autoplay/cognition/routing.js"),
+    scriptUrl("/js/autoplay/cognition/topos.js"),
+    scriptUrl("/js/autoplay/cognition/ctg.js"),
+    scriptUrl("/js/autoplay/cognition/sensory.js"),
+    scriptUrl("/js/autoplay/cognition/vision-palette.js"),
+    scriptUrl("/js/autoplay/cognition/phainesis.js"),
+    scriptUrl("/js/autoplay/cognition/nous.js"),
+    scriptUrl("/js/autoplay/cognition/phantasia.js"),
+    scriptUrl("/js/autoplay/cognition/kairos.js"),
+    scriptUrl("/js/autoplay/cognition/kinesis.js"),
+    scriptUrl("/js/autoplay/cognition/zoe.js"),
+    scriptUrl("/js/autoplay/cognition/pipeline-trace.js"),
+    scriptUrl("/js/autoplay/sensor-tensor.js"),
+    scriptUrl("/js/autoplay/control/objective-routing.js"),
+    scriptUrl("/js/autoplay/control/expression-dsl.js"),
+    scriptUrl("/js/autoplay/control/route-planner.js"),
+    scriptUrl("/js/autoplay/control/route-loop-budget.js"),
+    scriptUrl("/js/autoplay/control/doom-context.js"),
+    scriptUrl("/js/autoplay/control/evidence.js"),
+    scriptUrl("/js/autoplay/control/arbitration.js"),
+    scriptUrl("/js/autoplay/control/decision-trace.js"),
+    scriptUrl("/js/autoplay/control/pipeline-graph.js"),
+    scriptUrl("/js/autoplay/control/zoe-veto.js"),
+    scriptUrl("/js/autoplay/control/runtime-packets.js"),
+    scriptUrl("/js/autoplay/wasm-state.js"),
+    scriptUrl("/js/autoplay/control-runtime.js"),
+    scriptUrl("/js/autoplay/doom-sensor-inputs.js"),
+    scriptUrl("/js/autoplay/doom-action-adapter.js"),
+    scriptUrl("/js/autoplay/doom-retry-dispatch.js"),
+    scriptUrl("/js/autoplay/doom-binary-assets.js"),
+    scriptUrl("/js/doom-wasm-imports.js"),
+    scriptUrl("/js/doom-native-audio.js"),
+    scriptUrl("/js/doom-auditory-runtime.js"),
+    scriptUrl("/js/doom-wad-metadata.js"),
+    scriptUrl("/js/bonsai.js"),
+    scriptUrl("/js/doom-debug-audio.js"),
+    scriptUrl("/js/doom.js")
   );
 
   let runtime = null;

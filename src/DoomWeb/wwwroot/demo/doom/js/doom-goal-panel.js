@@ -15,7 +15,12 @@
     "enter-computer-control-room": "Enter Computer Room",
     "reach-central-hall": "Reach Central Hall",
     "engage-front-enemy": "Engage Front Enemy",
-    "secure-central-hall": "Secure Central Hall"
+    "secure-central-hall": "Secure Central Hall",
+    "cross-bridge": "Cross Bridge",
+    "reach-bridge": "Reach Cross Bridge",
+    "reach-final-room": "Reach Exit Route",
+    "press-exit-switch": "Press Exit Switch",
+    "level-clear": "Level Clear"
   });
 
   function labelize(value) {
@@ -49,11 +54,17 @@
       return "Recover From Death";
     }
 
-    if (milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
-      return "Reach Exit";
+    if (objective === "press-exit-switch" || milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
+      return "Press Exit Switch";
     }
 
-    if (objective === "engage-front-enemy" || objective === "secure-central-hall") {
+    if (objective === "engage-front-enemy"
+      || objective === "secure-central-hall"
+      || objective === "cross-bridge"
+      || objective === "reach-bridge"
+      || objective === "reach-central-hall"
+      || objective === "reach-final-room"
+      || objective === "level-clear") {
       return labelize(objective);
     }
 

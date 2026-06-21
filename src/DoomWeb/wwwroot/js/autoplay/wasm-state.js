@@ -27,6 +27,82 @@
     return value === "left" || value === "right" ? value : fallback;
   }
 
+  function audioEnergy(audio) {
+    return maxScore(
+      audio?.leftEnergy,
+      audio?.rightEnergy,
+      audio?.lowEnergy,
+      audio?.midEnergy,
+      audio?.highEnergy);
+  }
+
+  function isNativeDoorSfx(audio) {
+    const eventType = String(audio?.eventType || "").toLowerCase();
+    return Boolean(audio?.eventDetected)
+      && (eventType === "native-sfx"
+        || eventType === "doom-native-sfx"
+        || eventType === "use-success-gate"
+        || eventType === "use-response");
+  }
+
+  function normalizeAudioEventType(value) {
+    return String(value || "none").trim().toLowerCase();
+  }
+
+  function isDoorUseAudioEventType(eventType) {
+    return eventType === "use-success-gate"
+      || eventType === "use-failed-voice"
+      || eventType === "use-response";
+  }
+
+  function audioBalance(audio) {
+    const explicit = number(audio?.balance, NaN);
+    if (Number.isFinite(explicit)) {
+      return Math.max(-1, Math.min(1, explicit));
+    }
+
+    const left = number(audio?.leftEnergy, 0);
+    const right = number(audio?.rightEnergy, 0);
+    const total = left + right;
+    return total > 0 ? Math.max(-1, Math.min(1, (right - left) / total)) : 0;
+  }
+
+  function auditoryEnemyDirection(audio) {
+    const balance = audioBalance(audio);
+    if (balance > 0.12) {
+      return "right";
+    }
+
+    if (balance < -0.12) {
+      return "left";
+    }
+
+    return "front";
+  }
+
+  function auditoryEnemyConfidence(audio) {
+    const eventType = normalizeAudioEventType(audio?.eventType);
+    if (isDoorUseAudioEventType(eventType)) {
+      return 0;
+    }
+
+    const energy = audioEnergy(audio);
+    const band = maxScore(audio?.midEnergy, audio?.highEnergy, number(audio?.lowEnergy, 0) * 0.54, energy * 0.72);
+    const eventLikelyCombat = Boolean(audio?.eventDetected)
+      && (eventType === "native-sfx"
+        || eventType === "doom-native-sfx"
+        || eventType === "spatial-event"
+        || eventType === "attention"
+        || eventType === "contact");
+    if (energy < 0.035 && !eventLikelyCombat) {
+      return 0;
+    }
+
+    const balanceBoost = Math.min(0.12, Math.abs(audioBalance(audio)) * 0.16);
+    const eventBoost = eventLikelyCombat ? 0.16 : 0;
+    return maxScore((band * 0.78) + balanceBoost + eventBoost);
+  }
+
   function visionBoxTurn(box) {
     if (!box || !Number.isFinite(Number(box.column))) {
       return "none";
@@ -300,6 +376,15 @@
     const bridge = semantic.bridge || {};
     const finalRoom = semantic.finalRoom || {};
     const milestones = supervisorStatus.milestones || {};
+    const centralHallEntered = Boolean(supervisorStatus.centralHallEntered ?? milestones.centralHallEntered);
+    const centralHallFrames = number(supervisorStatus.centralHallFrames ?? milestones.centralHallFrames, 0);
+    const stairsEntered = Boolean(supervisorStatus.stairsEntered ?? milestones.stairsEntered);
+    const finalRoomEntered = Boolean(supervisorStatus.finalRoomEntered ?? milestones.finalRoomEntered);
+    const finalRoomCandidateFrames = number(supervisorStatus.finalRoomCandidateFrames ?? milestones.finalRoomCandidateFrames, 0);
+    const exitSwitchUseFrames = number(supervisorStatus.exitSwitchUseFrames ?? milestones.exitSwitchUseFrames, 0);
+    const exitSwitchPressed = Boolean(supervisorStatus.exitSwitchPressed ?? milestones.exitSwitchPressed);
+    const enemyDefeatedCount = number(supervisorStatus.enemyDefeatedCount ?? milestones.enemyDefeated ?? milestones.enemyDefeatedCount, 0);
+    const ammoLikelyEmpty = Boolean(supervisorStatus.ammoLikelyEmpty ?? milestones.ammoLikelyEmpty);
     const wasmSensorTensor = buildWasmSensorTensor(supervisorStatus.sensorTensor);
     const left = Number(frame.left || 0);
     const center = Number(frame.center || 0);
@@ -310,9 +395,42 @@
     const contextDict = depthSig >= 0.82
       ? "open-space"
       : (depthSig <= 0.34 ? "wall" : "corridor");
-    const health = Number(runtime?.autoplayHealthSensor?.value ?? runtime?.autoplayHealthSensor?.health ?? state?.player?.health ?? 100);
+    const health = Number(
+      runtime?.autoplayHealthSensor?.value
+        ?? runtime?.autoplayHealthSensor?.health
+        ?? supervisorStatus.healthSensor?.value
+        ?? supervisorStatus.healthSensor?.health
+        ?? frame.healthEstimatedPercent
+        ?? state?.player?.health
+        ?? 100);
     const faceSig = number(frame.enemyLateralBias, number(runtime?.autoplayEnemyLateralBias, 0));
-    const doorOpened = Boolean(milestones.doorOpened > 0 || supervisorStatus.doorOpenedCount > 0);
+    const predictions = number(supervisorStatus.predictions ?? runtime?.autoplayPredictions ?? 0, 0);
+    const lastUsePulsePrediction = number(
+      runtime?.autoplayPipelineState?.kinesis?.lastUsePulsePrediction
+        ?? runtime?.autoplayAutoplayState?.pipelineState?.kinesis?.lastUsePulsePrediction
+        ?? runtime?.autoplayAutoplayState?.kinesis?.lastUsePulsePrediction
+        ?? supervisorStatus.pipelineState?.kinesis?.lastUsePulsePrediction
+        ?? supervisorStatus.autoplayState?.pipelineState?.kinesis?.lastUsePulsePrediction
+        ?? supervisorStatus.autoplayState?.kinesis?.lastUsePulsePrediction
+        ?? supervisorStatus.lastUsePulsePrediction
+        ?? -1,
+      -1);
+    const recentUsePulse = lastUsePulsePrediction >= 0
+      && predictions >= lastUsePulsePrediction
+      && predictions - lastUsePulsePrediction <= 720;
+    const priorDoorOpenedCount = Math.max(
+      number(runtime?.autoplayMilestones?.doorOpened, 0),
+      number(runtime?.autoplayMilestones?.doorOpenedCount, 0),
+      number(runtime?.autoplayAutoplayState?.doorOpenedCount, 0),
+      number(runtime?.autoplayAutoplayState?.milestones?.doorOpened, 0),
+      number(runtime?.autoplayAutoplayState?.milestones?.doorOpenedCount, 0),
+      number(supervisorStatus.doorOpenedCount, 0),
+      number(supervisorStatus.autoplayState?.doorOpenedCount, 0),
+      number(supervisorStatus.autoplayState?.milestones?.doorOpened, 0),
+      number(supervisorStatus.autoplayState?.milestones?.doorOpenedCount, 0),
+      number(milestones.doorOpened, 0),
+      number(milestones.doorOpenedCount, 0));
+    const doorOpened = priorDoorOpenedCount > 0;
     const firstDoorVision = resolveFirstDoorVisionLock(
       runtime,
       number(frame.firstDoorVision9x9Score, 0),
@@ -334,12 +452,53 @@
       frame.spawnCorridorGapScore,
       runtime?.autoplayMotionEntranceScore,
       contextDict === "corridor" ? 0.35 : 0);
-    const enemyConfidence = maxScore(
+    const audioEnemyConfidence = auditoryEnemyConfidence(audio);
+    const audioEnemyDirection = auditoryEnemyDirection(audio);
+    const rawVisualEnemyConfidence = maxScore(
       runtime?.autoplayEnemyConfidence,
       frame.enemyConfidence,
       frame.enemyAllRegionPeak,
-      Math.abs(faceSig),
-      audio.eventDetected ? 0.55 : 0);
+      Math.abs(faceSig));
+    const terminalSurface = maxScore(
+      frame.computerPanelScore,
+      frame.computerDarkPanelScore,
+      frame.computerRoomScore,
+      computerRoom.confidence);
+    const terminalPanelSurface = maxScore(
+      frame.computerPanelScore,
+      frame.computerDarkPanelScore,
+      frame.computerRoomScore);
+    const weakTerminalSurfaceEnemy = terminalSurface >= 0.24
+      && rawVisualEnemyConfidence <= 0.32
+      && audioEnemyConfidence < 0.18;
+    const terminalOnlyVisualEnemy = terminalSurface >= 0.24
+      && terminalPanelSurface >= 0.24
+      && rawVisualEnemyConfidence >= 0.46
+      && audioEnemyConfidence < 0.18
+      && firstDoorVision.redScore <= 0.08;
+    const visualEnemySuppressed = terminalSurface >= 0.24
+      && rawVisualEnemyConfidence <= 0.46
+      && (weakTerminalSurfaceEnemy
+        || (audioEnemyConfidence >= 0.24 && audioEnemyDirection !== "front"))
+      || terminalOnlyVisualEnemy;
+    const visualEnemyConfidence = visualEnemySuppressed
+      ? Math.min(rawVisualEnemyConfidence, 0.10)
+      : rawVisualEnemyConfidence;
+    const enemyConfidence = maxScore(
+      visualEnemyConfidence,
+      audioEnemyConfidence);
+    const visualEnemyVisible = visualEnemyConfidence >= 0.28 || (!visualEnemySuppressed && Math.abs(faceSig) >= 0.20);
+    const visualEnemyCentered = visualEnemyConfidence >= 0.28 && Math.abs(faceSig) <= 0.12;
+    const visualEnemyYaw = visualEnemyCentered
+      ? 0
+      : Math.max(-18, Math.min(18, faceSig * 24));
+    const visualEnemyFireReady = visualEnemyCentered && visualEnemyConfidence >= 0.36;
+    const audioEnemyYaw = audioEnemyDirection === "right"
+      ? 18
+      : (audioEnemyDirection === "left" ? -18 : 0);
+    const enemyCombatYaw = visualEnemyVisible && !visualEnemyCentered
+      ? visualEnemyYaw
+      : (audioEnemyConfidence >= 0.24 ? audioEnemyYaw : visualEnemyYaw);
     const bridgeConfidence = maxScore(
       bridge.confidence,
       milestones.bridgeBrownScore,
@@ -355,7 +514,73 @@
       frame.computerPanelScore,
       frame.computerDarkPanelScore,
       frame.darkAreaScore);
-    const finalRoomConfidence = maxScore(finalRoom.confidence, milestones.finalRoomEntered ? 1 : 0);
+    const postDoorVisualCue = computerRoomConfidence >= 0.14
+      || number(frame.computerDarkPanelScore, 0) >= 0.24
+      || number(frame.computerPanelScore, 0) >= 0.16
+      || number(frame.darkAreaScore, 0) >= 0.08;
+    const bridgeGreenHazard = maxScore(frame.bridgeGreenLeft, frame.bridgeGreenCenter, frame.bridgeGreenRight);
+    const pipelineText = String(runtime?.autoplayControlPipeline ?? supervisorStatus.controlPipeline ?? supervisorStatus.pipeline ?? "");
+    const postUseControlWindow = /post-use/i.test(pipelineText);
+    const usePulseCooldownWindow = number(
+      runtime?.autoplayPipelineState?.kinesis?.usePulseCooldownFrames
+        ?? runtime?.autoplayAutoplayState?.pipelineState?.kinesis?.usePulseCooldownFrames
+        ?? runtime?.autoplayAutoplayState?.kinesis?.usePulseCooldownFrames
+        ?? runtime?.controlRuntime?.usePulseCooldown
+        ?? supervisorStatus.pipelineState?.kinesis?.usePulseCooldownFrames
+        ?? supervisorStatus.autoplayState?.pipelineState?.kinesis?.usePulseCooldownFrames
+        ?? supervisorStatus.autoplayState?.kinesis?.usePulseCooldownFrames
+        ?? supervisorStatus.usePulseCooldown,
+      0);
+    const useCooldownWindow = number(runtime?.useCooldown ?? runtime?.autoplayUseCooldown ?? supervisorStatus.useCooldown, 0) > 0
+      || usePulseCooldownWindow > 0;
+    const useBoundAudioWindow = recentUsePulse
+      || Boolean(supervisorStatus.firstDoorUsePulsed)
+      || number(supervisorStatus.pendingUseResponseFrames, 0) > 0
+      || number(supervisorStatus.doorTransitionArmedFrames, 0) > 0
+      || useCooldownWindow
+      || postUseControlWindow;
+    const postDoorAudioCue = !doorOpened
+      && isNativeDoorSfx(audio)
+      && audioEnergy(audio) >= 0.002
+      && postDoorVisualCue
+      && useBoundAudioWindow;
+    const firstDoorRouteContext = Boolean(
+      supervisorStatus.firstDoorCorridorLocated
+        || supervisorStatus.firstDoorUseAttempted
+        || milestones.firstDoorUseAttempted
+        || corridorConfidence >= 0.20
+        || doorConfidence >= 0.20);
+    const postDoorVisualOpenCue = !doorOpened
+      && useBoundAudioWindow
+      && firstDoorRouteContext
+      && depthSig >= 0.82
+      && number(frame.bridgeDoorScore, 0) <= 0.38
+      && number(frame.firstDoorUse3x3Score, 0) <= 0.08
+      && firstDoorVision.redScore <= 0.08
+      && maxScore(firstDoorVision.score, number(frame.spawnCorridorGapScore, 0), corridorConfidence) >= 0.36
+      && maxScore(bridgeGreenHazard, number(frame.darkAreaScore, 0)) >= 0.16;
+    const postDoorStrongComputerVisualCue = !doorOpened
+      && firstDoorRouteContext
+      && depthSig >= 0.82
+      && number(frame.bridgeDoorScore, 0) <= 0.38
+      && number(frame.firstDoorUse3x3Score, 0) <= 0.08
+      && firstDoorVision.redScore <= 0.08
+      && computerRoomConfidence >= 0.18
+      && number(frame.computerPanelScore, 0) >= 0.62
+      && bridgeGreenHazard >= 0.42;
+    const effectiveDoorOpened = doorOpened || postDoorAudioCue || postDoorVisualOpenCue || postDoorStrongComputerVisualCue;
+    const postDoorTerminalSurface = effectiveDoorOpened
+      ? maxScore(frame.computerPanelScore, frame.computerDarkPanelScore, frame.computerRoomScore)
+      : 0;
+    const centralHallConfidence = maxScore(
+      semantic.centralHall?.confidence,
+      centralHallEntered ? 1 : 0,
+      centralHallFrames / 8);
+    const finalRoomConfidence = maxScore(
+      finalRoom.confidence,
+      finalRoomEntered ? 1 : 0,
+      finalRoomCandidateFrames / 14,
+      exitSwitchUseFrames > 0 ? 0.42 : 0);
     const safeZoneConfidence = maxScore(
       semantic.safeZone?.confidence,
       health >= 18 && enemyConfidence < 0.35 && depthSig > 0.34 && Math.abs(wallVector) <= 0.5 ? 0.85 : 0,
@@ -380,10 +605,32 @@
       doorConfidence,
       corridorConfidence,
       enemyConfidence,
+      visualEnemyConfidence,
+      visualEnemySuppressed,
+      audioEnemyConfidence,
+      audioEnemyDirection,
+      visualEnemyVisible,
+      visualEnemyCentered,
+      visualEnemyYaw,
+      visualEnemyFireReady,
+      enemyCombatYaw,
+      audioBalance: audioBalance(audio),
+      audioEventType: normalizeAudioEventType(audio.eventType),
       safeZoneConfidence,
       bridgeConfidence,
       computerRoomConfidence,
-      firstDoorOpened: doorOpened,
+      firstDoorOpened: effectiveDoorOpened,
+      computerRoomEntered: Boolean(supervisorStatus.computerRoomEntered ?? milestones.computerRoomEntered),
+      centralHallEntered,
+      centralHallFrames,
+      stairsEntered,
+      enemyDefeatedCount,
+      ammoLikelyEmpty,
+      finalRoomEntered,
+      finalRoomCandidateFrames,
+      exitSwitchUseFrames,
+      exitSwitchPressed,
+      centralHallConfidence,
       finalRoomConfidence,
       spawnCorridorGapScore: spawnGap.score,
       spawnLandmarkRouteEvidence: spawnLandmarkRoute.evidence,
@@ -404,7 +651,10 @@
         enemy: enemyConfidence,
         "safe-zone": safeZoneConfidence,
         bridge: bridgeConfidence,
-        "computer-room": computerRoomConfidence
+        "computer-room": computerRoomConfidence,
+        "central-hall": centralHallConfidence,
+        "final-room": finalRoomConfidence,
+        "exit-switch": exitSwitchPressed ? 1 : (exitSwitchUseFrames > 0 ? 0.55 : 0)
       },
       phase: semantic.phase || runtime?.autoplayControlPipeline || "WasmControl",
       objective,
@@ -428,6 +678,10 @@
       },
       lastUpdatedFrame: runtime?.frameCount || 0
     };
+    const activeDetections = ["objective", "motion", "door", "wall", "hud"];
+    if (audioEnemyConfidence >= 0.24) {
+      activeDetections.push(`audio-enemy-${audioEnemyDirection}`);
+    }
 
     return {
       frame: runtime?.frameCount || 0,
@@ -439,6 +693,21 @@
       objective,
       objectiveRoute,
       soundEvent: Boolean(audio.eventDetected),
+      postDoorAudioCue,
+      postDoorVisualOpenCue,
+      postDoorStrongComputerVisualCue,
+      computerRoomEntered: Boolean(supervisorStatus.computerRoomEntered ?? milestones.computerRoomEntered),
+      centralHallEntered,
+      centralHallFrames,
+      stairsEntered,
+      enemyDefeatedCount,
+      ammoLikelyEmpty,
+      finalRoomEntered,
+      finalRoomCandidateFrames,
+      exitSwitchUseFrames,
+      exitSwitchPressed,
+      centralHallConfidence,
+      finalRoomConfidence,
       stuckTicks: Number(runtime?.autoplayStuckFrames || 0),
       qDelta: Math.round(wallVector * 30),
       recoveryFrames: Number(runtime?.autoplayRecoveryFrames || 0),
@@ -447,12 +716,30 @@
       moveRepeatFrames: Math.max(0, Math.floor(number(runtime?.autoplayMoveRepeatFrames ?? supervisorStatus.moveRepeatFrames, 0))),
       turnRepeatFrames: Math.max(0, Math.floor(number(runtime?.autoplayTurnRepeatFrames ?? supervisorStatus.turnRepeatFrames, 0))),
       wallVector,
+      doorOpenedCount: effectiveDoorOpened ? Math.max(1, priorDoorOpenedCount) : 0,
+      milestones: Object.assign({}, milestones, {
+        doorOpened: effectiveDoorOpened ? Math.max(1, priorDoorOpenedCount) : 0,
+        doorOpenedCount: effectiveDoorOpened ? Math.max(1, priorDoorOpenedCount) : 0
+      }),
       doorConfidence,
       corridorConfidence,
       enemyConfidence,
+      visualEnemyConfidence,
+      visualEnemySuppressed,
+      visualEnemyVisible,
+      visualEnemyCentered,
+      visualEnemyFireReady,
+      audioEnemyConfidence,
+      audioEnemyDirection,
+      audioBalance: audioBalance(audio),
+      audioEventType: normalizeAudioEventType(audio.eventType),
       safeZoneConfidence,
       bridgeConfidence,
       computerRoomConfidence,
+      computerRoomScore: number(frame.computerRoomScore, 0),
+      computerPanelScore: number(frame.computerPanelScore, 0),
+      computerDarkPanelScore: number(frame.computerDarkPanelScore, 0),
+      postDoorTerminalSurface,
       motionForwardProgress,
       motionObstacleScore,
       motionTurnScore,
@@ -490,7 +777,7 @@
       spawnCenterAnchorTurn: direction(frame.spawnCenterAnchorTurn, "none"),
       sensorTensor: wasmSensorTensor,
       semanticMemory,
-      activeDetections: ["objective", "motion", "door", "wall", "hud"],
+      activeDetections,
       screen6Regions: [left, center, center, center, right, right].map(value => Math.max(0, Math.min(1, Number(value || 0) / 255)))
     };
   }

@@ -1,6 +1,19 @@
 (function () {
   'use strict';
 
+    const DOOM_DEFAULT_MODEL_MANIFEST_URL = "/models/bonsai1.7b/manifest.json";
+    const DOOM_DEFAULT_MODEL_HOSTED_FILE = "/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf";
+    const doomDeploymentConfig = self.AIKernelDoomConfig || {};
+    const doomPublicConfig = self.AIKernelDoomPublic || {};
+    const doomSharedModel = {
+      manifestUrl: doomDeploymentConfig.modelManifestUrl ||
+        doomPublicConfig.modelManifestUrl ||
+        DOOM_DEFAULT_MODEL_MANIFEST_URL,
+      hostedFile: doomDeploymentConfig.modelHostedFile ||
+        doomPublicConfig.modelHostedFile ||
+        DOOM_DEFAULT_MODEL_HOSTED_FILE
+    };
+
     const logs = [
       {
         t: "[ DOOM ]",
@@ -30,7 +43,7 @@
       {
         t: "[MODEL]",
         c: "log-ok",
-        m: "Bonsai-1.7B q1_0 GGUF redistribution manifest mounted from /models/bonsai1.7b/manifest.json."
+        m: `Bonsai-1.7B q1_0 GGUF redistribution manifest mounted from ${doomSharedModel.manifestUrl}.`
       },
       {
         t: "[GPU  ]",
@@ -55,7 +68,7 @@
       {
         t: "--------",
         c: "log-muted",
-        m: "AIKERNEL.DOOM WAITING FOR EXPLICIT USER APPROVAL. Type yes in the aik console or use the approval button below. / aik コンソールで yes と入力するか、下のボタンで同意して起動できます。"
+        m: "AIKERNEL.DOOM WAITING FOR EXPLICIT USER APPROVAL. Type yes in the aik console or use the approval button. / aik コンソールで yes と入力するか、承認ボタンで同意して起動できます。"
       }
     ];
 
@@ -100,14 +113,35 @@
     let doomAudioEventBadge = null;
     let doomAudioPlaybackToggle = document.getElementById("doom-audio-playback-toggle");
     let doomToposDetailToggle = document.getElementById("doom-topos-detail-toggle");
+    let doomGpuContractsScriptLoading = null;
+    let doomGpuPathStatusScriptLoading = null;
     let doomSensorPanelScriptLoading = null;
     let doomPipelinePanelScriptLoading = null;
     let doomRuntimeFormatScriptLoading = null;
     let doomGoalPanelScriptLoading = null;
     let doomDebugOverlayScriptLoading = null;
+    let doomDebugCaptureScriptLoading = null;
+    let doomDebugCaptureApi = null;
+    let doomObjectiveStatusPanelScriptLoading = null;
     let doomBridgeAudioSnapshot = null;
     let doomAudioHudEnvelope = { left: 0, right: 0, balance: 0, updatedAt: 0 };
     let doomAudioEventHolds = [];
+    let doomCompassDisplayState = {
+      heading: null,
+      confidence: 0,
+      usable: 0,
+      holdUntil: 0,
+      updatedAt: 0,
+      reliability: "initial"
+    };
+    let doomToposClickAudioContext = null;
+    let doomPublicLayoutInstalled = false;
+    let doomLegalLinks = null;
+    let doomPipelineSidePanel = null;
+    let doomPipelineSideGrid = null;
+    let doomDetectionSummaryPanel = null;
+    let doomDebugLogLimitLabel = null;
+    const doomSideCards = new Map();
 
     let sensorUi = {};
     let detectionUi = {};
@@ -117,8 +151,9 @@
     const commandHistory = [];
     const controllerDebugLogEntries = [];
     const controllerDebugLogSignatureByCategory = new Map();
-    const CONTROLLER_DEBUG_LOG_MAX_VISIBLE = 18;
+    const CONTROLLER_DEBUG_LOG_MAX_VISIBLE = 48;
     let commandHistoryIndex = 0;
+    let controllerDebugLogSequence = 0;
     let controllerDebugLogFilter = "all";
     let controllerDebugLogLimit = CONTROLLER_DEBUG_LOG_MAX_VISIBLE;
     let controllerDebugLogAutoLimit = true;
@@ -152,6 +187,7 @@
       "/demo/doom/autoplay-status.schema.json"
     ];
     const activeDoomInputs = new Set();
+    const keyboardDoomInputs = new Set();
     const doomKeyCodes = {
       forward: 0xad,
       back: 0xaf,
@@ -195,7 +231,7 @@
       ? window.createAIKernelDoomRuntime({
         canvas: doomScreen,
         moduleUrl: "/demo/doom/module.json",
-        modelManifestUrl: "/models/bonsai1.7b/manifest.json",
+        modelManifestUrl: doomSharedModel.manifestUrl,
         autoplayProfileUrl: `/demo/doom/autoplay-profile.json?v=${encodeURIComponent(doomDevCacheKey)}`,
         log: appendConsoleLine,
         onStatusChange: queueRuntimeStatusUpdate
@@ -208,6 +244,57 @@
     let consoleFollowTimer = 0;
     const runtimeStatusFlow = requireRuntimeStatusFlowAdapter("createFlow")();
     let latestRuntimeStatus = null;
+
+    function readDoomDebugRuntimeStatus() {
+      const current = typeof doomRuntime?.status === "function" ? doomRuntime.status() : null;
+      return current || latestRuntimeStatus || { state: "unknown" };
+    }
+
+    function readDoomDebugGpuStatus() {
+      const provider = resolveWebGpuProvider();
+      const providerStatus = typeof provider?.status === "function" ? provider.status() : (provider || null);
+      const status = readDoomDebugRuntimeStatus();
+      const autoplay = status?.autoplay || {};
+      const resolver = self.AIKernelDoomGpuPathStatus?.resolveGpuPathStatus;
+      const path = typeof resolver === "function" ? resolver(status, autoplay) : null;
+      return {
+        provider: providerStatus,
+        path,
+        gpuHud: status?.gpuHud || status?.GpuHud || autoplay?.gpuHud || autoplay?.GpuHud || null,
+        runtime: {
+          renderer: status?.renderer || "unknown",
+          gpuDelegate: status?.gpuDelegate || "unknown",
+          usingCpuFallback: Boolean(status?.usingCpuFallback),
+          lastError: status?.lastError || "",
+          lastGpuWaitMs: Number(status?.lastGpuWaitMs || 0),
+          gpuWaitTimeouts: Number(status?.gpuWaitTimeouts || 0)
+        }
+      };
+    }
+
+    function refreshDoomDebugRuntimeBridge(reason = "status") {
+      window.AIKernelDoomDebugRuntime = Object.freeze({
+        version: "20260621-debug-runtime1",
+        reason,
+        status: readDoomDebugRuntimeStatus,
+        gpuStatus: readDoomDebugGpuStatus,
+        snapshot() {
+          const status = readDoomDebugRuntimeStatus();
+          const autoplay = status?.autoplay || {};
+          return {
+            reason,
+            state: status?.state || "unknown",
+            objective: autoplay.objective || "none",
+            pipeline: autoplay.controlPipeline || "Idle",
+            action: autoplay.action || autoplay.currentAction || null,
+            gpu: readDoomDebugGpuStatus()
+          };
+        }
+      });
+      return window.AIKernelDoomDebugRuntime;
+    }
+
+    refreshDoomDebugRuntimeBridge("initial");
 
     function appendLine(log) {
       const line = document.createElement("div");
@@ -253,11 +340,13 @@
       }
 
       if (state === "loading") {
+        halted.hidden = false;
         halted.classList.add("is-visible");
         halted.innerHTML = "[ LOADING ] AIKERNEL.DOOM APPROVED DOWNLOAD/LOAD ACTIVE.<span>Fetching and validating doom.wasm, DOOM1.WAD, Bonsai model, manifests, and metadata.</span><span>同意後のダウンロードと検証を実行しています。</span>";
       } else if (state === "ready") {
+        halted.hidden = false;
         halted.classList.add("is-visible");
-        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>The public demo asks for consent before downloading DOOM1.WAD, Bonsai-1.7B, and doom.wasm. Type <code>yes</code> in the aik console or use the approval button below. Current protected size estimate: about 270MB, under 300MB.</span><span>利用規約とライセンスを確認し、aik コンソールで <code>yes</code> と入力するか下のボタンで同意すると、約300MBのデータ取得を許可して Doom デモを起動します。</span>";
+        halted.innerHTML = "[ READY ] AIKERNEL.DOOM STARTS AFTER USER APPROVAL.<span>The public demo asks for consent before downloading DOOM1.WAD, Bonsai-1.7B, and doom.wasm. Type <code>yes</code> in the aik console or use the approval button. Current protected size estimate: about 270MB, under 300MB.</span><span>利用規約とライセンスを確認し、aik コンソールで <code>yes</code> と入力するか承認ボタンで同意すると、約300MBのデータ取得を許可して Doom デモを起動します。</span>";
       }
     }
 
@@ -334,6 +423,15 @@
         doomScreen.tabIndex = 0;
       }
 
+      const allowKeyboardFocus = reason === "user-game-focus"
+        || reason === "debug-focus-game"
+        || reason.indexOf("manual-keyboard") >= 0;
+
+      if (!allowKeyboardFocus) {
+        renderDoomState(doomRuntime?.status?.() || { state: "unknown" }, `focus=display:${reason}`);
+        return false;
+      }
+
       const applyFocus = () => {
         scrollDoomRuntimeIntoView(reason);
         try {
@@ -390,12 +488,23 @@
     }
 
     function focusPromptUnlessGameRunning(reason = "prompt") {
-      const status = doomRuntime?.status?.() || {};
-      if (status.state === "running" && doomScreenPanel?.hidden === false) {
-        return focusDoomViewport(`release-console:${reason}`);
+      return focusAikConsole(reason);
+    }
+
+    function isEditableKeyboardTarget(target) {
+      if (!target || typeof target.closest !== "function") {
+        return false;
       }
 
-      return focusAikConsole(reason);
+      return Boolean(target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"));
+    }
+
+    function shouldHandleDoomKeyboardEvent(event) {
+      if (event.defaultPrevented || isEditableKeyboardTarget(event.target)) {
+        return false;
+      }
+
+      return document.activeElement === doomScreen;
     }
 
     function isDoomRuntimeUiVisible(status = doomRuntime?.status?.() || {}) {
@@ -411,6 +520,7 @@
     }
 
     function setDoomRuntimeUiVisibility(status = doomRuntime?.status?.() || {}) {
+      installDoomPublicDemoLayout();
       const visible = isDoomRuntimeUiVisible(status);
       const gameSurfaceVisible = visible && doomScreenPanel?.hidden === false;
       consoleBody?.classList.toggle("is-doom-running", gameSurfaceVisible);
@@ -426,12 +536,23 @@
       if (doomRuntimePanel) {
         doomRuntimePanel.hidden = !visible;
       }
+      if (doomPipelineSidePanel) {
+        doomPipelineSidePanel.hidden = !visible;
+      }
+      if (doomDetectionSummaryPanel) {
+        doomDetectionSummaryPanel.hidden = !visible;
+      }
+      if (doomDebugOverlay) {
+        ensureDoomDebugOverlayHost();
+        doomDebugOverlay.hidden = !visible;
+      }
       if (doomDebugBar) {
         doomDebugBar.hidden = !visible || doomScreenPanel?.hidden !== false;
       }
       if (doomState) {
         doomState.hidden = !visible;
       }
+      syncDoomLayoutCardVisibility();
 
       if (!visible) {
         setGpuHudOverlayEnabled(false);
@@ -454,6 +575,7 @@
         }
       }
 
+      syncDoomLayoutCardVisibility();
       return visible;
     }
 
@@ -465,6 +587,1412 @@
         .replace(/"/g, "&quot;");
     }
 
+    function installDoomPublicDemoLayout() {
+      if (doomPublicLayoutInstalled) {
+        return;
+      }
+
+      doomPublicLayoutInstalled = true;
+      injectDoomPublicLayoutStyles();
+      consoleBody?.classList.add("is-doom-public-layout");
+      moveDoomToolbarBelowGame();
+
+      let insertionAnchor = doomScreenPanel;
+      if (doomDebugBar && consoleBody) {
+        doomDebugBar.classList.add("doom-debug-controls-under-game");
+        insertionAnchor?.after(doomDebugBar);
+        insertionAnchor = doomDebugBar;
+      }
+
+      const consoleStack = ensureDoomLayoutSection("doom-aik-console-stack", "doom-aik-console-stack");
+      moveAfter(consoleStack, insertionAnchor);
+      if (container) {
+        consoleStack.appendChild(container);
+      }
+      if (promptForm) {
+        consoleStack.appendChild(promptForm);
+      }
+      insertionAnchor = consoleStack;
+
+      doomLegalLinks = ensureDoomLegalLinks();
+      moveAfter(doomLegalLinks, insertionAnchor);
+      insertionAnchor = doomLegalLinks;
+
+      if (halted) {
+        halted.classList.add("doom-notice-panel");
+        moveAfter(halted, insertionAnchor);
+        insertionAnchor = halted;
+      }
+      if (approvalActions) {
+        approvalActions.classList.add("doom-approval-panel");
+        moveAfter(approvalActions, insertionAnchor);
+        insertionAnchor = approvalActions;
+      }
+      if (panic) {
+        panic.classList.add("doom-notice-panel", "is-panic-panel");
+        moveAfter(panic, insertionAnchor);
+        insertionAnchor = panic;
+      }
+      if (runtimeStatus) {
+        runtimeStatus.classList.add("doom-runtime-dump");
+        consoleBody?.appendChild(runtimeStatus);
+      }
+
+      installDoomSideCards();
+      ensureDoomControlPanel();
+      ensureDoomDebugLogHeader();
+      syncDoomLayoutCardVisibility();
+    }
+
+    function moveAfter(node, anchor) {
+      if (!node || !anchor || !anchor.parentNode) {
+        return;
+      }
+
+      if (anchor.nextSibling === node) {
+        return;
+      }
+
+      anchor.parentNode.insertBefore(node, anchor.nextSibling);
+    }
+
+    function ensureDoomLayoutSection(id, className) {
+      let node = document.getElementById(id);
+      if (!node) {
+        node = document.createElement("section");
+        node.id = id;
+        node.className = className;
+      }
+
+      if (consoleBody && !node.parentNode) {
+        consoleBody.appendChild(node);
+      }
+
+      return node;
+    }
+
+    function injectDoomPublicLayoutStyles() {
+      if (document.getElementById("doom-public-demo-layout-style")) {
+        return;
+      }
+
+      const style = document.createElement("style");
+      style.id = "doom-public-demo-layout-style";
+      style.textContent = `
+        .console-body.is-doom-public-layout { gap: 12px; }
+        .console-body.is-doom-public-layout #doom-screen-panel {
+          order: 10;
+          background: rgba(12,16,24,.38);
+          box-shadow: 0 10px 28px rgba(0,0,0,.18);
+        }
+        .console-body.is-doom-public-layout #doom-debug-bar { order: 20; }
+        .console-body.is-doom-public-layout #doom-aik-console-stack { order: 30; }
+        .console-body.is-doom-public-layout #doom-legal-links { order: 40; }
+        .console-body.is-doom-public-layout #halted { order: 50; }
+        .console-body.is-doom-public-layout #doom-approval-actions { order: 60; }
+        .console-body.is-doom-public-layout #panic { order: 70; }
+        .console-body.is-doom-public-layout #runtime-status { order: 90; }
+        #doom-screen-panel .doom-screen-toolbar { margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid rgba(255,255,255,.10); }
+        #doom-aik-console-stack { display: grid; gap: 8px; }
+        #doom-aik-console-stack #output { min-height: 154px; max-height: 228px; }
+        #doom-aik-console-stack .prompt-form { border: 1px solid rgba(145,170,210,.22); background: rgba(12,16,24,.78); border-radius: 8px; }
+        #doom-debug-bar.doom-debug-controls-under-game { display: grid; gap: 6px; padding: 8px; }
+        #doom-debug-bar.doom-debug-controls-under-game > .sensor-toggles,
+        #doom-debug-bar.doom-debug-controls-under-game > .detection-toggles {
+          display: none !important;
+        }
+        #doom-debug-bar .doom-sensor-pipeline-title {
+          display: block;
+          width: fit-content;
+          padding: 4px 7px;
+          border: 1px solid rgba(255,247,192,.20);
+          background: rgba(5,7,8,.06);
+          border-radius: 6px;
+          color: #fff7c0;
+          font: 700 11px/1.2 system-ui, sans-serif;
+          text-transform: uppercase;
+          text-shadow: 0 1px 3px #000;
+        }
+        #doom-debug-bar[hidden] { display: none !important; }
+        #doom-debug-bar .doom-sensor-toggles {
+          display: grid;
+          grid-template-columns: 1.04fr repeat(3, minmax(0, 1fr));
+          grid-template-rows: auto auto;
+          grid-auto-rows: max-content;
+          gap: 8px;
+          align-items: start;
+          padding: 7px;
+          border: 1px solid rgba(255,225,122,.22);
+          background: rgba(5,7,8,.06);
+          border-radius: 8px;
+        }
+        #doom-debug-bar .doom-detection-toggles.is-panelized { display: none; }
+        .doom-sensor-node {
+          min-width: 0;
+          min-height: 0;
+          display: grid;
+          grid-template-rows: auto max-content;
+          gap: 5px;
+          padding: 6px;
+          border: 1px solid rgba(255,255,255,.14);
+          background: rgba(0,0,0,.16);
+          border-radius: 7px;
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.035);
+          overflow: hidden;
+          align-self: start;
+        }
+        .doom-sensor-node.is-aisthesis { border-color: rgba(78,190,255,.34); background: rgba(5,18,28,.15); align-self: start; }
+        .doom-sensor-node.is-noesis { border-color: rgba(149,255,208,.28); background: rgba(5,24,18,.13); }
+        .doom-sensor-node.is-krisis { border-color: rgba(255,225,122,.32); background: rgba(26,22,6,.13); }
+        .doom-sensor-node.is-kinesis { border-color: rgba(255,180,142,.30); background: rgba(28,14,7,.13); }
+        .doom-sensor-node.is-noesis,
+        .doom-sensor-node.is-krisis,
+        .doom-sensor-node.is-kinesis {
+          align-self: start !important;
+          height: fit-content;
+        }
+        .doom-sensor-node-header {
+          min-width: 0;
+          padding: 3px 5px;
+          border-bottom: 1px solid rgba(255,247,192,.18);
+          background: rgba(255,247,192,.06);
+        }
+        .doom-sensor-node-label {
+          display: block;
+          color: #fff7c0;
+          font: 700 11px/1.15 system-ui, sans-serif;
+          text-transform: uppercase;
+          text-shadow: 0 1px 3px #000;
+        }
+        .doom-sensor-node-subtitle {
+          display: block;
+          margin-top: 2px;
+          color: #8ee4ff;
+          font: 10px/1.2 ui-monospace, Consolas, monospace;
+        }
+        .doom-sensor-stages {
+          display: grid;
+          grid-template-rows: none;
+          grid-auto-rows: max-content;
+          gap: 6px;
+          min-width: 0;
+          align-content: start;
+        }
+        .doom-sensor-stage {
+          min-height: 0;
+          align-self: start;
+        }
+        .doom-sensor-node.is-aisthesis .doom-sensor-stages,
+        .doom-sensor-node.is-krisis .doom-sensor-stages {
+          align-self: start;
+        }
+        .doom-sensor-node.is-noesis .doom-sensor-stages,
+        .doom-sensor-node.is-krisis .doom-sensor-stages,
+        .doom-sensor-node.is-kinesis .doom-sensor-stages {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          align-items: start;
+        }
+        .doom-sensor-stage-title {
+          margin: 0 0 4px;
+          color: #d9f0ff;
+          font: 700 10px/1.15 system-ui, sans-serif;
+          text-transform: uppercase;
+        }
+        .doom-sensor-node-buttons { display: flex; flex-wrap: wrap; gap: 3px; align-items: flex-start; }
+        .doom-sensor-node.is-aisthesis .doom-sensor-node-buttons {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 5px;
+          align-items: stretch;
+        }
+        .doom-sensor-node.is-aisthesis .doom-sensor-switch,
+        .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
+          width: 100%;
+          min-height: 42px;
+        }
+        @media (min-width: 1280px) {
+          #doom-debug-bar .doom-sensor-toggles {
+            grid-template-columns: minmax(260px, .95fr) minmax(0, 1.7fr) minmax(280px, 1fr);
+            grid-template-rows: auto auto;
+            align-items: start;
+            align-content: start;
+            grid-auto-rows: max-content;
+            min-height: 0;
+          }
+          #doom-debug-bar .doom-sensor-node {
+            min-height: 0;
+            height: max-content !important;
+            align-self: start !important;
+          }
+          #doom-debug-bar .doom-sensor-stages {
+            grid-template-rows: none !important;
+            grid-auto-rows: max-content !important;
+            align-content: start !important;
+          }
+          #doom-debug-bar .doom-sensor-stage {
+            min-height: 0 !important;
+            align-self: start !important;
+          }
+          #doom-debug-bar .doom-sensor-node[data-sensor-panel="aisthesis"] {
+            grid-column: 1 / 2 !important;
+            grid-row: 1 / 2 !important;
+          }
+          #doom-debug-bar .doom-sensor-node[data-sensor-panel="noesis"] {
+            grid-column: 2 / 3 !important;
+            grid-row: 1 / 2 !important;
+          }
+          #doom-debug-bar .doom-sensor-node[data-sensor-panel="krisis"] {
+            grid-column: 3 / 4 !important;
+            grid-row: 1 / 2 !important;
+            height: fit-content !important;
+            align-self: start !important;
+            max-height: max-content;
+          }
+          #doom-debug-bar .doom-sensor-node[data-sensor-panel="kinesis"] {
+            grid-column: 1 / 4 !important;
+            grid-row: 2 / 3 !important;
+          }
+        }
+        @media (min-width: 1280px) and (max-width: 1599.98px) {
+          #doom-debug-bar .doom-sensor-toggles {
+            grid-template-columns: minmax(250px, .9fr) minmax(0, 1.45fr) minmax(250px, .92fr);
+          }
+          #doom-debug-bar .doom-sensor-node {
+            padding: 7px;
+          }
+          #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-sensor-switch,
+          #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
+            min-height: 36px;
+          }
+        }
+        .doom-panel-signal-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          min-width: 0;
+          max-width: 100%;
+          padding: 3px 5px;
+          border: 1px solid rgba(255,247,192,.18);
+          border-radius: 5px;
+          background: rgba(255,247,192,.04);
+          color: #e9fbff;
+          font: 9.5px/1.16 ui-monospace, Consolas, monospace;
+          overflow: hidden;
+        }
+        .doom-panel-signal-chip strong { color: #fff7c0; font-weight: 700; }
+        .doom-panel-signal-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .78; }
+        .doom-sensor-switch {
+          min-width: 0;
+          padding: 3px 5px;
+          border-radius: 5px;
+          border: 1px solid rgba(145,170,210,.36);
+          background: rgba(23,33,48,.34);
+          color: #f4f8ff;
+          font: 9.5px/1.16 ui-monospace, Consolas, monospace;
+          text-align: left;
+        }
+        .doom-sensor-switch.is-on { border-color: rgba(142,228,255,.55); background: rgba(26,47,69,.38); }
+        .doom-sensor-switch:not(.is-on) { opacity: .52; }
+        .doom-legal-links { padding: 9px 11px; font: 12px/1.45 system-ui, sans-serif; color: #d7e8ff; }
+        .doom-legal-links a { color: #8ee4ff; text-decoration: none; border-bottom: 1px solid rgba(142,228,255,.42); }
+        .doom-legal-links a:focus-visible, .doom-legal-links a:hover { color: #fff7c0; border-bottom-color: #fff7c0; }
+        .doom-legal-links span { display: block; margin-top: 3px; color: #bdd1e8; }
+        .doom-notice-panel { padding: 11px 13px; font: 12px/1.48 system-ui, sans-serif; color: #f4f8ff; }
+        .doom-notice-panel span { display: block; margin-top: 4px; color: #bdd1e8; }
+        .doom-notice-panel.is-panic-panel:empty { display: none !important; }
+        .doom-runtime-dump { order: 90; max-height: 220px; }
+        #doom-screen-panel .doom-screen-wrap { position: relative; }
+        .doom-goal-hud {
+          position: absolute;
+          left: 50%;
+          top: 56%;
+          z-index: 66;
+          box-sizing: border-box;
+          width: min(58%, 420px);
+          transform: translate(-50%, -50%);
+          display: grid;
+          gap: 5px;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          box-shadow: none;
+          backdrop-filter: none;
+          pointer-events: none;
+          text-align: center;
+          color: #f7fbff;
+          text-shadow: 0 2px 8px rgba(0,0,0,.95), 0 0 10px rgba(0,0,0,.65);
+        }
+        .doom-goal-telos {
+          display: grid;
+          gap: 2px;
+          justify-items: center;
+          padding: 1px 0 2px;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+          backdrop-filter: none;
+        }
+        .doom-goal-telos .doom-goal-label,
+        .doom-goal-objective-label {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 16px;
+          padding: 1px 6px;
+          border: 1px solid rgba(125, 211, 252, .48);
+          border-radius: 4px;
+          background: rgba(2, 18, 30, .22);
+          color: #8ee4ff;
+          font: 700 10px/1.1 ui-monospace, Consolas, monospace;
+          letter-spacing: 0;
+          text-transform: uppercase;
+        }
+        .doom-goal-telos strong {
+          color: #fff7c0;
+          font: 800 25px/1.02 system-ui, sans-serif;
+          letter-spacing: 0;
+          text-transform: uppercase;
+        }
+        .doom-goal-primary {
+          display: inline-flex;
+          justify-self: center;
+          align-items: center;
+          gap: 8px;
+          max-width: 100%;
+          padding: 2px 6px;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+        }
+        .doom-goal-primary strong {
+          min-width: 0;
+          color: #f7fbff;
+          font: 700 14px/1.15 system-ui, sans-serif;
+          letter-spacing: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .doom-goal-sub {
+          display: flex;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 4px;
+          max-width: 100%;
+        }
+        .doom-goal-chip {
+          display: inline-flex;
+          align-items: center;
+          max-width: 150px;
+          padding: 1px 6px;
+          border: 1px solid rgba(148, 163, 184, .24);
+          border-radius: 999px;
+          background: rgba(2, 10, 18, .16);
+          color: #dff8ff;
+          font: 10px/1.2 ui-monospace, Consolas, monospace;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .doom-goal-chip.is-safety,
+        .doom-goal-chip.is-kairos {
+          color: #ffe7ad;
+          border-color: rgba(255, 225, 122, .32);
+          background: rgba(40, 24, 8, .16);
+        }
+        .doom-goal-chip.is-detection {
+          color: #dff8ff;
+          border-color: rgba(142, 228, 255, .28);
+          background: rgba(4, 24, 34, .14);
+        }
+        #doom-debug-overlay {
+          position: absolute;
+          inset: 0;
+          display: none;
+          pointer-events: none;
+          z-index: 60;
+          overflow: hidden;
+          contain: layout paint;
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+        }
+        #doom-debug-overlay.is-visible { display: block; }
+        #doom-debug-overlay.is-gpu-backed { mix-blend-mode: normal; }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label {
+          position: absolute;
+          display: none;
+          left: calc(var(--label-left, 1.3) * 1%);
+          top: calc(var(--label-top, 2.0) * 1%);
+          width: calc(var(--label-width, 34) * 1%);
+          max-width: calc(var(--label-width, 34) * 1%);
+          color: rgba(238,250,255,.94);
+          font: 600 9.5px/1.22 ui-monospace, Consolas, monospace;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          text-shadow: 0 1px 2px rgba(0,0,0,.95), 0 0 8px rgba(12,24,32,.65);
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          border-radius: 0 !important;
+          pointer-events: none;
+          z-index: 46;
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label[data-gpu-label-layout="rect"] {
+          display: block;
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label[data-gpu-label-anchor="below"] {
+          text-align: center;
+          transform: translateX(-50%);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.priority-high {
+          color: rgba(255,220,208,.98);
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 8px rgba(255,72,54,.38);
+          z-index: 50;
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door-candidate {
+          color: rgba(255,210,210,.98);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-wall,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-corner-candidate {
+          color: rgba(255,231,172,.96);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-enemy,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-combat,
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-enemy-circle {
+          color: rgba(255,202,194,.98);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-enemy-circle-audio {
+          color: rgba(255,228,174,.98);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-region {
+          display: none !important;
+        }
+        #doom-debug-overlay .debug-region {
+          position: absolute;
+          box-sizing: border-box;
+          border: 1px solid rgba(142,228,255,.64);
+          background: rgba(8,18,28,.085);
+          color: #e9fbff;
+          text-shadow: 0 1px 2px rgba(0,0,0,.82);
+          border-radius: 4px;
+          box-shadow: 0 0 8px rgba(78,190,255,.12), inset 0 0 0 1px rgba(255,255,255,.035);
+          opacity: .96;
+          overflow: hidden;
+        }
+        #doom-debug-overlay .debug-region.priority-high { border-width: 1px; }
+        #doom-debug-overlay .debug-region.is-vision,
+        #doom-debug-overlay .debug-region.is-gap {
+          background: rgba(0,0,0,.045);
+          box-shadow: none;
+          z-index: 12;
+        }
+        #doom-debug-overlay .debug-region-label {
+          position: absolute;
+          left: 4px;
+          top: 3px;
+          max-width: calc(100% - 8px);
+          color: inherit;
+          font: 10px/1.15 ui-monospace, Consolas, monospace;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+        #doom-debug-overlay .is-vision-heat {
+          border-color: rgba(96,214,255,var(--heat-border-alpha,.34));
+          background: rgba(48,174,255,var(--heat-alpha,.16));
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.07), 0 0 6px rgba(60,185,255,.10);
+          opacity: .40;
+          z-index: 1;
+        }
+        #doom-debug-overlay .is-grid-3x3 {
+          background: transparent !important;
+          box-shadow: none !important;
+          border-width: 1px;
+          opacity: .82;
+          z-index: 5;
+        }
+        #doom-debug-overlay .is-grid-motion {
+          border-color: rgba(255,218,103,var(--heat-border-alpha,.44));
+          background: rgba(255,210,92,var(--heat-alpha,.16));
+        }
+        #doom-debug-overlay .is-grid-3x3.is-grid-motion {
+          background: transparent !important;
+        }
+        #doom-debug-overlay .is-door, #doom-debug-overlay .is-door-candidate {
+          border-color: rgba(255,73,73,.94);
+          background: rgba(84,6,12,.055);
+          color: #ffd7d7;
+          z-index: 24;
+        }
+        #doom-debug-overlay .is-wall, #doom-debug-overlay .is-corner-candidate {
+          border-color: rgba(255,209,87,.92);
+          background: rgba(78,51,5,.045);
+          color: #ffe7ac;
+          z-index: 18;
+        }
+        #doom-debug-overlay .is-door-candidate,
+        #doom-debug-overlay .is-corner-candidate {
+          overflow: visible;
+        }
+        #doom-debug-overlay .is-door-candidate .debug-region-label,
+        #doom-debug-overlay .is-corner-candidate .debug-region-label {
+          left: 50%;
+          top: calc(100% + 3px);
+          max-width: 40vw;
+          padding: 2px 5px;
+          border: 1px solid rgba(255,255,255,.13);
+          border-radius: 4px;
+          background: rgba(0,0,0,.20);
+          font-size: 9px;
+          line-height: 1.15;
+          white-space: nowrap;
+          transform: translateX(-50%);
+          opacity: .92;
+        }
+        #doom-debug-overlay .is-door-candidate .debug-region-label {
+          border-color: rgba(255,73,73,.42);
+        }
+        #doom-debug-overlay .is-corner-candidate .debug-region-label {
+          border-color: rgba(255,209,87,.38);
+        }
+        #doom-debug-overlay .is-enemy, #doom-debug-overlay .is-combat-alert {
+          border-color: rgba(255,80,80,.96);
+          background: rgba(72,5,7,.11);
+          color: #ffd2d2;
+          z-index: 36;
+        }
+        #doom-debug-overlay .is-enemy-circle {
+          border: 1px solid rgba(255,80,80,.96);
+          background: rgba(255,16,24,.045);
+          color: #ffd2d2;
+          border-radius: 50%;
+          box-shadow: 0 0 12px rgba(255,48,32,.24), inset 0 0 0 1px rgba(255,210,190,.12);
+          z-index: 40;
+          overflow: visible;
+        }
+        #doom-debug-overlay .is-enemy-circle-visual {
+          border-width: 1px;
+          border-color: rgba(255,74,68,.96);
+          background: rgba(255,28,32,.035);
+          box-shadow: 0 0 12px rgba(255,48,32,.22), inset 0 0 0 1px rgba(255,210,190,.12);
+        }
+        #doom-debug-overlay .is-enemy-circle-audio {
+          border-width: 1px;
+          border-color: rgba(255,190,74,.90);
+          background: rgba(255,174,42,.030);
+          color: #ffe4ae;
+          box-shadow: 0 0 15px rgba(255,180,48,.22), inset 0 0 0 1px rgba(255,238,184,.12);
+        }
+        #doom-debug-overlay .is-enemy-circle-av {
+          border-color: rgba(255,74,68,.96);
+          background: rgba(255,32,32,.040);
+          box-shadow: 0 0 0 1px rgba(255,190,74,.42), 0 0 16px rgba(255,54,40,.26), inset 0 0 0 1px rgba(255,226,186,.16);
+        }
+        #doom-debug-overlay .is-enemy-circle .debug-region-label {
+          left: 50%;
+          top: calc(100% + 4px);
+          max-width: 34vw;
+          padding: 2px 5px;
+          border: 1px solid rgba(255,80,80,.42);
+          border-radius: 4px;
+          background: rgba(0,0,0,.22);
+          color: #ffd2d2;
+          font-size: 9px;
+          line-height: 1.15;
+          white-space: nowrap;
+          transform: translateX(-50%);
+        }
+        #doom-debug-overlay .is-enemy-circle-audio .debug-region-label {
+          border-color: rgba(255,190,74,.42);
+          color: #ffe4ae;
+        }
+        #doom-debug-overlay .is-enemy-circle-av .debug-region-label {
+          border-color: rgba(255,190,74,.50);
+          color: #ffe2d2;
+        }
+        #doom-debug-overlay .is-zoe-warning {
+          border-color: rgba(255,189,87,.92);
+          background: rgba(56,34,5,.12);
+          color: #ffe6ae;
+          z-index: 38;
+        }
+        #doom-debug-overlay .is-zoe-veto {
+          border-color: rgba(255,73,73,.96);
+          background: rgba(74,4,8,.18);
+          color: #ffd4d4;
+          z-index: 44;
+        }
+        #doom-debug-overlay .is-objective {
+          border-color: rgba(142,228,255,.82);
+          background: rgba(8,28,46,.085);
+          z-index: 30;
+        }
+        #doom-debug-overlay .is-kairos-pulse { animation: doom-debug-pulse .65s ease-in-out infinite alternate; }
+        #doom-debug-overlay .debug-probe-arrow {
+          position: absolute;
+          left: 46%;
+          top: 63%;
+          width: 8%;
+          height: 10%;
+          display: grid;
+          place-items: center;
+          color: #fff7c0;
+          font: 700 22px/1 ui-monospace, Consolas, monospace;
+          text-shadow: 0 0 10px rgba(255,220,100,.78);
+          pointer-events: none;
+        }
+        #doom-debug-overlay .debug-probe-arrow.is-left { transform: translateX(-40%); }
+        #doom-debug-overlay .debug-probe-arrow.is-right { transform: translateX(40%); }
+        @keyframes doom-debug-pulse { from { opacity: .45; } to { opacity: 1; } }
+        .side.is-doom-card-stack { display: flex; flex-direction: column; gap: 12px; align-self: stretch; }
+        details.doom-side-card { overflow: hidden; }
+        details.doom-side-card[hidden] { display: none !important; }
+        details.doom-side-card > summary { list-style: none; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; cursor: pointer; padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.10); color: #fff7c0; font: 700 12px/1.22 system-ui, sans-serif; letter-spacing: 0; }
+        details.doom-side-card > summary::-webkit-details-marker { display: none; }
+        details.doom-side-card > summary::after { content: "fold"; color: #8ee4ff; font: 10px/1 ui-monospace, Consolas, monospace; opacity: .78; }
+        details.doom-side-card[open] > summary::after { content: "open"; }
+        .doom-side-card-subtitle { grid-column: 1 / span 2; margin-top: -4px; color: #8f9aaa; font: 10px/1.22 ui-monospace, Consolas, monospace; font-weight: 400; }
+        .doom-side-card-body { padding: 10px; }
+        .doom-side-card-body > .doom-card-content { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 !important; }
+        .doom-control-panel-grid { display: grid; gap: 9px; }
+        .doom-control-command-row, .doom-control-keypad { display: flex; flex-wrap: wrap; gap: 6px; }
+        .doom-control-keypad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .doom-control-panel-grid button { min-width: 0; padding: 7px 8px; font-size: 11px; }
+        #doom-state { min-height: 18px; color: #bdd1e8; font: 11px/1.35 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+        .doom-side-pipeline-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .doom-side-pipeline-card { min-width: 0; padding: 8px; border: 1px solid rgba(255,255,255,.13); background: rgba(0,0,0,.22); border-radius: 6px; }
+        .doom-side-pipeline-card h4 { margin: 0 0 5px; color: #fff7c0; font: 700 11px/1.2 system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0; }
+        .doom-side-pipeline-card pre { margin: 0; color: #d9f0ff; font: 10px/1.34 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .doom-side-pipeline-card.is-zoe { border-color: rgba(255,73,73,.70); background: rgba(56,5,7,.24); }
+        .doom-side-pipeline-card.is-zoe-warning { border-color: rgba(255,189,87,.62); background: rgba(52,33,7,.22); }
+        .doom-objective-status-grid { display: grid; gap: 7px; }
+        .doom-objective-status-row { display: grid; grid-template-columns: 76px 1fr; gap: 8px; align-items: start; padding: 6px 7px; border: 1px solid rgba(255,255,255,.11); background: rgba(0,0,0,.14); border-radius: 6px; min-width: 0; }
+        .doom-objective-status-row strong { color: #fff7c0; font: 700 10px/1.25 ui-monospace, Consolas, monospace; text-transform: uppercase; }
+        .doom-objective-status-row span { color: #d9f0ff; font: 11px/1.32 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+        .doom-objective-status-row.is-telos { border-color: rgba(142,228,255,.38); background: rgba(5,32,44,.16); }
+        .doom-objective-status-row.is-priority { border-color: rgba(255,225,122,.36); background: rgba(40,31,7,.16); }
+        .doom-objective-status-row.is-gpu { border-color: rgba(78,190,255,.44); background: rgba(6,25,40,.16); }
+        .doom-objective-status-row.is-warn { border-color: rgba(255,189,87,.58); background: rgba(52,33,7,.18); }
+        .doom-objective-status-row.is-health.is-warn { border-color: rgba(255,189,87,.58); background: rgba(52,33,7,.22); }
+        .doom-objective-status-row.is-health.is-danger { border-color: rgba(255,73,73,.70); background: rgba(56,5,7,.24); }
+        .doom-detection-summary-grid { display: grid; gap: 6px; }
+        .doom-detection-summary-row { display: grid; grid-template-columns: 68px 1fr; gap: 8px; align-items: start; padding: 5px 7px; border: 1px solid rgba(255,255,255,.11); background: rgba(0,0,0,.14); border-radius: 6px; }
+        .doom-detection-summary-row strong { color: #fff7c0; font: 700 10px/1.25 ui-monospace, Consolas, monospace; text-transform: uppercase; }
+        .doom-detection-summary-row span { color: #d9f0ff; font: 11px/1.3 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+        .doom-detection-summary-row.is-danger { border-color: rgba(255,73,73,.55); background: rgba(56,5,7,.20); }
+        .doom-detection-summary-row.is-door { border-color: rgba(255,189,87,.45); }
+        .doom-detection-summary-row.is-vision { border-color: rgba(78,190,255,.40); }
+        .doom-control-log-entry { display: grid; grid-template-columns: 30px 1fr; gap: 5px; align-items: start; padding: 2px 0; }
+        .doom-control-log-entry.is-warn, .doom-control-log-entry.is-pathos { color: #ffd36f; }
+        .doom-control-log-entry.is-fail, .doom-control-log-entry.is-error { color: #ff8d8d; }
+        .doom-control-log-entry.is-priority { color: #fff7c0; }
+        .doom-control-log-entry.is-telos, .doom-control-log-entry.is-objective { color: #8ee4ff; }
+        .doom-control-log-entry.is-action { color: #d9f0ff; }
+        .doom-control-log-entry.is-action.is-warn { color: #ffd36f; }
+        .doom-control-log-label { color: #95ffd0; font-weight: 700; }
+        .doom-controller-debug-log-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .doom-debug-log-title { color: #fff7c0; font: 700 11px/1.2 system-ui, sans-serif; }
+        .doom-debug-log-limit { color: #8ee4ff; font: 10px/1.2 ui-monospace, Consolas, monospace; }
+        .doom-debug-log-filters { display: flex; flex-wrap: wrap; gap: 5px; }
+        .doom-control-panel-debug-log {
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          max-height: clamp(240px, 34vh, 520px);
+        }
+        .doom-control-panel-debug-log .doom-controller-debug-log-head {
+          margin-bottom: 4px;
+        }
+        .doom-control-panel-debug-log ol {
+          flex: 1 1 auto;
+          min-height: 0;
+          gap: 1px;
+          overflow: auto;
+        }
+        .doom-control-panel-debug-log .doom-control-log-entry,
+        .doom-control-panel-debug-log .doom-control-log-empty {
+          grid-template-columns: 2.35em minmax(0, 1fr);
+          gap: 2px;
+          font-size: 0.5rem;
+          line-height: 1.02;
+        }
+        @media (min-width: 1280px) {
+          .console-body.is-doom-running #doom-aik-console-stack {
+            grid-template-rows: auto auto !important;
+            align-self: start !important;
+            height: auto !important;
+            max-height: var(--doom-desktop-screen-height, var(--doom-xlarge-screen-height, min(52vh, 620px))) !important;
+          }
+          .console-body.is-doom-running #doom-aik-console-stack #output {
+            min-height: 112px !important;
+            max-height: clamp(132px, 20vh, 240px) !important;
+          }
+          .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+            align-self: start !important;
+          }
+          .console-body.is-doom-running #doom-debug-bar {
+            grid-template-columns: auto minmax(0, 1fr);
+            grid-template-rows: auto auto;
+            grid-template-areas:
+              "title actions"
+              "sensors sensors";
+            gap: 7px 9px;
+            align-items: center;
+            padding-top: 7px;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-debug-help {
+            display: none !important;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-sensor-pipeline-title {
+            grid-area: title;
+            align-self: center;
+            white-space: nowrap;
+            margin: 0;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-debug-actions {
+            grid-area: actions;
+            align-self: center;
+            justify-content: flex-start;
+            gap: 6px;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-debug-actions > button {
+            flex: 0 1 auto;
+            min-width: 0;
+            min-height: 28px;
+            padding: 5px 9px;
+            white-space: nowrap;
+          }
+        }
+        @media (min-width: 1280px) and (max-width: 1499.98px) {
+          .console-body.is-doom-running {
+            grid-template-columns: minmax(0, 1fr) !important;
+            grid-template-areas:
+              "screen"
+              "console"
+              "debug"
+              "legal"
+              "actions"
+              "status" !important;
+          }
+          .console-body.is-doom-running #doom-aik-console-stack {
+            grid-area: console !important;
+            width: 100%;
+            height: auto !important;
+            max-height: none !important;
+          }
+          .console-body.is-doom-running #doom-aik-console-stack #output {
+            min-height: 92px !important;
+            max-height: clamp(112px, 16vh, 176px) !important;
+            font-size: 0.68rem;
+            line-height: 1.22;
+          }
+          .console-body.is-doom-running #doom-aik-console-stack #wasm-prompt {
+            min-height: 46px;
+          }
+        }
+        @media (max-width: 1279.98px) {
+          .console-body.is-doom-running #doom-debug-bar {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            grid-template-areas:
+              "title"
+              "actions"
+              "sensors" !important;
+            gap: 9px;
+            align-items: stretch;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-sensor-pipeline-title {
+            grid-area: title !important;
+            justify-self: start;
+            margin: 0;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-debug-actions {
+            grid-area: actions !important;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+            gap: 7px;
+            width: 100%;
+            margin: 0;
+            align-self: stretch;
+            justify-content: stretch;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-debug-actions > button {
+            width: 100%;
+            min-width: 0;
+            min-height: 32px;
+            padding: 5px 8px;
+            white-space: nowrap;
+          }
+          .console-body.is-doom-running #doom-debug-bar .doom-sensor-toggles {
+            grid-area: sensors !important;
+            margin-top: 0;
+          }
+        }
+        @media (max-width: 980px) {
+          .shell { grid-template-columns: 1fr !important; }
+          .doom-side-pipeline-grid { grid-template-columns: 1fr; }
+          #doom-debug-bar .doom-sensor-toggles { grid-template-columns: 1fr; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function moveDoomToolbarBelowGame() {
+      if (!doomScreenPanel) {
+        return;
+      }
+
+      const toolbar = doomScreenPanel.querySelector(".doom-screen-toolbar");
+      const wrap = doomScreenPanel.querySelector(".doom-screen-wrap");
+      if (toolbar && wrap && toolbar.previousElementSibling !== wrap) {
+        wrap.after(toolbar);
+      }
+    }
+
+    function ensureDoomDebugOverlayHost() {
+      if (!doomDebugOverlay || !doomScreenPanel) {
+        return;
+      }
+
+      const wrap = doomScreenPanel.querySelector(".doom-screen-wrap");
+      if (!wrap) {
+        return;
+      }
+
+      const oldCard = doomDebugOverlay.closest?.("details.doom-side-card");
+      doomDebugOverlay.classList.remove("doom-card-content");
+      if (doomDebugOverlay.parentElement !== wrap) {
+        wrap.appendChild(doomDebugOverlay);
+      }
+
+      if (oldCard && oldCard.querySelectorAll(".doom-card-content").length === 0) {
+        oldCard.remove();
+      }
+    }
+
+    function ensureDoomDetectionSummaryPanel() {
+      if (doomDetectionSummaryPanel) {
+        return doomDetectionSummaryPanel;
+      }
+
+      doomDetectionSummaryPanel = document.getElementById("doom-detection-summary-panel") || document.createElement("section");
+      doomDetectionSummaryPanel.id = "doom-detection-summary-panel";
+      doomDetectionSummaryPanel.className = "doom-detection-summary-panel doom-card-content";
+      doomDetectionSummaryPanel.textContent = "Detection overlay is rendered on the game screen.";
+      return doomDetectionSummaryPanel;
+    }
+
+    function ensureDoomLegalLinks() {
+      let node = document.getElementById("doom-legal-links");
+      const existingPromptLegal = document.querySelector(".prompt-legal");
+      if (!node && existingPromptLegal) {
+        node = existingPromptLegal;
+        node.id = "doom-legal-links";
+        node.classList.add("doom-legal-links");
+        return node;
+      }
+
+      if (!node) {
+        node = document.createElement("section");
+        node.id = "doom-legal-links";
+        node.className = "panel doom-legal-links";
+        node.innerHTML = `<strong>Terms / 利用規約</strong> <a href="/demo/doom/terms-and-licenses.html" target="_blank" rel="noopener noreferrer">AIKernel.Doom Terms and License Notices</a><span>Review the license notices before approval. / 起動前に利用規約とライセンス表示を確認してください。</span>`;
+      } else {
+        node.classList.add("doom-legal-links");
+      }
+
+      return node;
+    }
+
+    function installDoomSideCards() {
+      const side = document.querySelector(".side");
+      if (!side) {
+        return;
+      }
+
+      side.classList.add("is-doom-card-stack");
+      ensureDoomDebugOverlayHost();
+      const controlCard = wrapDoomSideCard(doomController, "Control", "manual input and runtime switches", true);
+      doomPipelineSidePanel = doomPipelineSidePanel || document.getElementById("doom-pipeline-side-panel") || document.createElement("section");
+      doomPipelineSidePanel.id = "doom-pipeline-side-panel";
+      doomPipelineSidePanel.className = "doom-pipeline-side-panel doom-card-content";
+      doomPipelineSideGrid = doomPipelineSideGrid || doomPipelineSidePanel.querySelector(".doom-side-pipeline-grid") || document.createElement("div");
+      doomPipelineSideGrid.className = "doom-side-pipeline-grid";
+      doomPipelineSidePanel.replaceChildren(doomPipelineSideGrid);
+      const decisionCard = wrapDoomSideCard(doomPipelineSidePanel, "Decision Detail", "Aisthesis / Noesis / Krisis / Kinesis", true, "decision");
+      const stateCard = wrapDoomSideCard(doomRuntimePanel, "Objective / Status", "current route and state summaries", true);
+      const overlayCard = wrapDoomSideCard(ensureDoomDetectionSummaryPanel(), "Detection Summary", "overlay status and vision scores", true);
+      const logCard = wrapDoomSideCard(doomControllerDebugLog, "Doom Debug Log", "sequential command/action trace", true);
+
+      for (const card of [controlCard, decisionCard, stateCard, overlayCard, logCard]) {
+        if (card) {
+          side.appendChild(card);
+        }
+      }
+      ensureDoomDebugOverlayHost();
+    }
+
+    function wrapDoomSideCard(node, title, subtitle = "", open = true, key = "") {
+      if (!node) {
+        return null;
+      }
+
+      const existing = node.closest?.("details.doom-side-card");
+      if (existing) {
+        return existing;
+      }
+
+      const card = document.createElement("details");
+      card.className = `panel doom-side-card ${key ? `is-${key}` : ""}`.trim();
+      if (open) {
+        card.open = true;
+      }
+
+      const summary = document.createElement("summary");
+      const label = document.createElement("span");
+      label.textContent = title;
+      summary.appendChild(label);
+      if (subtitle) {
+        const sub = document.createElement("span");
+        sub.className = "doom-side-card-subtitle";
+        sub.textContent = subtitle;
+        summary.appendChild(sub);
+      }
+
+      const body = document.createElement("div");
+      body.className = "doom-side-card-body";
+      node.classList.remove("panel");
+      node.classList.add("doom-card-content");
+      node.parentNode?.insertBefore(card, node);
+      body.appendChild(node);
+      card.appendChild(summary);
+      card.appendChild(body);
+      doomSideCards.set(node.id || title, card);
+      return card;
+    }
+
+    function syncDoomLayoutCardVisibility() {
+      for (const [, card] of doomSideCards) {
+        const content = card.querySelector(".doom-card-content");
+        card.hidden = Boolean(content?.hidden);
+      }
+    }
+
+    function ensureDoomControlPanel() {
+      if (!doomController || doomController.dataset.controlPanelRestored === "true") {
+        return;
+      }
+
+      doomController.dataset.controlPanelRestored = "true";
+      let stateNode = doomState;
+      if (stateNode?.parentNode !== doomController) {
+        stateNode = document.getElementById("doom-state") || document.createElement("div");
+        stateNode.id = "doom-state";
+      }
+
+      const grid = document.createElement("div");
+      grid.className = "doom-control-panel-grid";
+      const stateWrap = document.createElement("div");
+      stateWrap.className = "doom-control-state-wrap";
+      stateWrap.appendChild(stateNode);
+
+      const commandRow = document.createElement("div");
+      commandRow.className = "doom-control-command-row";
+      const commands = [
+        ["Status", "doom.status"],
+        ["Phase", "doom.phase.check"],
+        ["Autoplay", "doom.autoplay toggle"],
+        ["Manual", "doom.autoplay manual-move toggle"],
+        ["Sense", "doom.autoplay sense-only toggle"],
+        ["Model", "model.status"],
+        ["Exports", "wasm.exports"],
+        ["Copy", "copy.logs"],
+        ["Clear", "clear"]
+      ];
+      for (const [label, command] of commands) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.command = command;
+        button.textContent = label;
+        commandRow.appendChild(button);
+      }
+
+      const keypad = document.createElement("div");
+      keypad.className = "doom-control-keypad";
+      const keys = [
+        ["Forward", "forward"],
+        ["Back", "back"],
+        ["Left", "left"],
+        ["Right", "right"],
+        ["Use", "use"],
+        ["Fire", "fire"],
+        ["Run", "run"],
+        ["Strafe", "strafe"]
+      ];
+      for (const [label, key] of keys) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.doomKey = key;
+        button.textContent = label;
+        keypad.appendChild(button);
+      }
+
+      grid.appendChild(stateWrap);
+      grid.appendChild(commandRow);
+      grid.appendChild(keypad);
+      if (doomControllerDebugLog) {
+        doomControllerDebugLog.classList.add("doom-control-panel-debug-log");
+        grid.appendChild(doomControllerDebugLog);
+      }
+      doomController.replaceChildren(grid);
+      ensureDoomDebugLogHeader();
+      renderControllerDebugLog();
+    }
+
+    function ensureDoomDebugLogHeader() {
+      if (!doomControllerDebugLog || doomControllerDebugLog.dataset.headerRestored === "true") {
+        return;
+      }
+
+      doomControllerDebugLog.dataset.headerRestored = "true";
+      const existingHeader = doomControllerDebugLog.querySelector(".doom-controller-debug-log-head");
+      if (existingHeader) {
+        let title = existingHeader.querySelector(".doom-debug-log-title")
+          || existingHeader.querySelector("span")
+          || existingHeader.firstElementChild;
+        if (!title) {
+          title = document.createElement("div");
+          existingHeader.insertBefore(title, existingHeader.firstChild);
+        }
+        title.classList.add("doom-debug-log-title");
+        title.textContent = "Doom Debug Log";
+
+        doomDebugLogLimitLabel = existingHeader.querySelector("[data-debug-log-limit-label]");
+        if (!doomDebugLogLimitLabel) {
+          doomDebugLogLimitLabel = document.createElement("div");
+          doomDebugLogLimitLabel.className = "doom-debug-log-limit";
+          doomDebugLogLimitLabel.dataset.debugLogLimitLabel = "true";
+          doomDebugLogLimitLabel.textContent = `SEQ(${controllerDebugLogLimit})`;
+          const filterAnchor = existingHeader.querySelector(".doom-controller-debug-filters, .doom-debug-log-filters");
+          existingHeader.insertBefore(doomDebugLogLimitLabel, filterAnchor || null);
+        }
+
+        ensureDoomDebugLogFilterButton(
+          existingHeader.querySelector(".doom-controller-debug-filters, .doom-debug-log-filters"),
+          "action",
+          "Act"
+        );
+        doomControllerDebugFilters = Array.from(document.querySelectorAll("[data-debug-log-filter]"));
+        return;
+      }
+
+      const existingFilterRow = doomControllerDebugLog.querySelector(".debug-row");
+      const header = document.createElement("div");
+      header.className = "doom-controller-debug-log-head";
+      const title = document.createElement("div");
+      title.className = "doom-debug-log-title";
+      title.textContent = "Doom Debug Log";
+      doomDebugLogLimitLabel = document.createElement("div");
+      doomDebugLogLimitLabel.className = "doom-debug-log-limit";
+      doomDebugLogLimitLabel.dataset.debugLogLimitLabel = "true";
+      doomDebugLogLimitLabel.textContent = `SEQ(${controllerDebugLogLimit})`;
+      const filters = document.createElement("div");
+      filters.className = "doom-debug-log-filters";
+      if (existingFilterRow) {
+        for (const button of Array.from(existingFilterRow.querySelectorAll("button[data-debug-log-filter]"))) {
+          filters.appendChild(button);
+        }
+        existingFilterRow.remove();
+      }
+      ensureDoomDebugLogFilterButton(filters, "action", "Act");
+
+      header.appendChild(title);
+      header.appendChild(doomDebugLogLimitLabel);
+      header.appendChild(filters);
+      doomControllerDebugLog.insertBefore(header, doomControllerDebugLog.firstChild);
+      doomControllerDebugFilters = Array.from(document.querySelectorAll("[data-debug-log-filter]"));
+    }
+
+    function ensureDoomDebugLogFilterButton(container, filter, label) {
+      if (!container) {
+        return null;
+      }
+
+      const normalized = normalizeControllerDebugCategory(filter);
+      const existing = Array.from(container.querySelectorAll("button[data-debug-log-filter]"))
+        .find(button => normalizeControllerDebugCategory(button.dataset.debugLogFilter || "") === normalized);
+      if (existing) {
+        return existing;
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.debugLogFilter = normalized;
+      button.setAttribute("aria-pressed", "false");
+      button.textContent = label;
+      container.appendChild(button);
+      return button;
+    }
+
+    function resolveDoomEnemyCue(autoplay = {}, noesis = {}) {
+      const resolver = self.AIKernelDoomPipelinePanel?.resolveEnemyCue;
+      if (typeof resolver === "function") {
+        const cue = resolver(autoplay);
+        if (cue) {
+          return cue;
+        }
+      }
+
+      const overlay = autoplay.debugOverlay || autoplay.DebugOverlay || autoplay.autoplayState?.debugOverlay || {};
+      const circle = overlay.enemyCircle || overlay.EnemyCircle || null;
+      const actualFiring = Boolean(autoplay.action?.fire || autoplay.currentAction?.fire);
+      if (circle && typeof circle === "object") {
+        const confidence = Math.max(0, Math.min(1, Number(circle.confidence ?? circle.Confidence ?? 0) || 0));
+        const active = Boolean(circle.active ?? circle.Active) || confidence >= 0.18;
+        const type = String(circle.type || circle.Type || "visual").toLowerCase();
+        const yaw = Number(circle.yaw ?? circle.Yaw ?? 0);
+        const typeLabel = type === "av" ? "A/V" : labelize(type);
+        return {
+          active,
+          type,
+          typeLabel,
+          yaw: Number.isFinite(yaw) ? yaw : 0,
+          direction: circle.direction || circle.Direction || "front",
+          confidence,
+          visualConfidence: Math.max(0, Math.min(1, Number(circle.visualConfidence ?? circle.VisualConfidence ?? 0) || 0)),
+          audioConfidence: Math.max(0, Math.min(1, Number(circle.audioConfidence ?? circle.AudioConfidence ?? 0) || 0)),
+          text: active ? `${typeLabel}=${confidence.toFixed(2)} yaw=${Number.isFinite(yaw) ? Math.round(yaw) : 0}` : "calm",
+          short: active ? `${typeLabel} ${Number.isFinite(yaw) ? Math.round(yaw) : 0}deg ${confidence.toFixed(2)}` : "calm"
+        };
+      }
+
+      if ((autoplay.debugOverlay || autoplay.DebugOverlay || autoplay.autoplayState?.debugOverlay) && !actualFiring) {
+        return {
+          active: false,
+          type: "none",
+          typeLabel: "None",
+          yaw: 0,
+          direction: "none",
+          confidence: 0,
+          visualConfidence: 0,
+          audioConfidence: 0,
+          text: "calm",
+          short: "calm"
+        };
+      }
+
+      const events = noesis.phainesisEvents || noesis.PhainesisEvents || {};
+      const visual = Math.max(0, Math.min(1, Number(autoplay.enemyConfidence ?? autoplay.visualEnemyConfidence ?? 0) || 0));
+      const audio = Math.max(0, Math.min(1, Number(autoplay.audioEnemyConfidence ?? events.enemyPresence ?? events.EnemyPresence ?? 0) || 0));
+      const confidence = Math.max(visual, audio);
+      const yaw = Number(autoplay.enemyCombatYaw ?? autoplay.visualEnemyYaw ?? 0);
+      const type = audio >= 0.24 && visual >= 0.35 ? "av" : (audio >= visual ? "audio" : "visual");
+      const typeLabel = type === "av" ? "A/V" : labelize(type);
+      const active = confidence >= 0.18 || actualFiring;
+      return {
+        active,
+        type,
+        typeLabel,
+        yaw: Number.isFinite(yaw) ? yaw : 0,
+        direction: autoplay.audioEnemyDirection || autoplay.enemyTurn || "front",
+        confidence,
+        visualConfidence: visual,
+        audioConfidence: audio,
+        text: active ? `vis=${visual.toFixed(2)} aud=${audio.toFixed(2)} yaw=${Number.isFinite(yaw) ? Math.round(yaw) : 0}` : "calm",
+        short: active ? `${typeLabel} ${Number.isFinite(yaw) ? Math.round(yaw) : 0}deg ${confidence.toFixed(2)}` : "calm"
+      };
+    }
+
+    function updateDoomSidePipelinePanel(status = doomRuntime?.status?.() || {}) {
+      if (!doomPipelineSideGrid) {
+        return;
+      }
+
+      const autoplay = status?.autoplay || {};
+      const pipeline = autoplay.pipelineState || autoplay.PipelineState || null;
+      const aisthesis = pipeline?.aisthesis || pipeline?.Aisthesis || {};
+      const sensorReadings = aisthesis.sensorReadings || aisthesis.SensorReadings || {};
+      const route = aisthesis.routePlan || aisthesis.RoutePlan || {};
+      const noesis = pipeline?.noesis || pipeline?.Noesis || {};
+      const krisis = pipeline?.krisis || pipeline?.Krisis || {};
+      const kinesis = pipeline?.kinesis || pipeline?.Kinesis || {};
+      const topology = noesis.topology || noesis.Topology || {};
+      const kairos = krisis.kairos || krisis.Kairos || {};
+      const zoe = kinesis.zoe || kinesis.Zoe || {};
+      const action = autoplay.action || autoplay.currentAction || {};
+      const health = Number(zoe.health ?? zoe.Health ?? autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+      const lethalRisk = Number(zoe.lethalRisk ?? zoe.LethalRisk ?? autoplay.lethalRisk ?? 0);
+      const zoeVetoed = Boolean(zoe.vetoed || zoe.Vetoed || autoplay.zoeVetoed);
+      const zoeWarning = Boolean(zoe.warning || zoe.Warning || zoe.lowHealth || zoe.LowHealth) || lethalRisk >= 0.50 || health < Number(zoe.healthThreshold ?? zoe.HealthThreshold ?? 50);
+      const enemyCue = resolveDoomEnemyCue(autoplay, noesis);
+      const bridgeHazard = Number(autoplay.bridgeGreenHazard ?? autoplay.milestones?.bridgeGreenCenter ?? 0);
+      const axis = String(kairos.selectedAxis || kairos.SelectedAxis || autoplay.kairosPriorityAxis?.selectedAxis || "monitor").toUpperCase();
+      const cards = [
+        {
+          key: "aisthesis",
+          title: "Aisthesis",
+          body: [
+            `route=${labelize(route.currentRoute || route.CurrentRoute || autoplay.autoplayState?.currentRoute || "none")}`,
+            `mode=${labelize(route.routeMode || route.RouteMode || autoplay.autoplayState?.routeMode || "none")}`,
+            `conf=${Number(route.routeConfidence ?? route.RouteConfidence ?? autoplay.routeConfidence ?? 0).toFixed(2)}`,
+            `visual=${Number(sensorReadings.visual ?? sensorReadings.Visual ?? 0).toFixed(2)} movement=${Number(sensorReadings.movement ?? sensorReadings.Movement ?? 0).toFixed(2)}`,
+            `bridge=${Number(autoplay.bridgeConfidence ?? 0).toFixed(2)} poison=${bridgeHazard.toFixed(2)}`
+          ].join("\n")
+        },
+        {
+          key: "noesis",
+          title: "Noesis",
+          body: [
+            `events=${Array.isArray(noesis.eventLabels || noesis.EventLabels) ? (noesis.eventLabels || noesis.EventLabels).slice(0, 3).map(labelize).join(" > ") : "none"}`,
+            `wall=${Number(topology.wallDistanceNormalized ?? topology.WallDistanceNormalized ?? 0).toFixed(2)}`,
+            `barrel=${Number(topology.barrelZoneEvidence ?? topology.BarrelZoneEvidence ?? 0).toFixed(2)}`,
+            `align=${Number(topology.centerCorridorAlignment ?? topology.CenterCorridorAlignment ?? 0).toFixed(2)}`
+          ].join("\n")
+        },
+        {
+          key: "krisis",
+          title: "Krisis",
+          body: [
+            `axis=${axis}`,
+            `L=${Number(kairos.logos ?? kairos.Logos ?? 0).toFixed(2)} P=${Number(kairos.pathos ?? kairos.Pathos ?? 0).toFixed(2)} E=${Number(kairos.ethos ?? kairos.Ethos ?? 0).toFixed(2)}`,
+            `loop=${labelize(route.routeLoopKind || route.RouteLoopKind || autoplay.autoplayState?.routeLoopKind || "none")}`,
+            `abort=${route.routeAbortHint || route.RouteAbortHint || autoplay.routeAbortHint || "none"}`,
+            `combat=${enemyCue.text}`
+          ].join("\n")
+        },
+        {
+          key: "kinesis",
+          title: "Kinesis",
+          zoe: zoeVetoed,
+          warning: !zoeVetoed && zoeWarning,
+          body: [
+            `action=${action.move || "none"}/${action.turn || "none"} use=${Boolean(action.use)} fire=${Boolean(action.fire)}`,
+            `repeat=${autoplay.actionRepeatFrames || autoplay.repeatActionFrames || 0} turn=${autoplay.repeatTurnFrames || 0}`,
+            `useCd=${autoplay.useCooldown || kinesis.usePulseCooldownFrames || kinesis.UsePulseCooldownFrames || 0}`,
+            `hp=${Number.isFinite(health) ? Math.round(health) : 100} zoe=${zoeVetoed ? "VETO" : (zoeWarning ? "warn" : "clear")} risk=${lethalRisk.toFixed(2)}`,
+            `enemy=${enemyCue.short}`
+          ].join("\n")
+        }
+      ];
+
+      const fragment = document.createDocumentFragment();
+      for (const card of cards) {
+        const node = document.createElement("section");
+        node.className = `doom-side-pipeline-card is-${card.key}${card.zoe ? " is-zoe" : (card.warning ? " is-zoe-warning" : "")}`;
+        const title = document.createElement("h4");
+        title.textContent = card.title;
+        const body = document.createElement("pre");
+        body.textContent = card.body;
+        node.appendChild(title);
+        node.appendChild(body);
+        fragment.appendChild(node);
+      }
+
+      doomPipelineSideGrid.replaceChildren(fragment);
+    }
+
+    function updateDoomDetectionSummary(status = {}, gpuHudActive = false) {
+      const panel = ensureDoomDetectionSummaryPanel();
+      if (!panel) {
+        return;
+      }
+
+      const autoplay = status?.autoplay || {};
+      const milestones = autoplay.milestones || {};
+      const heatmap = Array.isArray(milestones.firstDoorVision9x9Heatmap)
+        ? milestones.firstDoorVision9x9Heatmap
+        : [];
+      const heatMax = heatmap.reduce((max, value) => Math.max(max, Number(value) || 0), 0);
+      const box = milestones.firstDoorVision9x9Box || {};
+      const route = autoplay.autoplayState || {};
+      const routeName = route.currentRoute || route.CurrentRoute || autoplay.currentRoute || "none";
+      const routeMode = route.routeMode || route.RouteMode || autoplay.routeMode || "none";
+      const routeConfidence = Number(route.routeConfidence ?? route.RouteConfidence ?? autoplay.routeConfidence ?? 0);
+      const pipeline = autoplay.pipelineState || autoplay.PipelineState || {};
+      const noesis = pipeline.noesis || pipeline.Noesis || {};
+      const enemyCue = resolveDoomEnemyCue(autoplay, noesis);
+      const rows = [
+        {
+          key: "overlay",
+          label: "Overlay",
+          value: doomDebugOverlayEnabled ? `${gpuHudActive ? "GPU" : "DOM"} HUD / game screen` : "Off",
+          tone: doomDebugOverlayEnabled ? "vision" : ""
+        },
+        {
+          key: "vision",
+          label: "Vision",
+          value: `heat=${heatMax.toFixed(2)} cells=${heatmap.filter(value => Number(value) >= 0.08).length}`,
+          tone: "vision"
+        },
+        {
+          key: "door",
+          label: "Door",
+          value: `box=${Number(box.score || 0).toFixed(2)} use=${Number(milestones.firstDoorUse3x3Score || 0).toFixed(2)} red=${Number(box.redScore || 0).toFixed(2)}`,
+          tone: "door"
+        },
+        {
+          key: "combat",
+          label: "Combat",
+          value: enemyCue.active ? enemyCue.text : "calm",
+          tone: enemyCue.active ? "danger" : ""
+        },
+        {
+          key: "route",
+          label: "Route",
+          value: `${labelize(routeName)} / ${labelize(routeMode)} ${routeConfidence.toFixed(2)}`,
+          tone: ""
+        }
+      ];
+
+      const grid = document.createElement("div");
+      grid.className = "doom-detection-summary-grid";
+      for (const row of rows) {
+        const node = document.createElement("div");
+        node.className = `doom-detection-summary-row ${row.tone ? `is-${row.tone}` : ""}`.trim();
+        const label = document.createElement("strong");
+        label.textContent = row.label;
+        const value = document.createElement("span");
+        value.textContent = row.value;
+        node.append(label, value);
+        grid.appendChild(node);
+      }
+
+      panel.replaceChildren(grid);
+    }
+
+    function updateDoomObjectiveStatusPanel(status = {}) {
+      if (!doomRuntimePanel) {
+        return;
+      }
+
+      const options = {
+        resolvers: {
+          labelize,
+          resolveTelosObjective,
+          resolvePrimaryObjective,
+          resolvePriorityAction
+        }
+      };
+      const panel = self.AIKernelDoomObjectiveStatusPanel;
+      if (typeof panel?.renderObjectiveStatusPanel === "function") {
+        panel.renderObjectiveStatusPanel(doomRuntimePanel, status, options);
+        return;
+      }
+
+      doomRuntimePanel.textContent = "Objective status panel loading";
+      loadDoomObjectiveStatusPanelScript()?.then(loaded => {
+        if (typeof loaded?.renderObjectiveStatusPanel === "function") {
+          loaded.renderObjectiveStatusPanel(doomRuntimePanel, status, options);
+        }
+      });
+    }
+
     const FALLBACK_DISPLAY_LABELS = {
       "find-corridor-to-first-door": "Find Door Corridor",
       "locate-first-door-corridor": "Lock Door Corridor",
@@ -473,7 +2001,12 @@
       "enter-computer-control-room": "Enter Computer Room",
       "reach-central-hall": "Reach Central Hall",
       "engage-front-enemy": "Engage Front Enemy",
-      "secure-central-hall": "Secure Central Hall"
+      "secure-central-hall": "Secure Central Hall",
+      "cross-bridge": "Cross Bridge",
+      "reach-bridge": "Reach Cross Bridge",
+      "reach-final-room": "Reach Exit Route",
+      "press-exit-switch": "Press Exit Switch",
+      "level-clear": "Level Clear"
     };
 
     function labelize(value) {
@@ -508,11 +2041,17 @@
         return "Recover From Death";
       }
 
-      if (milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
-        return "Reach Exit";
+      if (objective === "press-exit-switch" || milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
+        return "Press Exit Switch";
       }
 
-      if (objective === "engage-front-enemy" || objective === "secure-central-hall") {
+      if (objective === "engage-front-enemy"
+        || objective === "secure-central-hall"
+        || objective === "cross-bridge"
+        || objective === "reach-bridge"
+        || objective === "reach-central-hall"
+        || objective === "reach-final-room"
+        || objective === "level-clear") {
         return labelize(objective);
       }
 
@@ -761,14 +2300,40 @@
     }
 
     function queueRuntimeStatusUpdate(status, reason = "status") {
+      latestRuntimeStatus = status || latestRuntimeStatus;
+      refreshDoomDebugRuntimeBridge(reason);
       loadDoomSensorPanelScript();
+      loadDoomGpuPathStatusScript();
       loadDoomRuntimeFormatScript();
       loadDoomPipelinePanelScript();
       loadDoomGoalPanelScript();
       loadDoomDebugOverlayScript();
-      runtimeStatusFlow.queue(status, reason, {
+      runtimeStatusFlow.queue(attachGpuHudStatus(status), reason, {
         light: syncRuntimeStatusLight,
         update: updateRuntimeStatus
+      });
+    }
+
+    function attachGpuHudStatus(status) {
+      if (!status || status.gpuHud || status.GpuHud) {
+        return status;
+      }
+
+      const latest = doomRuntime?.status?.();
+      const gpuHud = latest?.gpuHud || latest?.GpuHud || null;
+      if (!gpuHud) {
+        return status;
+      }
+
+      const autoplay = status.autoplay || {};
+      const latestAutoplay = latest?.autoplay || {};
+      return Object.assign({}, status, {
+        gpuHud,
+        debugOverlay: status.debugOverlay || latest.debugOverlay || null,
+        autoplay: Object.assign({}, autoplay, {
+          gpuHud: autoplay.gpuHud || latestAutoplay.gpuHud || gpuHud,
+          debugOverlay: autoplay.debugOverlay || latestAutoplay.debugOverlay || latest.debugOverlay || status.debugOverlay || null
+        })
       });
     }
 
@@ -809,6 +2374,10 @@
 
     function controllerDebugEntriesFromDecisionTrace(trace, optionText, reason = "status") {
       return requireControllerDebugLogAdapter("entriesFromDecisionTrace")(trace, optionText, reason);
+    }
+
+    function controllerDebugActionEntryFromStatus(status, reason = "status") {
+      return requireControllerDebugLogAdapter("actionEntryFromStatus")(status, reason);
     }
 
     function controllerDebugEntryMatches(entry, filter) {
@@ -868,9 +2437,14 @@
 
       const limit = resolveControllerDebugLogLimit();
       doomControllerDebugLog.dataset.limit = String(limit);
+      doomDebugLogLimitLabel = doomDebugLogLimitLabel
+        || doomControllerDebugLog.querySelector("[data-debug-log-limit-label]");
+      if (doomDebugLogLimitLabel) {
+        doomDebugLogLimitLabel.textContent = `SEQ(${limit})`;
+      }
       const entries = controllerDebugLogEntries
         .filter(entry => controllerDebugEntryMatches(entry, controllerDebugLogFilter))
-        .slice(0, limit);
+        .slice(-limit);
       const fragment = document.createDocumentFragment();
       if (!entries.length) {
         const empty = document.createElement("li");
@@ -883,7 +2457,9 @@
           item.className = `doom-control-log-entry is-${entry.category} is-${entry.level}`;
           const label = document.createElement("span");
           label.className = "doom-control-log-label";
-          label.textContent = controllerDebugCategoryGlyph(entry);
+          label.textContent = Number.isFinite(Number(entry.sequence))
+            ? `#${String(entry.sequence).slice(-2).padStart(2, "0")}`
+            : controllerDebugCategoryGlyph(entry);
           label.title = entry.label;
           const message = document.createElement("span");
           message.className = "doom-control-log-message";
@@ -896,6 +2472,7 @@
       }
 
       doomControllerDebugLogList.replaceChildren(fragment);
+      doomControllerDebugLogList.scrollTop = doomControllerDebugLogList.scrollHeight;
       window.AIKernelDoomLastControllerDebugLog = getControllerDebugLogEntries(controllerDebugLogLimit);
     }
 
@@ -903,22 +2480,25 @@
       const count = Math.max(1, Math.min(100, Number(limit) || resolveControllerDebugLogLimit()));
       return controllerDebugLogEntries
         .filter(entry => controllerDebugEntryMatches(entry, filter || "all"))
-        .slice(0, count)
+        .slice(-count)
         .map(entry => Object.assign({}, entry));
     }
 
     function pushControllerDebugLog(entry, options = {}) {
       const normalized = normalizeControllerDebugEntry(entry, options.category || "control");
+      normalized.sequence = Number.isFinite(Number(normalized.sequence))
+        ? Number(normalized.sequence)
+        : ++controllerDebugLogSequence;
       const signature = `${normalized.category}|${normalized.label}|${normalized.message}|${normalized.value}`;
       if (options.dedupe !== false && controllerDebugLogSignatureByCategory.get(normalized.category) === signature) {
         return null;
       }
 
       controllerDebugLogSignatureByCategory.set(normalized.category, signature);
-      controllerDebugLogEntries.unshift(normalized);
-      const maxEntries = Math.max(12, Math.min(200, Number(options.maxEntries) || 72));
+      controllerDebugLogEntries.push(normalized);
+      const maxEntries = Math.max(12, Math.min(320, Number(options.maxEntries) || 160));
       if (controllerDebugLogEntries.length > maxEntries) {
-        controllerDebugLogEntries.length = maxEntries;
+        controllerDebugLogEntries.splice(0, controllerDebugLogEntries.length - maxEntries);
       }
       if (Number.isFinite(Number(options.limit))) {
         controllerDebugLogLimit = Math.max(1, Math.min(CONTROLLER_DEBUG_LOG_MAX_VISIBLE, Number(options.limit)));
@@ -940,9 +2520,12 @@
         controllerDebugLogAutoLimit = true;
       }
       const values = Array.isArray(entries) ? entries : [entries];
-      for (let index = values.length - 1; index >= 0; index -= 1) {
+      for (let index = 0; index < values.length; index += 1) {
         const normalized = normalizeControllerDebugEntry(values[index], options.category || "control");
-        controllerDebugLogEntries.unshift(normalized);
+        normalized.sequence = Number.isFinite(Number(normalized.sequence))
+          ? Number(normalized.sequence)
+          : ++controllerDebugLogSequence;
+        controllerDebugLogEntries.push(normalized);
         controllerDebugLogSignatureByCategory.set(
           normalized.category,
           `${normalized.category}|${normalized.label}|${normalized.message}|${normalized.value}`
@@ -961,6 +2544,7 @@
     function clearControllerDebugLog() {
       controllerDebugLogEntries.length = 0;
       controllerDebugLogSignatureByCategory.clear();
+      controllerDebugLogSequence = 0;
       renderControllerDebugLog();
     }
 
@@ -997,49 +2581,16 @@
     }
 
     function syncControllerDebugLog(status = {}, reason = "status") {
-      const autoplay = status?.autoplay || {};
-      const semantic = autoplay.semanticMemory || {};
-      const control = status?.hudFlowControl || {};
-      const telos = resolveTelosObjective(autoplay);
-      const objective = autoplay.objective || semantic.objective || "none";
-      const pipeline = autoplay.controlPipeline || semantic.phase || "Idle";
-      const priority = Number(autoplay.strategyPriority ?? autoplay.priority ?? 0);
-      const optionText = `auto=${autoplay.enabled ? "on" : "off"} manual=${Boolean(autoplay.manualMove)} sense=${Boolean(autoplay.senseOnly)} hud=${control.mode || "adaptive"}`;
-      const traceEntries = controllerDebugEntriesFromDecisionTrace(autoplay.decisionTrace, optionText, reason);
-      if (traceEntries.length) {
-        setControllerDebugLogEntries(traceEntries, { autoLimit: true });
-        return;
-      }
-
-      pushControllerDebugLog({
-        category: "priority",
-        label: "PRIORITY",
-        message: `${Number.isFinite(priority) ? priority : 0} ${autoplay.strategyName || pipeline}`,
-        value: priority,
-        level: priority >= 2 ? "warn" : "info"
-      });
-      pushControllerDebugLog({
-        category: "telos",
-        label: "TELOS",
-        message: telos || "Monitor runtime",
-        value: telos
-      });
-      pushControllerDebugLog({
-        category: "objective",
-        label: "OBJECTIVE",
-        message: `${objective} via ${pipeline}`,
-        value: objective
-      });
-      pushControllerDebugLog({
-        category: "control",
-        label: "CONTROL",
-        message: `${reason}: ${optionText}`,
-        value: optionText
+      pushControllerDebugLog(controllerDebugActionEntryFromStatus(status, reason), {
+        dedupe: false,
+        autoLimit: true,
+        maxEntries: 180
       });
     }
 
     function syncRuntimeStatusLight(status, reason = "status") {
       latestRuntimeStatus = status || latestRuntimeStatus;
+      refreshDoomDebugRuntimeBridge(reason);
       renderDownloadProgress(status?.downloadProgress, status, reason);
       if (!setDoomRuntimeUiVisibility(status)) {
         return;
@@ -1051,8 +2602,20 @@
       syncManualMoveToggle(status);
       syncSenseOnlyToggle(status);
       syncOverlayToggle();
+      syncToposDetailToggle();
       syncAudioPlaybackToggle(status);
+      syncDetectionToggleButtons(status);
       syncControllerDebugLog(status, reason);
+      updateDoomSidePipelinePanel(status);
+      updateDoomObjectiveStatusPanel(status);
+      ensureDoomSpatialHud();
+      ensureDoomGoalHud();
+      ensureDoomToposHud();
+      updateDoomSpatialHud(status);
+      updateDoomGoalHud(status);
+      updateDoomToposHud(status);
+      renderDoomDebugOverlay(status);
+      syncDoomLayoutCardVisibility();
       const control = status?.hudFlowControl || {};
       const fps = Number.isFinite(status?.fps) ? Number(status.fps).toFixed(1) : "0.0";
       doomFps.textContent = `320x200 paletted framebuffer; fps=${fps}; hud=${control.mode || "adaptive"}; drop=${runtimeStatusFlow.snapshot().droppedFrames}; auto=${status?.autoplay?.enabled ? "on" : "off"}`;
@@ -1060,6 +2623,7 @@
 
     function updateRuntimeStatus(status, reason = "status") {
       latestRuntimeStatus = status || latestRuntimeStatus;
+      refreshDoomDebugRuntimeBridge(reason);
       renderDownloadProgress(status?.downloadProgress, status, reason);
       if (!setDoomRuntimeUiVisibility(status)) {
         lastRuntimeStatus = "";
@@ -1092,6 +2656,9 @@
         syncAudioPlaybackToggle(status);
         renderDoomDebugOverlay(status);
         syncControllerDebugLog(status, reason);
+        updateDoomSidePipelinePanel(status);
+        updateDoomObjectiveStatusPanel(status);
+        syncDoomLayoutCardVisibility();
 
         lastObjectiveStatus = formatted.objectiveText || "none";
         if (formatted.text !== lastRuntimeStatus && ["stopped", "failed"].includes(reason)) {
@@ -1149,8 +2716,8 @@
       const routeModeText = routeMode ? `/mode=${routeMode}` : "";
       const routeLoopKind = debugRoute.routeLoopKind || autoplay.routeLoopKind || autoplay.autoplayState?.routeLoopKind || "none";
       const routeLoopExceeded = Boolean(debugRoute.routeLoopBudgetExceeded || autoplay.routeLoopBudgetExceeded || autoplay.autoplayState?.routeLoopBudgetExceeded);
-      const routeLoopUsed = Math.max(Number(debugRoute.routePivotUsed || 0), Number(debugRoute.routeSlideUsed || 0), Number(debugRoute.routeBackoffUsed || 0));
-      const routeLoopBudget = Math.max(Number(debugRoute.routePivotBudget || 0), Number(debugRoute.routeSlideBudget || 0), Number(debugRoute.routeBackoffBudget || 0));
+      const routeLoopUsed = Math.max(Number(debugRoute.routePivotUsed || 0), Number(debugRoute.routeSlideUsed || 0), Number(debugRoute.routeBackoffUsed || 0), Number(debugRoute.routeRecoverUsed || 0));
+      const routeLoopBudget = Math.max(Number(debugRoute.routePivotBudget || 0), Number(debugRoute.routeSlideBudget || 0), Number(debugRoute.routeBackoffBudget || 0), Number(debugRoute.routeRecoverBudget || 0));
       const routeLoopText = routeLoopKind !== "none" || routeLoopExceeded ? `/loop=${routeLoopKind}${routeLoopExceeded ? "!" : ""}:${Math.round(routeLoopUsed)}/${Math.round(routeLoopBudget)}` : "";
       const routeDebugText = `ctx=${debugRoute.context || "?"}${routeModeText}/d${Number(debugRoute.depthSig || 0).toFixed(2)}/foot${Number(debugRoute.footObstacleScore || 0).toFixed(2)}${debugRoute.routeFootObstacle ? "!" : ""}/mo${Number(debugRoute.motionObstacleScore || 0).toFixed(2)}${routeTextureText}${routeEastText}/gap${Number(debugRoute.spawnCorridorGapScore || 0).toFixed(2)}/sec${Number(debugRoute.spawnSecretDoorScore || 0).toFixed(2)}/lm${Number(debugRoute.spawnLandmarkRouteEvidence || 0).toFixed(2)}${routeLoopText}`;
       const milestones = autoplay.milestones || {};
@@ -1161,7 +2728,8 @@
       const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
       const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
       const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-      const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+      const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+      const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
       const retryDispatch = autoplay.retryDispatch || {};
       const retryText = `${retryDispatch.active ? "active" : "idle"}/${retryDispatch.cooldownFrames || 0}/${retryDispatch.reason || "none"}`;
       const movement = autoplay.movementSensor || {};
@@ -1201,6 +2769,9 @@
       syncAudioPlaybackToggle(status);
       renderDoomDebugOverlay(status);
       syncControllerDebugLog(status, reason);
+      updateDoomSidePipelinePanel(status);
+      updateDoomObjectiveStatusPanel(status);
+      syncDoomLayoutCardVisibility();
 
       lastObjectiveStatus = objectiveText;
 
@@ -1217,29 +2788,30 @@
         return;
       }
 
+      ensureDoomDebugOverlayHost();
       doomDebugOverlay.classList.toggle("is-visible", doomDebugOverlayEnabled);
       if (!doomDebugOverlayEnabled) {
-        setGpuHudOverlayEnabled(false);
+        const gpuHudActive = syncGpuHudOverlay(status);
         doomDebugOverlay.replaceChildren();
+        updateDoomDetectionSummary(status, gpuHudActive);
         return;
       }
 
       const gpuHudActive = syncGpuHudOverlay(status);
       doomDebugOverlay.classList.toggle("is-gpu-backed", gpuHudActive);
-      if (gpuHudActive) {
-        doomDebugOverlay.replaceChildren();
-        return;
-      }
+      doomDebugOverlay.dataset.cssOverlayMode = gpuHudActive ? "reduced" : "full";
+      updateDoomDetectionSummary(status, gpuHudActive);
 
       const overlayRenderer = self.AIKernelDoomDebugOverlay;
       if (typeof overlayRenderer?.renderDebugOverlay === "function") {
-        overlayRenderer.renderDebugOverlay(doomDebugOverlay, status, { detectionVisibility: doomDetectionVisibility });
+        overlayRenderer.renderDebugOverlay(doomDebugOverlay, status, { detectionVisibility: doomDetectionVisibility, gpuBacked: gpuHudActive, gpuHud: status?.gpuHud || null });
         return;
       }
 
       loadDoomDebugOverlayScript()?.then(panel => {
         if (typeof panel?.renderDebugOverlay === "function") {
-          panel.renderDebugOverlay(doomDebugOverlay, doomRuntime?.status?.() || status, { detectionVisibility: doomDetectionVisibility });
+          const latestStatus = doomRuntime?.status?.() || status;
+          panel.renderDebugOverlay(doomDebugOverlay, latestStatus, { detectionVisibility: doomDetectionVisibility, gpuBacked: gpuHudActive, gpuHud: latestStatus?.gpuHud || null });
         }
       });
     }
@@ -1260,17 +2832,21 @@
     }
 
     function syncGpuHudOverlay(status = doomRuntime?.status?.() || {}) {
+      const runtimeGpuHud = status?.gpuHud || {};
+      const runtimeCompositeActive = Boolean(runtimeGpuHud.hudCompositeActive || runtimeGpuHud.compositeActive);
       const provider = resolveWebGpuProvider();
       if (typeof provider?.setHudOverlayEnabled !== "function") {
-        return false;
+        return runtimeCompositeActive;
       }
 
       const providerStatus = typeof provider.status === "function" ? provider.status() : {};
       const renderer = `${status?.renderer || ""} ${providerStatus?.backend || ""}`;
-      const ready = Boolean(providerStatus?.hudOverlayReady && providerStatus?.usingCpuFallback === false && /webgpu/i.test(renderer));
-      provider.setHudOverlayEnabled(Boolean(doomDebugOverlayEnabled && ready));
+      const webGpuReady = Boolean(providerStatus?.rendererInitialized || providerStatus?.hudOverlayReady || providerStatus?.zeroCopy);
+      const ready = Boolean(webGpuReady && providerStatus?.usingCpuFallback === false && /webgpu/i.test(renderer));
+      const autoplayActive = Boolean(status?.autoplay?.enabled);
+      provider.setHudOverlayEnabled(Boolean(ready && (doomDebugOverlayEnabled || autoplayActive)));
       const nextStatus = typeof provider.status === "function" ? provider.status() : providerStatus;
-      return Boolean(nextStatus?.hudOverlayActive);
+      return runtimeCompositeActive || Boolean(nextStatus?.hudCompositeActive || nextStatus?.hudOverlayActive || (ready && (doomDebugOverlayEnabled || autoplayActive) && nextStatus?.hudOverlayEnabled));
     }
 
     function ensureDoomSpatialHud() {
@@ -1289,16 +2865,16 @@
 
       doomSpatialHud = document.createElement("div");
       doomSpatialHud.className = "doom-spatial-hud";
-      doomSpatialHud.style.cssText = "position:absolute;left:8px;top:8px;z-index:8;display:grid;grid-template-columns:24px minmax(78px,96px);grid-template-rows:auto auto;align-items:end;gap:4px 6px;max-width:138px;padding:5px 6px;border:1px solid rgba(80,255,160,.45);background:rgba(0,0,0,.62);color:#b9ffd4;font:10px ui-monospace,Consolas,monospace;pointer-events:none;";
+      doomSpatialHud.style.cssText = "position:absolute;left:8px;top:8px;z-index:90;display:grid;grid-template-columns:24px minmax(78px,96px);grid-template-rows:auto auto;align-items:end;gap:4px 6px;max-width:138px;padding:5px 6px;border:1px solid rgba(80,255,160,.45);background:rgba(0,0,0,.22);color:#b9ffd4;font:10px ui-monospace,Consolas,monospace;pointer-events:none;";
 
       const leftGauge = document.createElement("div");
-      leftGauge.style.cssText = "width:9px;height:38px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.55);";
+      leftGauge.style.cssText = "width:9px;height:38px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.18);";
       doomAudioLeftFill = document.createElement("div");
       doomAudioLeftFill.style.cssText = "width:100%;height:100%;background:#6bff9b;transform:scaleY(0);transform-origin:bottom;";
       leftGauge.appendChild(doomAudioLeftFill);
 
       const rightGauge = document.createElement("div");
-      rightGauge.style.cssText = "width:9px;height:38px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.55);";
+      rightGauge.style.cssText = "width:9px;height:38px;border:1px solid rgba(185,255,212,.55);display:flex;align-items:flex-end;background:rgba(20,40,30,.18);";
       doomAudioRightFill = document.createElement("div");
       doomAudioRightFill.style.cssText = "width:100%;height:100%;background:#7ab7ff;transform:scaleY(0);transform-origin:bottom;";
       rightGauge.appendChild(doomAudioRightFill);
@@ -1333,7 +2909,7 @@
 
       doomSpatialEventIcon = document.createElement("div");
       doomSpatialEventIcon.className = "doom-spatial-event";
-      doomSpatialEventIcon.style.cssText = "position:absolute;z-index:9;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,240,120,.95);background:rgba(255,80,40,.78);box-shadow:0 0 14px rgba(255,120,40,.8);transform:translate(-50%,-50%);pointer-events:none;";
+      doomSpatialEventIcon.style.cssText = "position:absolute;z-index:9;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,240,120,.95);background:rgba(255,80,40,.78);box-shadow:0 0 14px rgba(255,120,40,.8);transform:translate(-50%,-50%);pointer-events:none;";
       doomSpatialEventIcon.hidden = true;
       host.appendChild(doomSpatialEventIcon);
 
@@ -1497,7 +3073,7 @@
 
       doomSensorPanelScriptLoading = new Promise(resolve => {
         const script = document.createElement("script");
-        script.src = "/demo/doom/js/doom-sensor-panel.js?v=20260618-sensorpanel1";
+        script.src = `/demo/doom/js/doom-sensor-panel.js?v=${encodeURIComponent(doomDevCacheKey)}`;
         script.async = false;
         script.onload = () => {
           refreshSensorPanelDescriptors();
@@ -1514,14 +3090,14 @@
         return doomPipelinePanelScriptLoading;
       }
 
-      doomPipelinePanelScriptLoading = new Promise(resolve => {
+      doomPipelinePanelScriptLoading = loadDoomGpuContractsScript().then(() => new Promise(resolve => {
         const script = document.createElement("script");
-        script.src = "/demo/doom/js/doom-pipeline-panel.js?v=20260619-pipelinepanel6";
+        script.src = `/demo/doom/js/doom-pipeline-panel.js?v=${encodeURIComponent(doomDevCacheKey)}`;
         script.async = false;
         script.onload = () => resolve(self.AIKernelDoomPipelinePanel || null);
         script.onerror = () => resolve(null);
         document.head.appendChild(script);
-      });
+      }));
       return doomPipelinePanelScriptLoading;
     }
 
@@ -1532,7 +3108,7 @@
 
       doomGoalPanelScriptLoading = new Promise(resolve => {
         const script = document.createElement("script");
-        script.src = "/demo/doom/js/doom-goal-panel.js?v=20260619-goalpanel2";
+        script.src = `/demo/doom/js/doom-goal-panel.js?v=${encodeURIComponent(doomDevCacheKey)}`;
         script.async = false;
         script.onload = () => {
           if (self.AIKernelDoomGoalPanel?.version) {
@@ -1546,6 +3122,22 @@
       return doomGoalPanelScriptLoading;
     }
 
+    function loadDoomObjectiveStatusPanelScript() {
+      if (self.AIKernelDoomObjectiveStatusPanel || doomObjectiveStatusPanelScriptLoading) {
+        return doomObjectiveStatusPanelScriptLoading;
+      }
+
+      doomObjectiveStatusPanelScriptLoading = loadDoomGpuPathStatusScript().then(() => new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = `/demo/doom/js/doom-objective-status-panel.js?v=${encodeURIComponent(doomDevCacheKey)}`;
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomObjectiveStatusPanel || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      }));
+      return doomObjectiveStatusPanelScriptLoading;
+    }
+
     function loadDoomDebugOverlayScript() {
       if (self.AIKernelDoomDebugOverlay || doomDebugOverlayScriptLoading) {
         return doomDebugOverlayScriptLoading;
@@ -1553,7 +3145,7 @@
 
       doomDebugOverlayScriptLoading = new Promise(resolve => {
         const script = document.createElement("script");
-        script.src = "/demo/doom/js/doom-debug-overlay.js?v=20260619-debugoverlay3";
+        script.src = `/demo/doom/js/doom-debug-overlay.js?v=${encodeURIComponent(doomDevCacheKey)}`;
         script.async = false;
         script.onload = () => resolve(self.AIKernelDoomDebugOverlay || null);
         script.onerror = () => resolve(null);
@@ -1562,20 +3154,75 @@
       return doomDebugOverlayScriptLoading;
     }
 
+    function gpuContractValue(name, fallback) {
+      const value = self.AIKernelDoomGpuContracts?.[name];
+      return typeof value === "string" && value.length > 0 ? value : fallback;
+    }
+
+    function loadDoomGpuContractsScript() {
+      if (self.AIKernelDoomGpuContracts || doomGpuContractsScriptLoading) {
+        return doomGpuContractsScriptLoading || Promise.resolve(self.AIKernelDoomGpuContracts || null);
+      }
+
+      doomGpuContractsScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        const publicScriptBase = self.AIKernelDoomPublic?.scriptBase;
+        const scriptBase = typeof publicScriptBase === "string" && publicScriptBase.length > 0 ? publicScriptBase : "/js/";
+        script.src = `${scriptBase}autoplay/gpu-contracts.js?v=${encodeURIComponent(doomDevCacheKey)}`;
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomGpuContracts || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomGpuContractsScriptLoading;
+    }
+
+    function loadDoomDebugCaptureScript() {
+      if (self.AIKernelDoomDebugCaptureModule || doomDebugCaptureScriptLoading) {
+        return doomDebugCaptureScriptLoading;
+      }
+
+      doomDebugCaptureScriptLoading = loadDoomGpuContractsScript().then(() => new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = `/demo/doom/js/doom-debug-capture.js?v=${encodeURIComponent(doomDevCacheKey)}`;
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomDebugCaptureModule || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      }));
+      return doomDebugCaptureScriptLoading;
+    }
+
     function loadDoomRuntimeFormatScript() {
       if (self.AIKernelDoomRuntimeFormat || doomRuntimeFormatScriptLoading) {
         return doomRuntimeFormatScriptLoading;
       }
 
-      doomRuntimeFormatScriptLoading = new Promise(resolve => {
+      doomRuntimeFormatScriptLoading = loadDoomGpuPathStatusScript().then(() => new Promise(resolve => {
         const script = document.createElement("script");
         script.src = `/demo/doom/js/doom-runtime-format.js?v=${encodeURIComponent(doomDevCacheKey)}`;
         script.async = false;
         script.onload = () => resolve(self.AIKernelDoomRuntimeFormat || null);
         script.onerror = () => resolve(null);
         document.head.appendChild(script);
-      });
+      }));
       return doomRuntimeFormatScriptLoading;
+    }
+
+    function loadDoomGpuPathStatusScript() {
+      if (self.AIKernelDoomGpuPathStatus || doomGpuPathStatusScriptLoading) {
+        return doomGpuPathStatusScriptLoading || Promise.resolve(self.AIKernelDoomGpuPathStatus || null);
+      }
+
+      doomGpuPathStatusScriptLoading = new Promise(resolve => {
+        const script = document.createElement("script");
+        script.src = `/demo/doom/js/doom-gpu-path-status.js?v=${encodeURIComponent(doomDevCacheKey)}`;
+        script.async = false;
+        script.onload = () => resolve(self.AIKernelDoomGpuPathStatus || null);
+        script.onerror = () => resolve(null);
+        document.head.appendChild(script);
+      });
+      return doomGpuPathStatusScriptLoading;
     }
 
     function ensureDoomToposHud() {
@@ -1598,10 +3245,10 @@
         host.style.position = "relative";
       }
 
-      doomToposHud = document.createElement("pre");
+      doomToposHud = document.createElement("div");
       doomToposHud.className = "doom-topos-hud";
       doomToposHud.setAttribute("aria-label", "Topos and CTG observed carrier");
-      doomToposHud.style.cssText = "position:absolute;right:10px;top:10px;z-index:8;min-width:210px;max-width:280px;margin:0;padding:8px 10px;border:1px solid rgba(255,225,122,.48);background:rgba(10,12,8,.68);color:#ffeaa0;font:10px/1.34 ui-monospace,Consolas,monospace;text-shadow:0 1px 2px #000;white-space:pre-wrap;pointer-events:none;";
+      doomToposHud.style.cssText = "position:absolute;right:10px;top:10px;z-index:160;width:240px;max-width:32vw;margin:0;padding:7px 9px;border:1px solid rgba(255,225,122,.48);background:rgba(10,12,8,.07);color:#ffeaa0;font:10px/1.28 ui-monospace,Consolas,monospace;text-shadow:0 1px 2px #000;white-space:pre-wrap;pointer-events:none;overflow:hidden;";
       host.appendChild(doomToposHud);
     }
 
@@ -1709,6 +3356,29 @@
       }
     }
 
+    function ensureDoomSensorPipelineTitle(sensorRow) {
+      if (!doomDebugBar) {
+        return null;
+      }
+
+      let title = doomDebugBar.querySelector(".doom-sensor-pipeline-title");
+      if (!title) {
+        title = document.createElement("div");
+        title.className = "doom-sensor-pipeline-title";
+        title.textContent = "Sensor Pipeline";
+      }
+
+      if (sensorRow) {
+        if (title.nextElementSibling !== sensorRow) {
+          sensorRow.before(title);
+        }
+      } else if (!title.parentNode) {
+        doomDebugBar.appendChild(title);
+      }
+
+      return title;
+    }
+
     function ensureDoomSensorToggleRow() {
       if (!doomDebugBar) {
         return;
@@ -1736,6 +3406,7 @@
         sensorRow.className = "doom-sensor-toggles";
         doomDebugBar.appendChild(sensorRow);
       }
+      ensureDoomSensorPipelineTitle(sensorRow);
 
       if (sensorRow.dataset.sensorPanelVersion !== sensorPanelVersion) {
         sensorRow.dataset.sensorPanelVersion = sensorPanelVersion;
@@ -1745,6 +3416,12 @@
           node.className = `doom-sensor-node ${panel.className || ""}`.trim();
           node.dataset.sensorPanel = panel.key;
           node.setAttribute("aria-label", `${panel.title} ${panel.subtitle || ""}`.trim());
+          if (panel.gridColumn) {
+            node.style.gridColumn = panel.gridColumn;
+          }
+          if (panel.gridRow) {
+            node.style.gridRow = panel.gridRow;
+          }
 
           const header = document.createElement("header");
           header.className = "doom-sensor-node-header";
@@ -1846,7 +3523,7 @@
 
     function createAudioBandTrack(fill, label) {
       const track = document.createElement("div");
-      track.style.cssText = "position:relative;overflow:hidden;border:1px solid rgba(230,240,255,.28);background:rgba(16,24,32,.7);";
+      track.style.cssText = "position:relative;overflow:hidden;border:1px solid rgba(230,240,255,.28);background:rgba(16,24,32,.24);";
       const text = document.createElement("span");
       text.textContent = label;
       text.style.cssText = "position:absolute;left:3px;top:-1px;z-index:1;color:rgba(255,255,255,.72);font:700 7px/7px ui-monospace,Consolas,monospace;text-shadow:0 1px 2px #000;";
@@ -2274,31 +3951,98 @@
         : `${label} is cut off; catches ${signal} when enabled.`;
     }
 
+    function normalizeCompassDisplayHeading(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        return null;
+      }
+
+      return ((number % 360) + 360) % 360;
+    }
+
+    function shortestCompassDisplayDelta(from, to) {
+      if (!Number.isFinite(from) || !Number.isFinite(to)) {
+        return 0;
+      }
+
+      return ((((to - from) % 360) + 540) % 360) - 180;
+    }
+
+    function smoothCompassScalar(previous, target, alpha) {
+      const current = Number.isFinite(previous) ? previous : target;
+      return current + (target - current) * Math.max(0, Math.min(1, alpha));
+    }
+
+    function updateCompassDisplayState(compass) {
+      const now = Number(self.performance?.now?.() ?? Date.now());
+      const previous = doomCompassDisplayState || {};
+      const previousHeading = normalizeCompassDisplayHeading(previous.heading);
+      const rawHeading = normalizeCompassDisplayHeading(compass?.heading);
+      const rawConfidence = clampHud01(compass?.confidence);
+      const rawUsable = rawHeading !== null
+        && compass?.headingUsable !== false
+        && !compass?.headingUncertain;
+      const dt = previous.updatedAt > 0 ? Math.max(16, Math.min(180, now - previous.updatedAt)) : 33;
+      const riseAlpha = 1 - Math.pow(0.5, dt / 110);
+      const decayAlpha = 1 - Math.pow(0.5, dt / 620);
+      const targetHeading = rawHeading !== null ? rawHeading : previousHeading;
+      const nextHeading = targetHeading === null
+        ? 0
+        : (previousHeading === null
+          ? targetHeading
+          : normalizeCompassDisplayHeading(previousHeading + shortestCompassDisplayDelta(previousHeading, targetHeading) * (rawUsable ? riseAlpha : Math.max(decayAlpha * 0.72, 0.035))));
+      const holdUntil = rawUsable
+        ? now + 1100
+        : Number(previous.holdUntil || 0);
+      const held = !rawUsable && now < holdUntil;
+      const confidenceTarget = rawUsable
+        ? Math.max(rawConfidence, 0.34)
+        : (held ? Math.max(rawConfidence * 0.7, Number(previous.confidence || 0) * 0.62, 0.14) : 0);
+      const usableTarget = rawUsable ? 1 : (held ? Math.max(Number(previous.usable || 0) * 0.70, 0.22) : 0);
+      const confidence = smoothCompassScalar(Number(previous.confidence || 0), confidenceTarget, rawUsable ? riseAlpha : decayAlpha);
+      const usable = smoothCompassScalar(Number(previous.usable || 0), usableTarget, rawUsable ? riseAlpha : decayAlpha);
+
+      doomCompassDisplayState = {
+        heading: nextHeading,
+        confidence: clampHud01(confidence),
+        usable: clampHud01(usable),
+        holdUntil,
+        updatedAt: now,
+        reliability: rawUsable
+          ? String(compass?.headingReliability || "usable")
+          : (held ? "decay-hold" : String(compass?.headingReliability || "low-evidence"))
+      };
+      return Object.assign({ rawHeading, rawUsable, held }, doomCompassDisplayState);
+    }
+
     function syncCompassNeedle(button, status) {
       if (!button || button.dataset.sensorToggle !== "compass") {
         return;
       }
 
       const compass = status?.autoplay?.compassSensor || {};
-      const heading = Number(compass.heading);
-      const headingUsable = Number.isFinite(heading)
-        && compass.headingUsable !== false
-        && !compass.headingUncertain;
+      const display = updateCompassDisplayState(compass);
+      const heading = Number(display.heading);
+      const headingUsable = display.usable >= 0.24;
       const needle = document.createElement("span");
       needle.className = "sensor-compass-needle";
-      needle.classList.toggle("is-uncertain", !headingUsable);
+      needle.classList.toggle("is-uncertain", !display.rawUsable);
+      needle.classList.toggle("is-decaying", Boolean(display.held));
+      needle.style.setProperty("--compass-signal-opacity", (0.34 + display.confidence * 0.66).toFixed(3));
       const arrow = document.createElement("span");
       arrow.className = "sensor-compass-arrow";
       arrow.textContent = "→";
       const label = document.createElement("span");
       label.className = "sensor-compass-readout";
-      button.classList.toggle("is-compass-uncertain", !headingUsable);
-      if (headingUsable) {
+      button.classList.toggle("is-compass-uncertain", !display.rawUsable);
+      if (Number.isFinite(heading) && headingUsable) {
         arrow.style.setProperty("--compass-needle-angle", `${(heading - 90).toFixed(1)}deg`);
-        label.textContent = `estimate ${Math.round(heading)}deg / c ${Number(compass.confidence || 0).toFixed(2)}`;
+        label.textContent = display.held
+          ? `estimate ${Math.round(heading)}deg / c ${display.confidence.toFixed(2)} / hold`
+          : `estimate ${Math.round(heading)}deg / c ${display.confidence.toFixed(2)}`;
       } else if (Number.isFinite(heading)) {
         arrow.style.setProperty("--compass-needle-angle", `${(heading - 90).toFixed(1)}deg`);
-        label.textContent = `estimate ? / c ${Number(compass.confidence || 0).toFixed(2)} / ${String(compass.headingReliability || "low-evidence")}`;
+        label.textContent = `estimate ? / c ${display.confidence.toFixed(2)} / ${display.reliability}`;
       } else {
         arrow.style.setProperty("--compass-needle-angle", "-90deg");
         label.textContent = "estimate ? / hold";
@@ -2574,10 +4318,10 @@
 
       const responses = {
         "help": "commands: yes, doom.status, doom.phase.check, doom.gui.selftest, doom.start, doom.stop, doom.restart-play, doom.audio toggle, doom.audio on, doom.audio off, doom.audio test, doom.audio status, doom.sensor <visual|audio|motor|movement|compass|spatial|health> <toggle|on|off>, doom.autoplay toggle, doom.autoplay on, doom.autoplay off, doom.autoplay manual-move toggle, doom.autoplay sense-only toggle, doom.autoplay sense-only on, doom.autoplay sense-only off, doom.autoplay status, doom.use-test, doom.cheat <idfa|idkfa|iddqd|idspispopd|idclip>, iddqd, idkfa, idfa, wasm.exports, model.status, legal, copy.logs, clear",
-        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button below.",
+        "doom.status": "suspended: approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button.",
         "doom.stop": "ok: no active public runtime process is running.",
         "wasm.exports": "main, doom_init, doom_tick, doom_render, doom_input, doom_input_action, doom_mount_wad, doom_wad_status, malloc, free",
-        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. Type yes in the aik console or use the approval button below.",
+        "model.status": "suspended: approval required before Bonsai-1.7B_Q1_0 GGUF download or load. Type yes in the aik console or use the approval button.",
         "legal": "open /demo/doom/terms-and-licenses.html in a new tab before approval"
       };
 
@@ -2649,7 +4393,7 @@
       }
 
       if (wasmApprovalPending && ["doom.start", "aik exec run doom"].includes(normalized)) {
-        appendConsoleLine("[SUSP]", "log-warn", "approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button below.");
+        appendConsoleLine("[SUSP]", "log-warn", "approval required before hosted WAD/model/WASM download or load. Type yes in the aik console or use the approval button.");
         return false;
       }
 
@@ -2663,11 +4407,23 @@
         return;
       }
 
+      if (!wasmApprovalPending && normalized === "doom.gpu status") {
+        await loadDoomGpuPathStatusScript();
+        const gpu = readDoomDebugGpuStatus();
+        const rows = Array.isArray(gpu.path?.rows) ? gpu.path.rows : [];
+        appendConsoleLine("[ GPU ]", gpu.runtime.usingCpuFallback ? "log-warn" : "log-info", `runtime renderer=${gpu.runtime.renderer}; delegate=${gpu.runtime.gpuDelegate}; fallback=${gpu.runtime.usingCpuFallback}; error=${gpu.runtime.lastError || "none"}.`);
+        appendConsoleLine("[ GPU ]", gpu.provider?.usingCpuFallback ? "log-warn" : "log-info", `provider=${gpu.provider?.name || "none"}; backend=${gpu.provider?.backend || "unknown"}; initialized=${Boolean(gpu.provider?.initialized)}; renderer=${Boolean(gpu.provider?.rendererInitialized)}; zeroCopy=${Boolean(gpu.provider?.zeroCopy)}; memory=${Number(gpu.provider?.estimatedGpuMemoryMB || gpu.provider?.gpuMemory?.totalMB || 0).toFixed(2)}MB.`);
+        if (rows.length > 0) {
+          rows.forEach(row => appendConsoleLine(`[ ${row.label} ]`, row.tone === "gpu" ? "log-ok" : (row.tone === "warn" ? "log-warn" : "log-info"), row.value));
+        }
+        return;
+      }
+
       if (!wasmApprovalPending && normalized === "model.status") {
         const status = doomRuntime?.status() || { modelLoaded: false };
         updateRuntimeStatus(status, "status");
         const autoplay = status.autoplay || {};
-        appendConsoleLine("[ RESP ]", "log-info", `${status.modelLoaded ? "ready" : "loading"}: Bonsai-1.7B_Q1_0 GGUF hostedFile=/models/bonsai1.7b/Bonsai-1.7B-Q1_0.gguf; loaded=${status.modelLoaded}; execution surface=WebGpuComputeProvider; autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}`);
+        appendConsoleLine("[ RESP ]", "log-info", `${status.modelLoaded ? "ready" : "loading"}: Bonsai-1.7B_Q1_0 GGUF hostedFile=${doomSharedModel.hostedFile}; manifest=${doomSharedModel.manifestUrl}; shared=${Boolean(doomPublicConfig.sharedModel || doomDeploymentConfig.sharedModel)}; loaded=${status.modelLoaded}; execution surface=WebGpuComputeProvider; autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}`);
         return;
       }
 
@@ -2836,15 +4592,10 @@
       }
 
       if (!wasmApprovalPending && (normalized === "doom.capture" || normalized === "doom.sense.capture")) {
-        if (!doomRuntime?.captureSenseOnlyFrame) {
-          appendConsoleLine("[CAPTURE]", "log-warn", "sense-only capture is unavailable in this runtime.");
-          return;
-        }
-
-        const capture = await doomRuntime.captureSenseOnlyFrame();
-        window.AIKernelDoomLastSenseCapture = capture;
-        const signatures = capture.signatures || {};
-        appendConsoleLine("[CAPTURE]", "log-ok", `frame=${capture.frame || 0}; senseOnly=${Boolean(capture.senseOnly)}; image=${capture.imageDataUrl ? "yes" : "status-only"}; region3x3=${signatures.region3x3 || "000000000"}; vision9x9=${String(signatures.vision9x9 || "").slice(0, 18)}; motion9=${signatures.motion9 || "000000000"}; audio=${capture.audio?.eventType || "none"}; detector=${capture.detector ? "yes" : "none"}.`);
+        const frame = await captureAnalysisFrame({ publish: true });
+        window.AIKernelDoomLastSenseCapture = frame;
+        const safe = frame.analysisSafe ? "analysis-safe" : "not-analysis-safe";
+        appendConsoleLine("[CAPTURE]", frame.ok ? "log-ok" : "log-warn", `frame=${frame.frame || 0}; usage=${frame.usage}; source=${frame.source}; overlayExcluded=${frame.overlayExcluded ? "yes" : "no"}; image=${frame.dataUrl ? "yes" : "status-only"}; ${safe}; reason=${frame.reason || "none"}.`);
         return;
       }
 
@@ -2883,7 +4634,8 @@
         const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
         const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
         const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-        const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+        const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+        const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
         const motionText = `${autoplay.motion9Signature || "000000000"}/${Number(autoplay.motion9Delta ?? 255).toFixed(2)}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/o${Number(autoplay.motionObstacleScore || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/e${Number(autoplay.motionEntranceScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}/${autoplay.motionIntent || "idle"}`;
         const footText = `${Number(autoplay.footObstacleScore || 0).toFixed(2)}/${Number(autoplay.priorFootObstacleScore || 0).toFixed(2)}/f${Number(autoplay.footObstacleFlickerScore || 0).toFixed(2)}/b${autoplay.footObstacleBounceFrames || 0}/d${Number(autoplay.footObstacleBandDelta || 0).toFixed(2)}`;
         updateRuntimeStatus(status, "autoplay-status");
@@ -3022,6 +4774,8 @@
     window.setAIKernelDoomControllerDebugLogEntries = setControllerDebugLogEntries;
     window.setAIKernelDoomControllerDebugLogFilter = setControllerDebugLogFilter;
     window.clearAIKernelDoomControllerDebugLog = clearControllerDebugLog;
+    installDoomPublicDemoLayout();
+    setApprovalNoticeHtml("ready");
     observeControllerDebugLogLayout();
     renderControllerDebugLog();
 
@@ -3045,57 +4799,62 @@
       }
     }
 
-    const doomGuiSelfTest = window.AIKernelDoomGuiSelfTest?.install?.({
-      delay,
-      getDoomRuntime: () => doomRuntime,
-      getWasmApprovalPending: () => wasmApprovalPending,
-      getOverlayEnabled: () => doomDebugOverlayEnabled,
-      setOverlayEnabled: value => {
-        doomDebugOverlayEnabled = Boolean(value);
-      },
-      getToposDetailEnabled: () => doomToposDetailEnabled,
-      setToposDetailEnabled: value => {
-        doomToposDetailEnabled = Boolean(value);
-      },
-      getDetectionVisible: key => doomDetectionVisibility.get(key) !== false,
-      setDetectionVisible: (key, value) => {
-        doomDetectionVisibility.set(key, Boolean(value));
-      },
-      sensorInputEnabled,
-      runWasmCommand,
-      appendConsoleLine,
-      ensureDoomSpatialHud,
-      ensureDoomGoalHud,
-      ensureDoomToposHud,
-      ensureDoomSensorToggleRow,
-      syncManualMoveToggle,
-      syncSenseOnlyToggle,
-      syncOverlayToggle,
-      syncToposDetailToggle,
-      syncSensorToggles,
-      syncSingleSensorToggle,
-      syncAutoplayToggle,
-      syncDetectionToggleButtons,
-      syncAudioPlaybackToggle,
-      pushControllerDebugLog,
-      setControllerDebugMessage,
-      setControllerDebugLogFilter,
-      renderDoomDebugOverlay,
-      updateDoomToposHud,
-      elements: () => ({
-        promptInput,
-        doomController,
-        doomControllerDebugLog,
-        doomControllerDebugLogList,
-        doomDebugBar,
-        doomOverlayToggle,
-        doomAutoplayToggle,
-        doomManualMoveToggle,
-        doomSenseOnlyToggle,
-        doomAudioPlaybackToggle,
-        doomToposDetailToggle
-      })
-    });
+    let doomGuiSelfTest = null;
+    try {
+      doomGuiSelfTest = window.AIKernelDoomGuiSelfTest?.install?.({
+        delay,
+        getDoomRuntime: () => doomRuntime,
+        getWasmApprovalPending: () => wasmApprovalPending,
+        getOverlayEnabled: () => doomDebugOverlayEnabled,
+        setOverlayEnabled: value => {
+          doomDebugOverlayEnabled = Boolean(value);
+        },
+        getToposDetailEnabled: () => doomToposDetailEnabled,
+        setToposDetailEnabled: value => {
+          doomToposDetailEnabled = Boolean(value);
+        },
+        getDetectionVisible: key => doomDetectionVisibility.get(key) !== false,
+        setDetectionVisible: (key, value) => {
+          doomDetectionVisibility.set(key, Boolean(value));
+        },
+        sensorInputEnabled,
+        runWasmCommand,
+        appendConsoleLine,
+        ensureDoomSpatialHud,
+        ensureDoomGoalHud,
+        ensureDoomToposHud,
+        ensureDoomSensorToggleRow,
+        syncManualMoveToggle,
+        syncSenseOnlyToggle,
+        syncOverlayToggle,
+        syncToposDetailToggle,
+        syncSensorToggles,
+        syncSingleSensorToggle,
+        syncAutoplayToggle,
+        syncDetectionToggleButtons,
+        syncAudioPlaybackToggle,
+        pushControllerDebugLog,
+        setControllerDebugMessage,
+        setControllerDebugLogFilter,
+        renderDoomDebugOverlay,
+        updateDoomToposHud,
+        elements: () => ({
+          promptInput,
+          doomController,
+          doomControllerDebugLog,
+          doomControllerDebugLogList,
+          doomDebugBar,
+          doomOverlayToggle,
+          doomAutoplayToggle,
+          doomManualMoveToggle,
+          doomSenseOnlyToggle,
+          doomAudioPlaybackToggle,
+          doomToposDetailToggle
+        })
+      }) || null;
+    } catch (error) {
+      appendConsoleLine("[GUI  ]", "log-warn", `self-test hooks disabled: ${String(error?.message || error || "unknown error")}`);
+    }
     window.getAIKernelDoomStatus = function getAIKernelDoomStatus() {
       return doomRuntime?.status?.() || null;
     };
@@ -3124,23 +4883,154 @@
       });
     }
 
-    function captureGameFrame() {
-      if (!doomScreen || typeof doomScreen.toDataURL !== "function") {
-        return {
-          ok: false,
-          reason: "game-canvas-unavailable",
-          timestamp: new Date().toISOString()
-        };
+    function ensureRawCaptureAnchor() {
+      let node = document.getElementById("doom-raw-frame-capture");
+      if (!node) {
+        node = document.createElement("a");
+        node.id = "doom-raw-frame-capture";
+        node.hidden = true;
+        node.setAttribute("aria-hidden", "true");
+        node.download = "aikernel-doom-raw-frame.png";
+        document.body.appendChild(node);
       }
 
-      return {
-        ok: true,
-        contentType: "image/png",
-        width: doomScreen.width || doomScreen.clientWidth || 0,
-        height: doomScreen.height || doomScreen.clientHeight || 0,
-        dataUrl: doomScreen.toDataURL("image/png"),
-        timestamp: new Date().toISOString()
+      return node;
+    }
+
+    function publishGameFrameCapture(capture) {
+      const node = ensureRawCaptureAnchor();
+      const dataUrl = capture?.dataUrl || capture?.imageDataUrl || "";
+      node.href = dataUrl || "#";
+      node.dataset.ok = capture?.ok ? "true" : "false";
+      node.dataset.source = capture?.source || capture?.captureSource || "unknown";
+      node.dataset.overlayExcluded = capture?.overlayExcluded !== false ? "true" : "false";
+      node.dataset.reason = capture?.reason || "";
+      node.dataset.frame = capture?.frame !== null && capture?.frame !== undefined ? String(capture.frame) : "";
+      node.dataset.timestamp = capture?.timestamp || new Date().toISOString();
+      node.dataset.contentType = capture?.contentType || "image/png";
+      window.AIKernelDoomLastPublishedRawCapture = {
+        ok: node.dataset.ok === "true",
+        source: node.dataset.source,
+        overlayExcluded: node.dataset.overlayExcluded === "true",
+        reason: node.dataset.reason,
+        frame: node.dataset.frame,
+        timestamp: node.dataset.timestamp
       };
+      return node;
+    }
+
+    function createUnavailableDebugCaptureApi() {
+      async function unavailableFrame(options = {}) {
+        const usage = options?.allowDisplayFallback === true
+          ? "debug-display-fallback"
+          : "analysis-raw-framebuffer";
+        const frame = {
+          ok: false,
+          reason: "debug-capture-module-unavailable",
+          overlayExcluded: true,
+          usage,
+          analysisSafe: false,
+          timestamp: new Date().toISOString()
+        };
+        if (options?.publish !== false) {
+          publishGameFrameCapture(frame);
+        }
+        return frame;
+      }
+
+      return Object.freeze({
+        version: "debugcapture-unavailable",
+        captureGameFrame: unavailableFrame,
+        captureRawGameFrame: unavailableFrame,
+        captureAnalysisFrame: unavailableFrame,
+        captureDisplayFrame: (options = {}) => unavailableFrame(Object.assign({}, options, {
+          allowDisplayFallback: true
+        })),
+        captureGpuAisthesisFeatures: () => ({
+          ok: false,
+          reason: "debug-capture-module-unavailable",
+          source: gpuContractValue("aisthesisFeatureTarget", "doom.gpu.aisthesis.features"),
+          usage: "debug-gpu-aisthesis-readback",
+          timestamp: new Date().toISOString()
+        }),
+        captureGpuSpatialReasoningOutput: () => ({
+          ok: false,
+          reason: "debug-capture-module-unavailable",
+          source: gpuContractValue("spatialOutputTarget", "doom.gpu.spatial.reasoning"),
+          usage: "debug-gpu-spatial-reasoning-readback",
+          timestamp: new Date().toISOString()
+        }),
+        getLastPublishedCapture: () => window.AIKernelDoomLastPublishedRawCapture || null
+      });
+    }
+
+    function installDoomDebugCaptureApi(module = self.AIKernelDoomDebugCaptureModule) {
+      if (doomDebugCaptureApi) {
+        return doomDebugCaptureApi;
+      }
+
+      if (typeof module?.createDebugCapture === "function") {
+        doomDebugCaptureApi = module.createDebugCapture({
+          getRuntime: () => doomRuntime,
+          getCanvas: () => doomScreen,
+          getGpuAisthesisFeatures: options => doomRuntime?.readGpuAisthesisFeatures?.(options) || {
+            ok: false,
+            reason: "gpu-aisthesis-readback-unavailable",
+            source: gpuContractValue("aisthesisFeatureTarget", "doom.gpu.aisthesis.features")
+          },
+          getGpuSpatialReasoningOutput: options => doomRuntime?.readGpuSpatialReasoningOutput?.(options) || {
+            ok: false,
+            reason: "gpu-spatial-reasoning-readback-unavailable",
+            source: gpuContractValue("spatialOutputTarget", "doom.gpu.spatial.reasoning")
+          },
+          publishCapture: publishGameFrameCapture,
+          getLastPublishedCapture: () => window.AIKernelDoomLastPublishedRawCapture || null
+        });
+      } else {
+        doomDebugCaptureApi = createUnavailableDebugCaptureApi();
+      }
+
+      window.AIKernelDoomDebugCapture = doomDebugCaptureApi;
+      return doomDebugCaptureApi;
+    }
+
+    async function ensureDoomDebugCaptureApi() {
+      if (doomDebugCaptureApi) {
+        return doomDebugCaptureApi;
+      }
+
+      const module = self.AIKernelDoomDebugCaptureModule || await loadDoomDebugCaptureScript();
+      return installDoomDebugCaptureApi(module);
+    }
+
+    async function captureGameFrame(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureGameFrame(options);
+    }
+
+    async function captureRawGameFrame(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureRawGameFrame(options);
+    }
+
+    async function captureAnalysisFrame(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureAnalysisFrame(options);
+    }
+
+    async function captureDisplayFrame(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureDisplayFrame(options);
+    }
+
+    async function captureGpuAisthesisFeatures(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureGpuAisthesisFeatures(options);
+    }
+
+    async function captureGpuSpatialReasoningOutput(options = {}) {
+      return (await ensureDoomDebugCaptureApi()).captureGpuSpatialReasoningOutput(options);
+    }
+
+    function getLastPublishedCapture() {
+      return (doomDebugCaptureApi || window.AIKernelDoomDebugCapture)?.getLastPublishedCapture?.()
+        || window.AIKernelDoomLastPublishedRawCapture
+        || null;
     }
 
     async function getSchemaDefinitions() {
@@ -3248,6 +5138,12 @@
       setControllerDebugLogFilter,
       clearControllerDebugLog,
       captureGameFrame,
+      captureRawGameFrame,
+      captureAnalysisFrame,
+      captureDisplayFrame,
+      captureGpuAisthesisFeatures,
+      captureGpuSpatialReasoningOutput,
+      getLastPublishedCapture,
       getSchemaDefinitions,
       sendSchemaDefinitions,
       runCommand: (command, options = {}) => runWasmCommand(command, options),
@@ -3256,6 +5152,148 @@
         ? window.runAIKernelDoomGuiSelfTestCommand?.()
         : doomGuiSelfTest?.runDoomGuiSelfTest?.()
     };
+    window.AIKernelDoomDebugCapture = Object.freeze({
+      captureAnalysisFrame,
+      captureDisplayFrame,
+      captureRawGameFrame,
+      captureGameFrame,
+      captureGpuAisthesisFeatures,
+      captureGpuSpatialReasoningOutput,
+      getLastPublishedCapture
+    });
+
+    const doomDebugCaptureBridgeResultId = "doom-debug-capture-bridge-result";
+
+    function ensureDebugCaptureBridgeResultNode() {
+      let node = document.getElementById(doomDebugCaptureBridgeResultId);
+      if (!node) {
+        node = document.createElement("script");
+        node.id = doomDebugCaptureBridgeResultId;
+        node.type = "application/json";
+        node.hidden = true;
+        node.setAttribute("aria-hidden", "true");
+        node.textContent = "";
+        document.body.appendChild(node);
+      }
+
+      return node;
+    }
+
+    function writeDebugCaptureBridgeResult(kind, result) {
+      const node = ensureDebugCaptureBridgeResultNode();
+
+      const payload = {
+        kind,
+        timestamp: new Date().toISOString(),
+        result
+      };
+      node.textContent = JSON.stringify(payload);
+      node.dataset.kind = kind;
+      node.dataset.timestamp = payload.timestamp;
+      node.dataset.ok = result?.ok === true ? "true" : "false";
+    }
+
+    function ensureDebugCaptureBridgeButton(kind, label, capture) {
+      const id = `doom-debug-capture-${kind}-trigger`;
+      let button = document.getElementById(id);
+      if (button) {
+        return button;
+      }
+
+      button = document.createElement("button");
+      button.id = id;
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute("aria-label", label);
+      button.dataset.debugCaptureTrigger = kind;
+      button.tabIndex = -1;
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "0",
+        top: kind === "analysis" ? "0" : "12px",
+        width: "8px",
+        height: "8px",
+        opacity: "0",
+        zIndex: "2147483600",
+        pointerEvents: "auto"
+      });
+      button.addEventListener("click", () => {
+        capture()
+          .then(frame => writeDebugCaptureBridgeResult(kind, frame))
+          .catch(error => writeDebugCaptureBridgeResult(kind, {
+            ok: false,
+            reason: String(error?.message || error || `capture-${kind}-failed`),
+            analysisSafe: kind === "analysis",
+            overlayExcluded: kind === "analysis"
+          }));
+      });
+      document.body.appendChild(button);
+      return button;
+    }
+
+    function installDebugCaptureBridgeApiSurface() {
+      if (window.AIKernelDoomDebugCaptureBridge) {
+        return window.AIKernelDoomDebugCaptureBridge;
+      }
+
+      window.AIKernelDoomDebugCaptureBridge = Object.freeze({
+        captureAnalysis: async () => {
+          const frame = await captureAnalysisFrame({ publish: true });
+          writeDebugCaptureBridgeResult("analysis", frame);
+          return frame;
+        },
+        captureDisplay: async () => {
+          const frame = await captureDisplayFrame({ publish: true });
+          writeDebugCaptureBridgeResult("display", frame);
+          return frame;
+        },
+        getLastResult: () => {
+          const node = ensureDebugCaptureBridgeResultNode();
+          try {
+            return JSON.parse(node.textContent || "null");
+          } catch {
+            return null;
+          }
+        }
+      });
+
+      return window.AIKernelDoomDebugCaptureBridge;
+    }
+
+    function installDebugCaptureBridge() {
+      if (document.documentElement.dataset.doomDebugCaptureBridge === "installed") {
+        installDebugCaptureBridgeApiSurface();
+        return;
+      }
+
+      document.documentElement.dataset.doomDebugCaptureBridge = "installed";
+      ensureDebugCaptureBridgeResultNode();
+      ensureDebugCaptureBridgeButton("analysis", "AIKernel raw analysis capture", () => captureAnalysisFrame({ publish: true }));
+      ensureDebugCaptureBridgeButton("display", "AIKernel display capture", () => captureDisplayFrame({ publish: true }));
+      document.addEventListener("aikernel-doom-debug-capture-analysis", () => {
+        captureAnalysisFrame({ publish: true })
+          .then(frame => writeDebugCaptureBridgeResult("analysis", frame))
+          .catch(error => writeDebugCaptureBridgeResult("analysis", {
+            ok: false,
+            reason: String(error?.message || error || "capture-analysis-failed"),
+            analysisSafe: false,
+            overlayExcluded: true
+          }));
+      });
+      document.addEventListener("aikernel-doom-debug-capture-display", () => {
+        captureDisplayFrame({ publish: true })
+          .then(frame => writeDebugCaptureBridgeResult("display", frame))
+          .catch(error => writeDebugCaptureBridgeResult("display", {
+            ok: false,
+            reason: String(error?.message || error || "capture-display-failed"),
+            analysisSafe: false,
+            overlayExcluded: false
+          }));
+      });
+      installDebugCaptureBridgeApiSurface();
+    }
+
+    installDebugCaptureBridge();
 
     function sendDoomInput(name, pressed, holdMs = 0) {
       const keycode = doomKeyCodes[name];
@@ -3379,11 +5417,63 @@
       syncGpuHudOverlay();
     }
 
+    function toggleToposDetailView(event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      doomToposDetailEnabled = !doomToposDetailEnabled;
+      playToposToggleClick();
+      syncToposDetailToggle();
+      updateDoomToposHud(doomRuntime?.status?.() || {});
+      focusPromptUnlessGameRunning();
+    }
+
+    function playToposToggleClick() {
+      const status = doomRuntime?.status?.() || {};
+      if (status.audioPlayback?.muted !== false) {
+        return;
+      }
+
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) {
+        return;
+      }
+
+      try {
+        doomToposClickAudioContext = doomToposClickAudioContext || new AudioContextCtor();
+        const context = doomToposClickAudioContext;
+        const now = context.currentTime;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "triangle";
+        oscillator.frequency.setValueAtTime(doomToposDetailEnabled ? 1040 : 740, now);
+        oscillator.frequency.exponentialRampToValueAtTime(doomToposDetailEnabled ? 1320 : 620, now + 0.045);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.018, now + 0.006);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(now);
+        oscillator.stop(now + 0.065);
+      } catch {
+        // The HUD click is optional and must never affect gameplay control.
+      }
+    }
+
+    function bindToposDetailToggle() {
+      if (!doomToposDetailToggle || doomToposDetailToggle.dataset.ctgToggleBound === "true") {
+        return;
+      }
+
+      doomToposDetailToggle.dataset.ctgToggleBound = "true";
+      doomToposDetailToggle.addEventListener("click", toggleToposDetailView);
+    }
+
     function syncToposDetailToggle() {
       if (!doomToposDetailToggle) {
         return;
       }
 
+      bindToposDetailToggle();
       doomToposDetailToggle.classList.toggle("is-on", doomToposDetailEnabled);
       doomToposDetailToggle.setAttribute("aria-pressed", doomToposDetailEnabled ? "true" : "false");
       doomToposDetailToggle.textContent = doomToposDetailEnabled ? "CTG: Detail" : "CTG: Simple";
@@ -3527,11 +5617,7 @@
     doomDebugBar?.addEventListener("click", async (event) => {
       const detailButton = event.target.closest("#doom-topos-detail-toggle");
       if (detailButton) {
-        event.stopPropagation();
-        doomToposDetailEnabled = !doomToposDetailEnabled;
-        syncToposDetailToggle();
-        updateDoomToposHud(doomRuntime?.status?.() || {});
-        focusPromptUnlessGameRunning();
+        toggleToposDetailView(event);
         return;
       }
 
@@ -3625,7 +5711,7 @@
     });
 
     window.addEventListener("keydown", (event) => {
-      if (event.target.closest?.("input, textarea, select")) {
+      if (!shouldHandleDoomKeyboardEvent(event)) {
         return;
       }
 
@@ -3634,16 +5720,18 @@
         return;
       }
 
+      keyboardDoomInputs.add(name);
       event.preventDefault();
       pressDoomInput(name);
     });
 
     window.addEventListener("keyup", (event) => {
       const name = keyboardDoomKeys[event.code];
-      if (!name) {
+      if (!name || !keyboardDoomInputs.has(name)) {
         return;
       }
 
+      keyboardDoomInputs.delete(name);
       event.preventDefault();
       releaseDoomInput(name);
     });
@@ -3711,8 +5799,11 @@
 
       await delay(700);
 
+      if (panic) {
+        panic.hidden = false;
+      }
       panic.style.display = "block";
-      halted.classList.add("is-visible");
+      setApprovalNoticeHtml("ready");
       promptInput.disabled = false;
       promptSubmit.disabled = false;
       setApprovalUiState("ready");

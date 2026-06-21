@@ -30,9 +30,38 @@
   const AUTOPLAY_RETRY_ENTER_KEY = 13;
   const AUTOPLAY_RETRY_COOLDOWN_FRAMES = 180;
   const AUTOPLAY_RETRY_TAP_FRAMES = 8;
+  const AUTOPLAY_RETRY_SETTLE_FRAMES = 60;
   const IS_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
   const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   const DOOM_BINARY_ASSET_CACHE = "aikernel-doom-binary-assets-v1";
+  const HUD_COMPOSITE_MAX_FPS = 30;
+  const GPU_CONTRACTS = requireDoomGpuContracts();
+  const RAW_FRAMEBUFFER_TARGET = GPU_CONTRACTS.rawFramebufferTarget;
+  const RAW_FRAMEBUFFER_WIRE_NAME = GPU_CONTRACTS.rawFramebufferWireName;
+  const HUD_COMPOSITE_TARGET = GPU_CONTRACTS.hudCompositeTarget;
+  const HUD_COMPOSITE_WIRE_NAME = GPU_CONTRACTS.hudCompositeWireName;
+  const GPU_AISTHESIS_FEATURE_TARGET = GPU_CONTRACTS.aisthesisFeatureTarget;
+  const GPU_AISTHESIS_MATRIX_TARGET = GPU_CONTRACTS.aisthesisMatrixTarget;
+  const GPU_AISTHESIS_MASK_TARGET = GPU_CONTRACTS.aisthesisMaskTarget;
+  const GPU_AISTHESIS_MASK_LAYOUT = GPU_CONTRACTS.aisthesisMaskLayout;
+  const GPU_SPATIAL_OUTPUT_TARGET = GPU_CONTRACTS.spatialOutputTarget;
+  const GPU_SPATIAL_OUTPUT_FIELDS = GPU_CONTRACTS.spatialOutputFields;
+  const SCRIPT_CACHE_KEY = (() => {
+    try {
+      const params = new URLSearchParams(self.location?.search || "");
+      return params.get("doomdev") || params.get("v") || "20260621-hud-panel-connect1";
+    } catch {
+      return "20260621-hud-panel-connect1";
+    }
+  })();
+
+  const DEFAULT_MODEL_MANIFEST_URL = "/models/bonsai1.7b/manifest.json";
+
+  function resolveDefaultModelManifestUrl() {
+    return self.AIKernelDoomConfig?.modelManifestUrl ||
+      self.AIKernelDoomPublic?.modelManifestUrl ||
+      DEFAULT_MODEL_MANIFEST_URL;
+  }
 
   ensureBrowserWebGpuComputeProvider();
 
@@ -81,6 +110,15 @@
     return fn;
   }
 
+  function requireDoomGpuContracts() {
+    const contracts = self.AIKernelDoomGpuContracts;
+    if (!contracts || typeof contracts.aisthesisMaskTextureTarget !== "function") {
+      throw new Error("AIKernelDoomGpuContracts is not available.");
+    }
+
+    return contracts;
+  }
+
   function requireDoomWasmImports(name) {
     const fn = self.AIKernelDoomWasmImports?.[name];
     if (typeof fn !== "function") {
@@ -112,7 +150,7 @@
     constructor(options) {
       this.canvas = options.canvas;
       this.moduleUrl = options.moduleUrl || "/demo/doom/module.json";
-      this.modelManifestUrl = options.modelManifestUrl || "/models/bonsai1.7b/manifest.json";
+      this.modelManifestUrl = options.modelManifestUrl || resolveDefaultModelManifestUrl();
       this.autoplayProfileUrl = options.autoplayProfileUrl || "/demo/doom/autoplay-profile.json";
       this.log = options.log || (() => {});
       this.onStatusChange = options.onStatusChange || (() => {});
@@ -295,6 +333,13 @@
       this.autoplayEnemyFireReady = false;
       this.autoplayEnemyAllRegionPeak = 0;
       this.autoplayEnemyLateralBias = 0;
+      this.autoplayAudioEnemyConfidence = 0;
+      this.autoplayAudioEnemyDirection = "none";
+      this.autoplayVisualEnemyVisible = false;
+      this.autoplayVisualEnemyCentered = false;
+      this.autoplayVisualEnemyYaw = 0;
+      this.autoplayVisualEnemyFireReady = false;
+      this.autoplayEnemyCombatYaw = 0;
       this.autoplayStrategyName = "SensorFusionStrafeProbeV3";
       this.autoplayStrategyContext = "unknown";
       this.autoplayStrategyPriority = 0;
@@ -323,6 +368,7 @@
     }
 
     status() {
+      const gpuHudStatus = this.createGpuHudStatus();
       return {
         state: this.state,
         renderer: this.renderer,
@@ -340,6 +386,7 @@
         lastGpuWaitMs: this.lastGpuWaitMs,
         gpuWaitTimeouts: this.gpuWaitTimeouts,
         hudFlowControl: this.createHudFlowControlStatus(),
+        gpuHud: gpuHudStatus,
         watchdogRestarting: this.watchdogRestarting,
         watchdogRestarts: this.watchdogRestarts,
         watchdogLastStallMs: this.watchdogLastStallMs,
@@ -351,6 +398,7 @@
           senseOnly: this.autoplaySenseOnly,
           controller: this.autoplayControllerKind,
           controlReady: this.wasmAutoplayReady,
+          gpuHud: gpuHudStatus,
           mode: this.autoplayMode,
           predictions: this.autoplayPredictions,
           reused: this.autoplayReused,
@@ -456,6 +504,13 @@
           enemyFireReady: this.autoplayEnemyFireReady,
           enemyAllRegionPeak: this.autoplayEnemyAllRegionPeak,
           enemyLateralBias: this.autoplayEnemyLateralBias,
+          audioEnemyConfidence: this.autoplayAudioEnemyConfidence,
+          audioEnemyDirection: this.autoplayAudioEnemyDirection,
+          visualEnemyVisible: this.autoplayVisualEnemyVisible,
+          visualEnemyCentered: this.autoplayVisualEnemyCentered,
+          visualEnemyYaw: this.autoplayVisualEnemyYaw,
+          visualEnemyFireReady: this.autoplayVisualEnemyFireReady,
+          enemyCombatYaw: this.autoplayEnemyCombatYaw,
           ammoSignature: this.autoplayAmmoSignature || this.bonsaiSupervisor?.status?.().ammoSignature || "",
           ammoLikelyEmpty: Boolean(this.autoplayAmmoLikelyEmpty || this.bonsaiSupervisor?.status?.().ammoLikelyEmpty),
           healthSignature: this.autoplayHealthSignature || this.bonsaiSupervisor?.status?.().healthSignature || "",
@@ -537,6 +592,100 @@
         downloadProgress: this.cloneDownloadProgress(),
         framebuffer: `${WIDTH}x${HEIGHT} paletted-8bit`,
         lastError: this.lastError
+      };
+    }
+
+    createGpuHudStatus() {
+      const provider = resolveWebGpuProvider();
+      const providerStatus = typeof provider?.status === "function"
+        ? provider.status()
+        : (provider || {});
+      const rawState = typeof provider?.getFrameStateBuffer === "function"
+        ? provider.getFrameStateBuffer(RAW_FRAMEBUFFER_TARGET)
+        : null;
+      const hudState = typeof provider?.getFrameStateBuffer === "function"
+        ? provider.getFrameStateBuffer(HUD_COMPOSITE_TARGET)
+        : null;
+      const compositeReady = Boolean(providerStatus?.hudCompositeReady);
+      const compositeActive = Boolean(providerStatus?.hudCompositeActive);
+
+      return {
+        source: "webgpu-hud-offscreen",
+        providerId: providerStatus?.providerId || provider?.providerId || "unknown",
+        providerName: providerStatus?.name || provider?.name || "unknown",
+        providerBackend: providerStatus?.backend || "unknown",
+        providerSupported: Boolean(providerStatus?.supported),
+        providerInitialized: Boolean(providerStatus?.initialized),
+        adapterReady: Boolean(providerStatus?.adapterReady),
+        deviceReady: Boolean(providerStatus?.deviceReady),
+        adapterPowerPreference: providerStatus?.adapterPowerPreference || "unknown",
+        adapterForceFallback: Boolean(providerStatus?.adapterForceFallback),
+        adapterRequestFallbackUsed: Boolean(providerStatus?.adapterRequestFallbackUsed),
+        adapterRequestError: providerStatus?.adapterRequestError || "",
+        adapterInfo: providerStatus?.adapterInfo || null,
+        adapterSummary: providerStatus?.adapterSummary || "unknown",
+        providerRendererInitialized: Boolean(providerStatus?.rendererInitialized),
+        providerUsingCpuFallback: Boolean(providerStatus?.usingCpuFallback),
+        providerLastError: providerStatus?.lastError || "",
+        providerZeroCopy: Boolean(providerStatus?.zeroCopy),
+        rawTextureReady: Boolean(providerStatus?.rawTextureReady),
+        storageTextureReady: Boolean(providerStatus?.storageTextureReady),
+        gpuBufferReady: Boolean(providerStatus?.gpuBufferReady),
+        gpuComputeReady: Boolean(providerStatus?.gpuComputeReady),
+        gpuComputeActive: Boolean(providerStatus?.gpuComputeActive),
+        displayTarget: compositeReady ? HUD_COMPOSITE_TARGET : RAW_FRAMEBUFFER_TARGET,
+        displaySource: compositeActive ? HUD_COMPOSITE_WIRE_NAME : RAW_FRAMEBUFFER_WIRE_NAME,
+        rawCaptureTarget: RAW_FRAMEBUFFER_TARGET,
+        rawCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
+        analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
+        analysisOverlayExcluded: true,
+        cssOverlayMode: compositeActive ? "reduced" : "full",
+        hudOverlayReady: Boolean(providerStatus?.hudOverlayReady),
+        hudPanelOverlayReady: Boolean(providerStatus?.hudPanelOverlayReady),
+        hudPanelDoubleBuffered: Boolean(providerStatus?.hudPanelDoubleBuffered),
+        hudCompositeTarget: providerStatus?.hudCompositeTarget || HUD_COMPOSITE_TARGET,
+        hudCompositeReady: compositeReady,
+        hudCompositeActive: compositeActive,
+        hudCompositeDoubleBuffered: Boolean(providerStatus?.hudCompositeDoubleBuffered),
+        hudCompositeMaxFps: Number(providerStatus?.hudCompositeMaxFps || HUD_COMPOSITE_MAX_FPS),
+        hudCompositeFrame: Number(hudState?.frame ?? providerStatus?.hudCompositeFrame ?? 0),
+        rawFrame: Number(rawState?.frame ?? this.frameCount ?? 0),
+        rawZeroCopy: Boolean(rawState?.zeroCopy),
+        hudZeroCopy: Boolean(hudState?.zeroCopy),
+        gpuMemory: providerStatus?.gpuMemory || null,
+        estimatedGpuMemoryBytes: Number(providerStatus?.estimatedGpuMemoryBytes || providerStatus?.gpuMemory?.totalBytes || 0),
+        estimatedGpuMemoryMB: Number(providerStatus?.estimatedGpuMemoryMB || providerStatus?.gpuMemory?.totalMB || 0),
+        overlayExcludedFromAnalysis: true,
+        gpuAisthesis: providerStatus?.gpuAisthesis || null,
+        gpuSpatialReasoning: providerStatus?.gpuSpatialReasoning || null
+      };
+    }
+
+    async readGpuAisthesisFeatures(options = {}) {
+      const provider = resolveWebGpuProvider();
+      if (typeof provider?.readGpuAisthesisFeatures === "function") {
+        return provider.readGpuAisthesisFeatures(options);
+      }
+
+      return {
+        ok: false,
+        reason: "gpu-aisthesis-readback-unavailable",
+        source: GPU_AISTHESIS_FEATURE_TARGET,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    async readGpuSpatialReasoningOutput(options = {}) {
+      const provider = resolveWebGpuProvider();
+      if (typeof provider?.readGpuSpatialReasoningOutput === "function") {
+        return provider.readGpuSpatialReasoningOutput(options);
+      }
+
+      return {
+        ok: false,
+        reason: "gpu-spatial-readback-unavailable",
+        source: GPU_SPATIAL_OUTPUT_TARGET,
+        timestamp: new Date().toISOString()
       };
     }
 
@@ -1041,9 +1190,16 @@
         this.autoplayEnemyDistance = 1;
         this.autoplayEnemyCluster = "none";
         this.autoplayEnemyFireReady = false;
-        this.autoplayEnemyAllRegionPeak = 0;
-        this.autoplayEnemyLateralBias = 0;
-        this.autoplayControlPipeline = "Idle";
+      this.autoplayEnemyAllRegionPeak = 0;
+      this.autoplayEnemyLateralBias = 0;
+      this.autoplayAudioEnemyConfidence = 0;
+      this.autoplayAudioEnemyDirection = "none";
+      this.autoplayVisualEnemyVisible = false;
+      this.autoplayVisualEnemyCentered = false;
+      this.autoplayVisualEnemyYaw = 0;
+      this.autoplayVisualEnemyFireReady = false;
+      this.autoplayEnemyCombatYaw = 0;
+      this.autoplayControlPipeline = "Idle";
         this.autoplayObjective = "disabled";
         this.autoplayActiveDetections = ["objective", "hud"];
         this.autoplaySemanticMemory = null;
@@ -1079,17 +1235,67 @@
       return this.status();
     }
 
-    captureSenseOnlyFrame() {
+    async captureRawFramebufferDataUrl() {
+      const indices = this.framebufferView;
+      const palette = this.paletteCache?.rgbaBytes;
+      if (!indices || !palette || indices.length < FRAME_BYTES) {
+        return "";
+      }
+
+      let targetCanvas = null;
+      if (typeof OffscreenCanvas === "function") {
+        targetCanvas = new OffscreenCanvas(WIDTH, HEIGHT);
+      } else if (typeof document !== "undefined" && typeof document.createElement === "function") {
+        targetCanvas = document.createElement("canvas");
+        targetCanvas.width = WIDTH;
+        targetCanvas.height = HEIGHT;
+      }
+
+      const context = targetCanvas?.getContext?.("2d", { alpha: false });
+      if (!context) {
+        return "";
+      }
+
+      const image = context.createImageData(WIDTH, HEIGHT);
+      const pixels = image.data;
+      for (let source = 0, target = 0; source < FRAME_BYTES; source += 1, target += 4) {
+        const color = (indices[source] || 0) * 4;
+        pixels[target] = palette[color] || 0;
+        pixels[target + 1] = palette[color + 1] || 0;
+        pixels[target + 2] = palette[color + 2] || 0;
+        pixels[target + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+
+      if (typeof targetCanvas.toDataURL === "function") {
+        return targetCanvas.toDataURL("image/png");
+      }
+
+      if (typeof targetCanvas.convertToBlob === "function") {
+        const blob = await targetCanvas.convertToBlob({ type: "image/png" });
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        return `data:image/png;base64,${bytesToBase64(bytes)}`;
+      }
+
+      return "";
+    }
+
+    async captureSenseOnlyFrame() {
       const status = this.status();
-      const imageDataUrl = this.canvas && typeof this.canvas.toDataURL === "function"
-        ? this.canvas.toDataURL("image/png")
-        : "";
+      const imageDataUrl = await this.captureRawFramebufferDataUrl();
       return {
         kind: "doom.sense-only.frame-capture",
         senseOnly: Boolean(this.autoplaySenseOnly),
         frame: this.frameCount,
         timestamp: new Date().toISOString(),
         imageDataUrl,
+        captureSource: imageDataUrl ? RAW_FRAMEBUFFER_WIRE_NAME : "raw-framebuffer-unavailable",
+        captureTarget: RAW_FRAMEBUFFER_TARGET,
+        displayTarget: status.gpuHud?.displayTarget || RAW_FRAMEBUFFER_TARGET,
+        displaySource: status.gpuHud?.displaySource || RAW_FRAMEBUFFER_WIRE_NAME,
+        overlayExcluded: true,
+        analysisSafe: Boolean(imageDataUrl),
+        hudComposite: status.gpuHud || null,
         signatures: {
           region3x3: this.autoplayRegion9Signature,
           vision9x9: this.autoplayVision9x9Signature,
@@ -1443,6 +1649,12 @@
         return;
       }
 
+      if (requireDoomRetryDispatch("snapshot")(this.autoplayRetryDispatch).active) {
+        if (this.processAutoplayRetryDispatch()) {
+          return;
+        }
+      }
+
       const frameIndices = this.resolveFramebufferIndices(renderResult);
       this.updateWebGpuFrameState(frameIndices);
       const gpuVision = self.AIKernelBonsai?.resolveGpuVisionSource?.() || null;
@@ -1503,7 +1715,7 @@
       }
 
       try {
-        const wasmState = this.createWasmAutoplayState(state);
+        const wasmState = this.enrichWasmAutoplayStateWithFrame(this.createWasmAutoplayState(state), state);
         if (!this.controlRuntime || typeof this.controlRuntime.predict !== "function") {
           throw new Error("AIKernel.Control runtime shim is unavailable.");
         }
@@ -1552,6 +1764,55 @@
       return requireDoomWasmState("createState")(this, state);
     }
 
+    enrichWasmAutoplayStateWithFrame(wasmState, state) {
+      const frame = state?.framebuffer || {};
+      const maxScore = (...values) => Math.max(0, Math.min(1, values.reduce((best, value) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.max(best, parsed) : best;
+      }, 0)));
+      const previousMilestones = this.autoplayMilestones || {};
+      const doorOpenedCount = Math.max(
+        Number(wasmState?.doorOpenedCount || 0),
+        Number(wasmState?.milestones?.doorOpened || 0),
+        Number(wasmState?.milestones?.doorOpenedCount || 0),
+        Number(previousMilestones.doorOpened || 0),
+        Number(previousMilestones.doorOpenedCount || 0));
+      const computerRoomScore = this.round2(maxScore(wasmState?.computerRoomScore, frame.computerRoomScore));
+      const computerPanelScore = this.round2(maxScore(wasmState?.computerPanelScore, frame.computerPanelScore));
+      const computerDarkPanelScore = this.round2(maxScore(wasmState?.computerDarkPanelScore, frame.computerDarkPanelScore));
+      const postDoorTerminalSurface = doorOpenedCount > 0
+        ? this.round2(maxScore(
+          wasmState?.postDoorTerminalSurface,
+          computerPanelScore,
+          computerDarkPanelScore,
+          computerRoomScore * 0.72))
+        : 0;
+      const computerRoomConfidence = this.round2(maxScore(
+        wasmState?.computerRoomConfidence,
+        postDoorTerminalSurface,
+        computerRoomScore,
+        computerPanelScore * 0.82,
+        computerDarkPanelScore * 0.82));
+      const semanticMemory = Object.assign({}, wasmState?.semanticMemory || {});
+      const symbols = Object.assign({}, semanticMemory.symbols || {});
+      symbols["computer-room"] = maxScore(symbols["computer-room"], computerRoomConfidence);
+
+      return Object.assign({}, wasmState || {}, {
+        doorOpenedCount,
+        computerRoomConfidence,
+        computerRoomScore,
+        computerPanelScore,
+        computerDarkPanelScore,
+        postDoorTerminalSurface,
+        semanticMemory: Object.assign({}, semanticMemory, {
+          symbols,
+          computerRoom: Object.assign({}, semanticMemory.computerRoom || {}, {
+            confidence: computerRoomConfidence
+          })
+        })
+      });
+    }
+
     resolveWasmAutoplayObjective(signals) {
       return requireDoomWasmState("resolveObjective")(signals);
     }
@@ -1568,7 +1829,11 @@
       const vision9x9Signature = this.gridSignature(frame.vision9x9Sample).padEnd(81, "0").slice(0, 81);
       const motion9Signature = String(visualMotion.baseSignature || visualMotion.signature || "").padEnd(9, "0").slice(0, 9);
       const previousMilestones = this.autoplayMilestones || this.bonsaiSupervisor?.status?.().milestones || {};
+      const doorOpenedCount = Math.max(
+        Number(previousMilestones.doorOpened || 0),
+        Number(wasmState?.doorOpenedCount || 0));
       const milestones = Object.assign({}, previousMilestones, {
+        doorOpened: doorOpenedCount,
         darkAreaScore: this.round2(frame.darkAreaScore),
         gameplayLuma: this.round2(frame.gameplayLuma),
         blueFloorScore: this.round2(frame.blueFloorScore),
@@ -1627,7 +1892,12 @@
           confidence: this.round2(frame.healthZeroScore),
           signature: frame.healthSignature || "",
           activeColumns: Number(frame.healthActiveColumns || 0),
-          activeCells: Number(frame.healthActiveCells || 0)
+          activeCells: Number(frame.healthActiveCells || 0),
+          estimatedPercent: Number(frame.healthEstimatedPercent ?? 100),
+          value: Number(frame.healthEstimatedPercent ?? 100),
+          health: Number(frame.healthEstimatedPercent ?? 100),
+          lowHealth: Number(frame.healthEstimatedPercent ?? 100) > 0 && Number(frame.healthEstimatedPercent ?? 100) < 50,
+          lowHealthThreshold: 50
         },
         quantizedFrameChange: this.round2(Number(visualMotion.magnitude || 0) * 255),
         regionQuantizedFrameChange: this.round2(Number(visualMotion.baseMagnitude || 0) * 255),
@@ -1661,6 +1931,13 @@
         enemyFireReady: Boolean(frame.enemyCentered),
         enemyAllRegionPeak: this.round2(frame.enemyAllRegionPeak),
         enemyLateralBias: this.round2(frame.enemyLateralBias),
+        audioEnemyConfidence: this.round2(wasmState?.audioEnemyConfidence ?? 0),
+        audioEnemyDirection: wasmState?.audioEnemyDirection || "none",
+        visualEnemyVisible: Boolean(wasmState?.visualEnemyVisible ?? Number(frame.enemyConfidence || 0) >= 0.28),
+        visualEnemyCentered: Boolean(wasmState?.visualEnemyCentered ?? frame.enemyCentered),
+        visualEnemyYaw: Number(wasmState?.visualEnemyYaw || 0),
+        visualEnemyFireReady: Boolean(wasmState?.visualEnemyFireReady ?? frame.enemyCentered),
+        enemyCombatYaw: Number(wasmState?.enemyCombatYaw || 0),
         ammoSignature: frame.ammoSignature || "",
         ammoLikelyEmpty: Boolean(frame.ammoLikelyEmpty),
         healthSignature: frame.healthSignature || "",
@@ -1668,6 +1945,7 @@
         healthZeroScore: this.round2(frame.healthZeroScore),
         healthActiveColumns: Number(frame.healthActiveColumns || 0),
         healthActiveCells: Number(frame.healthActiveCells || 0),
+        healthEstimatedPercent: Number(frame.healthEstimatedPercent ?? 100),
         milestones
       };
     }
@@ -1763,6 +2041,13 @@
       this.autoplayEnemyFireReady = Boolean(status.enemyFireReady);
       this.autoplayEnemyAllRegionPeak = status.enemyAllRegionPeak || 0;
       this.autoplayEnemyLateralBias = status.enemyLateralBias || 0;
+      this.autoplayAudioEnemyConfidence = status.audioEnemyConfidence || 0;
+      this.autoplayAudioEnemyDirection = status.audioEnemyDirection || "none";
+      this.autoplayVisualEnemyVisible = Boolean(status.visualEnemyVisible);
+      this.autoplayVisualEnemyCentered = Boolean(status.visualEnemyCentered);
+      this.autoplayVisualEnemyYaw = Number.isFinite(Number(status.visualEnemyYaw)) ? Number(status.visualEnemyYaw) : 0;
+      this.autoplayVisualEnemyFireReady = Boolean(status.visualEnemyFireReady);
+      this.autoplayEnemyCombatYaw = Number.isFinite(Number(status.enemyCombatYaw)) ? Number(status.enemyCombatYaw) : 0;
       this.autoplayStrategyName = status.strategyName || this.autoplayStrategyName;
       this.autoplayStrategyContext = status.strategyContext || this.autoplayStrategyContext || "unknown";
       this.autoplayStrategyPriority = status.strategyPriority || 0;
@@ -1794,6 +2079,9 @@
       this.autoplayHealthZeroScore = status.healthZeroScore || 0;
       this.autoplayHealthActiveColumns = status.healthActiveColumns || 0;
       this.autoplayHealthActiveCells = status.healthActiveCells || 0;
+      this.autoplayHealthEstimatedPercent = Number.isFinite(Number(status.healthEstimatedPercent))
+        ? Number(status.healthEstimatedPercent)
+        : Number(this.autoplayHealthSensor?.value ?? this.autoplayHealthSensor?.health ?? this.autoplayHealthEstimatedPercent ?? 100);
       this.autoplayMilestones = status.milestones || this.autoplayMilestones || null;
     }
 
@@ -1814,10 +2102,10 @@
       }
 
       const texture = typeof provider.getFramebufferTexture === "function"
-        ? provider.getFramebufferTexture("doom")
+        ? provider.getFramebufferTexture(RAW_FRAMEBUFFER_TARGET)
         : null;
       const status = typeof provider.status === "function" ? provider.status() : null;
-      provider.setFrameState("doom", {
+      provider.setFrameState(RAW_FRAMEBUFFER_TARGET, {
         width: WIDTH,
         height: HEIGHT,
         format: texture ? "rgba8unorm-gpu-texture" : "paletted-8bit",
@@ -1835,7 +2123,14 @@
       }
 
       const frame = state?.framebuffer || {};
+      const gpuHud = this.resolveGpuHudOverlay(state);
       const probeTurn = this.resolveGpuHudProbeTurn();
+      const compassHud = this.resolveGpuHudCompassState(state);
+      const enemyCircle = this.resolveGpuHudEnemyCircle(state);
+      if (typeof provider.setHudOverlayEnabled === "function") {
+        provider.setHudOverlayEnabled(Boolean(this.autoplayEnabled && this.visualSensorEnabled && state));
+      }
+
       const kairos = Math.max(
         Number(this.autoplayTargetConfidence || 0),
         Number(this.autoplayCornerSignal || 0),
@@ -1844,14 +2139,49 @@
         this.autoplayRecoveryFrames > 0 ? 0.7 : 0
       );
       provider.setHudOverlayState({
+        contractVersion: Number(gpuHud?.contractVersion ?? gpuHud?.ContractVersion ?? 1),
+        contractName: String(gpuHud?.contractName || gpuHud?.ContractName || "DoomGpuHudOverlay"),
+        featureFlags: gpuHud?.featureFlags || gpuHud?.FeatureFlags || [],
+        rawFramebufferTarget: String(gpuHud?.rawFramebufferTarget || gpuHud?.RawFramebufferTarget || RAW_FRAMEBUFFER_TARGET),
+        rawFrameTarget: gpuHud?.rawFrameTarget || gpuHud?.RawFrameTarget || null,
+        hudTarget: String(gpuHud?.hudTarget || gpuHud?.HudTarget || HUD_COMPOSITE_TARGET),
+        hudFrameTarget: gpuHud?.hudFrameTarget || gpuHud?.HudFrameTarget || null,
+        analysisCaptureSource: String(gpuHud?.analysisCaptureSource || gpuHud?.AnalysisCaptureSource || RAW_FRAMEBUFFER_WIRE_NAME),
+        analysisFrameTarget: gpuHud?.analysisFrameTarget || gpuHud?.AnalysisFrameTarget || null,
+        displaySource: String(gpuHud?.displaySource || gpuHud?.DisplaySource || HUD_COMPOSITE_WIRE_NAME),
+        displayFrameTarget: gpuHud?.displayFrameTarget || gpuHud?.DisplayFrameTarget || null,
+        readbackPolicy: String(gpuHud?.readbackPolicy || gpuHud?.ReadbackPolicy || "none"),
+        readback: gpuHud?.readback || gpuHud?.Readback || null,
+        frameToken: gpuHud?.frameToken || gpuHud?.FrameToken || null,
+        rectangleLayout: String(gpuHud?.rectangleLayout || gpuHud?.RectangleLayout || "rect8:left,top,right,bottom,r,g,b,alpha"),
+        rectangleBufferLayout: gpuHud?.rectangleBufferLayout || gpuHud?.RectangleBufferLayout || null,
+        panelLayout: String(gpuHud?.panelLayout || gpuHud?.PanelLayout || "panel16"),
+        panelBufferLayout: gpuHud?.panelBufferLayout || gpuHud?.PanelBufferLayout || null,
         enabled: Boolean(this.autoplayEnabled && this.visualSensorEnabled && state),
         heatmapEnabled: Boolean(this.visualSensorEnabled),
-        cells: this.createGpuHudCells(frame),
+        cells: this.createGpuHudCells(state, frame),
+        panelValues: this.createGpuHudPanelValues(state, frame),
+        rectangleValues: this.createGpuHudRectangleValues(state),
+        rectangles: this.createGpuHudRectangles(state, frame),
+        enemyCircle,
         kairos: this.clampHudUnit(kairos),
         useProbeTurn: probeTurn,
-        enemyConfidence: this.clampHudUnit(Number(frame.enemyConfidence ?? this.autoplayEnemyConfidence ?? 0)),
-        depthEstimate: Math.max(0, Math.min(1.5, Number(frame.depthEstimate ?? this.autoplayDepthEstimate ?? 1)))
+        enemyConfidence: this.clampHudUnit(Number(enemyCircle?.confidence ?? enemyCircle?.Confidence ?? 0)),
+        depthEstimate: Math.max(0, Math.min(1.5, Number(frame.depthEstimate ?? this.autoplayDepthEstimate ?? 1))),
+        compassHeading: compassHud.heading,
+        compassUsable: compassHud.usable,
+        compassYaw: compassHud.yaw,
+        compassConfidence: compassHud.confidence
       });
+
+      const gpuAisthesisState = this.createGpuAisthesisState(state, frame);
+      if (typeof provider.setGpuAisthesisState === "function") {
+        provider.setGpuAisthesisState(gpuAisthesisState);
+      }
+
+      if (typeof provider.setGpuSpatialReasoningState === "function") {
+        provider.setGpuSpatialReasoningState(this.createGpuSpatialReasoningState(state, frame, gpuAisthesisState));
+      }
     }
 
     resolveGpuHudProbeTurn() {
@@ -1870,7 +2200,44 @@
       return 0;
     }
 
-    createGpuHudCells(frame) {
+    resolveGpuHudCompassState(state) {
+      const compass = state?.compassSensor || state?.CompassSensor || this.autoplayCompassSensor || {};
+      const heading = Number(compass.heading ?? compass.Heading ?? this.compassHeading ?? 0);
+      const confidence = this.clampHudUnit(Number(compass.confidence ?? compass.Confidence ?? 0));
+      const usable = Number.isFinite(heading)
+        && confidence >= 0.12
+        && compass.headingUsable !== false
+        && compass.HeadingUsable !== false
+        && !compass.headingUncertain
+        && !compass.HeadingUncertain;
+      const action = this.autoplayLastAction || {};
+      const yaw = Number(
+        state?.recommendedYaw
+        ?? state?.autoplayState?.recommendedYaw
+        ?? this.autoplayAutoplayState?.recommendedYaw
+        ?? this.autoplayRouteFallbackYaw
+        ?? action.turnYaw
+        ?? 0);
+
+      return {
+        heading: Number.isFinite(heading) ? ((heading % 360) + 360) % 360 : 0,
+        usable,
+        yaw: Number.isFinite(yaw) ? Math.max(-90, Math.min(90, yaw)) : 0,
+        confidence
+      };
+    }
+
+    createGpuHudCells(state, frame) {
+      const gpuHud = this.resolveGpuHudOverlay(state);
+      const projectedCells = gpuHud?.cells || gpuHud?.Cells || gpuHud?.heatCells || gpuHud?.HeatCells || [];
+      if (Array.isArray(projectedCells) && projectedCells.length > 0) {
+        const cells = projectedCells.slice(0, 81).map(value => this.clampHudUnit(Number(value || 0)));
+        while (cells.length < 81) {
+          cells.push(0);
+        }
+        return cells;
+      }
+
       const cells = new Array(81).fill(0);
       if (!frame || typeof frame !== "object") {
         return cells;
@@ -1894,6 +2261,349 @@
       }
 
       return cells;
+    }
+
+    createGpuHudRectangleValues(state) {
+      const gpuHud = this.resolveGpuHudOverlay(state);
+      const projectedValues = gpuHud?.rectangleValues || gpuHud?.RectangleValues || gpuHud?.rectValues || gpuHud?.RectValues || [];
+      if (!Array.isArray(projectedValues) && !ArrayBuffer.isView(projectedValues)) {
+        return [];
+      }
+
+      return Array.from(projectedValues)
+        .slice(0, 128)
+        .map(value => {
+          const numeric = Number(value || 0);
+          return Number.isFinite(numeric) ? numeric : 0;
+        });
+    }
+
+    createGpuHudRectangles(state, frame) {
+      const gpuHud = this.resolveGpuHudOverlay(state);
+      const projectedRects = gpuHud?.rectangles || gpuHud?.Rectangles || [];
+      if (!Array.isArray(projectedRects) || projectedRects.length <= 0) {
+        return [];
+      }
+
+      return projectedRects
+        .map(rect => this.normalizeGpuHudDirectRect(rect))
+        .filter(Boolean)
+        .slice(0, 16);
+    }
+
+    resolveGpuHudOverlay(state) {
+      const debugOverlay = this.autoplayDebugOverlay
+        || this.autoplayAutoplayState?.debugOverlay
+        || this.autoplayAutoplayState?.DebugOverlay
+        || state?.debugOverlay
+        || state?.DebugOverlay
+        || state?.autoplayState?.debugOverlay
+        || state?.autoplayState?.DebugOverlay
+        || {};
+      return debugOverlay.gpuHud
+        || debugOverlay.GpuHud
+        || this.autoplayAutoplayState?.gpuHud
+        || this.autoplayAutoplayState?.GpuHud
+        || state?.gpuHud
+        || state?.GpuHud
+        || null;
+    }
+
+    resolveGpuHudEnemyCircle(state) {
+      const debugOverlay = this.autoplayDebugOverlay
+        || this.autoplayAutoplayState?.debugOverlay
+        || this.autoplayAutoplayState?.DebugOverlay
+        || state?.debugOverlay
+        || state?.DebugOverlay
+        || state?.autoplayState?.debugOverlay
+        || state?.autoplayState?.DebugOverlay
+        || {};
+      const circle = debugOverlay.enemyCircle
+        || debugOverlay.EnemyCircle
+        || this.autoplayAutoplayState?.enemyCircle
+        || this.autoplayAutoplayState?.EnemyCircle
+        || state?.enemyCircle
+        || state?.EnemyCircle
+        || null;
+      if (!circle || typeof circle !== "object") {
+        return null;
+      }
+
+      const confidence = this.clampHudUnit(Number(circle.confidence ?? circle.Confidence ?? 0));
+      if (!Boolean(circle.active ?? circle.Active) || confidence < 0.24) {
+        return null;
+      }
+
+      return circle;
+    }
+
+    createGpuAisthesisState(state, frame) {
+      const debugOverlay = this.autoplayDebugOverlay
+        || this.autoplayAutoplayState?.debugOverlay
+        || this.autoplayAutoplayState?.DebugOverlay
+        || state?.debugOverlay
+        || state?.DebugOverlay
+        || state?.autoplayState?.debugOverlay
+        || state?.autoplayState?.DebugOverlay
+        || {};
+      const projected = debugOverlay.gpuAisthesis
+        || debugOverlay.GpuAisthesis
+        || this.autoplayAutoplayState?.gpuAisthesis
+        || this.autoplayAutoplayState?.GpuAisthesis
+        || state?.gpuAisthesis
+        || state?.GpuAisthesis
+        || null;
+      if (projected && typeof projected === "object") {
+        return projected;
+      }
+
+      const combat = this.clampHudUnit(Number(frame?.enemyConfidence ?? this.autoplayEnemyConfidence ?? 0)) > 0.08;
+      const door = Math.max(
+        Number(frame?.firstDoorVision9x9Score || 0),
+        Number(frame?.firstDoorVision9x9RedScore || 0),
+        Number(this.autoplayUseProbeConfidence || 0)) > 0.04;
+      const features = ["vision-heatmap", "edge-detect", "mask9x9-texture"];
+      if (door) {
+        features.push("red-panel-detect");
+      }
+      if (combat) {
+        features.push("enemy-direction", "projectile-flow");
+      }
+
+      const kairos = state?.pipelineState?.krisis?.kairos
+        || state?.pipelineState?.Krisis?.Kairos
+        || this.autoplayAutoplayState?.pipelineState?.krisis?.kairos
+        || this.autoplayAutoplayState?.PipelineState?.Krisis?.Kairos
+        || {};
+      const topology = state?.pipelineState?.noesis?.topology
+        || state?.pipelineState?.Noesis?.Topology
+        || this.autoplayAutoplayState?.pipelineState?.noesis?.topology
+        || this.autoplayAutoplayState?.PipelineState?.Noesis?.Topology
+        || {};
+      const stateVector = [
+        this.clampHudUnit(Number(kairos.logos ?? kairos.Logos ?? 0)),
+        this.clampHudUnit(Number(kairos.pathos ?? kairos.Pathos ?? 0)),
+        this.clampHudUnit(Number(kairos.ethos ?? kairos.Ethos ?? 0)),
+        this.clampHudUnit(Number(this.autoplayRouteConfidence ?? state?.routeConfidence ?? 0)),
+        this.clampHudUnit(Number(this.autoplayFirstDoorRouteEvidence ?? state?.firstDoorRouteEvidence ?? 0)),
+        this.clampHudUnit(Number(this.autoplayUseProbeConfidence ?? state?.useProbeConfidence ?? 0)),
+        this.clampHudUnit(Number(topology.wallDistanceNormalized ?? topology.WallDistanceNormalized ?? 1)),
+        this.clampHudUnit(Number(topology.barrelZoneEvidence ?? topology.BarrelZoneEvidence ?? 0)),
+        this.clampHudUnit((Number(topology.centerCorridorAlignment ?? topology.CenterCorridorAlignment ?? 0) + 1) / 2),
+        this.clampHudUnit(combat ? 1 : 0),
+        this.clampHudUnit(Math.max(Number(frame?.enemyConfidence ?? 0), Number(this.autoplayEnemyConfidence ?? 0))),
+        this.clampHudUnit(Number(state?.zoeLethalRisk ?? this.autoplayZoeLethalRisk ?? 0)),
+        this.clampHudUnit(Boolean(state?.lowHealth ?? this.autoplayLowHealth) ? 1 : 0),
+        this.clampHudUnit(Boolean(this.autoplayLastAction?.move === "forward" || this.autoplayLastAction?.moveForward) ? 1 : 0),
+        this.clampHudUnit(Math.abs(Number(this.autoplayLastAction?.yaw ?? this.autoplayLastAction?.turnYaw ?? 0)) / 32),
+        this.clampHudUnit(Boolean(this.autoplayLastAction?.use || this.autoplayLastAction?.useKey) ? 1 : 0)
+      ];
+      const matrixValues = [5, 1, 16, stateVector.length, ...stateVector];
+
+      return {
+        contractVersion: 1,
+        contractName: "DoomGpuAisthesis",
+        enabled: Boolean(this.autoplayEnabled && this.visualSensorEnabled && state),
+        inputTarget: RAW_FRAMEBUFFER_TARGET,
+        inputFrameTarget: GPU_CONTRACTS.rawFramebufferFrameTarget("analysis"),
+        hudTarget: HUD_COMPOSITE_TARGET,
+        hudFrameTarget: GPU_CONTRACTS.hudCompositeFrameTarget("display"),
+        captureSource: RAW_FRAMEBUFFER_WIRE_NAME,
+        captureFrameTarget: GPU_CONTRACTS.rawFramebufferFrameTarget("analysis"),
+        readbackPolicy: "debug-only",
+        readback: {
+          kind: "DebugOnly",
+          wireName: "debug-only",
+          allowsSummary: true,
+          allowsFullReadback: true,
+          debugOnly: true
+        },
+        frameToken: GPU_CONTRACTS.frameToken("gpu-aisthesis-js-adapter"),
+        output: combat ? "vector+mask+heatmap" : "heatmap+vector",
+        maskTextureEnabled: true,
+        maskTextureTarget: GPU_AISTHESIS_MASK_TARGET,
+        maskTexture: GPU_CONTRACTS.aisthesisMaskTextureTarget(),
+        maskTextureLayout: GPU_AISTHESIS_MASK_LAYOUT,
+        visionHeatmap: true,
+        edgeDetect: true,
+        cornerDetect: Boolean(this.autoplayCornerSignal > 0.08),
+        redPanelDetect: door,
+        enemyDirection: combat,
+        projectileFlow: combat,
+        features,
+        matrixLayout: "matrix:kind,rows,columns,count,values",
+        matrixBufferLayout: {
+          name: "matrix",
+          version: 1,
+          stride: 0,
+          maxItems: 0,
+          maxFloats: 512,
+          fields: ["kind", "rows", "columns", "count", "values"],
+          summary: "matrix v1 max512"
+        },
+        matrixKinds: ["ctg-state"],
+        matrixKindSummary: "matrices=ctg-state",
+        stateVector,
+        matrixValues,
+        matrixCount: 1,
+        matrixFloatCount: matrixValues.length,
+        featureCount: features.length,
+        stateVectorLayout: "state16:route,loop,door,combat,zoe,logos,pathos,ethos,topology,use",
+        stateVectorBufferLayout: {
+          name: "state16",
+          version: 1,
+          stride: 16,
+          maxItems: 1,
+          maxFloats: 16,
+          fields: ["route", "loop", "door", "combat", "zoe", "logos", "pathos", "ethos", "topology", "use"],
+          summary: "state16 v1 stride16 max1"
+        }
+      };
+    }
+
+    createGpuSpatialReasoningState(state, frame, gpuAisthesisState) {
+      const debugOverlay = this.autoplayDebugOverlay
+        || this.autoplayAutoplayState?.debugOverlay
+        || this.autoplayAutoplayState?.DebugOverlay
+        || state?.debugOverlay
+        || state?.DebugOverlay
+        || state?.autoplayState?.debugOverlay
+        || state?.autoplayState?.DebugOverlay
+        || {};
+      const projected = debugOverlay.gpuSpatialReasoning
+        || debugOverlay.GpuSpatialReasoning
+        || this.autoplayAutoplayState?.gpuSpatialReasoning
+        || this.autoplayAutoplayState?.GpuSpatialReasoning
+        || state?.gpuSpatialReasoning
+        || state?.GpuSpatialReasoning
+        || null;
+      if (projected && typeof projected === "object") {
+        return projected;
+      }
+
+      const aisthesis = gpuAisthesisState || this.createGpuAisthesisState(state, frame);
+      return {
+        contractVersion: 1,
+        contractName: "DoomGpuSpatialReasoning",
+        enabled: Boolean(aisthesis?.enabled ?? aisthesis?.Enabled),
+        inputSource: GPU_AISTHESIS_FEATURE_TARGET,
+        matrixSource: GPU_AISTHESIS_MATRIX_TARGET,
+        maskTextureSource: aisthesis?.maskTextureTarget || aisthesis?.MaskTextureTarget || GPU_AISTHESIS_MASK_TARGET,
+        maskTexture: aisthesis?.maskTexture || aisthesis?.MaskTexture || GPU_CONTRACTS.aisthesisMaskTextureTarget(),
+        maskTextureLayout: aisthesis?.maskTextureLayout || aisthesis?.MaskTextureLayout || GPU_AISTHESIS_MASK_LAYOUT,
+        outputTarget: GPU_SPATIAL_OUTPUT_TARGET,
+        inputFrameTarget: aisthesis?.inputFrameTarget || aisthesis?.InputFrameTarget || GPU_CONTRACTS.rawFramebufferFrameTarget("analysis"),
+        hudFrameTarget: aisthesis?.hudFrameTarget || aisthesis?.HudFrameTarget || GPU_CONTRACTS.hudCompositeFrameTarget("display"),
+        readbackPolicy: "runtime-summary",
+        readback: {
+          kind: "RuntimeSummary",
+          wireName: "runtime-summary",
+          allowsSummary: true,
+          allowsFullReadback: false,
+          debugOnly: false
+        },
+        frameToken: GPU_CONTRACTS.frameToken("gpu-spatial-js-adapter"),
+        featureFlags: ["topos-reduce", "route-reduce", "threat-reduce", "zoe-reduce", "ctg-normalize", "mask-texture-reduce"],
+        output: "summary",
+        outputVectorLayout: {
+          name: "spatial32",
+          version: 1,
+          stride: 32,
+          maxItems: 1,
+          maxFloats: 32,
+          fields: GPU_SPATIAL_OUTPUT_FIELDS,
+          summary: "spatial32 v1 stride32 max1"
+        },
+        outputFloatCount: 32,
+        matrixCount: Number(aisthesis?.matrixCount ?? aisthesis?.MatrixCount ?? aisthesis?.matrices?.length ?? aisthesis?.Matrices?.length ?? 0) || 0,
+        matrixFloatCount: Number(aisthesis?.matrixFloatCount ?? aisthesis?.MatrixFloatCount ?? aisthesis?.matrixValues?.length ?? aisthesis?.MatrixValues?.length ?? 0) || 0,
+        featureCount: Number(aisthesis?.featureCount ?? aisthesis?.FeatureCount ?? aisthesis?.features?.length ?? aisthesis?.Features?.length ?? 0) || 0,
+        summary: "spatial=dto-fallback mask9x9 spatial32"
+      };
+    }
+
+    normalizeGpuHudDirectRect(rect) {
+      if (!rect || typeof rect !== "object") {
+        return null;
+      }
+
+      const left = Number(rect.left ?? rect.Left ?? 0);
+      const top = Number(rect.top ?? rect.Top ?? 0);
+      const width = Number(rect.width ?? rect.Width ?? 0);
+      const height = Number(rect.height ?? rect.Height ?? 0);
+      if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return null;
+      }
+
+      const color = rect.color || rect.Color || [];
+      return {
+        kind: String(rect.kind || rect.Kind || "diagnostic").toLowerCase(),
+        left,
+        top,
+        width,
+        height,
+        score: this.clampHudUnit(Number(rect.score ?? rect.Score ?? rect.confidence ?? rect.Confidence ?? 1)),
+        alpha: this.clampHudUnit(Number(rect.alpha ?? rect.Alpha ?? 0.68)),
+        color: Array.isArray(color) || ArrayBuffer.isView(color)
+          ? Array.from(color).slice(0, 3).map(value => this.clampHudUnit(Number(value || 0)))
+          : undefined
+      };
+    }
+
+    createGpuHudPanelValues(state, frame) {
+      const gpuHud = this.resolveGpuHudOverlay(state);
+      const projectedValues = gpuHud?.panelValues || gpuHud?.PanelValues || [];
+      if (Array.isArray(projectedValues) && projectedValues.length > 0) {
+        const values = projectedValues.slice(0, 16).map(value => this.clampHudUnit(Number(value || 0)));
+        while (values.length < 16) {
+          values.push(0);
+        }
+        return values;
+      }
+
+      const pipeline = this.autoplayPipelineState || {};
+      const noesis = pipeline.noesis || pipeline.Noesis || {};
+      const krisis = pipeline.krisis || pipeline.Krisis || {};
+      const kairos = krisis.kairos || krisis.Kairos || this.autoplayKairosPriorityAxis || {};
+      const kinesis = pipeline.kinesis || pipeline.Kinesis || {};
+      const values = this.autoplayDebugRouteValues || {};
+      const routeConfidence = this.clampHudUnit(Number(this.autoplayRouteConfidence ?? this.autoplayAutoplayState?.routeConfidence ?? values.routeConfidence ?? 0));
+      const loopBudget = this.clampHudUnit(Math.max(
+        Number(values.routePivotBudget || 0) > 0 ? Number(values.routePivotUsed || 0) / Number(values.routePivotBudget || 1) : 0,
+        Number(values.routeSlideBudget || 0) > 0 ? Number(values.routeSlideUsed || 0) / Number(values.routeSlideBudget || 1) : 0,
+        Number(values.routeBackoffBudget || 0) > 0 ? Number(values.routeBackoffUsed || 0) / Number(values.routeBackoffBudget || 1) : 0,
+        values.routeLoopBudgetExceeded ? 1 : 0
+      ));
+      const action = this.autoplayLastAction || {};
+      const actionActive = action.move && action.move !== "none" || action.turn && action.turn !== "none" || action.use || action.fire;
+      const combat = this.clampHudUnit(Math.max(
+        Number(frame?.enemyConfidence ?? this.autoplayEnemyConfidence ?? 0),
+        Number(this.autoplayAudioEnemyConfidence || 0),
+        action.fire ? 1 : 0
+      ));
+      const zoe = this.clampHudUnit(Math.max(
+        this.autoplayPipelineState?.kinesis?.zoe?.vetoed || this.autoplayPipelineState?.Kinesis?.Zoe?.Vetoed ? 1 : 0,
+        Number(this.autoplayPipelineState?.kinesis?.zoe?.lethalRisk ?? this.autoplayPipelineState?.Kinesis?.Zoe?.LethalRisk ?? 0),
+        this.autoplayHealthEstimatedPercent > 0 && this.autoplayHealthEstimatedPercent < 50 ? 0.55 : 0
+      ));
+      return [
+        this.clampHudUnit(Math.max(Number(frame?.gameplayLuma || 0), Number(frame?.blueFloorScore || 0), Number(frame?.spawnCorridorGapScore || 0))),
+        this.clampHudUnit(Math.max(Number(noesis.confidenceFusion || noesis.ConfidenceFusion || 0), routeConfidence, Number(values.routeTopologyBarrelZoneEvidence || 0))),
+        this.clampHudUnit(Math.max(Number(kairos.logos || kairos.Logos || 0), Number(kairos.pathos || kairos.Pathos || 0), Number(kairos.ethos || kairos.Ethos || 0))),
+        this.clampHudUnit(Math.max(actionActive ? 0.72 : 0, Number(kinesis.actionRepeatFrames || kinesis.ActionRepeatFrames || 0) / 30)),
+        routeConfidence,
+        loopBudget,
+        this.clampHudUnit(Math.max(Number(this.autoplayTargetConfidence || 0), Number(this.autoplayCornerSignal || 0), Number(this.autoplayUseProbeConfidence || 0))),
+        combat,
+        zoe,
+        this.clampHudUnit(Number(kairos.logos || kairos.Logos || 0)),
+        this.clampHudUnit(Number(kairos.pathos || kairos.Pathos || 0)),
+        this.clampHudUnit(Number(kairos.ethos || kairos.Ethos || 0)),
+        this.clampHudUnit(Number(values.routeTopologyWallDistanceNormalized ?? 1)),
+        this.clampHudUnit(Number(values.routeTopologyBarrelZoneEvidence || 0)),
+        this.clampHudUnit((Number(values.routeTopologyCenterCorridorAlignment || 0) + 1) / 2),
+        this.clampHudUnit(Number(this.autoplayUseCooldown || 0) / 90)
+      ];
     }
 
     clampHudUnit(value) {
@@ -2956,6 +3666,175 @@
       return requireDoomNativeAudio("drain")(this);
     }
 
+    resetAutoplaySensorState(reason = "sensor-reset") {
+      this.lastAutoplayStatus = null;
+      this.previousVisionMotionGrid = null;
+      this.previousVisionMotionBaseGrid = null;
+      this.previousWallPatternMotionGrid = null;
+      this.previousWallPatternMotionBaseGrid = null;
+      this.previousVisionMotionSignature = "";
+      this.lastVisualMotionVector = null;
+      this.compassLandmarks = new Map();
+      this.compassHeading = 0;
+      this.sensorInputs = this.createSensorInputMap();
+      this.autoplayUsePulseFrames = 0;
+      this.autoplayUsePulseSpacingFrames = 0;
+      this.autoplayPending = false;
+      this.autoplayMode = this.autoplayEnabled ? "settling" : "disabled";
+      this.autoplayPredictions = 0;
+      this.autoplayReused = 0;
+      this.autoplayStuckFrames = 0;
+      this.autoplayRecoveryFrames = 0;
+      this.autoplayMobilityMode = "none";
+      this.autoplayLoopEscapeFrames = 0;
+      this.autoplaySafetyReason = "none";
+      this.autoplayTargetConfidence = 0;
+      this.autoplaySoundCueActive = false;
+      this.autoplayAuditorySnapshot = null;
+      this.autoplaySpatialSnapshot = null;
+      this.autoplayVisionSensor = null;
+      this.autoplayMotorSensor = null;
+      this.autoplayMovementSensor = null;
+      this.autoplayCompassSensor = null;
+      this.autoplaySpatialSensor = null;
+      this.autoplayHealthSensor = null;
+      this.autoplayCtgCarrier = null;
+      this.autoplayCtgObservedScores = null;
+      this.autoplayToposDecisionCarrier = null;
+      this.autoplayNousCarrier = null;
+      this.autoplayNousDetectorResult = null;
+      this.autoplayActionSignature = "";
+      this.autoplayActionRepeatFrames = 0;
+      this.autoplayMoveSignature = "";
+      this.autoplayMoveRepeatFrames = 0;
+      this.autoplayTurnSignature = "";
+      this.autoplayTurnRepeatFrames = 0;
+      this.autoplayRepeatActionFrames = 0;
+      this.autoplayRepeatTurnFrames = 0;
+      this.autoplayQuantizedStallFrames = 0;
+      this.autoplayQuantizedFrameChange = 255;
+      this.autoplayRegionQuantizedFrameChange = 255;
+      this.autoplayStatusBarQuantizedFrameChange = 255;
+      this.autoplayRegionSignature = "000000";
+      this.autoplayRegion9Signature = "000000000";
+      this.autoplayVision9x9Signature = "0".repeat(81);
+      this.autoplayMotion9Signature = "000000000";
+      this.autoplayMotion9Delta = 255;
+      this.autoplayMotionForwardProgress = 0;
+      this.autoplayMotionObstacleScore = 0;
+      this.autoplayMotionTurnScore = 0;
+      this.autoplayMotionEntranceScore = 0;
+      this.autoplayMotionStallScore = 0;
+      this.autoplayMotionIntent = "idle";
+      this.autoplayFootObstacleScore = 0;
+      this.autoplayPriorFootObstacleScore = 0;
+      this.autoplayFootObstacleFlickerScore = 0;
+      this.autoplayFootObstacleBounceFrames = 0;
+      this.autoplayFootObstacleBandDelta = 0;
+      this.autoplayInputStallFrames = 0;
+      this.autoplayDepthSignature = "0000";
+      this.autoplayDepthEstimate = 1;
+      this.autoplayDepthSignatureDistance = 255;
+      this.autoplayFaceSignature = "0000000000000000";
+      this.autoplayFaceQuantizedFrameChange = 255;
+      this.autoplayCornerSignal = 0;
+      this.autoplaySignatureMatchKind = "none";
+      this.autoplaySignatureMatchDistance = 255;
+      this.autoplayWallSignatureCount = 0;
+      this.autoplayCornerSignatureCount = 0;
+      this.autoplayDepthSignatureCount = 0;
+      this.autoplayWallUseProbeFrames = 0;
+      this.autoplayWallUseProbeStage = 0;
+      this.autoplayWallUseProbeTurn = "left";
+      this.autoplayCornerSuppressFrames = 0;
+      this.autoplayWallDetachFrames = 0;
+      this.autoplayWallDetachTurn = "left";
+      this.autoplayWallSurveyFrames = 0;
+      this.autoplayWallSurveyTurn = "left";
+      this.autoplayWallSurveyDecisionFrames = 0;
+      this.autoplayMapRushCorrectionFrames = 0;
+      this.autoplayMapRushCorrectionTurn = "left";
+      this.autoplayMapRushCorrectionBackFrames = 0;
+      this.autoplayMapDoorSweepFrames = 0;
+      this.autoplayEnemyConfidence = 0;
+      this.autoplayEnemyTurn = "none";
+      this.autoplayEnemyDistance = 1;
+      this.autoplayEnemyCluster = "none";
+      this.autoplayEnemyFireReady = false;
+      this.autoplayEnemyAllRegionPeak = 0;
+      this.autoplayEnemyLateralBias = 0;
+      this.autoplayAudioEnemyConfidence = 0;
+      this.autoplayAudioEnemyDirection = "none";
+      this.autoplayVisualEnemyVisible = false;
+      this.autoplayVisualEnemyCentered = false;
+      this.autoplayVisualEnemyYaw = 0;
+      this.autoplayVisualEnemyFireReady = false;
+      this.autoplayEnemyCombatYaw = 0;
+      this.autoplayStrategyName = "SensorFusionStrafeProbeV3";
+      this.autoplayStrategyContext = "retry-settle";
+      this.autoplayStrategyPriority = 0;
+      this.autoplayDecisionStage = "RetrySettle";
+      this.autoplayEvidenceScore = 0;
+      this.autoplaySemanticScores = null;
+      this.autoplayDecisionTrace = null;
+      this.autoplayAmmoSignature = "";
+      this.autoplayAmmoLikelyEmpty = false;
+      this.autoplayHealthSignature = "";
+      this.autoplayHealthLikelyDead = false;
+      this.autoplayHealthZeroScore = 0;
+      this.autoplayHealthActiveColumns = 0;
+      this.autoplayHealthActiveCells = 0;
+      this.autoplayHealthEstimatedPercent = 100;
+      this.autoplayControlPipeline = "RetrySettle";
+      this.autoplayObjective = "retry-after-death";
+      this.autoplayActiveDetections = ["objective", "health", "hud"];
+      this.autoplaySemanticMemory = null;
+      this.autoplayMilestones = {
+        doorOpened: 0,
+        enemyDefeated: 0,
+        combatFireFrames: 0,
+        enemyConfidencePeak: 0,
+        enemyDropFrames: 0
+      };
+      this.autoplayStageEvaluations = [];
+      this.autoplayKairosPriorityAxis = null;
+      this.autoplayPipelineState = null;
+      this.autoplayGoalState = null;
+      this.autoplayDebugOverlay = null;
+      this.autoplayAutoplayState = null;
+      this.autoplayDebugRouteValues = null;
+      this.autoplayHealthSensor = {
+        active: false,
+        likelyDead: false,
+        retryRequested: false,
+        confidence: 0,
+        zeroScore: 0,
+        activeCells: 0,
+        estimatedPercent: 100,
+        value: 100,
+        health: 100,
+        lowHealth: false,
+        retryReason: "none"
+      };
+      this.autoplayLastAction = self.AIKernelBonsai?.neutralAction?.() || {
+        move: "none",
+        turn: "none",
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      };
+      if (typeof self.AIKernelDoomControlRuntime?.create === "function") {
+        this.controlRuntime = self.AIKernelDoomControlRuntime.create(this.autoplayProfile || {});
+        this.wasmAutoplayReady = true;
+        this.autoplayControllerKind = "control-runtime-shim";
+        this.wasmAutoplayLastError = "";
+      }
+
+      this.updateGpuHudOverlayState(null);
+      this.log("[AUTOPLAY]", "log-info", `sensor state reset: ${reason}.`);
+    }
+
     scheduleAutoplayRetryDispatch(status) {
       requireDoomRetryDispatch("schedule")(this.autoplayRetryDispatch, status, {
         keys: AUTOPLAY_KEYS,
@@ -2964,6 +3843,7 @@
         runtimeState: this.state,
         senseOnly: this.autoplaySenseOnly,
         releaseInputs: () => this.releaseAutoplayInputs(),
+        resetSensors: (phase, reason) => this.resetAutoplaySensorState(`${phase}:${reason}`),
         queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
         logQueued: reason => {
           this.log("[AUTOPLAY]", "log-warn", `retry dispatch queued: reason=${reason}.`);
@@ -2975,9 +3855,13 @@
     processAutoplayRetryDispatch() {
       return requireDoomRetryDispatch("process")(this.autoplayRetryDispatch, {
         cooldownFrames: AUTOPLAY_RETRY_COOLDOWN_FRAMES,
+        settleFrames: AUTOPLAY_RETRY_SETTLE_FRAMES,
+        releaseInputs: () => this.releaseAutoplayInputs(),
         releaseMoveInputs: () => this.releaseAutoplayMoveInputs(),
+        resetSensors: (phase, reason) => this.resetAutoplaySensorState(`${phase}:${reason}`),
         queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
-        logCompleted: reason => this.log("[AUTOPLAY]", "log-info", `retry dispatch completed: reason=${reason}.`)
+        logCompleted: reason => this.log("[AUTOPLAY]", "log-info", `retry dispatch completed: reason=${reason}; settling sensors=${AUTOPLAY_RETRY_SETTLE_FRAMES} frames.`),
+        logSettled: reason => this.log("[AUTOPLAY]", "log-ok", `retry sensor settle completed: reason=${reason}.`)
       });
     }
 
@@ -3342,6 +4226,20 @@
     return requireDoomWadMetadata("buildPaletteCache")(palette);
   }
 
+  function bytesToBase64(bytes) {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+      binary += String.fromCharCode.apply(null, chunk);
+    }
+
+    const encoder = typeof btoa === "function"
+      ? btoa
+      : (typeof window !== "undefined" && typeof window.btoa === "function" ? window.btoa.bind(window) : null);
+    return encoder ? encoder(binary) : "";
+  }
+
   function delay(milliseconds) {
     return new Promise(resolve => window.setTimeout(resolve, milliseconds));
   }
@@ -3359,6 +4257,26 @@
 
   let rendererProviderScriptLoading = null;
 
+  function resolveDoomScriptBase() {
+    const fallback = "/js/";
+    try {
+      const currentScript = document.currentScript;
+      if (currentScript?.src) {
+        return new URL(".", currentScript.src).pathname;
+      }
+
+      const script = Array.from(document.scripts || [])
+        .reverse()
+        .find(item => /(?:^|\/)doom\.js(?:\?|$)/.test(item.src || ""));
+      if (script?.src) {
+        return new URL(".", script.src).pathname;
+      }
+    } catch {
+    }
+
+    return fallback;
+  }
+
   async function ensureDoomRendererProvider(log) {
     let provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
     if (typeof provider?.initializeDoomRenderer === "function") {
@@ -3366,7 +4284,7 @@
     }
 
     if (typeof document !== "undefined") {
-      rendererProviderScriptLoading ||= loadScript("/demo/doom/js/webgpu-provider.js?v=20260618-sensorpanel1")
+      rendererProviderScriptLoading ||= loadScript(`${resolveDoomScriptBase()}webgpu-provider.js?v=${encodeURIComponent(SCRIPT_CACHE_KEY)}`)
         .catch(error => {
           rendererProviderScriptLoading = null;
           if (typeof log === "function") {
@@ -3395,6 +4313,92 @@
     });
   }
 
+  const WEBGPU_ADAPTER_POWER_PREFERENCE = "high-performance";
+  const WEBGPU_ADAPTER_REQUEST_OPTIONS = Object.freeze({
+    powerPreference: WEBGPU_ADAPTER_POWER_PREFERENCE,
+    forceFallbackAdapter: false
+  });
+
+  function cloneWebGpuAdapterRequestOptions() {
+    return {
+      powerPreference: WEBGPU_ADAPTER_REQUEST_OPTIONS.powerPreference,
+      forceFallbackAdapter: WEBGPU_ADAPTER_REQUEST_OPTIONS.forceFallbackAdapter
+    };
+  }
+
+  async function requestPreferredWebGpuAdapter(gpu) {
+    const preferredOptions = cloneWebGpuAdapterRequestOptions();
+    try {
+      const adapter = await gpu.requestAdapter(preferredOptions);
+      if (adapter) {
+        return {
+          adapter,
+          options: preferredOptions,
+          fallbackUsed: false,
+          requestError: ""
+        };
+      }
+    } catch (error) {
+      const fallbackAdapter = await gpu.requestAdapter();
+      return {
+        adapter: fallbackAdapter,
+        options: preferredOptions,
+        fallbackUsed: Boolean(fallbackAdapter),
+        requestError: error instanceof Error ? error.message : String(error)
+      };
+    }
+
+    const fallbackAdapter = await gpu.requestAdapter();
+    return {
+      adapter: fallbackAdapter,
+      options: preferredOptions,
+      fallbackUsed: Boolean(fallbackAdapter),
+      requestError: fallbackAdapter ? "high-performance adapter unavailable; default adapter used" : "WebGPU adapter unavailable"
+    };
+  }
+
+  async function resolveWebGpuAdapterInfo(adapter) {
+    if (!adapter) {
+      return null;
+    }
+
+    try {
+      const info = typeof adapter.requestAdapterInfo === "function"
+        ? await adapter.requestAdapterInfo()
+        : adapter.info;
+      if (!info) {
+        return null;
+      }
+
+      return {
+        vendor: String(info.vendor || ""),
+        architecture: String(info.architecture || ""),
+        device: String(info.device || ""),
+        description: String(info.description || ""),
+        subgroupMinSize: Number(info.subgroupMinSize || 0),
+        subgroupMaxSize: Number(info.subgroupMaxSize || 0)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function summarizeWebGpuAdapterInfo(info) {
+    if (!info || typeof info !== "object") {
+      return "unknown";
+    }
+
+    const parts = [
+      info.description,
+      info.device,
+      info.vendor,
+      info.architecture
+    ]
+      .map(value => String(value || "").trim())
+      .filter(Boolean);
+    return parts.length > 0 ? parts.join(" / ") : "unknown";
+  }
+
   function ensureBrowserWebGpuComputeProvider() {
     if (window.WebGpuComputeProvider) {
       if (!window.webGpuComputeProvider) {
@@ -3414,6 +4418,11 @@
       initialized: false,
       initializing: null,
       adapter: null,
+      adapterInfo: null,
+      adapterSummary: "unknown",
+      adapterRequestOptions: cloneWebGpuAdapterRequestOptions(),
+      adapterRequestFallbackUsed: false,
+      adapterRequestError: "",
       device: null,
       queue: null,
       lastError: "",
@@ -3430,13 +4439,19 @@
           }
 
           try {
-            this.adapter = await navigator.gpu.requestAdapter();
+            const adapterRequest = await requestPreferredWebGpuAdapter(navigator.gpu);
+            this.adapter = adapterRequest.adapter;
+            this.adapterRequestOptions = adapterRequest.options;
+            this.adapterRequestFallbackUsed = adapterRequest.fallbackUsed;
+            this.adapterRequestError = adapterRequest.requestError || "";
             if (!this.adapter) {
               this.usingCpuFallback = true;
               this.lastError = "WebGPU adapter is unavailable.";
               return this.status();
             }
 
+            this.adapterInfo = await resolveWebGpuAdapterInfo(this.adapter);
+            this.adapterSummary = summarizeWebGpuAdapterInfo(this.adapterInfo);
             this.device = await this.adapter.requestDevice();
             this.queue = this.device.queue;
             this.usingCpuFallback = false;
@@ -3457,7 +4472,7 @@
         return this.initializing;
       },
       setFrameState(target, state) {
-        frameStates.set(target || "doom", Object.assign({
+        frameStates.set(target || RAW_FRAMEBUFFER_TARGET, Object.assign({
           providerId: this.providerId,
           backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
           zeroCopy: false,
@@ -3466,13 +4481,13 @@
       },
       setDoomFrameTexture(texture) {
         if (texture) {
-          frameTextures.set("doom", texture);
+          frameTextures.set(RAW_FRAMEBUFFER_TARGET, texture);
         } else {
-          frameTextures.delete("doom");
+          frameTextures.delete(RAW_FRAMEBUFFER_TARGET);
         }
       },
       createBonsaiVisionBinding(target) {
-        const name = target || "doom";
+        const name = target || RAW_FRAMEBUFFER_TARGET;
         const texture = frameTextures.get(name);
         if (texture && !this.usingCpuFallback) {
           return {
@@ -3493,21 +4508,57 @@
         };
       },
       getDoomFrameTexture() {
-        return frameTextures.get("doom") || null;
+        return frameTextures.get(RAW_FRAMEBUFFER_TARGET) || null;
       },
       getFramebufferTexture(target) {
-        return frameTextures.get(target || "doom") || null;
+        return frameTextures.get(target || RAW_FRAMEBUFFER_TARGET) || null;
       },
       getFrameStateBuffer(target) {
-        return frameStates.get(target || "doom") || null;
+        return frameStates.get(target || RAW_FRAMEBUFFER_TARGET) || null;
       },
       status() {
+        const deviceReady = Boolean(this.device && this.queue && !this.usingCpuFallback);
         return {
           providerId: this.providerId,
           name: this.name,
           backend: this.usingCpuFallback ? "cpu-fallback" : this.backendName,
           supported: this.supported,
           initialized: this.initialized,
+          adapterReady: Boolean(this.adapter),
+          deviceReady,
+          adapterPowerPreference: this.adapterRequestOptions?.powerPreference || WEBGPU_ADAPTER_POWER_PREFERENCE,
+          adapterForceFallback: Boolean(this.adapterRequestOptions?.forceFallbackAdapter),
+          adapterRequestFallbackUsed: Boolean(this.adapterRequestFallbackUsed),
+          adapterRequestError: this.adapterRequestError || "",
+          adapterInfo: this.adapterInfo,
+          adapterSummary: this.adapterSummary,
+          rendererInitialized: false,
+          zeroCopy: false,
+          rawTextureReady: false,
+          storageTextureReady: false,
+          gpuBufferReady: false,
+          gpuComputeReady: false,
+          gpuComputeActive: false,
+          hudOverlayReady: false,
+          hudPanelOverlayReady: false,
+          hudPanelDoubleBuffered: false,
+          hudCompositeReady: false,
+          hudCompositeActive: false,
+          hudCompositeDoubleBuffered: false,
+          gpuMemory: {
+            active: false,
+            totalBytes: 0,
+            totalMB: 0,
+            buffersBytes: 0,
+            texturesBytes: 0,
+            framebufferBytes: 0,
+            hudBytes: 0,
+            aisthesisBytes: 0,
+            spatialBytes: 0,
+            note: this.usingCpuFallback ? "cpu-fallback" : "renderer-unavailable"
+          },
+          estimatedGpuMemoryBytes: 0,
+          estimatedGpuMemoryMB: 0,
           usingCpuFallback: this.usingCpuFallback,
           lastError: this.lastError
         };
@@ -3519,9 +4570,13 @@
     return provider;
   }
 
-  function resolveRendererName() {
+  function resolveWebGpuProvider() {
     ensureBrowserWebGpuComputeProvider();
-    const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
+    return window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider || null;
+  }
+
+  function resolveRendererName() {
+    const provider = resolveWebGpuProvider();
     if (provider) {
       const status = typeof provider.status === "function" ? provider.status() : provider;
       return status?.usingCpuFallback === false
@@ -3537,8 +4592,7 @@
   }
 
   function resolveGpuDelegateName() {
-    ensureBrowserWebGpuComputeProvider();
-    const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
+    const provider = resolveWebGpuProvider();
     if (provider) {
       const status = typeof provider.status === "function" ? provider.status() : provider;
       const backend = status?.backend || (status?.usingCpuFallback ? "cpu-fallback" : "browser-webgpu");
@@ -3553,8 +4607,7 @@
   }
 
   function resolveWebGpuQueue() {
-    ensureBrowserWebGpuComputeProvider();
-    const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
+    const provider = resolveWebGpuProvider();
     return provider?.device?.queue || provider?.queue || navigator.gpu?.queue || null;
   }
 

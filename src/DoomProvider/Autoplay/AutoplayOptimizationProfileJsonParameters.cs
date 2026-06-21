@@ -36,6 +36,7 @@ internal static class AutoplayOptimizationProfileJsonParameters
             DoorTransitionArmedFrames = ReadInt(parameters, root, "doorTransitionArmedFrames", defaults.DoorTransitionArmedFrames),
             CombatYawDegrees = ReadInt(parameters, root, "combatYawDegrees", defaults.CombatYawDegrees),
             LowHealthThreshold = ReadInt(parameters, root, "lowHealthThreshold", defaults.LowHealthThreshold),
+            CriticalHealthThreshold = ReadInt(parameters, root, "criticalHealthThreshold", defaults.CriticalHealthThreshold),
             EmergencyEscapeYawDegrees = ReadInt(parameters, root, "emergencyEscapeYawDegrees", defaults.EmergencyEscapeYawDegrees),
             WallAwayYawDegrees = ReadInt(parameters, root, "wallAwayYawDegrees", defaults.WallAwayYawDegrees),
             OpenCruiseYawDegrees = ReadInt(parameters, root, "openCruiseYawDegrees", defaults.OpenCruiseYawDegrees),

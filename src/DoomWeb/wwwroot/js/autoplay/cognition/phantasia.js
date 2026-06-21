@@ -19,7 +19,7 @@
   }
 
   function normalizeRelativeDirection(value) {
-    return value === "left" || value === "right" || value === "center" || value === "behind"
+    return value === "left" || value === "right" || value === "center" || value === "front" || value === "behind"
       ? value
       : null;
   }
@@ -55,6 +55,9 @@
       audioMidEnergy: round2(clamp01(Number(overrides.audioMidEnergy ?? 0))),
       audioHighEnergy: round2(clamp01(Number(overrides.audioHighEnergy ?? 0))),
       audioDominantBand: overrides.audioDominantBand || "none",
+      audioEventDetected: Boolean(overrides.audioEventDetected),
+      audioEventType: String(overrides.audioEventType || "none").toLowerCase(),
+      audioDirection: normalizeRelativeDirection(overrides.audioDirection) || null,
       movementSpeed: round2(clamp01(Number(overrides.movementSpeed ?? 0))),
       motorForward: round2(clampSigned(Number(overrides.motorForward ?? 0))),
       temporalDelta: round2(clamp01(Number(overrides.temporalDelta ?? 0))),
@@ -69,6 +72,8 @@
       spawnCorridorGapScore: round2(clamp01(Number(overrides.spawnCorridorGapScore ?? 0))),
       spawnLandmarkRouteEvidence: round2(clamp01(Number(overrides.spawnLandmarkRouteEvidence ?? 0))),
       computerRoomScore: round2(clamp01(Number(overrides.computerRoomScore ?? 0))),
+      computerPanelScore: round2(clamp01(Number(overrides.computerPanelScore ?? 0))),
+      computerDarkPanelScore: round2(clamp01(Number(overrides.computerDarkPanelScore ?? 0))),
       bridgeDoorScore: round2(clamp01(Number(overrides.bridgeDoorScore ?? 0))),
       healthActiveCells: Number(overrides.healthActiveCells || 0),
       healthZeroScore: round2(clamp01(Number(overrides.healthZeroScore ?? 0))),

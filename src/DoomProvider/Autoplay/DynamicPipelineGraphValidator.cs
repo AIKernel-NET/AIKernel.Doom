@@ -41,7 +41,8 @@ internal static class DynamicPipelineGraphValidator
         {
             if (!UsesHealthOnly(veto.Expression))
             {
-                diagnostics.Add($"Zoe veto '{veto.Expression}' must use only health, hp, or lethalRisk inputs.");
+                diagnostics.Add(
+                    $"Zoe veto '{veto.Expression}' must use only health, hp, lethalRisk, or health-state inputs.");
             }
         }
 
@@ -59,11 +60,24 @@ internal static class DynamicPipelineGraphValidator
             .Replace(">", " ", StringComparison.Ordinal)
             .Replace("&&", " ", StringComparison.Ordinal)
             .Replace("||", " ", StringComparison.Ordinal)
+            .Replace("!", " ", StringComparison.Ordinal)
             .Split([' ', '\t', '(', ')'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         return tokens.All(token =>
-            float.TryParse(token, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
-            || token is "health" or "hp" or "lethalRisk" or "true" or "false");
+        {
+            var normalized = token.ToLowerInvariant();
+            return float.TryParse(token, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
+                || normalized is "health"
+                    or "hp"
+                    or "lethalrisk"
+                    or "lowhealth"
+                    or "criticalhealth"
+                    or "lowhealthgoalfirst"
+                    or "lowhealththreshold"
+                    or "criticalhealththreshold"
+                    or "true"
+                    or "false";
+        });
     }
 
     private static void RequireAny<T>(IReadOnlyList<T> values, string diagnostic, List<string> diagnostics)

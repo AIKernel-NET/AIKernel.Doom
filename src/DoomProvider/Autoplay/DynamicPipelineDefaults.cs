@@ -24,13 +24,21 @@ internal static class DynamicPipelineDefaults
         new("damageLocalization", "health"),
         new("projectileFlow", "visual"),
         new("threatField", "visual"),
+        new("visualEnemyVisible", "visual"),
+        new("audioEnemyConfidence", "audio"),
+        new("audioEnemyStrong", "audio"),
+        new("audioEnemyFront", "audio"),
         new("explorationEntropy", "visual"),
         new("itemBacktrack", "visual"),
         new("goalDirection", "visual"),
         new("safeZone", "visual"),
         new("intentConsistency", "movement"),
         new("movementStability", "movement"),
-        new("confidenceFusion", "visual")
+        new("confidenceFusion", "visual"),
+        new("healthRisk", "health"),
+        new("lowHealthGoalFirst", "health"),
+        new("criticalHealth", "health"),
+        new("fatalHealth", "health")
     ];
 
     public static readonly string[] Priorities =
@@ -59,7 +67,8 @@ internal static class DynamicPipelineDefaults
 
     public static readonly ZoeVetoRule[] ZoeVetoRules =
     [
-        new("hp < 10"),
-        new("lethalRisk > 0.7")
+        new("hp <= 0"),
+        new("criticalHealth && lethalRisk > 0.65"),
+        new("lethalRisk > 0.90")
     ];
 }

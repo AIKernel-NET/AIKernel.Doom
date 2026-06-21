@@ -13,13 +13,39 @@
     "follow-demo-route-to-first-door": "follow-demo-route-to-first-door",
     "recover-via-east-window": "recover-via-east-window",
     "cross-bridge": "reach-bridge",
-    "reach-central-hall": "reach-bridge",
-    "engage-front-enemy": "avoid-enemy",
-    "secure-central-hall": "avoid-enemy",
+    "reach-central-hall": "reach-central-hall",
+    "engage-front-enemy": "engage-front-enemy",
+    "secure-central-hall": "secure-central-hall",
+    "bypass-gatekeeper": "reach-final-room",
+    "reach-final-room": "reach-final-room",
+    "press-exit-switch": "press-exit-switch",
+    "level-clear": "level-clear",
     "enter-computer-control-room": "enter-computer-room",
     "restore-relative-motion": "stabilize-safe-zone",
     "retry-after-death": "stabilize-safe-zone"
   });
+
+  const POST_FIRST_DOOR_OBJECTIVES = Object.freeze([
+    "enter-computer-room",
+    "reach-bridge",
+    "reach-central-hall",
+    "engage-front-enemy",
+    "secure-central-hall",
+    "reach-final-room",
+    "press-exit-switch",
+    "level-clear"
+  ]);
+
+  const PRE_FIRST_DOOR_CANONICAL_OBJECTIVES = Object.freeze([
+    "open-door",
+    "align-first-door",
+    "approach-first-door",
+    "enter-first-door-corridor",
+    "locate-first-door-corridor",
+    "find-corridor-to-first-door",
+    "follow-demo-route-to-first-door",
+    "recover-via-east-window"
+  ]);
 
   function number(value, fallback = 0) {
     const parsed = Number(value);
@@ -50,21 +76,77 @@
     };
   }
 
+  function goalFirstObjective(signals = {}) {
+    if (bool(signals.exitSwitchPressed)) {
+      return "level-clear";
+    }
+
+    if (bool(signals.finalRoomEntered) || number(signals.finalRoomConfidence) >= 0.72) {
+      return "press-exit-switch";
+    }
+
+    if (bool(signals.centralHallEntered) || bool(signals.stairsEntered) || number(signals.doorOpenedCount) > 1) {
+      return "reach-final-room";
+    }
+
+    if (bool(signals.computerRoomEntered) || number(signals.computerRoomConfidence) >= 0.35 || number(signals.bridgeConfidence) >= 0.30) {
+      return "reach-central-hall";
+    }
+
+    return "enter-computer-room";
+  }
+
   function resolveObjectiveRoute(signals = {}) {
     const requested = String(signals?.semanticObjective || signals?.currentObjective || "").trim();
     const canonical = CANONICAL_OBJECTIVE_MAP[requested];
     const firstDoorOpened = bool(signals.firstDoorOpened);
-    if (!firstDoorOpened && (canonical === "reach-bridge" || canonical === "enter-computer-room")) {
+    if (!firstDoorOpened && POST_FIRST_DOOR_OBJECTIVES.includes(canonical)) {
       return objectiveRoute("find-corridor-to-first-door", "find-route", "first-door-locked", requested);
     }
 
-    if (canonical) {
+    const health = number(signals.health, 100);
+    const lowHealth = health > 0 && health < 50;
+    const criticalHealth = health > 0 && health < 18;
+    if (firstDoorOpened && lowHealth) {
+      return objectiveRoute(
+        criticalHealth && !bool(signals.centralHallEntered) && !bool(signals.finalRoomEntered)
+          ? "stabilize-safe-zone"
+          : goalFirstObjective(signals),
+        criticalHealth ? "recover" : "goal-first",
+        criticalHealth ? "low-health" : "low-health-goal-first",
+        requested);
+    }
+
+    if (!firstDoorOpened && health > 0 && health < 18) {
+      return objectiveRoute("stabilize-safe-zone", "recover", "low-health", requested);
+    }
+
+    if (bool(signals.exitSwitchPressed)) {
+      return objectiveRoute("level-clear", "finish", "exit-switch-pressed", requested);
+    }
+
+    if (bool(signals.finalRoomEntered)) {
+      return objectiveRoute("press-exit-switch", "use-exit", "final-room-entered", requested);
+    }
+
+    if (bool(signals.stairsEntered) || number(signals.doorOpenedCount) > 1 || number(signals.finalRoomConfidence) >= 0.45) {
+      return objectiveRoute("reach-final-room", "advance-exit-route", "final-route-evidence", requested);
+    }
+
+    if (canonical && !(firstDoorOpened && PRE_FIRST_DOOR_CANONICAL_OBJECTIVES.includes(canonical))) {
       return objectiveRoute(canonical, "canonical-objective", "canonical-map", requested);
     }
 
-    const health = number(signals.health, 100);
-    if (health > 0 && health < 18) {
-      return objectiveRoute("stabilize-safe-zone", "recover", "low-health", requested);
+    if (bool(signals.centralHallEntered)) {
+      if (number(signals.enemyDefeatedCount) > 0 || bool(signals.ammoLikelyEmpty)) {
+        return objectiveRoute("reach-final-room", "advance-exit-route", "central-hall-cleared", requested);
+      }
+
+      if (number(signals.enemyConfidence) >= 0.18 || number(signals.audioEnemyConfidence) >= 0.18) {
+        return objectiveRoute("engage-front-enemy", "fire-and-advance", "central-hall-enemy", requested);
+      }
+
+      return objectiveRoute("secure-central-hall", "survey-threat", "central-hall-entered", requested);
     }
 
     if (number(signals.enemyConfidence) >= 0.35) {
@@ -86,12 +168,16 @@
       return objectiveRoute("follow-demo-route-to-first-door", "follow-landmark-route", "spawn-landmark-route", requested);
     }
 
-    if (firstDoorOpened && number(signals.bridgeConfidence) >= 0.35) {
+    if (firstDoorOpened && number(signals.bridgeConfidence) >= 0.30) {
       return objectiveRoute("reach-bridge", "navigate-landmark", "bridge-evidence", requested);
     }
 
     if (firstDoorOpened && number(signals.computerRoomConfidence) >= 0.35) {
-      return objectiveRoute("enter-computer-room", "navigate-landmark", "computer-room-evidence", requested);
+      return objectiveRoute(
+        bool(signals.computerRoomEntered) ? "reach-central-hall" : "enter-computer-room",
+        "navigate-landmark",
+        "computer-room-evidence",
+        requested);
     }
 
     if (firstDoorOpened && number(signals.safeZoneConfidence) >= 0.65) {

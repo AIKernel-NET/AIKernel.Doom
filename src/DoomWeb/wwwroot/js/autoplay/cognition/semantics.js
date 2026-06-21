@@ -7,7 +7,10 @@
     "enemy",
     "safe-zone",
     "bridge",
-    "computer-room"
+    "computer-room",
+    "central-hall",
+    "final-room",
+    "exit-switch"
   ]);
 
   function clamp01(value) {
@@ -44,7 +47,10 @@
       enemy: createSymbol("enemy", overrides.enemy),
       safeZone: createSymbol("safe-zone", overrides.safeZone),
       bridge: createSymbol("bridge", overrides.bridge),
-      computerRoom: createSymbol("computer-room", overrides.computerRoom)
+      computerRoom: createSymbol("computer-room", overrides.computerRoom),
+      centralHall: createSymbol("central-hall", overrides.centralHall),
+      finalRoom: createSymbol("final-room", overrides.finalRoom),
+      exitSwitch: createSymbol("exit-switch", overrides.exitSwitch)
     };
   }
 
@@ -95,6 +101,10 @@
         darkAreaScore: 0,
         enemyZoneMatch: false
       },
+      centralHall: {
+        confidence: symbols.centralHall.confidence,
+        entered: false
+      },
       bridge: {
         confidence: symbols.bridge.confidence,
         laneTurn: symbols.bridge.bearing === "left" || symbols.bridge.bearing === "right"
@@ -123,6 +133,7 @@
     next.enemy ||= {};
     next.safeZone ||= {};
     next.computerRoom ||= {};
+    next.centralHall ||= {};
     next.bridge ||= {};
     next.finalRoom ||= {};
     next.motion ||= {};
@@ -162,10 +173,26 @@
       + (number(observation.firstDoorCorridorSignature) * 0.22)
       + ((observation.mapDoorSectorMatch || number(observation.wallUseProbeFrames) > 0 || observation.firstDoorUseAttempted) ? 0.24 : 0)
       + (depthEstimate <= number(observation.doorApproachDepth, 0.86) ? 0.16 : 0));
+    const postDoorTerminalSurface = number(observation.doorOpenedCount) > 0
+      ? Math.max(
+        number(observation.computerPanelScore),
+        number(observation.computerDarkPanelScore),
+        number(observation.computerRoomScore))
+      : 0;
+    const postDoorWeakComputerCue = number(observation.doorOpenedCount) > 0
+      && postDoorTerminalSurface >= 0.32
+      && (greenHazard >= 0.18
+        || number(observation.computerRedLightScore) >= 0.03
+        || number(observation.darkAreaScore) >= 0.02
+        || number(observation.bridgeDoorScore) >= 0.03);
     const computerRoomConfidence = clamp01(
       (number(observation.computerRoomScore) * 0.55)
+      + (number(observation.computerPanelScore) * 0.18)
+      + (number(observation.computerDarkPanelScore) * 0.10)
+      + (number(observation.computerRedLightScore) * 0.08)
       + (number(observation.darkAreaScore) * 0.2)
-      + ((observation.darkZoneEntered || number(observation.doorOpenedCount) > 0) ? 0.25 : 0));
+      + ((observation.darkZoneEntered || number(observation.doorOpenedCount) > 0) ? 0.18 : 0)
+      + (postDoorWeakComputerCue ? 0.12 : 0));
     const bridgeConfidence = clamp01(
       (number(observation.bridgeBrownScore) * 0.48)
       + (greenHazard * 0.26)
@@ -174,6 +201,10 @@
       (observation.finalRoomEntered ? 0.62 : 0)
       + (number(observation.bridgeDoorScore) * 0.22)
       + (number(observation.exitSwitchUseFrames) > 0 ? 0.16 : 0));
+    const centralHallConfidence = clamp01(
+      (observation.centralHallEntered ? 0.62 : 0)
+      + (number(observation.centralHallFrames) / 8 * 0.28)
+      + (number(observation.bridgeBrownScore) * 0.1));
     const enemyConfidence = clamp01(Math.max(
       number(observation.enemyConfidence),
       number(observation.enemyConfidencePeak),
@@ -213,6 +244,8 @@
     next.computerRoom.confidence = round2(computerRoomConfidence);
     next.computerRoom.darkAreaScore = round2(observation.darkAreaScore);
     next.computerRoom.enemyZoneMatch = Boolean(observation.mapEnemyZoneMatch);
+    next.centralHall.confidence = round2(centralHallConfidence);
+    next.centralHall.entered = Boolean(observation.centralHallEntered);
     next.bridge.confidence = round2(bridgeConfidence);
     next.bridge.laneTurn = turn(observation.bridgeLaneTurn);
     next.bridge.greenHazard = round2(greenHazard);
@@ -229,6 +262,9 @@
     updateSymbol(next.symbols.safeZone, safeZoneConfidence, next.safeZone.bearing, "safety");
     updateSymbol(next.symbols.bridge, bridgeConfidence, next.bridge.laneTurn, "bridge-lane");
     updateSymbol(next.symbols.computerRoom, computerRoomConfidence, "none", "computer-room");
+    updateSymbol(next.symbols.centralHall, centralHallConfidence, "none", "central-hall");
+    updateSymbol(next.symbols.finalRoom, finalRoomConfidence, "none", "final-room");
+    updateSymbol(next.symbols.exitSwitch, observation.exitSwitchPressed ? 1 : (number(observation.exitSwitchUseFrames) > 0 ? 0.55 : 0), "none", "exit-switch");
 
     return next;
   }

@@ -27,6 +27,7 @@ internal static class AutoplayOptimizationProfileParameters
             ["doorTransitionArmedFrames"] = profile => profile.DoorTransitionArmedFrames,
             ["combatYawDegrees"] = profile => profile.CombatYawDegrees,
             ["lowHealthThreshold"] = profile => profile.LowHealthThreshold,
+            ["criticalHealthThreshold"] = profile => profile.CriticalHealthThreshold,
             ["emergencyEscapeYawDegrees"] = profile => profile.EmergencyEscapeYawDegrees,
             ["wallAwayYawDegrees"] = profile => profile.WallAwayYawDegrees,
             ["openCruiseYawDegrees"] = profile => profile.OpenCruiseYawDegrees,

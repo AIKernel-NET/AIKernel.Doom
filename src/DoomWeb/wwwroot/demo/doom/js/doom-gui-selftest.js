@@ -226,6 +226,36 @@
       results.push({ name: "controller-debug-log-visible", ok: Boolean(refs.doomControllerDebugLog && refs.doomControllerDebugLogList), detail: "control-top-n" });
       const panelKeys = Array.from(document.querySelectorAll(".doom-sensor-node[data-sensor-panel]")).map(node => node.dataset.sensorPanel).join("|");
       results.push({ name: "sensor-panel-canon-grid", ok: panelKeys === "aisthesis|noesis|krisis|kinesis", detail: panelKeys || "missing" });
+      const aisthesisButtons = document.querySelector('[data-sensor-panel="aisthesis"] .doom-sensor-node-buttons');
+      const aisthesisColumns = aisthesisButtons ? getComputedStyle(aisthesisButtons).gridTemplateColumns : "";
+      const aisthesisColumnCount = /repeat\(\s*2\s*,/i.test(aisthesisColumns)
+        ? 2
+        : (aisthesisColumns.match(/\d+(?:\.\d+)?px/g) || aisthesisColumns.split(" ").filter(Boolean)).length;
+      results.push({
+        name: "aisthesis-primary-two-column",
+        ok: aisthesisColumnCount === 2 || window.matchMedia?.("(max-width: 720px)")?.matches,
+        detail: aisthesisColumns || "missing"
+      });
+      const gpuContracts = window.AIKernelDoomGpuContracts || {};
+      const hudPanelFields = gpuContracts.hudPanelFields || [];
+      const expectedHudPanelFields = ["aisthesis", "noesis", "krisis", "kinesis", "route", "loop", "door", "combat", "zoe", "logos", "pathos", "ethos", "wall", "barrel", "alignment", "use"];
+      const hudPanelFieldOrderOk = expectedHudPanelFields.every((field, index) => hudPanelFields[index] === field);
+      results.push({
+        name: "gpu-hud-panel-field-order",
+        ok: hudPanelFieldOrderOk,
+        detail: hudPanelFields.join("|") || "missing"
+      });
+      const hudPanelRects = gpuContracts.hudPanelRects?.cards || {};
+      const hudPanelRectKeys = ["aisthesis", "noesis", "krisis", "kinesis", "route", "combat", "zoe"];
+      const hudPanelRectsOk = hudPanelRectKeys.every(key => {
+        const rect = hudPanelRects[key];
+        return rect && Number(rect.right) > Number(rect.left) && Number(rect.bottom) > Number(rect.top);
+      });
+      results.push({
+        name: "gpu-hud-panel-rects",
+        ok: hudPanelRectsOk,
+        detail: hudPanelRectKeys.filter(key => hudPanelRects[key]).join("|") || "missing"
+      });
       results.push({
         name: "phainesis-det-panelized",
         ok: Boolean(document.querySelector('[data-sensor-panel="noesis"] [data-sensor-stage="phainesis"] [data-detection-toggle="motion"]')),

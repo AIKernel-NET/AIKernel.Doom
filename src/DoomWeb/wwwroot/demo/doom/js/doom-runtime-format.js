@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const version = "20260619-runtimeformat2";
+  const version = "20260621-runtimeformat-gpu1";
 
   function number(value, fallback = 0) {
     const parsed = Number(value);
@@ -33,22 +33,51 @@
       : "none";
   }
 
+  function routeLoopMetric(route, kind, suffix) {
+    if (kind === "turn-stall") {
+      return number(route[`routePivot${suffix}`]);
+    }
+
+    if (kind === "slide-stall") {
+      return number(route[`routeSlide${suffix}`]);
+    }
+
+    if (kind === "corner-stall") {
+      return number(route[`routeBackoff${suffix}`]);
+    }
+
+    if (kind === "advance-stall") {
+      return number(route[`routeAdvance${suffix}`]);
+    }
+
+    if (kind === "recover-stall") {
+      return number(route[`routeRecover${suffix}`]);
+    }
+
+    return Math.max(
+      number(route[`routePivot${suffix}`]),
+      number(route[`routeSlide${suffix}`]),
+      number(route[`routeBackoff${suffix}`]),
+      number(route[`routeAdvance${suffix}`]),
+      number(route[`routeRecover${suffix}`]));
+  }
+
   function routeDebugText(autoplay) {
     const debugRoute = autoplay.debugRouteValues || {};
     const routeTextureText = debugRoute.routeTextureWallOcclusion ? "/tex!" : "";
     const routeEastText = debugRoute.eastWindowRecoverAnchor ? "/east!" : "";
+    const terminalText = number(debugRoute.postDoorTerminalSurface) > 0
+      || number(debugRoute.computerRoomScore) > 0
+      || number(debugRoute.computerDarkPanelScore) > 0
+      || number(debugRoute.computerPanelScore) > 0
+      ? `/term${fixed(debugRoute.postDoorTerminalSurface)}/comp${fixed(debugRoute.computerRoomScore)}-${fixed(debugRoute.computerDarkPanelScore)}-${fixed(debugRoute.computerPanelScore)}`
+      : "";
     const routeMode = debugRoute.routeMode || autoplay.routeMode || autoplay.autoplayState?.routeMode || "";
     const routeModeText = routeMode ? `/mode=${routeMode}` : "";
     const loopKind = debugRoute.routeLoopKind || autoplay.routeLoopKind || autoplay.autoplayState?.routeLoopKind || "none";
     const loopExceeded = Boolean(debugRoute.routeLoopBudgetExceeded || autoplay.routeLoopBudgetExceeded || autoplay.autoplayState?.routeLoopBudgetExceeded);
-    const loopUsed = Math.max(
-      number(debugRoute.routePivotUsed),
-      number(debugRoute.routeSlideUsed),
-      number(debugRoute.routeBackoffUsed));
-    const loopBudget = Math.max(
-      number(debugRoute.routePivotBudget),
-      number(debugRoute.routeSlideBudget),
-      number(debugRoute.routeBackoffBudget));
+    const loopUsed = routeLoopMetric(debugRoute, loopKind, "Used");
+    const loopBudget = routeLoopMetric(debugRoute, loopKind, "Budget");
     const loopText = loopKind !== "none" || loopExceeded
       ? `/loop=${loopKind}${loopExceeded ? "!" : ""}:${Math.round(loopUsed)}/${Math.round(loopBudget)}`
       : "";
@@ -58,7 +87,7 @@
       `/mo${fixed(debugRoute.motionObstacleScore)}${routeTextureText}${routeEastText}` +
       `/gap${fixed(debugRoute.spawnCorridorGapScore)}` +
       `/sec${fixed(debugRoute.spawnSecretDoorScore)}` +
-      `/lm${fixed(debugRoute.spawnLandmarkRouteEvidence)}${loopText}`;
+      `/lm${fixed(debugRoute.spawnLandmarkRouteEvidence)}${terminalText}${loopText}`;
   }
 
   function milestonesText(status, autoplay) {
@@ -69,6 +98,22 @@
     const routeText = `blue=${fixed(milestones.blueFloorScore)}; court=${fixed(milestones.courtyardScore)}/${milestones.courtyardTurn || "none"}/${milestones.courtyardRescueMode || "none"}/${milestones.courtyardRescueFrames || 0}; secret=${fixed(milestones.spawnSecretDoorScore)}/${milestones.spawnSecretDoorTurn || "none"}; stair=${fixed(milestones.spawnWestStairScore)}/${milestones.spawnWestStairTurn || "none"}; gap=${fixed(milestones.spawnCorridorGapScore)}/${milestones.spawnCorridorGapTurn || "none"}/${milestones.spawnCorridorGapFrames || 0}/yaw${number(autoplay.routeFallbackYaw).toFixed(0)}/${autoplay.spawnCorridorGapActionTurn || "none"}; bridge=${fixed(milestones.bridgeBrownScore)}/${fixed(milestones.bridgeGreenLeft)}-${fixed(milestones.bridgeGreenCenter)}-${fixed(milestones.bridgeGreenRight)}/${milestones.bridgeLaneTurn || "none"}/door${fixed(milestones.bridgeDoorScore)}; corridor=${milestones.firstDoorCorridorLocated ? "yes" : "no"}/${milestones.firstDoorCorridorFrames || 0}/${fixed(milestones.firstDoorCorridorSignature)}/v9${fixed(milestones.firstDoorVision9x9Score)}/r${fixed(milestones.firstDoorVision9x9RedScore)}; deadEnd=${milestones.firstDoorDeadEndTurnFrames || 0}; useSeen=${bool(milestones.firstDoorUseAttempted)}/${fixed(milestones.firstDoorUseSignature)}/3x3${fixed(milestones.firstDoorUse3x3Score)}/${milestones.firstDoorUse3x3Turn || "none"}`;
     const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${fixed(milestones.computerRoomScore)}/${fixed(milestones.computerBlueScore)}/${fixed(milestones.computerRedLightScore)}/${fixed(milestones.computerDarkPanelScore)}/${fixed(milestones.computerPanelScore)}`;
     return `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${fixed(milestones.darkAreaScore)}; luma=${fixed(milestones.gameplayLuma, 1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${fixed(milestones.enemyConfidencePeak)}; drop=${milestones.enemyDropFrames || 0}`;
+  }
+
+  function gpuPathSummary(status = {}) {
+    const resolver = self.AIKernelDoomGpuPathStatus?.resolveGpuPathStatus;
+    if (typeof resolver === "function") {
+      const resolved = resolver(status);
+      return {
+        text: resolved?.text || "game=pending; bonsai=pending; hud=pending; sensor=pending",
+        shortText: resolved?.shortText || "GPU pending"
+      };
+    }
+
+    return {
+      text: "game=pending; bonsai=pending; hud=pending; sensor=pending",
+      shortText: "GPU pending"
+    };
   }
 
   function formatAutoplayText(status) {
@@ -85,7 +130,8 @@
     const strategyText = `${autoplay.strategyName || "unknown"}/${autoplay.strategyContext || "unknown"}/p${autoplay.strategyPriority || 0}`;
     const enemyText = `${fixed(autoplay.enemyConfidence)}/${autoplay.enemyTurn || "none"}/${autoplay.enemyCluster || "none"}/${autoplay.enemyFireReady ? "fire" : "hold"}/${fixed(autoplay.enemyDistance, 2, 1)}/c${fixed(autoplay.enemyCenterCellConfidence)}`;
     const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-    const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/z${fixed(autoplay.healthZeroScore)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+    const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+    const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${fixed(autoplay.healthZeroScore)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
     const retryDispatch = autoplay.retryDispatch || {};
     const retryText = `${retryDispatch.active ? "active" : "idle"}/${retryDispatch.cooldownFrames || 0}/${retryDispatch.reason || "none"}`;
     const movement = autoplay.movementSensor || {};
@@ -124,13 +170,14 @@
     const gpuTimeouts = status?.gpuWaitTimeouts || 0;
     const watchdogText = `watchdog=${status?.watchdogRestarts || 0}/${Math.round(number(status?.watchdogLastStallMs))}ms${status?.watchdogRestarting ? ":restarting" : ""}`;
     const autoplay = formatAutoplayText(status || {});
+    const gpuPath = gpuPathSummary(status || {});
     const droppedFrames = options.droppedFrames || 0;
     const hudControl = status?.hudFlowControl || {};
-    const text = `runtime=${status?.state}; wasm=${status?.wasmLoaded}; wad=${status?.wadLoaded}; model=${status?.modelLoaded}; input=${status?.inputReady}; actionInput=${status?.actionInputReady}; loop=${status?.loopActive}; ${watchdogText}; autoplay=${autoplay.text}; frames=${status?.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status?.gpuDelegate || "pending"}; framebuffer=${status?.framebuffer}`;
+    const text = `runtime=${status?.state}; wasm=${status?.wasmLoaded}; wad=${status?.wadLoaded}; model=${status?.modelLoaded}; input=${status?.inputReady}; actionInput=${status?.actionInputReady}; loop=${status?.loopActive}; ${watchdogText}; autoplay=${autoplay.text}; frames=${status?.frameCount || 0}; fps=${fps}/${targetFps}; work=${workMs}ms; yield=${yieldMs}ms; gpuWait=${gpuWaitMs}ms; gpuTimeouts=${gpuTimeouts}; gpu=${status?.gpuDelegate || "pending"}; gpuPath=${gpuPath.text}; framebuffer=${status?.framebuffer}`;
     return {
       text,
-      html: `<strong>runtime</strong>=${htmlEscape(status?.state)}; wasm=${htmlEscape(status?.wasmLoaded)}; wad=${htmlEscape(status?.wadLoaded)}; model=${htmlEscape(status?.modelLoaded)}; input=${htmlEscape(status?.inputReady)}; actionInput=${htmlEscape(status?.actionInputReady)}; loop=${htmlEscape(status?.loopActive)}; ${htmlEscape(watchdogText)}; autoplay=${htmlEscape(autoplay.text)}; frames=${htmlEscape(status?.frameCount || 0)}; fps=${htmlEscape(fps)}/${htmlEscape(targetFps)}; work=${htmlEscape(workMs)}ms; yield=${htmlEscape(yieldMs)}ms; gpuWait=${htmlEscape(gpuWaitMs)}ms; gpuTimeouts=${htmlEscape(gpuTimeouts)}; gpu=${htmlEscape(status?.gpuDelegate || "pending")}; framebuffer=${htmlEscape(status?.framebuffer)}`,
-      fpsText: `320x200 paletted framebuffer; fps=${fps}; cap=${targetFps}; yield=${yieldMs}ms; gpu=${gpuWaitMs}ms/${gpuTimeouts}; hud=${hudControl.mode || "adaptive"}/drop${droppedFrames}; auto=${status?.autoplay?.enabled ? "on" : "off"}`,
+      html: `<strong>runtime</strong>=${htmlEscape(status?.state)}; wasm=${htmlEscape(status?.wasmLoaded)}; wad=${htmlEscape(status?.wadLoaded)}; model=${htmlEscape(status?.modelLoaded)}; input=${htmlEscape(status?.inputReady)}; actionInput=${htmlEscape(status?.actionInputReady)}; loop=${htmlEscape(status?.loopActive)}; ${htmlEscape(watchdogText)}; autoplay=${htmlEscape(autoplay.text)}; frames=${htmlEscape(status?.frameCount || 0)}; fps=${htmlEscape(fps)}/${htmlEscape(targetFps)}; work=${htmlEscape(workMs)}ms; yield=${htmlEscape(yieldMs)}ms; gpuWait=${htmlEscape(gpuWaitMs)}ms; gpuTimeouts=${htmlEscape(gpuTimeouts)}; gpu=${htmlEscape(status?.gpuDelegate || "pending")}; gpuPath=${htmlEscape(gpuPath.text)}; framebuffer=${htmlEscape(status?.framebuffer)}`,
+      fpsText: `320x200 paletted framebuffer; fps=${fps}; cap=${targetFps}; yield=${yieldMs}ms; gpu=${gpuPath.shortText} ${gpuWaitMs}ms/${gpuTimeouts}; hud=${hudControl.mode || "adaptive"}/drop${droppedFrames}; auto=${status?.autoplay?.enabled ? "on" : "off"}`,
       objectiveText: autoplay.objectiveText,
       pipelineText: autoplay.pipelineText
     };

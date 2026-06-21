@@ -29,7 +29,10 @@ public sealed partial record AutoplayPipelineDefinition
         new() { Id = "enemy", Kind = "threat" },
         new() { Id = "safe-zone", Kind = "safety" },
         new() { Id = "bridge", Kind = "route" },
-        new() { Id = "computer-room", Kind = "route" }
+        new() { Id = "computer-room", Kind = "route" },
+        new() { Id = "central-hall", Kind = "route" },
+        new() { Id = "final-room", Kind = "route" },
+        new() { Id = "exit-switch", Kind = "terminal" }
     ];
 
     /// <summary>
@@ -42,6 +45,12 @@ public sealed partial record AutoplayPipelineDefinition
         new() { Id = "reach-bridge", Intent = "bridge", Means = "advance-route", Priority = 45 },
         new() { Id = "avoid-enemy", Intent = "enemy", Means = "kite-or-fire", Priority = 80 },
         new() { Id = "enter-computer-room", Intent = "computer-room", Means = "advance-route", Priority = 40 },
+        new() { Id = "reach-central-hall", Intent = "central-hall", Means = "cross-bridge-and-open-door", Priority = 68 },
+        new() { Id = "engage-front-enemy", Intent = "enemy", Means = "fire-and-advance", Priority = 84 },
+        new() { Id = "secure-central-hall", Intent = "central-hall", Means = "survey-threat", Priority = 66 },
+        new() { Id = "reach-final-room", Intent = "final-room", Means = "bypass-or-post-combat-route", Priority = 72 },
+        new() { Id = "press-exit-switch", Intent = "exit-switch", Means = "align-approach-use", Priority = 92 },
+        new() { Id = "level-clear", Intent = "exit-switch", Means = "complete", Priority = 100 },
         new() { Id = "stabilize-safe-zone", Intent = "safe-zone", Means = "recover-and-relocalize", Priority = 90 }
     ];
 

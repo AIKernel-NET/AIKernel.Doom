@@ -321,15 +321,31 @@
     const brightness = (red + green + blue) / 3;
     const redHue = hueInRange(hsv.hue, 348, 18);
     const redDominance = red - Math.max(green * 1.08, blue * 1.18);
+    const softRedDominance = red - Math.max(green * 0.94, blue * 1.02);
     const orangeLeak = green > blue + 8 && green >= red * 0.54;
-    if (!redHue || orangeLeak || redDominance < 16 || hsv.saturation < 0.34 || hsv.value < 0.14) {
+    const darkRedPanel = redHue
+      && red >= 34
+      && softRedDominance >= 7
+      && green <= red * 0.82
+      && blue <= red * 0.78
+      && hsv.saturation >= 0.22
+      && hsv.value >= 0.08
+      && hsv.value <= 0.56;
+    if (!darkRedPanel && (!redHue || orangeLeak || redDominance < 16 || hsv.saturation < 0.34 || hsv.value < 0.14)) {
       return 0;
     }
 
-    return clamp01(
+    const brightRedScore = clamp01(
       (redDominance / 148) * 0.48
       + hsv.saturation * 0.28
       + clamp01((brightness - 28) / 156) * 0.24);
+    const darkRedScore = darkRedPanel
+      ? clamp01(
+        (softRedDominance / 96) * 0.46
+        + hsv.saturation * 0.30
+        + clamp01((0.58 - hsv.value) / 0.50) * 0.24)
+      : 0;
+    return Math.max(brightRedScore, darkRedScore);
   }
 
   function scoreComputerRoomBluePaletteIndex(index, rgbaBytes) {

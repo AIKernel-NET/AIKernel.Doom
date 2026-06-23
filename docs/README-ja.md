@@ -23,7 +23,7 @@ DOOM の配布パッケージではありません。`DOOM1.WAD` や Bonsai GGUF
 
 共有の repository boundary、v0.1.3 canonical NuGet reference、package family の
 version alignment は
-[AIKernel GPU rev3 Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-rev3-migration.md)
+[AIKernel GPU canonical Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-canonical-migration.md)
 で定義します。
 複数 repository をまたぐ変更では、v0.1.3 package family に揃え、AIKernel.Doom が
 既定で local package path を参照しないようにしてください。

@@ -37,14 +37,21 @@
     const motionStall = number(input.motionStallScore);
     const inputStallFrames = number(input.inputStallFrames);
     const openAdvance = depth >= 0.74 && motionStall < 0.58 && inputStallFrames < 3;
-    const frontConfidence = Math.max(
+    const structuralDecoy = Boolean(input.enemyStructuralDecoy);
+    const trustedEvidence = Boolean(input.trustedCombatEvidence)
+      || number(input.trustedEnemyThreat) >= 0.26;
+    const rawFrontConfidence = Math.max(
       number(input.targetConfidence),
       number(input.enemyConfidence),
       number(input.enemyCenterCellConfidence));
+    const frontConfidence = structuralDecoy && !trustedEvidence
+      ? Math.min(rawFrontConfidence, 0.10)
+      : rawFrontConfidence;
     const centered = targetTurn === "none"
       || number(input.enemyCenterCellConfidence) >= 0.12
       || Math.abs(number(input.left) - number(input.right)) <= 22;
     const probeFire = !input.ammoLikelyEmpty
+      && (!structuralDecoy || trustedEvidence)
       && centered
       && frontConfidence >= 0.18
       && number(input.fireCooldown) <= 0
@@ -73,6 +80,10 @@
 
   function inferPostEnemyObjective(input = {}) {
     if (!input.centralHallEntered || number(input.enemyDefeatedCount) <= 0) {
+      if (input.enemyStructuralDecoy && !input.trustedCombatEvidence) {
+        return input.bridgeLaneVisible ? "cross-bridge" : "secure-central-hall";
+      }
+
       return "engage-front-enemy";
     }
 

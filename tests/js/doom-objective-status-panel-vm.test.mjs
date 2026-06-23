@@ -164,7 +164,7 @@ const status = {
           totalBytes: 25165824,
           totalMB: 24
         },
-        rev3Bridge: {
+        canonicalBridge: {
           diagnostics: {
             Passes: {
               Aisthesis: {
@@ -197,7 +197,7 @@ const status = {
           gpuComputeActive: true,
           featureBufferReady: true,
           matrixUploadSource: "dto-flat",
-          rev3Pilot: {
+          canonicalPilot: {
             summary: { mode: "compute-vector" },
             featureMaskStorageTexture: true,
             comparison: {
@@ -218,7 +218,7 @@ const status = {
           computeReady: true,
           gpuComputeActive: true,
           matrixUploadSource: "dto-flat",
-          rev3Pilot: {
+          canonicalPilot: {
             summary: { mode: "matrix-state-vector" },
             comparison: {
               available: false,
@@ -249,20 +249,20 @@ assert(rows.some(row => row.label === "BONSAI" && row.value.includes("zero-copy"
 assert(rows.some(row => row.label === "HUD" && row.value.includes("GPU composite") && row.tone === "gpu"), "HUD should show composite backend");
 assert(rows.some(row => row.label === "SENSOR" && row.value.includes("ais=gpu") && row.value.includes("matrix=dto-flat") && row.tone === "gpu"), "SENSOR should show active Aisthesis/Spatial GPU status");
 const hudRow = rows.find(row => row.label === "HUD");
-assert(hudRow?.metadata?.rev3_pass_readiness === "hud:on", "HUD row should expose canonical pass readiness metadata");
+assert(hudRow?.metadata?.pass_readiness === "hud:on", "HUD row should expose canonical pass readiness metadata");
 const sensorRow = rows.find(row => row.label === "SENSOR");
-assert(sensorRow?.metadata?.rev3_pass_id === "sensor", "SENSOR row should carry canonical Rev3 pass metadata");
-assert(sensorRow?.metadata?.rev3_pass_readiness === "ais:on/sp:on", "SENSOR row should expose canonical Aisthesis/Spatial readiness metadata");
-assert(sensorRow?.metadata?.rev3_feature_mask_storage_texture === "true", "SENSOR row should expose canonical FeatureMask storage texture metadata");
-assert(sensorRow?.metadata?.rev3_pilot_state === "ais:within;sp:unavailable", "SENSOR row should merge Aisthesis and Spatial pilot states");
-assert(sensorRow?.metadata?.rev3_promotion_gate === "ais:trace-candidate;sp:unavailable", "SENSOR row should merge Aisthesis and Spatial promotion gates");
-assert(sensorRow?.metadata?.rev3_promotion_blocked === "true", "SENSOR row should expose blocked promotion readiness");
-assert(sensorRow?.metadata?.rev3_promotion_reason === "sp:unavailable", "SENSOR row should identify the blocking promotion side");
-assert(sensorRow?.metadata?.rev3_candidate_streak === "4", "SENSOR row should expose Aisthesis candidate streak");
-assert(sensorRow?.metadata?.rev3_diagnostic_streak === "4", "SENSOR row should expose the strongest diagnostic streak");
-assert(sensorRow?.metadata?.rev3_required_streak === "8", "SENSOR row should expose required pilot streak");
+assert(sensorRow?.metadata?.pass_id === "sensor", "SENSOR row should carry canonical pass metadata");
+assert(sensorRow?.metadata?.pass_readiness === "ais:on/sp:on", "SENSOR row should expose canonical Aisthesis/Spatial readiness metadata");
+assert(sensorRow?.metadata?.feature_mask_storage_texture === "true", "SENSOR row should expose canonical FeatureMask storage texture metadata");
+assert(sensorRow?.metadata?.pilot_state === "ais:within;sp:unavailable", "SENSOR row should merge Aisthesis and Spatial pilot states");
+assert(sensorRow?.metadata?.promotion_gate === "ais:trace-candidate;sp:unavailable", "SENSOR row should merge Aisthesis and Spatial promotion gates");
+assert(sensorRow?.metadata?.promotion_blocked === "true", "SENSOR row should expose blocked promotion readiness");
+assert(sensorRow?.metadata?.promotion_reason === "sp:unavailable", "SENSOR row should identify the blocking promotion side");
+assert(sensorRow?.metadata?.candidate_streak === "4", "SENSOR row should expose Aisthesis candidate streak");
+assert(sensorRow?.metadata?.diagnostic_streak === "4", "SENSOR row should expose the strongest diagnostic streak");
+assert(sensorRow?.metadata?.required_streak === "8", "SENSOR row should expose required pilot streak");
 assert(sensorRow?.metadata?.doom_runtime_stamped === "true", "SENSOR row should mark runtime metadata projection");
-assert(rows.some(row => row.label === "SENSOR" && row.value.includes("mask=rev3")), "SENSOR should show canonical FeatureMask storage texture readiness");
+assert(rows.some(row => row.label === "SENSOR" && row.value.includes("mask=canonical")), "SENSOR should show canonical FeatureMask storage texture readiness");
 assert(rows.some(row => row.label === "HEALTH" && row.value.includes("hp=42")), "HEALTH should carry Zoe/health sensor state");
 assert(rows.some(row => row.label === "PROGRESS" && row.value.includes("door=1")), "PROGRESS should carry phase milestones");
 
@@ -292,13 +292,13 @@ assert(nodes.filter(node => String(node.className).includes("doom-objective-stat
 assert(nodes.some(node => node.textContent === "TELOS"), "Renderer should emit TELOS label");
 assert(nodes.some(node => node.textContent === "ComputerRoom"), "Renderer should emit TELOS value");
 assert(nodes.some(node => node.textContent === "hp=42 risk=0.23"), "Renderer should emit health risk value");
-const renderedSensorRow = nodes.find(node => node.dataset?.rev3PassId === "sensor");
-assert(renderedSensorRow?.dataset?.rev3PilotState === "ais:within;sp:unavailable", "Rendered SENSOR row should retain Rev3 pilot state metadata");
-assert(renderedSensorRow?.dataset?.rev3PassReadiness === "ais:on/sp:on", "Rendered SENSOR row should retain Rev3 pass readiness metadata");
-assert(renderedSensorRow?.dataset?.rev3FeatureMaskStorageTexture === "true", "Rendered SENSOR row should retain FeatureMask storage texture metadata");
-assert(renderedSensorRow?.dataset?.rev3PromotionGate === "ais:trace-candidate;sp:unavailable", "Rendered SENSOR row should retain Rev3 promotion gate metadata");
-assert(renderedSensorRow?.dataset?.rev3PromotionBlocked === "true", "Rendered SENSOR row should retain promotion blocked metadata");
-assert(renderedSensorRow?.dataset?.rev3PromotionReason === "sp:unavailable", "Rendered SENSOR row should retain promotion reason metadata");
+const renderedSensorRow = nodes.find(node => node.dataset?.passId === "sensor");
+assert(renderedSensorRow?.dataset?.pilotState === "ais:within;sp:unavailable", "Rendered SENSOR row should retain Canonical pilot state metadata");
+assert(renderedSensorRow?.dataset?.passReadiness === "ais:on/sp:on", "Rendered SENSOR row should retain Canonical pass readiness metadata");
+assert(renderedSensorRow?.dataset?.featureMaskStorageTexture === "true", "Rendered SENSOR row should retain FeatureMask storage texture metadata");
+assert(renderedSensorRow?.dataset?.promotionGate === "ais:trace-candidate;sp:unavailable", "Rendered SENSOR row should retain Canonical promotion gate metadata");
+assert(renderedSensorRow?.dataset?.promotionBlocked === "true", "Rendered SENSOR row should retain promotion blocked metadata");
+assert(renderedSensorRow?.dataset?.promotionReason === "sp:unavailable", "Rendered SENSOR row should retain promotion reason metadata");
 assert(renderedSensorRow?.dataset?.doomRuntimeStamped === "true", "Rendered SENSOR row should retain Doom runtime stamp metadata");
 assert(renderedSensorRow?.dataset?.doomZeroCopy === "true", "Rendered SENSOR row should retain zero-copy metadata");
 
@@ -323,22 +323,22 @@ const liveGpuRows = rows.filter(row => ["GAME", "BONSAI", "HUD", "SENSOR"].inclu
 const canonicalGpuRows = canonicalRows.filter(row => ["GAME", "BONSAI", "HUD", "SENSOR"].includes(row.label));
 assert(canonicalGpuRows.map(row => row.label).join("|") === liveGpuRows.map(row => row.label).join("|"), "Canonical and live GPU path labels should match in the Objective/Status panel");
 for (const row of canonicalGpuRows) {
-  assert(row.metadata?.rev3_pass_id === row.label.toLowerCase(), `Canonical ${row.label} row should carry a deterministic Rev3 pass id`);
+  assert(row.metadata?.pass_id === row.label.toLowerCase(), `Canonical ${row.label} row should carry a deterministic Canonical pass id`);
   assert(row.metadata?.doom_runtime_stamped === "false", `Canonical ${row.label} row should remain marked as pre-runtime DTO metadata`);
 }
 const canonicalSensorRow = canonicalGpuRows.find(row => row.label === "SENSOR");
 const liveSensorRow = liveGpuRows.find(row => row.label === "SENSOR");
-assert(canonicalSensorRow?.metadata?.rev3_pass_id === liveSensorRow?.metadata?.rev3_pass_id, "Canonical and live SENSOR metadata should share the same Rev3 pass id");
-assert(canonicalSensorRow?.metadata?.rev3_path_role === liveSensorRow?.metadata?.rev3_path_role, "Canonical and live SENSOR metadata should share the same Rev3 path role");
+assert(canonicalSensorRow?.metadata?.pass_id === liveSensorRow?.metadata?.pass_id, "Canonical and live SENSOR metadata should share the same Canonical pass id");
+assert(canonicalSensorRow?.metadata?.path_role === liveSensorRow?.metadata?.path_role, "Canonical and live SENSOR metadata should share the same Canonical path role");
 assert(canonicalSensorRow?.metadata?.doom_zero_copy === liveSensorRow?.metadata?.doom_zero_copy, "Canonical and live SENSOR metadata should preserve zero-copy parity");
 const canonicalRoot = createNode("section");
 panel.renderObjectiveStatusPanel(canonicalRoot, canonicalStatus);
 const canonicalNodes = flatten(canonicalRoot);
-const renderedCanonicalSensorRow = canonicalNodes.find(node => node.dataset?.rev3PassId === "sensor");
+const renderedCanonicalSensorRow = canonicalNodes.find(node => node.dataset?.passId === "sensor");
 assert(renderedCanonicalSensorRow?.dataset?.doomRuntimeStamped === "false", "Rendered canonical SENSOR row should preserve pre-runtime metadata stamp");
-assert(renderedCanonicalSensorRow?.dataset?.rev3PilotState === "dto-projected", "Rendered canonical SENSOR row should preserve DTO-projected pilot state");
-assert(renderedCanonicalSensorRow?.dataset?.rev3PromotionBlocked === "true", "Rendered canonical SENSOR row should preserve blocked promotion metadata");
-assert(renderedCanonicalSensorRow?.dataset?.rev3PromotionReason === "runtime-stamp-required", "Rendered canonical SENSOR row should preserve runtime stamp promotion reason");
+assert(renderedCanonicalSensorRow?.dataset?.pilotState === "dto-projected", "Rendered canonical SENSOR row should preserve DTO-projected pilot state");
+assert(renderedCanonicalSensorRow?.dataset?.promotionBlocked === "true", "Rendered canonical SENSOR row should preserve blocked promotion metadata");
+assert(renderedCanonicalSensorRow?.dataset?.promotionReason === "runtime-stamp-required", "Rendered canonical SENSOR row should preserve runtime stamp promotion reason");
 
 console.log("DOOM_OBJECTIVE_STATUS_PANEL_VM_TEST_OK", {
   version: panel.version,

@@ -4,6 +4,8 @@
   const version = "20260621-debugoverlay-gpu1";
   const overlayRenderCache = new WeakMap();
   const overlayRenderIntervalMs = 42;
+  const gpuHudLabelHoldMs = 1100;
+  const gpuHudHeldLabels = new Map();
 
   function nowMs() {
     return Number(self.performance?.now?.() ?? Date.now());
@@ -189,6 +191,10 @@
       return rawValue ? `${title}\n${rawValue.toUpperCase()}` : title;
     }
 
+    if (name.includes("is-route-target")) {
+      return rawValue ? `${rawLabel.toUpperCase()}\n${rawValue}` : rawLabel.toUpperCase();
+    }
+
     return rawValue ? `${rawLabel} ${rawValue}` : rawLabel;
   }
 
@@ -263,12 +269,14 @@
   function createGpuTextLabel(className, label, value = "", options = {}) {
     const node = document.createElement("div");
     const priority = options.priority ? `priority-${options.priority}` : "";
-    node.className = `debug-gpu-label ${className} ${priority} ${options.active ? "is-detected" : ""}`.trim();
+    const holdClass = options.held ? "is-held" : "";
+    node.className = `debug-gpu-label ${className} ${priority} ${options.active ? "is-detected" : ""} ${holdClass}`.trim();
     node.textContent = formatOverlayLabelText(className, label, value);
     node.dataset.labelSlot = String(options.slot ?? 0);
     node.dataset.gpuHudLabel = "true";
     node.dataset.gpuLabelLayout = "diagnostic";
     node.style.setProperty("--label-slot", String(options.slot ?? 0));
+    node.style.setProperty("--label-alpha", clamp01(options.holdAlpha ?? 1).toFixed(3));
     if (options.source) {
       node.dataset.source = String(options.source);
     }
@@ -286,10 +294,80 @@
     return Array.isArray(labels) ? labels : [];
   }
 
+  function gpuHudLabelHoldKey(label) {
+    const className = String(label?.className || label?.ClassName || "is-diagnostic").toLowerCase();
+    const labelText = String(label?.label || label?.Label || "").toLowerCase();
+    const left = normalizeLabelPercent(label?.left ?? label?.Left, 0).toFixed(1);
+    const top = normalizeLabelPercent(label?.top ?? label?.Top, 0).toFixed(1);
+    return `${className}|${labelText}|${left}|${top}`;
+  }
+
+  function shouldHoldGpuHudLabel(label) {
+    const className = String(label?.className || label?.ClassName || "").toLowerCase();
+    const priority = String(label?.priority || label?.Priority || "mid").toLowerCase();
+    if (className.includes("is-radar-label") || className.includes("is-priority-axis")) {
+      return false;
+    }
+
+    return priority === "high"
+      || className.includes("route")
+      || className.includes("door")
+      || className.includes("wall")
+      || className.includes("corner")
+      || className.includes("enemy")
+      || className.includes("combat")
+      || className.includes("zoe");
+  }
+
+  function mergeHeldGpuHudLabels(labels) {
+    const now = nowMs();
+    const current = Array.isArray(labels) ? labels.filter(Boolean) : [];
+    const currentKeys = new Set();
+
+    for (const label of current) {
+      if (!shouldHoldGpuHudLabel(label)) {
+        continue;
+      }
+
+      const key = gpuHudLabelHoldKey(label);
+      currentKeys.add(key);
+      gpuHudHeldLabels.set(key, {
+        label: { ...label },
+        expiresAt: now + gpuHudLabelHoldMs
+      });
+    }
+
+    const held = [];
+    for (const [key, entry] of gpuHudHeldLabels.entries()) {
+      if (!entry || entry.expiresAt <= now) {
+        gpuHudHeldLabels.delete(key);
+        continue;
+      }
+
+      if (currentKeys.has(key)) {
+        continue;
+      }
+
+      const remaining = Math.max(0, Math.min(1, (entry.expiresAt - now) / gpuHudLabelHoldMs));
+      held.push({
+        ...entry.label,
+        active: false,
+        Active: false,
+        source: "gpu-hud-held-label",
+        Source: "gpu-hud-held-label",
+        __held: true,
+        __holdAlpha: 0.28 + remaining * 0.62
+      });
+    }
+
+    return current.concat(held);
+  }
+
   function renderGpuHudLabels(fragment, labels, startSlot = 0) {
     let slot = startSlot;
-    for (let index = 0; index < labels.length; index += 1) {
-      const label = labels[index] || {};
+    const renderLabels = mergeHeldGpuHudLabels(labels);
+    for (let index = 0; index < renderLabels.length; index += 1) {
+      const label = renderLabels[index] || {};
       const text = label.label || label.Label || "";
       if (!text) {
         continue;
@@ -308,7 +386,9 @@
           top: label.top ?? label.Top,
           width: label.width ?? label.Width,
           height: label.height ?? label.Height,
-          anchor: label.anchor || label.Anchor || "inside"
+          anchor: label.anchor || label.Anchor || "inside",
+          held: Boolean(label.__held),
+          holdAlpha: label.__holdAlpha ?? 1
         }
       );
       fragment.appendChild(node);

@@ -7,11 +7,15 @@ using AIKernel.Abstractions.Capabilities;
 using AIKernel.Common.Results;
 using AIKernel.Doom.Provider;
 using AIKernel.Dtos.Capabilities;
-/// <summary>
-/// EN: Represents DoomCapabilityInvoker.
-/// EN: Documentation for public API. JA: DoomCapabilityInvoker を表します。
-/// </summary>
 
+/// <summary>
+/// [EN] Invokes Doom capability operations by routing canonical capability requests to the Doom provider.
+/// [JA] canonical capability request を Doom provider へ route し、Doom capability operation を実行します。
+/// </summary>
+/// <remarks>
+/// [EN] The invoker returns deterministic metadata and hashes so replay tooling can compare start, stop, and status behavior across providers.
+/// [JA] replay tooling が provider 間で start、stop、status の挙動を比較できるように、invoker は決定論的な metadata と hash を返します。
+/// </remarks>
 public sealed class DoomCapabilityInvoker : ICapabilityModuleInvoker
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -21,18 +25,34 @@ public sealed class DoomCapabilityInvoker : ICapabilityModuleInvoker
 
     private readonly DoomProvider _provider;
     /// <summary>
-    /// EN: Executes DoomCapabilityInvoker.
-    /// EN: Documentation for public API. JA: DoomCapabilityInvoker を実行します。
+    /// [EN] Initializes a capability invoker over the provider instance that owns the Doom runtime lifecycle.
+    /// [JA] Doom runtime lifecycle を所有する provider instance を使って capability invoker を初期化します。
     /// </summary>
+    /// <param name="provider">
+    /// [EN] Provider instance that executes Doom start, stop, and status operations.
+    /// [JA] Doom の start、stop、status operation を実行する provider instance です。
+    /// </param>
 
     public DoomCapabilityInvoker(DoomProvider provider)
     {
         _provider = provider;
     }
     /// <summary>
-    /// EN: Gets InvokeAsync.
-    /// EN: Documentation for public API. JA: InvokeAsync を取得します。
+    /// [EN] Invokes the requested Doom capability and returns a deterministic result envelope.
+    /// [JA] 要求された Doom capability を実行し、決定論的な result envelope を返します。
     /// </summary>
+    /// <param name="request">
+    /// [EN] Capability invocation request containing the capability id, operation, replay hash, and metadata.
+    /// [JA] capability id、operation、replay hash、metadata を含む capability invocation request です。
+    /// </param>
+    /// <param name="cancellationToken">
+    /// [EN] Token used to cancel asynchronous start or stop work.
+    /// [JA] 非同期の start または stop 処理をキャンセルするための token です。
+    /// </param>
+    /// <returns>
+    /// [EN] Capability invocation result with status metadata or a deterministic failure code.
+    /// [JA] status metadata、または決定論的な failure code を含む capability invocation result です。
+    /// </returns>
 
     public async ValueTask<CapabilityInvocationResult> InvokeAsync(
         CapabilityInvocationRequest request,

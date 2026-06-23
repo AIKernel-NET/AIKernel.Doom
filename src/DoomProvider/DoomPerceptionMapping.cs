@@ -8,13 +8,13 @@ using AIKernel.Enums.Perception;
 
 /// <summary>
 /// EN: Maps Doom-specific game state into generic HUD signal DTOs.
-/// EN: Documentation for public API. JA: Doom 固有 game state を generic HUD signal DTO に写像します。
+/// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Doom 固有 game state を generic HUD signal DTO に写像します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
 /// </summary>
 public sealed class DoomHudSignalMapper
 {
     /// <summary>
     /// EN: Converts a Doom game state into HUD signals without performing CTG or Gate decisions.
-    /// EN: Documentation for public API. JA: CTG / Gate decision を行わず Doom game state を HUD signal に変換します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] CTG / Gate decision を行わず Doom game state を HUD signal に変換します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     /// <param name="state">EN: Doom game state. JA: Doom game state です。</param>
     /// <param name="observationId">EN: Observation identifier. JA: observation 識別子です。</param>
@@ -61,13 +61,13 @@ public sealed class DoomHudSignalMapper
 
 /// <summary>
 /// EN: Maps Doom-specific perception metadata into overlay annotation DTOs.
-/// EN: Documentation for public API. JA: Doom 固有 perception metadata を overlay annotation DTO に写像します。
+/// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Doom 固有 perception metadata を overlay annotation DTO に写像します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
 /// </summary>
 public sealed class DoomOverlayAnnotationMapper
 {
     /// <summary>
     /// EN: Converts a Doom sensor fusion snapshot into overlay annotations without rendering.
-    /// EN: Documentation for public API. JA: rendering を行わず Doom sensor fusion snapshot を overlay annotation に変換します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] rendering を行わず Doom sensor fusion snapshot を overlay annotation に変換します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     /// <param name="sensor">EN: Doom sensor fusion snapshot. JA: Doom sensor fusion snapshot です。</param>
     /// <param name="observationId">EN: Observation identifier. JA: observation 識別子です。</param>
@@ -103,13 +103,13 @@ public sealed class DoomOverlayAnnotationMapper
 
 /// <summary>
 /// EN: Maps Doom autoplay action commands into generic virtual input DTOs.
-/// EN: Documentation for public API. JA: Doom autoplay action command を generic virtual input DTO に写像します。
+/// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Doom autoplay action command を generic virtual input DTO に写像します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
 /// </summary>
 public sealed class DoomInputMappingAdapter
 {
     /// <summary>
     /// EN: Converts a Doom action command into a virtual keyboard input state request.
-    /// EN: Documentation for public API. JA: Doom action command を virtual keyboard input state request に変換します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Doom action command を virtual keyboard input state request に変換します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     /// <param name="command">EN: Doom action command. JA: Doom action command です。</param>
     /// <param name="inputId">EN: Input identifier. JA: input 識別子です。</param>

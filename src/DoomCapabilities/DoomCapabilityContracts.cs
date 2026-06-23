@@ -2,38 +2,42 @@ namespace AIKernel.Doom.Capabilities;
 
 using AIKernel.Dtos.Capabilities;
 using AIKernel.Enums;
-/// <summary>
-/// EN: Represents DoomCapabilityContracts.
-/// EN: Documentation for public API. JA: DoomCapabilityContracts を表します。
-/// </summary>
 
+/// <summary>
+/// [EN] Provides the canonical capability descriptors that expose Doom start, stop, and status operations to AIKernel tooling.
+/// [JA] AIKernel tooling に Doom の start、stop、status operation を公開する canonical capability descriptor を提供します。
+/// </summary>
+/// <remarks>
+/// [EN] Keep descriptor identifiers stable because ROM metadata, capability manifests, replay tooling, and hosted demos bind these names.
+/// [JA] ROM metadata、capability manifest、replay tooling、hosted demo がこれらの名前へ bind するため、descriptor identifier は安定させてください。
+/// </remarks>
 public static class DoomCapabilityContracts
 {
     /// <summary>
-    /// EN: Executes All.
-    /// EN: Documentation for public API. JA: All を実行します。
+    /// [EN] Returns all Doom capability descriptors in the order expected by manifest and integration tests.
+    /// [JA] manifest と integration test が期待する順序で、すべての Doom capability descriptor を返します。
     /// </summary>
     public static IReadOnlyList<CapabilityModuleDescriptor> All()
         => [Start(), Stop(), Status()];
-    /// <summary>
-    /// EN: Executes Start.
-    /// EN: Documentation for public API. JA: Start を実行します。
-    /// </summary>
 
+    /// <summary>
+    /// [EN] Creates the descriptor for starting the Doom runtime.
+    /// [JA] Doom runtime を開始する descriptor を作成します。
+    /// </summary>
     public static CapabilityModuleDescriptor Start()
         => Descriptor("doom.start", "Start DOOM", "doom.start");
-    /// <summary>
-    /// EN: Executes Stop.
-    /// EN: Documentation for public API. JA: Stop を実行します。
-    /// </summary>
 
+    /// <summary>
+    /// [EN] Creates the descriptor for stopping the Doom runtime.
+    /// [JA] Doom runtime を停止する descriptor を作成します。
+    /// </summary>
     public static CapabilityModuleDescriptor Stop()
         => Descriptor("doom.stop", "Stop DOOM", "doom.stop");
-    /// <summary>
-    /// EN: Executes Status.
-    /// EN: Documentation for public API. JA: Status を実行します。
-    /// </summary>
 
+    /// <summary>
+    /// [EN] Creates the descriptor for reading the Doom runtime status.
+    /// [JA] Doom runtime status を読み取る descriptor を作成します。
+    /// </summary>
     public static CapabilityModuleDescriptor Status()
         => Descriptor("doom.status", "DOOM status", "doom.status");
 
@@ -43,7 +47,7 @@ public static class DoomCapabilityContracts
             name,
             CapabilityModuleKind.ManagedAssembly,
             CapabilityInvocationMode.Direct,
-            "0.1.0",
+            "0.1.3",
             typeof(DoomCapabilityInvoker).FullName,
             null,
             null,

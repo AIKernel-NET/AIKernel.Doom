@@ -28,30 +28,134 @@ internal sealed class AutoplayPipelineContext
         DoorProbeYaw = Math.Abs(QDelta) <= profile.DoorAimToleranceDegrees ? 0 : AimYaw;
     }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public SensorFusion Sensor { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int RecoveryFrames { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public AutoplayOptimizationProfile Profile { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public float DepthSig { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int QDelta { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public string Context { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public float WallVector { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int EscapeYaw { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int CombatYaw { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int WallAwayYaw { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int OpenCruiseYaw { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int AimYaw { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public int DoorProbeYaw { get; }
 
     public bool LowHealthGoalFirst
@@ -79,6 +183,18 @@ internal sealed class AutoplayPipelineContext
     public bool ExitSwitchPressed
         => Sensor.SensorTensor.SemanticScore("exit-switch") >= 0.9f;
 
+    /// <summary>
+    /// [EN] Executes the <c>EnemyDefeatedCount</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>EnemyDefeatedCount</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public int EnemyDefeatedCount => 0;
 
     public bool AmmoLikelyEmpty
@@ -109,14 +225,53 @@ internal sealed class AutoplayPipelineContext
     public bool BridgeLaneVisible
         => DoorOpenedCount > 0 && (Context == "bridge" || BridgeConfidence >= 0.18f);
 
+    /// <summary>
+    /// [EN] Indicates whether combat routing is allowed to interpret the current computer-room evidence as an enemy context.
+    /// [JA] 現在の computer-room evidence を enemy context として combat routing が解釈してよいかを示します。
+    /// </summary>
     public bool ComputerRoomCombatContext
-        => Context == "computer-room" || ComputerRoomConfidence >= 0.28f;
+        => (Context == "computer-room" || ComputerRoomConfidence >= 0.28f)
+            && !EnemyStructuralDecoy;
+
+    /// <summary>
+    /// [EN] Flags wall, pillar, terminal, or computer-panel shapes that resemble enemies but lack trusted combat evidence.
+    /// [JA] enemy に似て見える wall / pillar / terminal / computer-panel 形状で、信頼できる combat evidence がないものを示します。
+    /// </summary>
+    public bool EnemyStructuralDecoy
+        => (PostDoorTerminalSurface >= 0.24f || Tensor.Get("vision.wall") >= 0.42f)
+            && RawVisualEnemyConfidence <= 0.50f
+            && Tensor.Get("semantic.mapenemy") < 0.24f
+            && Tensor.Get("system.combat") < 0.24f
+            && !Sensor.SoundEvent;
+
+    /// <summary>
+    /// [EN] Preserves recent post-door enemy evidence when the current frame is partially masked by computer-panel or terminal surfaces.
+    /// [JA] 現在 frame が computer-panel / terminal surface に一部隠れている場合でも、post-door の直近 enemy evidence を保持します。
+    /// </summary>
+    public float EnemyConfidencePeak
+        => Clamp01(Max(Sensor.EnemyConfidencePeak, RawVisualEnemyConfidence));
+
+    /// <summary>
+    /// [EN] True when a weak post-door enemy trace should stay trusted because a recent high-confidence enemy peak was observed.
+    /// [JA] 直近の高 confidence enemy peak が観測されているため、弱い post-door enemy trace を信頼済みとして維持すべき場合に true です。
+    /// </summary>
+    public bool PostDoorEnemyMemoryEvidence
+        => DoorOpenedCount > 0
+            && !EnemyHardStructuralDecoy
+            && EnemyConfidencePeak >= 0.62f
+            && RawVisualEnemyConfidence >= 0.08f
+            && PostDoorTerminalSurface >= 0.28f;
 
     public float VisualEnemyConfidence
     {
         get
         {
-            var visual = Max(Tensor.Get("vision.enemy"), Tensor.Get("semantic.mapenemy"));
+            if (EnemyHardStructuralDecoy)
+            {
+                return Math.Min(Tensor.Get("vision.enemy"), 0.10f);
+            }
+
+            var visual = RawVisualEnemyConfidence;
             if (TerminalSurface >= 0.24f && Tensor.Get("system.combat") < 0.18f)
             {
                 return Math.Min(visual, 0.10f);
@@ -142,7 +297,7 @@ internal sealed class AutoplayPipelineContext
     }
 
     public bool AudioEnemyStrong
-        => AudioEnemyConfidence >= 0.24f;
+        => AudioEnemyConfidence >= 0.24f && !EnemyStructuralDecoy;
 
     public bool AudioEnemyFront
         => AudioEnemyStrong;
@@ -155,7 +310,10 @@ internal sealed class AutoplayPipelineContext
 
     public bool VisualEnemyVisible
         => VisualEnemyConfidence >= 0.28f
-            || (Tensor.Get("system.combat") >= 0.45f && Math.Abs(Sensor.FaceSig) >= Profile.CombatFaceThreshold);
+            || (!EnemyStructuralDecoy
+                && VisualEnemyConfidence >= 0.18f
+                && Tensor.Get("system.combat") >= 0.45f
+                && Math.Abs(Sensor.FaceSig) >= Profile.CombatFaceThreshold);
 
     public bool VisualEnemyCentered
         => VisualEnemyConfidence >= 0.28f
@@ -176,12 +334,48 @@ internal sealed class AutoplayPipelineContext
     public int EnemyCombatYaw
         => VisualEnemyVisible && !VisualEnemyCentered ? VisualEnemyYaw : 0;
 
+    /// <summary>
+    /// [EN] Aggregates only trusted enemy evidence for combat gates, excluding structural decoys and weak face signatures.
+    /// [JA] structural decoy や弱い face signature を除外し、combat gate に渡せる信頼済み enemy evidence のみを集約します。
+    /// </summary>
+    public float TrustedEnemyThreat
+        => EnemyHardStructuralDecoy
+            ? 0
+            : Max(
+                VisualEnemyFireReady ? VisualEnemyConfidence : 0,
+                VisualEnemyConfidence >= 0.52f ? VisualEnemyConfidence : 0,
+                AudioEnemyConfidence >= 0.34f ? AudioEnemyConfidence : 0,
+                PostDoorEnemyMemoryEvidence ? Math.Min(0.34f, EnemyConfidencePeak * 0.42f) : 0,
+                Tensor.Get("semantic.mapenemy"));
+
+    /// <summary>
+    /// [EN] True when the pipeline has enough trusted visual, audio, or semantic evidence to enter or stay in combat.
+    /// [JA] pipeline が combat に入る、または combat を維持するための信頼済み visual / audio / semantic evidence を十分に持つ場合に true です。
+    /// </summary>
+    public bool TrustedCombatEvidence
+        => TrustedEnemyThreat >= 0.26f
+            || PostDoorEnemyMemoryEvidence
+            || (VisualEnemyVisible && VisualEnemyConfidence >= 0.35f)
+            || AudioEnemyConfidence >= 0.34f;
+
     public bool CentralHallBypassAllowed
         => CentralHallEntered && (LowHealthGoalFirst || AmmoLikelyEmpty || EnemyDefeatedCount > 0);
 
     public bool FinalRoomRouteCandidate
         => StairsEntered || DoorOpenedCount > 1 || FinalRoomConfidence >= 0.45f;
 
+    /// <summary>
+    /// [EN] Executes the <c>UsePulseCooldownFrames</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>UsePulseCooldownFrames</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public int UsePulseCooldownFrames => 0;
 
     private AutoplaySensorTensor Tensor => Sensor.SensorTensor;
@@ -189,9 +383,35 @@ internal sealed class AutoplayPipelineContext
     private float TerminalSurface
         => Max(Tensor.Get("semantic.computer"), Tensor.Get("vision.dark"));
 
+    private float RawVisualEnemyConfidence
+        => Max(Tensor.Get("vision.enemy"), Tensor.Get("semantic.mapenemy"));
+
+    private bool EnemyHardStructuralDecoy
+        => Tensor.Get("vision.wall") >= 0.42f
+            && RawVisualEnemyConfidence <= 0.50f
+            && Tensor.Get("semantic.mapenemy") < 0.24f
+            && Tensor.Get("system.combat") < 0.24f
+            && !Sensor.SoundEvent;
+
     private bool DoorAudioSurface
         => Tensor.Get("semantic.door") >= 0.24f && Tensor.Get("system.combat") < 0.18f;
 
+    /// <summary>
+    /// [EN] Executes the <c>SemanticScore</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>SemanticScore</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="symbol">
+    /// [EN] Supplies the <c>symbol</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>symbol</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public float SemanticScore(string symbol)
     {
         var normalized = (symbol ?? string.Empty).Trim().ToLowerInvariant();
@@ -221,6 +441,22 @@ internal sealed class AutoplayPipelineContext
         return Math.Max(heuristicScore, Sensor.SensorTensor.SemanticScore(normalized));
     }
 
+    /// <summary>
+    /// [EN] Executes the <c>SemanticScores</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>SemanticScores</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="symbols">
+    /// [EN] Supplies the <c>symbols</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>symbols</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public IReadOnlyDictionary<string, float> SemanticScores(IEnumerable<string> symbols)
         => symbols
             .Where(symbol => !string.IsNullOrWhiteSpace(symbol))

@@ -23,7 +23,7 @@ corresponding source recipe, patches, build scripts, and license notices.
 
 Shared repository boundaries, v0.1.3 canonical NuGet references, and
 cross-package version alignment are defined by
-[AIKernel GPU rev3 Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-rev3-migration.md).
+[AIKernel GPU canonical Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-canonical-migration.md).
 When a change crosses repositories, use the matching v0.1.3 package family
 and avoid defaulting AIKernel.Doom to local package paths.
 

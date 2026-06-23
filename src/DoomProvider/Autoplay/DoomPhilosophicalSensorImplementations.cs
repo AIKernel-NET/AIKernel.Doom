@@ -28,9 +28,15 @@ public sealed class DoomPhainesis : IPhainesis
         var obstacle = tensor.Get("motion.obstacle");
         var stall = Math.Max(tensor.Get("motion.stall"), Math.Max(tensor.Get("motion.inputstall"), tensor.Get("motion.stuck")));
         var audio = tensor.Get("system.audio");
+        var audioEvent = audio >= 0.08f || tensor.Get("audio.event") >= 0.08f || tensor.Get("system.sound") >= 0.08f;
         var combat = Math.Max(enemy, tensor.Get("system.combat"));
         var audioEnemy = Clamp01(audio * Math.Max(tensor.Get("system.combat"), enemy));
-        var visualEnemy = tensor.Get("semantic.computer") >= 0.24f && tensor.Get("system.combat") < 0.18f
+        var structuralDecoy = (tensor.Get("semantic.computer") >= 0.24f || tensor.Get("vision.wall") >= 0.42f)
+            && tensor.Get("vision.enemy") <= 0.50f
+            && tensor.Get("semantic.mapenemy") < 0.24f
+            && tensor.Get("system.combat") < 0.24f
+            && !audioEvent;
+        var visualEnemy = structuralDecoy || tensor.Get("semantic.computer") >= 0.24f && tensor.Get("system.combat") < 0.18f
             ? Math.Min(tensor.Get("vision.enemy"), 0.10f)
             : tensor.Get("vision.enemy");
         var delta = tensor.Get("motion.delta");
@@ -50,6 +56,15 @@ public sealed class DoomPhainesis : IPhainesis
                 ["oscillation"] = Clamp01(tensor.Get("motion.turn") * (1 - stability)),
                 ["looming"] = Max(Clamp01(enemy * delta), Clamp01(combat * delta)),
                 ["enemyPresence"] = Max(visualEnemy, audioEnemy),
+                ["enemyStructuralDecoy"] = structuralDecoy ? 1 : 0,
+                ["trustedEnemyThreat"] = structuralDecoy ? 0 : Max(
+                    visualEnemy >= 0.52f ? visualEnemy : 0,
+                    audioEnemy >= 0.34f ? audioEnemy : 0,
+                    tensor.Get("semantic.mapenemy")),
+                ["trustedCombatEvidence"] = structuralDecoy ? 0 : Max(
+                    visualEnemy >= 0.35f ? visualEnemy : 0,
+                    audioEnemy >= 0.34f ? audioEnemy : 0,
+                    tensor.Get("semantic.mapenemy")),
                 ["visualEnemyVisible"] = visualEnemy >= 0.28f ? 1 : 0,
                 ["audioEnemyConfidence"] = audioEnemy,
                 ["audioEnemyStrong"] = audioEnemy >= 0.24f ? 1 : 0,

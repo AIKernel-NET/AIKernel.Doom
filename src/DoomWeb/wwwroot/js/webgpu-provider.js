@@ -30,6 +30,7 @@
   const GPU_SPATIAL_OUTPUT_LAYOUT_NAME = GPU_CONTRACTS.spatialOutputLayoutName;
   const HUD_COMPOSITE_TARGET = GPU_CONTRACTS.hudCompositeTarget;
   const HUD_COMPOSITE_WIRE_NAME = GPU_CONTRACTS.hudCompositeWireName;
+  const SWAPCHAIN_HUD_SINGLE_PASS_WIRE_NAME = `${RAW_FRAMEBUFFER_WIRE_NAME}+gpu-hud-single-pass`;
   const HUD_CELLS_TARGET = GPU_CONTRACTS.hudCellsTarget;
   const HUD_PANEL_VALUES_TARGET = GPU_CONTRACTS.hudPanelValuesTarget;
   const HUD_PRIORITY_RECTS_TARGET = GPU_CONTRACTS.hudPriorityRectsTarget;
@@ -43,35 +44,39 @@
   const GPU_SPATIAL_OUTPUT_TARGET = GPU_CONTRACTS.spatialOutputTarget;
   const HUD_COMPOSITE_MAX_FPS = 30;
   const HUD_COMPOSITE_MIN_INTERVAL_MS = 1000 / HUD_COMPOSITE_MAX_FPS;
-  const REV3_BACKEND_WEBGPU = 2;
-  const REV3_FRAME_KIND_RAW = 1;
-  const REV3_FRAME_KIND_HUD = 2;
-  const REV3_PIXEL_FORMAT_RGBA32 = 3;
-  const REV3_HUD_COMPOSITE_PILOT_TARGET = `${HUD_COMPOSITE_TARGET}:rev3-pilot`;
-  const REV3_PILOT_MIN_INTERVAL_MS = 250;
-  const REV3_AISTHESIS_PARITY_THRESHOLDS = Object.freeze({
+  const HUD_COMPOSITE_PRESENT_ENABLED = true;
+  const HUD_OFFSCREEN_COMPOSITE_ENABLED = true;
+  const HUD_OFFSCREEN_COMPOSITE_MAX_FPS = 10;
+  const HUD_OFFSCREEN_COMPOSITE_MIN_INTERVAL_MS = 1000 / HUD_OFFSCREEN_COMPOSITE_MAX_FPS;
+  const GPU_BACKEND_WEBGPU = 2;
+  const GPU_FRAME_KIND_RAW = 1;
+  const GPU_FRAME_KIND_HUD = 2;
+  const GPU_PIXEL_FORMAT_RGBA32 = 3;
+  const GPU_HUD_COMPOSITE_PILOT_TARGET = `${HUD_COMPOSITE_TARGET}:canonical-pilot`;
+  const GPU_PILOT_MIN_INTERVAL_MS = 250;
+  const GPU_AISTHESIS_PARITY_THRESHOLDS = Object.freeze({
     okMean: 0.15,
     okMax: 0.35,
     observeMean: 0.35,
     observeMax: 0.65
   });
-  const REV3_SPATIAL_PARITY_THRESHOLDS = Object.freeze({
+  const GPU_SPATIAL_PARITY_THRESHOLDS = Object.freeze({
     okMean: 0.20,
     okMax: 0.50,
     observeMean: 0.45,
     observeMax: 0.85
   });
-  const REV3_AISTHESIS_PROMOTION_STREAK_REQUIRED = 8;
-  const REV3_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED = 8;
+  const GPU_AISTHESIS_PROMOTION_STREAK_REQUIRED = 8;
+  const GPU_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED = 8;
   const WEBGPU_ADAPTER_POWER_PREFERENCE = "high-performance";
   const WEBGPU_ADAPTER_REQUEST_OPTIONS = Object.freeze({
     powerPreference: WEBGPU_ADAPTER_POWER_PREFERENCE,
     forceFallbackAdapter: false
   });
-  const REV3_SHADER_PATHS = Object.freeze({
-    "gpu.hud.composite": "shaders/hud-composite.rev3.wgsl",
-    "gpu.aisthesis.raw-frame": "shaders/aisthesis.rev3.wgsl",
-    "gpu.spatial-reasoning": "shaders/spatial-reasoning.rev3.wgsl"
+  const GPU_SHADER_PATHS = Object.freeze({
+    "gpu.hud.composite": "shaders/hud-composite.wgsl",
+    "gpu.aisthesis.raw-frame": "shaders/aisthesis.wgsl",
+    "gpu.spatial-reasoning": "shaders/spatial-reasoning.wgsl"
   });
 
   function fallbackHudPanelRects() {
@@ -604,8 +609,12 @@ struct HudInfo {
   enemyAudioAlpha: f32,
   enemySignalSuppressed: f32,
   enemySignalLost: f32,
-  radarPad6: f32,
-  radarPad7: f32,
+  radarReferenceYaw: f32,
+  radarReferenceAlpha: f32,
+  kairosLogos: f32,
+  kairosPathos: f32,
+  kairosEthos: f32,
+  _reserved35: f32,
 };
 
 @group(0) @binding(0) var frameSampler: sampler;
@@ -640,7 +649,7 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
 
 fn alphaComposite(base: vec4<f32>, overlay: vec4<f32>) -> vec4<f32> {
   let alpha = clamp(overlay.a, 0.0, 1.0);
-  return vec4<f32>(base.rgb * (1.0 - alpha) + overlay.rgb * alpha, 1.0);
+  return vec4<f32>(base.rgb * (1.0 - alpha) + overlay.rgb * alpha, base.a + alpha * (1.0 - base.a));
 }
 
 fn heatColor(value: f32) -> vec3<f32> {
@@ -670,13 +679,22 @@ fn rectGlow(uv: vec2<f32>, minCorner: vec2<f32>, maxCorner: vec2<f32>, soft: f32
 @fragment
 fn fragmentMain(input: VertexOut) -> @location(0) vec4<f32> {
   let uv = clamp(input.uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-  var color = textureSample(frameTexture, frameSampler, input.uv);
+  var color = textureSample(frameTexture, frameSampler, uv);
   if (hud.enabled < 0.5) {
     return color;
   }
 
-  if (hud.heatmapEnabled > 0.5 && uv.y < 0.82) {
-    let gridUv = vec2<f32>(clamp(uv.x, 0.0, 0.999), clamp(uv.y / 0.82, 0.0, 0.999));
+  let heatMin = vec2<f32>(0.012, 0.018);
+  let heatMax = vec2<f32>(0.164, 0.154);
+  if (
+    hud.heatmapEnabled > 0.5
+    && uv.x >= heatMin.x
+    && uv.x <= heatMax.x
+    && uv.y >= heatMin.y
+    && uv.y <= heatMax.y
+  ) {
+    let heatSize = max(heatMax - heatMin, vec2<f32>(0.001, 0.001));
+    let gridUv = clamp((uv - heatMin) / heatSize, vec2<f32>(0.0, 0.0), vec2<f32>(0.999, 0.999));
     let cellX = min(u32(floor(gridUv.x * ${HUD_GRID_SIZE}.0)), ${HUD_GRID_SIZE - 1}u);
     let cellY = min(u32(floor(gridUv.y * ${HUD_GRID_SIZE}.0)), ${HUD_GRID_SIZE - 1}u);
     let cell = cellY * ${HUD_GRID_SIZE}u + cellX;
@@ -685,13 +703,25 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4<f32> {
     let edge = max(abs(local.x - 0.5), abs(local.y - 0.5));
     let cellInterior = 1.0 - smoothstep(0.42, 0.5, edge);
     let intensity = smoothstep(0.08, 0.78, value);
-    color = alphaComposite(color, vec4<f32>(heatColor(value), cellInterior * intensity * 0.34));
+    color = alphaComposite(color, vec4<f32>(heatColor(value), cellInterior * intensity * 0.24));
   }
 
   let pulse = 0.5 + 0.5 * sin(hud.timeSeconds * 8.4823);
   let kairos = clamp(hud.kairos, 0.0, 1.0);
   let kairosGlow = rectGlow(uv, vec2<f32>(0.31, 0.39), vec2<f32>(0.69, 0.67), 0.04);
-  color = alphaComposite(color, vec4<f32>(0.05 + 0.25 * pulse, 0.82, 1.0, kairosGlow * kairos * (0.12 + pulse * 0.20)));
+  let kairosLogos = clamp(hud.kairosLogos, 0.0, 1.0);
+  let kairosPathos = clamp(hud.kairosPathos, 0.0, 1.0);
+  let kairosEthos = clamp(hud.kairosEthos, 0.0, 1.0);
+  let kairosTotal = max(0.001, kairosLogos + kairosPathos + kairosEthos);
+  let logosColor = vec3<f32>(0.27, 0.85, 1.0);
+  let pathosColor = vec3<f32>(1.0, 0.45, 0.40);
+  let ethosColor = vec3<f32>(0.61, 1.0, 0.52);
+  let kairosAxisEnergy = clamp(max(kairosLogos, max(kairosPathos, kairosEthos)) * 1.18, 0.0, 1.0);
+  let kairosMixedColor = (logosColor * kairosLogos + pathosColor * kairosPathos + ethosColor * kairosEthos) / kairosTotal;
+  let kairosFieldColor = mix(vec3<f32>(0.66, 0.60, 0.38), kairosMixedColor, kairosAxisEnergy);
+  let kairosPresence = max(max(kairos, kairosAxisEnergy * 0.65), 0.18);
+  let kairosFieldAlpha = kairosGlow * (0.007 + kairosPresence * (0.018 + pulse * 0.030)) * (0.58 + kairosAxisEnergy * 0.54);
+  color = alphaComposite(color, vec4<f32>(kairosFieldColor, kairosFieldAlpha));
 
   let turn = clamp(hud.useProbeTurn, -1.0, 1.0);
   if (abs(turn) > 0.05) {
@@ -717,9 +747,17 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4<f32> {
   let nearWall = clamp(1.05 - hud.depthEstimate, 0.0, 1.0);
   let footGlow = smoothstep(0.66, 0.98, uv.y) * nearWall * 0.16;
   color = alphaComposite(color, vec4<f32>(1.0, 0.42, 0.08, footGlow));
-  return alphaComposite(color, textureSample(panelOverlay, frameSampler, uv));
+  let panelSample = textureSample(panelOverlay, frameSampler, uv);
+  let panelEnergy = max(panelSample.r, max(panelSample.g, panelSample.b));
+  let panelAlpha = panelSample.a * step(0.001, panelEnergy);
+  return alphaComposite(color, vec4<f32>(panelSample.rgb, panelAlpha));
 }
 `;
+
+  const PRESENT_OVERLAY_SHADER = PRESENT_SHADER.replace(
+    "var color = textureSample(frameTexture, frameSampler, uv);",
+    "let ignoredFrame = textureSample(frameTexture, frameSampler, uv);\n  var color = ignoredFrame * 0.0;"
+  );
 
   const BLIT_SHADER = `
 @group(0) @binding(0) var frameSampler: sampler;
@@ -751,7 +789,8 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
 
 @fragment
 fn fragmentMain(input: VertexOut) -> @location(0) vec4<f32> {
-  return textureSample(displayTexture, frameSampler, input.uv);
+  let uv = clamp(input.uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+  return textureSample(displayTexture, frameSampler, uv);
 }
 `;
 
@@ -794,8 +833,12 @@ struct HudInfo {
   enemyAudioAlpha: f32,
   enemySignalSuppressed: f32,
   enemySignalLost: f32,
-  radarPad6: f32,
-  radarPad7: f32,
+  radarReferenceYaw: f32,
+  radarReferenceAlpha: f32,
+  kairosLogos: f32,
+  kairosPathos: f32,
+  kairosEthos: f32,
+  _reserved35: f32,
 };
 
 @group(0) @binding(0) var<uniform> hud: HudInfo;
@@ -852,9 +895,9 @@ fn addLayerCard(color: vec4<f32>, uv: vec2<f32>, layer: u32, value: f32, minCorn
   let border = borderMask(uv, minCorner, maxCorner, hudBorderWidth());
   let barWidth = mix(minCorner.x + 0.018, maxCorner.x - 0.018, clamp(value, 0.0, 1.0));
   let bar = rectMask(uv, vec2<f32>(minCorner.x + 0.018, maxCorner.y - 0.026), vec2<f32>(barWidth, maxCorner.y - 0.014));
-  let base = vec4<f32>(0.010, 0.014, 0.018, fill * 0.36);
-  let edge = vec4<f32>(layerColor(layer, value), border * (0.26 + value * 0.28));
-  let meter = vec4<f32>(layerColor(layer, value), bar * (0.28 + value * 0.30));
+  let base = vec4<f32>(0.010, 0.014, 0.018, fill * 0.14);
+  let edge = vec4<f32>(layerColor(layer, value), border * (0.22 + value * 0.22));
+  let meter = vec4<f32>(layerColor(layer, value), bar * (0.22 + value * 0.24));
   return alphaComposite(alphaComposite(alphaComposite(color, base), edge), meter);
 }
 
@@ -880,9 +923,9 @@ fn addDiagnosticRect(color: vec4<f32>, uv: vec2<f32>, index: u32) -> vec4<f32> {
     minCorner + borderSize,
     maxCorner - borderSize
   );
-  let filled = alphaComposite(color, vec4<f32>(rectColor, fill * alpha * 0.055));
-  let edged = alphaComposite(filled, vec4<f32>(rectColor, border * alpha * 0.92));
-  return alphaComposite(edged, vec4<f32>(rectColor, innerGlow * alpha * 0.020));
+  let filled = alphaComposite(color, vec4<f32>(rectColor, fill * alpha * 0.006));
+  let edged = alphaComposite(filled, vec4<f32>(rectColor, border * alpha * 0.82));
+  return alphaComposite(edged, vec4<f32>(rectColor, innerGlow * alpha * 0.004));
 }
 
 fn segmentMask(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>, width: f32) -> f32 {
@@ -891,6 +934,19 @@ fn segmentMask(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>, width: f32
   let h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
   let dist = length(pa - ba * h);
   return 1.0 - smoothstep(width, width * 1.8, dist);
+}
+
+fn triangleMask(point: vec2<f32>, a: vec2<f32>, b: vec2<f32>, c: vec2<f32>, aspect: f32) -> f32 {
+  let p = vec2<f32>(point.x * aspect, point.y);
+  let pa = vec2<f32>(a.x * aspect, a.y);
+  let pb = vec2<f32>(b.x * aspect, b.y);
+  let pc = vec2<f32>(c.x * aspect, c.y);
+  let e0 = (p.x - pa.x) * (pb.y - pa.y) - (p.y - pa.y) * (pb.x - pa.x);
+  let e1 = (p.x - pb.x) * (pc.y - pb.y) - (p.y - pb.y) * (pc.x - pb.x);
+  let e2 = (p.x - pc.x) * (pa.y - pc.y) - (p.y - pc.y) * (pa.x - pc.x);
+  let positive = step(0.0, min(e0, min(e1, e2)));
+  let negative = step(max(e0, max(e1, e2)), 0.0);
+  return clamp(positive + negative, 0.0, 1.0);
 }
 
 fn sdLine(point: vec2<f32>, start: vec2<f32>, finish: vec2<f32>) -> f32 {
@@ -925,7 +981,12 @@ fn radarNeedle(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, degrees: f32,
 }
 
 fn addRadarNorthMarker(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32, theme: vec3<f32>, confidence: f32, alphaScale: f32) -> vec4<f32> {
-  let angle = -hud.compassHeading * 0.01745329252;
+  let lowConfidenceSearch = 1.0 - step(0.20, confidence);
+  let lostSearch = max(clamp(hud.radarLostAlpha, 0.0, 1.0), 1.0 - step(0.5, hud.radarMode));
+  let searchAmount = clamp(max(lowConfidenceSearch, lostSearch) * (1.0 - step(0.45, hud.compassUsable)), 0.0, 1.0);
+  let searchHeading = hud.timeSeconds * 1080.0;
+  let markerHeading = mix(hud.compassHeading, searchHeading, searchAmount);
+  let angle = -markerHeading * 0.01745329252;
   let direction = vec2<f32>(sin(angle) / aspect, -cos(angle));
   let tangent = vec2<f32>(cos(angle) / aspect, sin(angle));
   let tip = center + direction * radius;
@@ -937,8 +998,27 @@ fn addRadarNorthMarker(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radiu
     max(segmentMask(uv, tip, right, 0.0030), segmentMask(uv, left, right, 0.0030))
   );
   let glow = radarDotMask(uv, tip, 0.012, aspect);
-  let alpha = clamp((0.30 + confidence * 0.82) * alphaScale, 0.0, 1.0);
-  return alphaComposite(alphaComposite(color, vec4<f32>(theme, glow * alpha * 0.30)), vec4<f32>(theme, edge * alpha));
+  let alpha = clamp((0.40 + confidence * 0.76) * alphaScale, 0.0, 1.0);
+  return alphaComposite(alphaComposite(color, vec4<f32>(theme, glow * alpha * 0.46)), vec4<f32>(theme, edge * alpha));
+}
+
+fn addRadarReferenceBearing(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> vec4<f32> {
+  let signal = clamp(hud.radarReferenceAlpha, 0.0, 1.0);
+  if (signal <= 0.01) {
+    return color;
+  }
+
+  let angle = hud.radarReferenceYaw * 0.01745329252;
+  let direction = vec2<f32>(sin(angle) / aspect, -cos(angle));
+  let start = center + direction * radius * 0.16;
+  let finish = center + direction * radius * 0.94;
+  let line = segmentMask(uv, start, finish, 0.0025);
+  let tip = radarDotMask(uv, finish, 0.0085, aspect);
+  let guide = radarCircleMask(uv, finish, 0.017, aspect, 0.0026);
+  let referenceColor = vec3<f32>(0.16, 0.92, 1.0);
+  var next = alphaComposite(color, vec4<f32>(referenceColor, line * signal * 0.62));
+  next = alphaComposite(next, vec4<f32>(referenceColor, guide * signal * 0.42));
+  return alphaComposite(next, vec4<f32>(referenceColor, tip * signal * 0.74));
 }
 
 fn addRadarDirectionDot(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32, yawDegrees: f32, alpha: f32, markerColor: vec3<f32>, distanceScale: f32, ringRadius: f32) -> vec4<f32> {
@@ -955,8 +1035,8 @@ fn addRadarDirectionDot(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radi
   let ring = radarCircleMask(uv, marker, ringRadius, aspect, 0.0032);
   let dot = radarDotMask(uv, marker, ringRadius * 0.54, aspect);
   var next = alphaComposite(color, vec4<f32>(markerColor, radial * 0.18 * signal));
-  next = alphaComposite(next, vec4<f32>(markerColor, ring * (0.42 + signal * 0.42)));
-  return alphaComposite(next, vec4<f32>(markerColor, dot * (0.38 + signal * 0.50)));
+  next = alphaComposite(next, vec4<f32>(markerColor, ring * (0.58 + signal * 0.38)));
+  return alphaComposite(next, vec4<f32>(markerColor, dot * (0.52 + signal * 0.44)));
 }
 
 fn addRadarEnemyDirectionMarkers(color: vec4<f32>, uv: vec2<f32>, center: vec2<f32>, radius: f32, aspect: f32) -> vec4<f32> {
@@ -973,7 +1053,7 @@ fn addRadarEnemyDirectionMarkers(color: vec4<f32>, uv: vec2<f32>, center: vec2<f
   let fused = min(visualAlpha, audioAlpha);
   let fusionDist = sdLine(uv, audioPos, visualPos);
   let fusionLink = smoothstep(0.015, 0.002, fusionDist) * fused;
-  next = alphaComposite(next, vec4<f32>(0.24, 1.0, 0.54, fusionLink * 0.58));
+  next = alphaComposite(next, vec4<f32>(0.24, 1.0, 0.54, fusionLink * 0.74));
   next = addRadarDirectionDot(next, uv, center, radius, aspect, hud.enemyAudioYaw, audioAlpha, mix(vec3<f32>(1.0, 0.62, 0.12), vec3<f32>(0.56, 0.56, 0.58), lost), 0.90, 0.020);
   next = addRadarDirectionDot(next, uv, center, radius, aspect, hud.enemyVisualYaw, visualAlpha, vec3<f32>(1.0, 0.16, 0.30), 0.66, 0.017);
   next = addRadarDirectionDot(next, uv, center, radius, aspect, (hud.enemyVisualYaw + hud.enemyAudioYaw) * 0.5, fused, vec3<f32>(1.0, 0.36, 0.92), 0.78, 0.023);
@@ -995,13 +1075,13 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let theme = mix(activeColor, lostColor, 1.0 - step(0.5, mode));
   let flicker = mix(clamp(hud.radarFlickerPhase, 0.0, 1.0), 1.0, step(0.20, confidence));
   let lostStatic = (fract(sin(dot(uv + vec2<f32>(hud.timeSeconds * 0.021, hud.timeSeconds * 0.037), vec2<f32>(12.9898, 78.233))) * 43758.5453) - 0.5) * hud.radarLostAlpha;
-  let signalAlpha = clamp(max(usable, hud.radarHoldAlpha * 0.36) * (0.62 + confidence * 0.38), 0.12, 1.0);
-  var next = alphaComposite(color, vec4<f32>(0.002, 0.010, 0.016, ring * 0.14));
-  next = alphaComposite(next, vec4<f32>(theme + vec3<f32>(lostStatic * 0.08), ring * (0.46 + confidence * 0.40) * max(signalAlpha, 0.32)));
+  let signalAlpha = clamp(max(usable, hud.radarHoldAlpha * 0.42) * (0.70 + confidence * 0.30), 0.18, 1.0);
+  var next = alphaComposite(color, vec4<f32>(0.002, 0.010, 0.016, ring * 0.22));
+  next = alphaComposite(next, vec4<f32>(theme + vec3<f32>(lostStatic * 0.08), ring * (0.64 + confidence * 0.34) * max(signalAlpha, 0.46)));
 
   let innerA = radarCircleMask(uv, center, radius * 0.34, aspect, 0.0026);
   let innerB = radarCircleMask(uv, center, radius * 0.66, aspect, 0.0024);
-  next = alphaComposite(next, vec4<f32>(theme, (innerA * 0.30 + innerB * 0.26) * signalAlpha));
+  next = alphaComposite(next, vec4<f32>(theme, (innerA * 0.42 + innerB * 0.36) * signalAlpha));
 
   let front = center + vec2<f32>(0.0, -radius);
   let rear = center + vec2<f32>(0.0, radius);
@@ -1009,7 +1089,7 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let right = center + vec2<f32>(radius / aspect, 0.0);
   let vertical = segmentMask(uv, front, rear, 0.0012);
   let horizontal = segmentMask(uv, left, right, 0.0012);
-  next = alphaComposite(next, vec4<f32>(theme, max(vertical, horizontal) * 0.30 * signalAlpha));
+  next = alphaComposite(next, vec4<f32>(theme, max(vertical, horizontal) * 0.44 * signalAlpha));
 
   let stick = vec2<f32>(
     clamp(hud.compassYaw, -1.0, 1.0) / aspect,
@@ -1020,14 +1100,61 @@ fn addEgoRadarHud(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
   let stickLine = segmentMask(uv, center, stickEnd, 0.0048);
   let stickDot = radarDotMask(uv, stickEnd, 0.014, aspect);
   let stickColor = mix(theme, vec3<f32>(1.0, 0.90, 0.32), smoothstep(0.54, 1.0, stickPower));
-  next = alphaComposite(next, vec4<f32>(stickColor, stickLine * (0.30 + stickPower * 0.62)));
-  next = alphaComposite(next, vec4<f32>(stickColor, stickDot * (0.50 + stickPower * 0.48)));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickLine * (0.42 + stickPower * 0.58)));
+  next = alphaComposite(next, vec4<f32>(stickColor, stickDot * (0.62 + stickPower * 0.36)));
 
   next = addRadarEnemyDirectionMarkers(next, uv, center, radius, aspect);
+  next = addRadarReferenceBearing(next, uv, center, radius, aspect);
   next = addRadarNorthMarker(next, uv, center, radius * 1.02, aspect, theme, confidence, flicker);
 
   let centerDot = radarDotMask(uv, center, 0.0065, aspect);
-  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.72));
+  return alphaComposite(next, vec4<f32>(1.0, 0.96, 0.66, centerDot * 0.86));
+}
+
+fn addKairosLpeRadar(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
+  let aspect = f32(info.width) / max(1.0, f32(info.height));
+  let logos = clamp(panel[9], 0.0, 1.0);
+  let pathos = clamp(panel[10], 0.0, 1.0);
+  let ethos = clamp(panel[11], 0.0, 1.0);
+  let energy = clamp(max(logos, max(pathos, ethos)), 0.0, 1.0);
+  let center = vec2<f32>(0.706, 0.765);
+  let radius = 0.044;
+  let logosVertex = center + vec2<f32>(0.0, -radius);
+  let pathosVertex = center + vec2<f32>(-radius * 0.88 / aspect, radius * 0.66);
+  let ethosVertex = center + vec2<f32>(radius * 0.88 / aspect, radius * 0.66);
+  let logosPoint = center + (logosVertex - center) * max(logos, 0.045);
+  let pathosPoint = center + (pathosVertex - center) * max(pathos, 0.045);
+  let ethosPoint = center + (ethosVertex - center) * max(ethos, 0.045);
+  let logosColor = vec3<f32>(0.27, 0.85, 1.0);
+  let pathosColor = vec3<f32>(1.0, 0.45, 0.40);
+  let ethosColor = vec3<f32>(0.61, 1.0, 0.52);
+  let total = max(0.001, logos + pathos + ethos);
+  let mixed = (logosColor * logos + pathosColor * pathos + ethosColor * ethos) / total;
+  let neutral = vec3<f32>(0.78, 0.70, 0.42);
+  let fillColor = mix(neutral, mixed, clamp(energy * 1.25, 0.0, 1.0));
+
+  let outer = max(
+    segmentMask(uv, logosVertex, pathosVertex, 0.0018),
+    max(segmentMask(uv, pathosVertex, ethosVertex, 0.0018), segmentMask(uv, ethosVertex, logosVertex, 0.0018))
+  );
+  let inner = max(
+    segmentMask(uv, center, logosVertex, 0.0010),
+    max(segmentMask(uv, center, pathosVertex, 0.0010), segmentMask(uv, center, ethosVertex, 0.0010))
+  );
+  let shape = triangleMask(uv, logosPoint, pathosPoint, ethosPoint, aspect);
+  let edge = max(
+    segmentMask(uv, logosPoint, pathosPoint, 0.0022),
+    max(segmentMask(uv, pathosPoint, ethosPoint, 0.0022), segmentMask(uv, ethosPoint, logosPoint, 0.0022))
+  );
+  var next = alphaComposite(color, vec4<f32>(neutral, outer * 0.24 + inner * 0.12));
+  next = alphaComposite(next, vec4<f32>(fillColor, shape * (0.11 + energy * 0.30)));
+  next = alphaComposite(next, vec4<f32>(fillColor, edge * (0.38 + energy * 0.42)));
+  next = alphaComposite(next, vec4<f32>(logosColor, radarDotMask(uv, logosVertex, 0.0048, aspect) * 0.76));
+  next = alphaComposite(next, vec4<f32>(pathosColor, radarDotMask(uv, pathosVertex, 0.0048, aspect) * 0.76));
+  next = alphaComposite(next, vec4<f32>(ethosColor, radarDotMask(uv, ethosVertex, 0.0048, aspect) * 0.76));
+  next = alphaComposite(next, vec4<f32>(logosColor, radarDotMask(uv, logosPoint, 0.0056, aspect) * (0.40 + logos * 0.54)));
+  next = alphaComposite(next, vec4<f32>(pathosColor, radarDotMask(uv, pathosPoint, 0.0056, aspect) * (0.40 + pathos * 0.54)));
+  return alphaComposite(next, vec4<f32>(ethosColor, radarDotMask(uv, ethosPoint, 0.0056, aspect) * (0.40 + ethos * 0.54)));
 }
 
 @compute @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE})
@@ -1052,6 +1179,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   color = addLayerCard(color, uv, 1u, panel[1], ${wgslPanelMin("noesis")}, ${wgslPanelMax("noesis")});
   color = addLayerCard(color, uv, 2u, panel[2], ${wgslPanelMin("krisis")}, ${wgslPanelMax("krisis")});
   color = addLayerCard(color, uv, 3u, panel[3], ${wgslPanelMin("kinesis")}, ${wgslPanelMax("kinesis")});
+  color = addKairosLpeRadar(color, uv);
   color = addLayerCard(color, uv, 1u, panel[5], ${wgslPanelMin("route")}, ${wgslPanelMax("route")});
   color = addLayerCard(color, uv, 2u, panel[7], ${wgslPanelMin("combat")}, ${wgslPanelMax("combat")});
   color = addLayerCard(color, uv, 3u, panel[8], ${wgslPanelMin("zoe")}, ${wgslPanelMax("zoe")});
@@ -1069,7 +1197,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     color = addDiagnosticRect(color, uv, rectIndex);
   }
 
-  textureStore(outputPanel, vec2<i32>(i32(id.x), i32(id.y)), color);
+  let colorEnergy = max(color.r, max(color.g, color.b));
+  let safeAlpha = color.a * step(0.001, colorEnergy);
+  textureStore(outputPanel, vec2<i32>(i32(id.x), i32(id.y)), vec4<f32>(color.rgb, safeAlpha));
 }
 `;
 
@@ -1094,43 +1224,47 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       this.queue = null;
       this.frameStates = new Map();
       this.frameTextures = new Map();
-      this.rev3Bridge = null;
-      this.rev3Executor = null;
-      this.rev3TextureRegistry = null;
-      this.rev3ShaderSources = null;
-      this.rev3LastFallback = "";
-      this.rev3LastError = "";
-      this.rev3BridgeInitialized = false;
-      this.rev3HudCompositeDispatchInFlight = false;
-      this.rev3HudCompositeLastResult = null;
-      this.rev3HudCompositeLastError = "";
-      this.rev3HudCompositeLastSkipped = "pilot-disabled";
-      this.rev3HudCompositeLastFrame = 0;
-      this.rev3HudCompositeLastAttemptFrame = 0;
-      this.rev3AisthesisDispatchInFlight = false;
-      this.rev3AisthesisLastResult = null;
-      this.rev3AisthesisLastSummary = null;
-      this.rev3AisthesisParityHistory = createRev3PilotParityHistory(
+      this.canonicalBridge = null;
+      this.canonicalExecutor = null;
+      this.canonicalTextureRegistry = null;
+      this.canonicalShaderSources = null;
+      this.canonicalLastFallback = "";
+      this.canonicalLastError = "";
+      this.canonicalBridgeInitialized = false;
+      this.canonicalHudCompositeDispatchInFlight = false;
+      this.canonicalHudCompositeLastResult = null;
+      this.canonicalHudCompositeLastError = "";
+      this.canonicalHudCompositeLastSkipped = "pilot-disabled";
+      this.canonicalHudCompositeLastFrame = 0;
+      this.canonicalHudCompositeLastAttemptFrame = 0;
+      this.canonicalAisthesisDispatchInFlight = false;
+      this.canonicalAisthesisLastResult = null;
+      this.canonicalAisthesisLastSummary = null;
+      this.canonicalAisthesisParityHistory = createCanonicalPilotParityHistory(
         "gpu.aisthesis.raw-frame",
-        REV3_AISTHESIS_PROMOTION_STREAK_REQUIRED,
+        GPU_AISTHESIS_PROMOTION_STREAK_REQUIRED,
         "parity");
-      this.rev3AisthesisLastError = "";
-      this.rev3AisthesisLastSkipped = "pilot-disabled";
-      this.rev3AisthesisLastFrame = 0;
-      this.rev3AisthesisLastAttemptFrame = 0;
-      this.rev3AisthesisLastAttemptAt = Number.NEGATIVE_INFINITY;
-      this.rev3SpatialDispatchInFlight = false;
-      this.rev3SpatialLastResult = null;
-      this.rev3SpatialLastSummary = null;
-      this.rev3SpatialParityHistory = createRev3PilotParityHistory(
+      this.canonicalAisthesisLastError = "";
+      this.canonicalAisthesisLastSkipped = "pilot-disabled";
+      this.canonicalAisthesisLastFrame = 0;
+      this.canonicalAisthesisLastAttemptFrame = 0;
+      this.canonicalAisthesisLastAttemptAt = Number.NEGATIVE_INFINITY;
+      this.canonicalSpatialDispatchInFlight = false;
+      this.canonicalSpatialLastResult = null;
+      this.canonicalSpatialLastSummary = null;
+      this.canonicalSpatialParityHistory = createCanonicalPilotParityHistory(
         "gpu.spatial-reasoning",
-        REV3_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED,
+        GPU_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED,
         "diagnostic");
-      this.rev3SpatialLastError = "";
-      this.rev3SpatialLastSkipped = "pilot-disabled";
-      this.rev3SpatialLastFrame = 0;
-      this.rev3SpatialLastAttemptFrame = 0;
-      this.rev3SpatialLastAttemptAt = Number.NEGATIVE_INFINITY;
+      this.canonicalSpatialLastError = "";
+      this.canonicalSpatialLastSkipped = "pilot-disabled";
+      this.canonicalSpatialLastFrame = 0;
+      this.canonicalSpatialLastAttemptFrame = 0;
+      this.canonicalSpatialLastAttemptAt = Number.NEGATIVE_INFINITY;
+      this.hudOffscreenCompositeRuntimeDisabled = false;
+      this.hudOffscreenCompositeFailureCount = 0;
+      this.hudOffscreenCompositeLastError = "";
+      this.hudOffscreenCompositeLastDisabledAt = 0;
       this.lastError = "";
       this.renderer = null;
       this.hudOverlayEnabled = false;
@@ -1178,8 +1312,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         hudFrameTarget: normalizeGpuFrameTarget(null, "HudCompositeOffscreen", HUD_COMPOSITE_TARGET, HUD_COMPOSITE_WIRE_NAME, "display", false),
         analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
         analysisFrameTarget: normalizeGpuFrameTarget(null, "RawFramebuffer", FRAME_TARGET, RAW_FRAMEBUFFER_WIRE_NAME, "analysis", true),
-        displaySource: HUD_COMPOSITE_WIRE_NAME,
-        displayFrameTarget: normalizeGpuFrameTarget(null, "HudCompositeOffscreen", HUD_COMPOSITE_TARGET, HUD_COMPOSITE_WIRE_NAME, "display", false),
+        displaySource: RAW_FRAMEBUFFER_WIRE_NAME,
+        displayFrameTarget: normalizeGpuFrameTarget(null, "RawFramebuffer", FRAME_TARGET, RAW_FRAMEBUFFER_WIRE_NAME, "display", true),
         readbackPolicy: "none",
         readback: normalizeGpuReadbackPolicy(null, "none"),
         frameToken: normalizeGpuFrameToken(null, FRAME_TARGET, HUD_COMPOSITE_TARGET, 0, "provider-init"),
@@ -1270,7 +1404,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           this.fallbackReason = "";
           this.initialized = true;
           this.lastError = "";
-          await this.initializeRev3Bridge();
+          await this.initializeCanonicalBridge();
           return this.status();
         } catch (error) {
           this.device = null;
@@ -1286,22 +1420,22 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       return this.initializing;
     }
 
-    async waitForRev3BridgeModule() {
+    async waitForCanonicalBridgeModule() {
       const root = typeof window !== "undefined" ? window : self;
       try {
-        if (root.AIKernelWebGpuRev3Ready && typeof root.AIKernelWebGpuRev3Ready.then === "function") {
-          await root.AIKernelWebGpuRev3Ready;
+        if (root.AIKernelWebGpuReady && typeof root.AIKernelWebGpuReady.then === "function") {
+          await root.AIKernelWebGpuReady;
         }
       } catch (error) {
-        this.rev3LastError = error instanceof Error ? error.message : String(error);
+        this.canonicalLastError = error instanceof Error ? error.message : String(error);
       }
 
-      return root.AIKernelWebGpuRev3 || null;
+      return root.AIKernelWebGpu || null;
     }
 
-    resolveRev3AssetBase() {
+    resolveCanonicalAssetBase() {
       const root = typeof window !== "undefined" ? window : self;
-      const configured = String(root.AIKernelDoomRev3AssetBase || "");
+      const configured = String(root.AIKernelDoomGpuAssetBase || "");
       if (configured) {
         return configured.endsWith("/") ? configured : `${configured}/`;
       }
@@ -1309,35 +1443,35 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       return "/js/aikernel/";
     }
 
-    async loadRev3ShaderSources() {
-      if (this.rev3ShaderSources) {
-        return this.rev3ShaderSources;
+    async loadCanonicalShaderSources() {
+      if (this.canonicalShaderSources) {
+        return this.canonicalShaderSources;
       }
 
       const sources = {};
-      const base = this.resolveRev3AssetBase();
-      for (const [passId, relativePath] of Object.entries(REV3_SHADER_PATHS)) {
+      const base = this.resolveCanonicalAssetBase();
+      for (const [passId, relativePath] of Object.entries(GPU_SHADER_PATHS)) {
         const url = `${base}${relativePath}`;
         const response = await fetch(url);
         if (!response.ok) {
-          throw new Error(`rev3 shader ${passId} unavailable: ${response.status}`);
+          throw new Error(`canonical shader ${passId} unavailable: ${response.status}`);
         }
 
         sources[passId] = await response.text();
       }
 
-      this.rev3ShaderSources = sources;
+      this.canonicalShaderSources = sources;
       return sources;
     }
 
-    createRev3TextureRegistry() {
+    createCanonicalTextureRegistry() {
       return {
-        get: (targetId) => this.resolveRev3Texture(targetId),
-        resolve: (target) => this.resolveRev3Texture(target?.TargetId || target?.targetId || target?.Role || target?.role)
+        get: (targetId) => this.resolveCanonicalTexture(targetId),
+        resolve: (target) => this.resolveCanonicalTexture(target?.TargetId || target?.targetId || target?.Role || target?.role)
       };
     }
 
-    resolveRev3Texture(targetId) {
+    resolveCanonicalTexture(targetId) {
       const name = String(targetId || "");
       if (!name || name === "raw" || name === FRAME_TARGET || name === RAW_FRAMEBUFFER_WIRE_NAME) {
         return this.renderer?.frameTexture || this.frameTextures.get(FRAME_TARGET) || null;
@@ -1348,8 +1482,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return texture || this.frameTextures.get(HUD_COMPOSITE_TARGET) || null;
       }
 
-      if (name === "hud-pilot" || name === REV3_HUD_COMPOSITE_PILOT_TARGET) {
-        return this.renderer?.rev3HudCompositePilotTexture || this.frameTextures.get(REV3_HUD_COMPOSITE_PILOT_TARGET) || null;
+      if (name === "hud-pilot" || name === GPU_HUD_COMPOSITE_PILOT_TARGET) {
+        return this.renderer?.canonicalHudCompositePilotTexture || this.frameTextures.get(GPU_HUD_COMPOSITE_PILOT_TARGET) || null;
       }
 
       if (name === GPU_AISTHESIS_MASK_TARGET || name === GPU_AISTHESIS_MASK_WIRE_NAME) {
@@ -1359,103 +1493,103 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       return this.frameTextures.get(name) || null;
     }
 
-    async initializeRev3Bridge() {
-      if (this.rev3BridgeInitialized || this.usingCpuFallback || !this.device || !this.queue) {
-        return this.rev3BridgeStatus();
+    async initializeCanonicalBridge() {
+      if (this.canonicalBridgeInitialized || this.usingCpuFallback || !this.device || !this.queue) {
+        return this.canonicalBridgeStatus();
       }
 
-      this.rev3BridgeInitialized = true;
+      this.canonicalBridgeInitialized = true;
       try {
-        const rev3 = await this.waitForRev3BridgeModule();
-        if (!rev3?.createWebGpuRev3EnvelopeBridge || !rev3?.createWebGpuRev3BrowserExecutor) {
-          this.rev3LastFallback = "rev3-bridge-module-unavailable";
-          return this.rev3BridgeStatus();
+        const canonical = await this.waitForCanonicalBridgeModule();
+        if (!canonical?.createWebGpuEnvelopeBridge || !canonical?.createWebGpuBrowserExecutor) {
+          this.canonicalLastFallback = "canonical-bridge-module-unavailable";
+          return this.canonicalBridgeStatus();
         }
 
-        const shaderSources = await this.loadRev3ShaderSources();
-        this.rev3TextureRegistry = this.rev3TextureRegistry || this.createRev3TextureRegistry();
-        this.rev3Executor = rev3.createWebGpuRev3BrowserExecutor({
+        const shaderSources = await this.loadCanonicalShaderSources();
+        this.canonicalTextureRegistry = this.canonicalTextureRegistry || this.createCanonicalTextureRegistry();
+        this.canonicalExecutor = canonical.createWebGpuBrowserExecutor({
           adapter: this.adapter,
           device: this.device,
           queue: this.queue,
-          textureRegistry: this.rev3TextureRegistry,
+          textureRegistry: this.canonicalTextureRegistry,
           shaderSources,
           onFallback: reason => {
-            this.rev3LastFallback = String(reason || "");
+            this.canonicalLastFallback = String(reason || "");
           },
           onDeviceLost: info => {
-            this.handleGpuLost("webgpu-rev3", info);
+            this.handleGpuLost("webgpu-canonical", info);
           }
         });
-        this.rev3Bridge = rev3.createWebGpuRev3EnvelopeBridge({ executor: this.rev3Executor });
-        await this.rev3Executor.initialize?.();
-        this.rev3LastError = "";
+        this.canonicalBridge = canonical.createWebGpuEnvelopeBridge({ executor: this.canonicalExecutor });
+        await this.canonicalExecutor.initialize?.();
+        this.canonicalLastError = "";
       } catch (error) {
-        this.rev3LastError = error instanceof Error ? error.message : String(error);
-        this.rev3LastFallback = "rev3-bridge-initialize-failed";
+        this.canonicalLastError = error instanceof Error ? error.message : String(error);
+        this.canonicalLastFallback = "canonical-bridge-initialize-failed";
       }
 
-      return this.rev3BridgeStatus();
+      return this.canonicalBridgeStatus();
     }
 
-    rev3BridgeStatus() {
-      const diagnostics = typeof this.rev3Executor?.getDiagnostics === "function"
-        ? this.rev3Executor.getDiagnostics()
+    canonicalBridgeStatus() {
+      const diagnostics = typeof this.canonicalExecutor?.getDiagnostics === "function"
+        ? this.canonicalExecutor.getDiagnostics()
         : null;
-      const shaderSourceCount = this.rev3ShaderSources ? Object.keys(this.rev3ShaderSources).length : 0;
+      const shaderSourceCount = this.canonicalShaderSources ? Object.keys(this.canonicalShaderSources).length : 0;
       return {
-        bridgeAvailable: Boolean(this.rev3Bridge),
-        executorAvailable: Boolean(this.rev3Executor),
-        bridgeInitialized: Boolean(this.rev3BridgeInitialized),
-        shaderSourcesReady: shaderSourceCount === Object.keys(REV3_SHADER_PATHS).length,
+        bridgeAvailable: Boolean(this.canonicalBridge),
+        executorAvailable: Boolean(this.canonicalExecutor),
+        bridgeInitialized: Boolean(this.canonicalBridgeInitialized),
+        shaderSourcesReady: shaderSourceCount === Object.keys(GPU_SHADER_PATHS).length,
         shaderSourceCount,
-        textureRegistryReady: Boolean(this.rev3TextureRegistry),
-        rawTextureReady: Boolean(this.resolveRev3Texture(FRAME_TARGET)),
-        hudTextureReady: Boolean(this.resolveRev3Texture(HUD_COMPOSITE_TARGET)),
-        hudPilotTextureReady: Boolean(this.resolveRev3Texture(REV3_HUD_COMPOSITE_PILOT_TARGET)),
+        textureRegistryReady: Boolean(this.canonicalTextureRegistry),
+        rawTextureReady: Boolean(this.resolveCanonicalTexture(FRAME_TARGET)),
+        hudTextureReady: Boolean(this.resolveCanonicalTexture(HUD_COMPOSITE_TARGET)),
+        hudPilotTextureReady: Boolean(this.resolveCanonicalTexture(GPU_HUD_COMPOSITE_PILOT_TARGET)),
         builtInPasses: Object.freeze(["gpu.aisthesis.raw-frame", "gpu.spatial-reasoning", "gpu.hud.composite"]),
-        lastFallback: this.rev3LastFallback,
-        lastError: this.rev3LastError,
+        lastFallback: this.canonicalLastFallback,
+        lastError: this.canonicalLastError,
         diagnostics
       };
     }
 
-    isRev3HudCompositePilotEnabled() {
+    isCanonicalHudCompositePilotEnabled() {
       const root = typeof window !== "undefined" ? window : self;
-      if (root.AIKernelDoomRev3HudCompositePilot === true) {
+      if (root.AIKernelDoomCanonicalHudCompositePilot === true) {
         return true;
       }
 
       const flags = Array.isArray(this.hudOverlayState?.featureFlags) ? this.hudOverlayState.featureFlags : [];
-      return flags.some(flag => String(flag).toLowerCase() === "rev3-hud-composite-pilot");
+      return flags.some(flag => String(flag).toLowerCase() === "canonical-hud-composite-pilot");
     }
 
-    isRev3AisthesisPilotEnabled() {
+    isCanonicalAisthesisPilotEnabled() {
       const root = typeof window !== "undefined" ? window : self;
-      if (root.AIKernelDoomRev3AisthesisPilot === true) {
+      if (root.AIKernelDoomCanonicalAisthesisPilot === true) {
         return true;
       }
 
       const flags = Array.isArray(this.gpuAisthesisState?.features) ? this.gpuAisthesisState.features : [];
-      return flags.some(flag => String(flag).toLowerCase() === "rev3-aisthesis-pilot");
+      return flags.some(flag => String(flag).toLowerCase() === "canonical-aisthesis-pilot");
     }
 
-    isRev3SpatialPilotEnabled() {
+    isCanonicalSpatialPilotEnabled() {
       const root = typeof window !== "undefined" ? window : self;
-      if (root.AIKernelDoomRev3SpatialPilot === true) {
+      if (root.AIKernelDoomCanonicalSpatialPilot === true) {
         return true;
       }
 
       const flags = Array.isArray(this.gpuSpatialReasoningState?.featureFlags) ? this.gpuSpatialReasoningState.featureFlags : [];
-      return flags.some(flag => String(flag).toLowerCase() === "rev3-spatial-pilot");
+      return flags.some(flag => String(flag).toLowerCase() === "canonical-spatial-pilot");
     }
 
-    createRev3TargetEnvelope(role, targetId, kind, width, height, pixelFormat = REV3_PIXEL_FORMAT_RGBA32) {
+    createCanonicalTargetEnvelope(role, targetId, kind, width, height, pixelFormat = GPU_PIXEL_FORMAT_RGBA32) {
       return {
         Role: role,
         TargetId: targetId,
         Kind: kind,
-        Backend: REV3_BACKEND_WEBGPU,
+        Backend: GPU_BACKEND_WEBGPU,
         Width: Math.max(1, Math.floor(Number(width || 0))),
         Height: Math.max(1, Math.floor(Number(height || 0))),
         PixelFormat: pixelFormat,
@@ -1463,7 +1597,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       };
     }
 
-    createRev3FeatureFlags(values, explicit = {}) {
+    createCanonicalFeatureFlags(values, explicit = {}) {
       const output = Object.assign({}, explicit);
       const list = Array.isArray(values) ? values : [];
       for (const value of list) {
@@ -1475,10 +1609,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       return output;
     }
 
-    createRev3AisthesisEnvelope(renderer) {
+    createCanonicalAisthesisEnvelope(renderer) {
       const state = this.gpuAisthesisState || {};
       return {
-        Schema: "aikernel.gpu.rev3.dispatch",
+        Schema: "aikernel.gpu.dispatch",
         Version: "0.1.3",
         PassId: "gpu.aisthesis.raw-frame",
         PassKind: 1,
@@ -1488,10 +1622,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           SampleTicks: Math.floor(performance?.now?.() || Date.now())
         },
         Targets: [
-          this.createRev3TargetEnvelope("raw", FRAME_TARGET, REV3_FRAME_KIND_RAW, renderer.width, renderer.height, REV3_PIXEL_FORMAT_RGBA32)
+          this.createCanonicalTargetEnvelope("raw", FRAME_TARGET, GPU_FRAME_KIND_RAW, renderer.width, renderer.height, GPU_PIXEL_FORMAT_RGBA32)
         ],
         Buffers: [],
-        FeatureFlags: this.createRev3FeatureFlags(state.features, {
+        FeatureFlags: this.createCanonicalFeatureFlags(state.features, {
           visionHeatmap: Boolean(state.visionHeatmap),
           edgeDetect: Boolean(state.edgeDetect),
           cornerDetect: Boolean(state.cornerDetect),
@@ -1503,14 +1637,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         Labels: [],
         Tags: {
           host: "AIKernel.Doom",
-          mode: "rev3-aisthesis-pilot",
+          mode: "canonical-aisthesis-pilot",
           raw_capture_source: RAW_FRAMEBUFFER_WIRE_NAME,
           display: "not-presented"
         }
       };
     }
 
-    createRev3MatrixBuffers() {
+    createCanonicalMatrixBuffers() {
       const matrices = [
         { Name: "ais-matrix:topos", LayoutName: "AisMatrix", Stride: 81, Count: 1, Values: new Array(81).fill(0) },
         { Name: "ais-matrix:route", LayoutName: "AisMatrix", Stride: 81, Count: 1, Values: new Array(81).fill(0) },
@@ -1537,7 +1671,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       return matrices;
     }
 
-    createRev3StateVectorBuffer(renderer) {
+    createCanonicalStateVectorBuffer(renderer) {
       const values = new Array(16).fill(0);
       const spatial = renderer?.gpuSpatialInfoUpload || [];
       const hud = renderer?.hudInfoUpload || [];
@@ -1559,9 +1693,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       };
     }
 
-    createRev3SpatialEnvelope(renderer) {
+    createCanonicalSpatialEnvelope(renderer) {
       return {
-        Schema: "aikernel.gpu.rev3.dispatch",
+        Schema: "aikernel.gpu.dispatch",
         Version: "0.1.3",
         PassId: "gpu.spatial-reasoning",
         PassKind: 2,
@@ -1571,14 +1705,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           SampleTicks: Math.floor(performance?.now?.() || Date.now())
         },
         Targets: [
-          this.createRev3TargetEnvelope("raw", FRAME_TARGET, REV3_FRAME_KIND_RAW, renderer.width, renderer.height, REV3_PIXEL_FORMAT_RGBA32),
-          this.createRev3TargetEnvelope("hud", HUD_COMPOSITE_TARGET, REV3_FRAME_KIND_HUD, renderer.width, renderer.height, REV3_PIXEL_FORMAT_RGBA32)
+          this.createCanonicalTargetEnvelope("raw", FRAME_TARGET, GPU_FRAME_KIND_RAW, renderer.width, renderer.height, GPU_PIXEL_FORMAT_RGBA32),
+          this.createCanonicalTargetEnvelope("hud", HUD_COMPOSITE_TARGET, GPU_FRAME_KIND_HUD, renderer.width, renderer.height, GPU_PIXEL_FORMAT_RGBA32)
         ],
         Buffers: [
-          ...this.createRev3MatrixBuffers(),
-          this.createRev3StateVectorBuffer(renderer)
+          ...this.createCanonicalMatrixBuffers(),
+          this.createCanonicalStateVectorBuffer(renderer)
         ],
-        FeatureFlags: this.createRev3FeatureFlags(this.gpuSpatialReasoningState?.featureFlags, {
+        FeatureFlags: this.createCanonicalFeatureFlags(this.gpuSpatialReasoningState?.featureFlags, {
           "topos-reduce": true,
           "route-reduce": true,
           "threat-reduce": true,
@@ -1589,14 +1723,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         Labels: [],
         Tags: {
           host: "AIKernel.Doom",
-          mode: "rev3-spatial-pilot",
+          mode: "canonical-spatial-pilot",
           ais_matrix_order: "topos,route,threat,zoe",
           state_vector_stride: "16"
         }
       };
     }
 
-    createRev3HudScalars(renderer) {
+    createCanonicalHudScalars(renderer) {
       const values = renderer?.hudInfoUpload || [];
       const visualAlpha = clamp01(Number(values[25] || 0));
       const audioAlpha = clamp01(Number(values[27] || 0));
@@ -1627,7 +1761,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       };
     }
 
-    canRunRev3Pilot(lastAttemptAt, inFlight, enabled, dispatchName) {
+    canRunCanonicalPilot(lastAttemptAt, inFlight, enabled, dispatchName) {
       if (!enabled) {
         return "pilot-disabled";
       }
@@ -1635,114 +1769,114 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return `${dispatchName}-dispatch-in-flight`;
       }
       const now = performance?.now?.() || Date.now();
-      if (now - lastAttemptAt < REV3_PILOT_MIN_INTERVAL_MS) {
+      if (now - lastAttemptAt < GPU_PILOT_MIN_INTERVAL_MS) {
         return `${dispatchName}-throttled`;
       }
-      if (!this.rev3Bridge) {
-        return "rev3-bridge-unavailable";
+      if (!this.canonicalBridge) {
+        return "canonical-bridge-unavailable";
       }
       return "";
     }
 
-    scheduleRev3AisthesisPilot(renderer) {
-      const skip = this.canRunRev3Pilot(
-        this.rev3AisthesisLastAttemptAt,
-        this.rev3AisthesisDispatchInFlight,
-        this.isRev3AisthesisPilotEnabled(),
-        "rev3-aisthesis");
+    scheduleCanonicalAisthesisPilot(renderer) {
+      const skip = this.canRunCanonicalPilot(
+        this.canonicalAisthesisLastAttemptAt,
+        this.canonicalAisthesisDispatchInFlight,
+        this.isCanonicalAisthesisPilotEnabled(),
+        "canonical-aisthesis");
       if (skip) {
-        this.rev3AisthesisLastSkipped = skip;
+        this.canonicalAisthesisLastSkipped = skip;
         return false;
       }
-      if (!this.rev3Bridge?.dispatchAisthesisEnvelope || !this.resolveRev3Texture(FRAME_TARGET)) {
-        this.rev3AisthesisLastSkipped = "rev3-aisthesis-bridge-or-raw-target-unavailable";
+      if (!this.canonicalBridge?.dispatchAisthesisEnvelope || !this.resolveCanonicalTexture(FRAME_TARGET)) {
+        this.canonicalAisthesisLastSkipped = "canonical-aisthesis-bridge-or-raw-target-unavailable";
         return false;
       }
 
-      this.rev3AisthesisDispatchInFlight = true;
-      this.rev3AisthesisLastSkipped = "";
-      this.rev3AisthesisLastAttemptFrame = renderer.frame;
-      this.rev3AisthesisLastAttemptAt = performance?.now?.() || Date.now();
-      const envelope = this.createRev3AisthesisEnvelope(renderer);
-      this.rev3Bridge.dispatchAisthesisEnvelope(envelope)
+      this.canonicalAisthesisDispatchInFlight = true;
+      this.canonicalAisthesisLastSkipped = "";
+      this.canonicalAisthesisLastAttemptFrame = renderer.frame;
+      this.canonicalAisthesisLastAttemptAt = performance?.now?.() || Date.now();
+      const envelope = this.createCanonicalAisthesisEnvelope(renderer);
+      this.canonicalBridge.dispatchAisthesisEnvelope(envelope)
         .then(result => {
-          this.rev3AisthesisLastResult = result || null;
-          this.rev3AisthesisLastFrame = renderer.frame;
-          const summary = createRev3AisthesisPilotSummary(
+          this.canonicalAisthesisLastResult = result || null;
+          this.canonicalAisthesisLastFrame = renderer.frame;
+          const summary = createCanonicalAisthesisSummary(
             result,
             renderer.frame,
             this.gpuAisthesisLastSummary);
-          this.rev3AisthesisParityHistory = updateRev3PilotParityHistory(
-            this.rev3AisthesisParityHistory,
+          this.canonicalAisthesisParityHistory = updateCanonicalPilotParityHistory(
+            this.canonicalAisthesisParityHistory,
             summary,
-            REV3_AISTHESIS_PROMOTION_STREAK_REQUIRED,
+            GPU_AISTHESIS_PROMOTION_STREAK_REQUIRED,
             "parity");
-          summary.history = this.rev3AisthesisParityHistory;
-          this.rev3AisthesisLastSummary = summary;
-          this.rev3AisthesisLastError = "";
+          summary.history = this.canonicalAisthesisParityHistory;
+          this.canonicalAisthesisLastSummary = summary;
+          this.canonicalAisthesisLastError = "";
         })
         .catch(error => {
-          this.rev3AisthesisLastError = error instanceof Error ? error.message : String(error);
-          this.rev3LastError = this.rev3AisthesisLastError;
-          this.rev3LastFallback = "rev3-aisthesis-pilot-failed";
+          this.canonicalAisthesisLastError = error instanceof Error ? error.message : String(error);
+          this.canonicalLastError = this.canonicalAisthesisLastError;
+          this.canonicalLastFallback = "canonical-aisthesis-pilot-failed";
         })
         .finally(() => {
-          this.rev3AisthesisDispatchInFlight = false;
+          this.canonicalAisthesisDispatchInFlight = false;
         });
       return true;
     }
 
-    scheduleRev3SpatialPilot(renderer) {
-      const skip = this.canRunRev3Pilot(
-        this.rev3SpatialLastAttemptAt,
-        this.rev3SpatialDispatchInFlight,
-        this.isRev3SpatialPilotEnabled(),
-        "rev3-spatial");
+    scheduleCanonicalSpatialPilot(renderer) {
+      const skip = this.canRunCanonicalPilot(
+        this.canonicalSpatialLastAttemptAt,
+        this.canonicalSpatialDispatchInFlight,
+        this.isCanonicalSpatialPilotEnabled(),
+        "canonical-spatial");
       if (skip) {
-        this.rev3SpatialLastSkipped = skip;
+        this.canonicalSpatialLastSkipped = skip;
         return false;
       }
-      if (!this.rev3Bridge?.dispatchSpatialReasoningEnvelope) {
-        this.rev3SpatialLastSkipped = "rev3-spatial-bridge-unavailable";
+      if (!this.canonicalBridge?.dispatchSpatialReasoningEnvelope) {
+        this.canonicalSpatialLastSkipped = "canonical-spatial-bridge-unavailable";
         return false;
       }
 
-      this.rev3SpatialDispatchInFlight = true;
-      this.rev3SpatialLastSkipped = "";
-      this.rev3SpatialLastAttemptFrame = renderer.frame;
-      this.rev3SpatialLastAttemptAt = performance?.now?.() || Date.now();
-      const envelope = this.createRev3SpatialEnvelope(renderer);
-      this.rev3Bridge.dispatchSpatialReasoningEnvelope(envelope)
+      this.canonicalSpatialDispatchInFlight = true;
+      this.canonicalSpatialLastSkipped = "";
+      this.canonicalSpatialLastAttemptFrame = renderer.frame;
+      this.canonicalSpatialLastAttemptAt = performance?.now?.() || Date.now();
+      const envelope = this.createCanonicalSpatialEnvelope(renderer);
+      this.canonicalBridge.dispatchSpatialReasoningEnvelope(envelope)
         .then(result => {
-          this.rev3SpatialLastResult = result || null;
-          this.rev3SpatialLastFrame = renderer.frame;
-          const summary = createRev3SpatialPilotSummary(
+          this.canonicalSpatialLastResult = result || null;
+          this.canonicalSpatialLastFrame = renderer.frame;
+          const summary = createCanonicalSpatialSummary(
             result,
             renderer.frame,
             this.gpuSpatialReasoningLastSummary);
-          this.rev3SpatialParityHistory = updateRev3PilotParityHistory(
-            this.rev3SpatialParityHistory,
+          this.canonicalSpatialParityHistory = updateCanonicalPilotParityHistory(
+            this.canonicalSpatialParityHistory,
             summary,
-            REV3_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED,
+            GPU_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED,
             "diagnostic");
-          summary.history = this.rev3SpatialParityHistory;
-          this.rev3SpatialLastSummary = summary;
-          this.rev3SpatialLastError = "";
+          summary.history = this.canonicalSpatialParityHistory;
+          this.canonicalSpatialLastSummary = summary;
+          this.canonicalSpatialLastError = "";
         })
         .catch(error => {
-          this.rev3SpatialLastError = error instanceof Error ? error.message : String(error);
-          this.rev3LastError = this.rev3SpatialLastError;
-          this.rev3LastFallback = "rev3-spatial-pilot-failed";
+          this.canonicalSpatialLastError = error instanceof Error ? error.message : String(error);
+          this.canonicalLastError = this.canonicalSpatialLastError;
+          this.canonicalLastFallback = "canonical-spatial-pilot-failed";
         })
         .finally(() => {
-          this.rev3SpatialDispatchInFlight = false;
+          this.canonicalSpatialDispatchInFlight = false;
         });
       return true;
     }
 
-    createRev3HudCompositeEnvelope(renderer) {
+    createCanonicalHudCompositeEnvelope(renderer) {
       return {
-        Schema: "aikernel.gpu.rev3.dispatch",
+        Schema: "aikernel.gpu.dispatch",
         Version: "0.1.3",
         PassId: "gpu.hud.composite",
         PassKind: 3,
@@ -1752,8 +1886,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           SampleTicks: Math.floor(performance?.now?.() || Date.now())
         },
         Targets: [
-          this.createRev3TargetEnvelope("raw", FRAME_TARGET, REV3_FRAME_KIND_RAW, renderer.width, renderer.height, REV3_PIXEL_FORMAT_RGBA32),
-          this.createRev3TargetEnvelope("hud", REV3_HUD_COMPOSITE_PILOT_TARGET, REV3_FRAME_KIND_HUD, renderer.width, renderer.height, REV3_PIXEL_FORMAT_RGBA32)
+          this.createCanonicalTargetEnvelope("raw", FRAME_TARGET, GPU_FRAME_KIND_RAW, renderer.width, renderer.height, GPU_PIXEL_FORMAT_RGBA32),
+          this.createCanonicalTargetEnvelope("hud", GPU_HUD_COMPOSITE_PILOT_TARGET, GPU_FRAME_KIND_HUD, renderer.width, renderer.height, GPU_PIXEL_FORMAT_RGBA32)
         ],
         Buffers: [],
         FeatureFlags: {
@@ -1761,47 +1895,47 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           "ego-radar": true,
           "doom-pilot-texture": true
         },
-        Scalars: this.createRev3HudScalars(renderer),
+        Scalars: this.createCanonicalHudScalars(renderer),
         Labels: [],
         Tags: {
           host: "AIKernel.Doom",
-          mode: "rev3-hud-composite-pilot",
+          mode: "canonical-hud-composite-pilot",
           display: "not-presented"
         }
       };
     }
 
-    scheduleRev3HudCompositePilot(renderer) {
-      if (!this.isRev3HudCompositePilotEnabled()) {
-        this.rev3HudCompositeLastSkipped = "pilot-disabled";
+    scheduleCanonicalHudCompositePilot(renderer) {
+      if (!this.isCanonicalHudCompositePilotEnabled()) {
+        this.canonicalHudCompositeLastSkipped = "pilot-disabled";
         return false;
       }
 
-      if (this.rev3HudCompositeDispatchInFlight) {
-        this.rev3HudCompositeLastSkipped = "pilot-dispatch-in-flight";
+      if (this.canonicalHudCompositeDispatchInFlight) {
+        this.canonicalHudCompositeLastSkipped = "pilot-dispatch-in-flight";
         return false;
       }
 
-      if (!this.rev3Bridge?.dispatchHudCompositeEnvelope || !renderer?.rev3HudCompositePilotTexture) {
-        this.rev3HudCompositeLastSkipped = "rev3-hud-bridge-or-target-unavailable";
+      if (!this.canonicalBridge?.dispatchHudCompositeEnvelope || !renderer?.canonicalHudCompositePilotTexture) {
+        this.canonicalHudCompositeLastSkipped = "canonical-hud-bridge-or-target-unavailable";
         return false;
       }
 
-      this.rev3HudCompositeDispatchInFlight = true;
-      this.rev3HudCompositeLastSkipped = "";
-      this.rev3HudCompositeLastAttemptFrame = renderer.frame;
-      const envelope = this.createRev3HudCompositeEnvelope(renderer);
-      this.rev3Bridge.dispatchHudCompositeEnvelope(envelope)
+      this.canonicalHudCompositeDispatchInFlight = true;
+      this.canonicalHudCompositeLastSkipped = "";
+      this.canonicalHudCompositeLastAttemptFrame = renderer.frame;
+      const envelope = this.createCanonicalHudCompositeEnvelope(renderer);
+      this.canonicalBridge.dispatchHudCompositeEnvelope(envelope)
         .then(result => {
-          this.rev3HudCompositeLastResult = result || null;
-          this.rev3HudCompositeLastFrame = renderer.frame;
-          this.rev3HudCompositeLastError = "";
+          this.canonicalHudCompositeLastResult = result || null;
+          this.canonicalHudCompositeLastFrame = renderer.frame;
+          this.canonicalHudCompositeLastError = "";
           if (result) {
-            this.frameTextures.set(REV3_HUD_COMPOSITE_PILOT_TARGET, renderer.rev3HudCompositePilotTexture);
-            this.setFrameState(REV3_HUD_COMPOSITE_PILOT_TARGET, {
+            this.frameTextures.set(GPU_HUD_COMPOSITE_PILOT_TARGET, renderer.canonicalHudCompositePilotTexture);
+            this.setFrameState(GPU_HUD_COMPOSITE_PILOT_TARGET, {
               width: renderer.width,
               height: renderer.height,
-              format: "rgba8unorm-rev3-hud-pilot",
+              format: "rgba8unorm-canonical-hud-pilot",
               frame: renderer.frame,
               zeroCopy: true,
               overlayExcluded: false,
@@ -1811,12 +1945,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           }
         })
         .catch(error => {
-          this.rev3HudCompositeLastError = error instanceof Error ? error.message : String(error);
-          this.rev3LastError = this.rev3HudCompositeLastError;
-          this.rev3LastFallback = "rev3-hud-composite-pilot-failed";
+          this.canonicalHudCompositeLastError = error instanceof Error ? error.message : String(error);
+          this.canonicalLastError = this.canonicalHudCompositeLastError;
+          this.canonicalLastFallback = "canonical-hud-composite-pilot-failed";
         })
         .finally(() => {
-          this.rev3HudCompositeDispatchInFlight = false;
+          this.canonicalHudCompositeDispatchInFlight = false;
         });
       return true;
     }
@@ -1932,8 +2066,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           format,
           usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
         }));
-        const rev3HudCompositePilotTexture = this.device.createTexture({
-          label: "doom.hud.composite.rev3-pilot",
+        const canonicalHudCompositePilotTexture = this.device.createTexture({
+          label: "doom.hud.composite.canonical-pilot",
           size: { width, height },
           format: "rgba8unorm",
           usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC
@@ -2029,6 +2163,34 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           },
           primitive: { topology: "triangle-list" }
         });
+        const overlayPipeline = this.device.createRenderPipeline({
+          label: "doom.present.overlay.pipeline",
+          layout: "auto",
+          vertex: {
+            module: this.device.createShaderModule({ code: PRESENT_OVERLAY_SHADER }),
+            entryPoint: "vertexMain"
+          },
+          fragment: {
+            module: this.device.createShaderModule({ code: PRESENT_OVERLAY_SHADER }),
+            entryPoint: "fragmentMain",
+            targets: [{
+              format,
+              blend: {
+                color: {
+                  srcFactor: "src-alpha",
+                  dstFactor: "one-minus-src-alpha",
+                  operation: "add"
+                },
+                alpha: {
+                  srcFactor: "one",
+                  dstFactor: "one-minus-src-alpha",
+                  operation: "add"
+                }
+              }
+            }]
+          },
+          primitive: { topology: "triangle-list" }
+        });
         const blitPipeline = this.device.createRenderPipeline({
           label: "doom.present.blit.pipeline",
           layout: "auto",
@@ -2059,6 +2221,17 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             { binding: 4, resource: texture.createView() }
           ]
         }));
+        const overlayBindGroups = hudPanelTextures.map((texture, index) => this.device.createBindGroup({
+          label: `doom.present.overlay.bindings.${index}`,
+          layout: overlayPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: frameTexture.createView() },
+            { binding: 2, resource: { buffer: hudInfoBuffer } },
+            { binding: 3, resource: { buffer: hudCellsBuffer } },
+            { binding: 4, resource: texture.createView() }
+          ]
+        }));
         const hudCompositePresentBindGroups = hudCompositeTextures.map((texture, index) => this.device.createBindGroup({
           label: `doom.hud.composite.present.bindings.${index}`,
           layout: blitPipeline.getBindGroupLayout(0),
@@ -2067,6 +2240,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             { binding: 1, resource: texture.createView() }
           ]
         }));
+        const rawFramePresentBindGroup = this.device.createBindGroup({
+          label: "doom.raw.present.bindings",
+          layout: blitPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: frameTexture.createView() }
+          ]
+        });
         const indexUpload = new Uint32Array(framePixels);
         const infoUpload = new Uint32Array([width, height, 0, 0]);
         const hudInfoUpload = new Float32Array(HUD_UNIFORM_FLOATS);
@@ -2102,7 +2283,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           gpuAisthesisMaskTexture,
           hudPanelTextures,
           hudCompositeTextures,
-          rev3HudCompositePilotTexture,
+          canonicalHudCompositePilotTexture,
           computePipeline,
           computeBindGroup,
           panelComputePipeline,
@@ -2112,8 +2293,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           gpuSpatialReasoningComputePipeline,
           gpuSpatialReasoningComputeBindGroup,
           renderPipeline,
+          overlayPipeline,
           renderBindGroups,
+          overlayBindGroups,
           blitPipeline,
+          rawFramePresentBindGroup,
           hudCompositePresentBindGroups,
           indexUpload,
           infoUpload,
@@ -2128,6 +2312,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           gpuSpatialOutputUpload,
           hudOverlayEnabled: this.hudOverlayEnabled,
           hudPanelIndex: 0,
+          hudPanelReady: false,
+          hudPanelLastUpdateAt: Number.NEGATIVE_INFINITY,
+          hudPanelFrame: 0,
           hudCompositeIndex: 0,
           hudCompositeReady: false,
           hudCompositeLastUpdateAt: Number.NEGATIVE_INFINITY,
@@ -2201,7 +2388,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           renderer.gpuSpatialOutputBuffer,
           renderer.frameTexture,
           renderer.gpuAisthesisMaskTexture,
-          renderer.rev3HudCompositePilotTexture
+          renderer.canonicalHudCompositePilotTexture
         ].forEach(resource => this.destroyGpuResource(resource));
 
         (renderer.hudPanelTextures || []).forEach(resource => this.destroyGpuResource(resource));
@@ -2209,15 +2396,15 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       }
 
       try {
-        this.rev3Bridge?.dispose?.();
-        this.rev3Executor?.dispose?.();
+        this.canonicalBridge?.dispose?.();
+        this.canonicalExecutor?.dispose?.();
         this.device?.destroy?.();
       } catch {
       }
 
       this.renderer = null;
-      this.rev3Bridge = null;
-      this.rev3Executor = null;
+      this.canonicalBridge = null;
+      this.canonicalExecutor = null;
       this.device = null;
       this.queue = null;
       this.adapter = null;
@@ -2330,8 +2517,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       next.hudFrameTarget = normalizeGpuFrameTarget(state.hudFrameTarget || state.HudFrameTarget || next.hudFrameTarget, "HudCompositeOffscreen", next.hudTarget, HUD_COMPOSITE_WIRE_NAME, "display", false);
       next.analysisCaptureSource = String(state.analysisCaptureSource || state.AnalysisCaptureSource || next.analysisCaptureSource || RAW_FRAMEBUFFER_WIRE_NAME);
       next.analysisFrameTarget = normalizeGpuFrameTarget(state.analysisFrameTarget || state.AnalysisFrameTarget || next.analysisFrameTarget, "RawFramebuffer", next.rawFramebufferTarget, next.analysisCaptureSource, "analysis", true);
-      next.displaySource = String(state.displaySource || state.DisplaySource || next.displaySource || HUD_COMPOSITE_WIRE_NAME);
-      next.displayFrameTarget = normalizeGpuFrameTarget(state.displayFrameTarget || state.DisplayFrameTarget || next.displayFrameTarget, "HudCompositeOffscreen", next.hudTarget, next.displaySource, "display", false);
+      const requestedDisplaySource = String(state.displaySource || state.DisplaySource || next.displaySource || RAW_FRAMEBUFFER_WIRE_NAME);
+      next.displaySource = requestedDisplaySource === HUD_COMPOSITE_WIRE_NAME
+        ? SWAPCHAIN_HUD_OVERLAY_WIRE_NAME
+        : requestedDisplaySource;
+      next.displayFrameTarget = normalizeGpuFrameTarget(null, "RawFramebuffer", next.rawFramebufferTarget, next.displaySource, "display", true);
       next.readbackPolicy = String(state.readbackPolicy || state.ReadbackPolicy || next.readbackPolicy || "none");
       next.readback = normalizeGpuReadbackPolicy(state.readback || state.Readback || next.readback, next.readbackPolicy);
       next.frameToken = normalizeGpuFrameToken(state.frameToken || state.FrameToken || next.frameToken, next.rawFramebufferTarget, next.hudTarget, this.renderer?.frame || 0, "hud-overlay");
@@ -2743,37 +2933,43 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       const state = this.hudOverlayState || {};
       const now = (performance?.now?.() || Date.now()) / 1000;
       const enabled = Boolean(renderer.hudOverlayEnabled && state.enabled !== false && !this.usingCpuFallback);
+      const panelValues = state.panelValues || state.panelCells || [];
       renderer.hudInfoUpload[0] = now;
       renderer.hudInfoUpload[1] = enabled ? 1 : 0;
       renderer.hudInfoUpload[2] = state.heatmapEnabled === false ? 0 : 1;
-      renderer.hudInfoUpload[3] = clamp01(Number(state.kairos || 0));
-      renderer.hudInfoUpload[4] = Math.max(-1, Math.min(1, Number(state.useProbeTurn || 0)));
-      renderer.hudInfoUpload[5] = clamp01(Number(state.enemyConfidence || 0));
-      renderer.hudInfoUpload[6] = Math.max(0, Math.min(1.5, Number(state.depthEstimate ?? 1)));
+      renderer.hudInfoUpload[3] = clamp01(finiteGpuScalar(state.kairos || 0));
+      renderer.hudInfoUpload[4] = clampRange(state.useProbeTurn || 0, -1, 1, 0);
+      renderer.hudInfoUpload[5] = clamp01(finiteGpuScalar(state.enemyConfidence || 0));
+      renderer.hudInfoUpload[6] = clampRange(state.depthEstimate ?? 1, 0, 1.5, 1);
       const radar = state.radarHud || state.egoRadar || {};
       renderer.hudInfoUpload[8] = normalizeRadarAngle(radar.northAngleDeg ?? radar.NorthAngleDeg ?? state.radarNorthAngleDeg ?? state.compassHeading ?? 0);
-      renderer.hudInfoUpload[9] = clamp01(Number(radar.usableAlpha ?? radar.UsableAlpha ?? state.radarUsableAlpha ?? state.compassUsable ?? 0));
-      renderer.hudInfoUpload[10] = Math.max(-1, Math.min(1, Number(radar.kinesisTurn ?? radar.KinesisTurn ?? state.radarKinesisTurn ?? state.compassYaw ?? 0)));
-      renderer.hudInfoUpload[11] = clamp01(Number(radar.confidence ?? radar.Confidence ?? state.radarConfidence ?? state.compassConfidence ?? 0));
+      renderer.hudInfoUpload[9] = clamp01(finiteGpuScalar(radar.usableAlpha ?? radar.UsableAlpha ?? state.radarUsableAlpha ?? state.compassUsable ?? 0));
+      renderer.hudInfoUpload[10] = clampRange(radar.kinesisTurn ?? radar.KinesisTurn ?? state.radarKinesisTurn ?? state.compassYaw ?? 0, -1, 1, 0);
+      renderer.hudInfoUpload[11] = clamp01(finiteGpuScalar(radar.confidence ?? radar.Confidence ?? state.radarConfidence ?? state.compassConfidence ?? 0));
       renderer.hudInfoUpload[12] = state.enemyCircleActive ? 1 : 0;
-      renderer.hudInfoUpload[13] = clamp01(Number(state.enemyCircleX ?? 0.5));
-      renderer.hudInfoUpload[14] = clamp01(Number(state.enemyCircleY ?? 0.5));
-      renderer.hudInfoUpload[15] = Math.max(0.03, Math.min(0.16, Number(state.enemyCircleRadius ?? 0.08)));
+      renderer.hudInfoUpload[13] = clamp01(finiteGpuScalar(state.enemyCircleX ?? 0.5));
+      renderer.hudInfoUpload[14] = clamp01(finiteGpuScalar(state.enemyCircleY ?? 0.5));
+      renderer.hudInfoUpload[15] = clampRange(state.enemyCircleRadius ?? 0.08, 0.03, 0.16, 0.08);
       renderer.hudInfoUpload[16] = state.enemyCircleVisual ? 1 : 0;
       renderer.hudInfoUpload[17] = state.enemyCircleAudio ? 1 : 0;
-      renderer.hudInfoUpload[18] = Math.max(-1, Math.min(1, Number(radar.kinesisForward ?? radar.KinesisForward ?? state.radarKinesisForward ?? 0)));
-      renderer.hudInfoUpload[19] = Math.max(0, Math.min(2, Number(radar.mode ?? radar.Mode ?? state.radarMode ?? 0)));
-      renderer.hudInfoUpload[20] = clamp01(Number(radar.suppressedAlpha ?? radar.SuppressedAlpha ?? state.radarSuppressedAlpha ?? 0));
-      renderer.hudInfoUpload[21] = clamp01(Number(radar.lostAlpha ?? radar.LostAlpha ?? state.radarLostAlpha ?? 0));
-      renderer.hudInfoUpload[22] = clamp01(Number(radar.holdAlpha ?? radar.HoldAlpha ?? state.radarHoldAlpha ?? 0));
-      renderer.hudInfoUpload[23] = clamp01(Number(radar.flickerPhase ?? radar.FlickerPhase ?? state.radarFlickerPhase ?? 1));
-      renderer.hudInfoUpload[24] = Math.max(-90, Math.min(90, Number(radar.enemyVisualYaw ?? radar.EnemyVisualYaw ?? state.enemyVisualYaw ?? 0)));
-      renderer.hudInfoUpload[25] = clamp01(Number(radar.enemyVisualAlpha ?? radar.EnemyVisualAlpha ?? state.enemyVisualAlpha ?? 0));
-      renderer.hudInfoUpload[26] = Math.max(-90, Math.min(90, Number(radar.enemyAudioYaw ?? radar.EnemyAudioYaw ?? state.enemyAudioYaw ?? 0)));
-      renderer.hudInfoUpload[27] = clamp01(Number(radar.enemyAudioAlpha ?? radar.EnemyAudioAlpha ?? state.enemyAudioAlpha ?? 0));
-      renderer.hudInfoUpload[28] = clamp01(Number(radar.enemySignalSuppressed ?? radar.EnemySignalSuppressed ?? state.enemySignalSuppressed ?? 0));
-      renderer.hudInfoUpload[29] = clamp01(Number(radar.enemySignalLost ?? radar.EnemySignalLost ?? state.enemySignalLost ?? 0));
-      for (let index = 30; index < HUD_UNIFORM_FLOATS; index += 1) {
+      renderer.hudInfoUpload[18] = clampRange(radar.kinesisForward ?? radar.KinesisForward ?? state.radarKinesisForward ?? 0, -1, 1, 0);
+      renderer.hudInfoUpload[19] = clampRange(radar.mode ?? radar.Mode ?? state.radarMode ?? 0, 0, 2, 0);
+      renderer.hudInfoUpload[20] = clamp01(finiteGpuScalar(radar.suppressedAlpha ?? radar.SuppressedAlpha ?? state.radarSuppressedAlpha ?? 0));
+      renderer.hudInfoUpload[21] = clamp01(finiteGpuScalar(radar.lostAlpha ?? radar.LostAlpha ?? state.radarLostAlpha ?? 0));
+      renderer.hudInfoUpload[22] = clamp01(finiteGpuScalar(radar.holdAlpha ?? radar.HoldAlpha ?? state.radarHoldAlpha ?? 0));
+      renderer.hudInfoUpload[23] = clamp01(finiteGpuScalar(radar.flickerPhase ?? radar.FlickerPhase ?? state.radarFlickerPhase ?? 1));
+      renderer.hudInfoUpload[24] = clampRange(radar.enemyVisualYaw ?? radar.EnemyVisualYaw ?? state.enemyVisualYaw ?? 0, -90, 90, 0);
+      renderer.hudInfoUpload[25] = clamp01(finiteGpuScalar(radar.enemyVisualAlpha ?? radar.EnemyVisualAlpha ?? state.enemyVisualAlpha ?? 0));
+      renderer.hudInfoUpload[26] = clampRange(radar.enemyAudioYaw ?? radar.EnemyAudioYaw ?? state.enemyAudioYaw ?? 0, -90, 90, 0);
+      renderer.hudInfoUpload[27] = clamp01(finiteGpuScalar(radar.enemyAudioAlpha ?? radar.EnemyAudioAlpha ?? state.enemyAudioAlpha ?? 0));
+      renderer.hudInfoUpload[28] = clamp01(finiteGpuScalar(radar.enemySignalSuppressed ?? radar.EnemySignalSuppressed ?? state.enemySignalSuppressed ?? 0));
+      renderer.hudInfoUpload[29] = clamp01(finiteGpuScalar(radar.enemySignalLost ?? radar.EnemySignalLost ?? state.enemySignalLost ?? 0));
+      renderer.hudInfoUpload[30] = clampRange(radar.referenceYaw ?? radar.ReferenceYaw ?? state.radarReferenceYaw ?? 0, -180, 180, 0);
+      renderer.hudInfoUpload[31] = clamp01(finiteGpuScalar(radar.referenceAlpha ?? radar.ReferenceAlpha ?? state.radarReferenceAlpha ?? 0));
+      renderer.hudInfoUpload[32] = clamp01(finiteGpuScalar(state.kairosLogos ?? state.KairosLogos ?? panelValues[9] ?? 0));
+      renderer.hudInfoUpload[33] = clamp01(finiteGpuScalar(state.kairosPathos ?? state.KairosPathos ?? panelValues[10] ?? 0));
+      renderer.hudInfoUpload[34] = clamp01(finiteGpuScalar(state.kairosEthos ?? state.KairosEthos ?? panelValues[11] ?? 0));
+      for (let index = 35; index < HUD_UNIFORM_FLOATS; index += 1) {
         renderer.hudInfoUpload[index] = 0;
       }
       renderer.hudCellsUpload.fill(0);
@@ -2808,7 +3004,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       this.queue.writeBuffer(renderer.hudCellsBuffer, 0, renderer.hudCellsUpload);
       if (renderer.hudPanelBuffer && renderer.hudPanelUpload) {
         renderer.hudPanelUpload.fill(0);
-        const panelValues = state.panelValues || state.panelCells || [];
         const panelCount = Math.min(HUD_PANEL_VALUE_COUNT, panelValues.length || 0);
         for (let index = 0; index < panelCount; index += 1) {
           renderer.hudPanelUpload[index] = clamp01(Number(panelValues[index] || 0));
@@ -2866,11 +3061,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         renderer.gpuSpatialReasoningFrame = renderer.frame;
       }
 
-      const hudActive = Boolean(renderer.hudOverlayEnabled && this.hudOverlayState?.enabled !== false && !this.usingCpuFallback);
+      const hudActive = Boolean(HUD_COMPOSITE_PRESENT_ENABLED && renderer.hudOverlayEnabled && this.hudOverlayState?.enabled !== false && !this.usingCpuFallback);
       const now = performance?.now?.() || Date.now();
-      const compositeDue = hudActive
-        && (!renderer.hudCompositeReady || now - renderer.hudCompositeLastUpdateAt >= HUD_COMPOSITE_MIN_INTERVAL_MS);
-      if (compositeDue) {
+      const panelDue = hudActive
+        && (!renderer.hudPanelReady || now - renderer.hudPanelLastUpdateAt >= HUD_COMPOSITE_MIN_INTERVAL_MS);
+      const compositeDue = Boolean(HUD_OFFSCREEN_COMPOSITE_ENABLED)
+        && hudActive
+        && !this.hudOffscreenCompositeRuntimeDisabled
+        && renderer.hudPanelReady
+        && (!renderer.hudCompositeReady || now - renderer.hudCompositeLastUpdateAt >= HUD_OFFSCREEN_COMPOSITE_MIN_INTERVAL_MS);
+      if (panelDue) {
         renderer.hudPanelIndex = (renderer.hudPanelIndex + 1) % 2;
         const panelPass = encoder.beginComputePass({ label: "doom.hud.panel.compute.pass" });
         panelPass.setPipeline(renderer.panelComputePipeline);
@@ -2880,63 +3080,89 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           Math.ceil(renderer.height / WORKGROUP_SIZE)
         );
         panelPass.end();
-
-        renderer.hudCompositeIndex = (renderer.hudCompositeIndex + 1) % 2;
-        const compositePass = encoder.beginRenderPass({
-          label: "doom.hud.composite.pass",
-          colorAttachments: [{
-            view: renderer.hudCompositeTextures[renderer.hudCompositeIndex].createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store"
-          }]
-        });
-        compositePass.setPipeline(renderer.renderPipeline);
-        compositePass.setBindGroup(0, renderer.renderBindGroups[renderer.hudPanelIndex]);
-        compositePass.draw(3);
-        compositePass.end();
-
-        renderer.hudCompositeReady = true;
-        renderer.hudCompositeLastUpdateAt = now;
-        renderer.hudCompositeFrame = renderer.frame;
+        renderer.hudPanelReady = true;
+        renderer.hudPanelLastUpdateAt = now;
+        renderer.hudPanelFrame = renderer.frame;
       }
 
+      const presentWithGpuHud = Boolean(
+        hudActive
+        && renderer.hudPanelReady
+        && renderer.renderPipeline
+        && renderer.renderBindGroups?.[renderer.hudPanelIndex]);
       const colorAttachment = renderer.context.getCurrentTexture().createView();
-      if (hudActive && renderer.hudCompositeReady) {
-        const presentPass = encoder.beginRenderPass({
-          label: "doom.hud.composite.present.pass",
-          colorAttachments: [{
-            view: colorAttachment,
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store"
-          }]
-        });
-        presentPass.setPipeline(renderer.blitPipeline);
-        presentPass.setBindGroup(0, renderer.hudCompositePresentBindGroups[renderer.hudCompositeIndex]);
-        presentPass.draw(3);
-        presentPass.end();
-      } else {
-        const renderPass = encoder.beginRenderPass({
-          label: "doom.present.raw.pass",
-          colorAttachments: [{
-            view: colorAttachment,
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store"
-          }]
-        });
+      const renderPass = encoder.beginRenderPass({
+        label: presentWithGpuHud ? "doom.present.hud.single-pass" : (hudActive ? "doom.present.raw.base.pass" : "doom.present.raw.pass"),
+        colorAttachments: [{
+          view: colorAttachment,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store"
+        }]
+      });
+      if (presentWithGpuHud) {
         renderPass.setPipeline(renderer.renderPipeline);
         renderPass.setBindGroup(0, renderer.renderBindGroups[renderer.hudPanelIndex]);
-        renderPass.draw(3);
-        renderPass.end();
+      } else {
+        renderPass.setPipeline(renderer.blitPipeline);
+        renderPass.setBindGroup(0, renderer.rawFramePresentBindGroup);
       }
+      renderPass.draw(3);
+      renderPass.end();
 
       this.queue.submit([encoder.finish()]);
-      this.scheduleRev3AisthesisPilot(renderer);
-      this.scheduleRev3SpatialPilot(renderer);
+      let compositeSucceeded = false;
       if (compositeDue) {
-        this.scheduleRev3HudCompositePilot(renderer);
+        try {
+          const compositeIndex = (renderer.hudCompositeIndex + 1) % 2;
+          const compositeEncoder = this.device.createCommandEncoder({ label: "doom.hud.offscreen.composite.encoder" });
+          const compositeRawPass = compositeEncoder.beginRenderPass({
+            label: "doom.hud.composite.raw.pass",
+            colorAttachments: [{
+              view: renderer.hudCompositeTextures[compositeIndex].createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store"
+            }]
+          });
+          compositeRawPass.setPipeline(renderer.blitPipeline);
+          compositeRawPass.setBindGroup(0, renderer.rawFramePresentBindGroup);
+          compositeRawPass.draw(3);
+          compositeRawPass.end();
+
+          const compositeOverlayPass = compositeEncoder.beginRenderPass({
+            label: "doom.hud.composite.overlay.pass",
+            colorAttachments: [{
+              view: renderer.hudCompositeTextures[compositeIndex].createView(),
+              loadOp: "load",
+              storeOp: "store"
+            }]
+          });
+          compositeOverlayPass.setPipeline(renderer.overlayPipeline);
+          compositeOverlayPass.setBindGroup(0, renderer.overlayBindGroups[renderer.hudPanelIndex]);
+          compositeOverlayPass.draw(3);
+          compositeOverlayPass.end();
+
+          this.queue.submit([compositeEncoder.finish()]);
+          renderer.hudCompositeIndex = compositeIndex;
+          renderer.hudCompositeReady = true;
+          renderer.hudCompositeLastUpdateAt = now;
+          renderer.hudCompositeFrame = renderer.frame;
+          compositeSucceeded = true;
+          this.hudOffscreenCompositeFailureCount = 0;
+          this.hudOffscreenCompositeLastError = "";
+        } catch (error) {
+          this.hudOffscreenCompositeFailureCount += 1;
+          this.hudOffscreenCompositeLastError = error instanceof Error ? error.message : String(error || "unknown offscreen composite failure");
+          this.hudOffscreenCompositeRuntimeDisabled = true;
+          this.hudOffscreenCompositeLastDisabledAt = now;
+          console.warn("[GPU ] HUD offscreen composite disabled for this session; swapchain HUD remains active.", this.hudOffscreenCompositeLastError);
+        }
+      }
+      this.scheduleCanonicalAisthesisPilot(renderer);
+      this.scheduleCanonicalSpatialPilot(renderer);
+      if (compositeSucceeded) {
+        this.scheduleCanonicalHudCompositePilot(renderer);
       }
       this.setFrameState(FRAME_TARGET, {
         width: renderer.width,
@@ -2955,7 +3181,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           zeroCopy: true,
           overlayExcluded: false,
           sourceFrame: renderer.frame,
-          maxFps: HUD_COMPOSITE_MAX_FPS
+          maxFps: HUD_OFFSCREEN_COMPOSITE_MAX_FPS
         });
         this.setHudCompositeTexture(renderer.hudCompositeTextures[renderer.hudCompositeIndex]);
       }
@@ -3043,8 +3269,26 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         this.fallbackReason = this.fallbackReason || ensureDoomGpuModeState().reason || "GPU rendering disabled.";
       }
 
-      const compositeReady = Boolean(this.renderer?.hudCompositeTextures?.length === 2 && this.renderer?.blitPipeline) && !this.usingCpuFallback;
-      const compositeActive = Boolean(this.renderer?.hudCompositeReady && this.hudOverlayEnabled && this.hudOverlayState?.enabled !== false && !this.usingCpuFallback);
+      const compositeReady = Boolean(HUD_OFFSCREEN_COMPOSITE_ENABLED && HUD_COMPOSITE_PRESENT_ENABLED && this.renderer?.hudCompositeTextures?.length === 2 && this.renderer?.blitPipeline) && !this.usingCpuFallback;
+      const hudPresentationReady = Boolean(HUD_COMPOSITE_PRESENT_ENABLED && !this.usingCpuFallback);
+      const hudSwapchainActive = Boolean(
+        hudPresentationReady
+        && this.renderer?.hudInfoBuffer
+        && this.renderer?.hudPanelReady
+        && this.renderer?.renderPipeline
+        && this.hudOverlayEnabled
+        && this.hudOverlayState?.enabled !== false
+        && !this.usingCpuFallback);
+      const compositeActive = Boolean(
+        HUD_OFFSCREEN_COMPOSITE_ENABLED
+        &&
+        !this.hudOffscreenCompositeRuntimeDisabled
+        &&
+        HUD_COMPOSITE_PRESENT_ENABLED
+        && this.renderer?.hudCompositeReady
+        && this.hudOverlayEnabled
+        && this.hudOverlayState?.enabled !== false
+        && !this.usingCpuFallback);
       const gpuAisthesisState = this.gpuAisthesisState || {};
       const gpuAisthesisStatus = Object.assign({}, gpuAisthesisState);
       delete gpuAisthesisStatus.matrixValues;
@@ -3055,7 +3299,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       const deviceReady = Boolean(this.device && this.queue && !this.usingCpuFallback);
       const rawTextureReady = Boolean(this.renderer?.frameTexture && this.frameTextures.get(FRAME_TARGET) && deviceReady);
       const storageTextureReady = Boolean(this.renderer?.frameTexture && deviceReady);
-      const rev3Bridge = this.rev3BridgeStatus();
+      const canonicalBridge = this.canonicalBridgeStatus();
       const gpuBufferReady = Boolean(
         this.renderer?.indexBuffer
         && this.renderer?.paletteBuffer
@@ -3101,58 +3345,71 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         gpuBufferReady,
         gpuComputeReady: Boolean((gpuAisthesisComputeReady || gpuSpatialComputeReady) && deviceReady),
         gpuComputeActive: Boolean(gpuAisthesisGpuComputeActive || gpuSpatialGpuComputeActive),
-        rev3Bridge,
-        rev3BridgeReady: Boolean(rev3Bridge.bridgeAvailable && rev3Bridge.executorAvailable),
-        rev3ShaderSourcesReady: Boolean(rev3Bridge.shaderSourcesReady),
-        rev3TextureRegistryReady: Boolean(rev3Bridge.textureRegistryReady),
-        rev3PilotMinIntervalMs: REV3_PILOT_MIN_INTERVAL_MS,
-        rev3AisthesisPilotEnabled: this.isRev3AisthesisPilotEnabled(),
-        rev3AisthesisPilotInFlight: Boolean(this.rev3AisthesisDispatchInFlight),
-        rev3AisthesisPilotFrame: Number(this.rev3AisthesisLastFrame || 0),
-        rev3AisthesisPilotAttemptFrame: Number(this.rev3AisthesisLastAttemptFrame || 0),
-        rev3AisthesisPilotLastSkipped: this.rev3AisthesisLastSkipped,
-        rev3AisthesisPilotLastError: this.rev3AisthesisLastError,
-        rev3AisthesisPilotSucceeded: Boolean(this.rev3AisthesisLastResult),
-        rev3AisthesisPilotFeatureCount: Number(this.rev3AisthesisLastResult?.FeatureVector?.length || this.rev3AisthesisLastResult?.featureVector?.length || 0),
-        rev3AisthesisPilotSummary: this.rev3AisthesisLastSummary,
-        rev3AisthesisParityHistory: this.rev3AisthesisParityHistory,
-        rev3SpatialPilotEnabled: this.isRev3SpatialPilotEnabled(),
-        rev3SpatialPilotInFlight: Boolean(this.rev3SpatialDispatchInFlight),
-        rev3SpatialPilotFrame: Number(this.rev3SpatialLastFrame || 0),
-        rev3SpatialPilotAttemptFrame: Number(this.rev3SpatialLastAttemptFrame || 0),
-        rev3SpatialPilotLastSkipped: this.rev3SpatialLastSkipped,
-        rev3SpatialPilotLastError: this.rev3SpatialLastError,
-        rev3SpatialPilotSucceeded: Boolean(this.rev3SpatialLastResult),
-        rev3SpatialPilotVectorCount: Number(this.rev3SpatialLastResult?.SpatialVector?.length || this.rev3SpatialLastResult?.spatialVector?.length || 0),
-        rev3SpatialPilotSummary: this.rev3SpatialLastSummary,
-        rev3SpatialParityHistory: this.rev3SpatialParityHistory,
-        rev3HudCompositePilotEnabled: this.isRev3HudCompositePilotEnabled(),
-        rev3HudCompositePilotTarget: REV3_HUD_COMPOSITE_PILOT_TARGET,
-        rev3HudCompositePilotTextureReady: Boolean(this.renderer?.rev3HudCompositePilotTexture && deviceReady),
-        rev3HudCompositePilotInFlight: Boolean(this.rev3HudCompositeDispatchInFlight),
-        rev3HudCompositePilotFrame: Number(this.rev3HudCompositeLastFrame || 0),
-        rev3HudCompositePilotAttemptFrame: Number(this.rev3HudCompositeLastAttemptFrame || 0),
-        rev3HudCompositePilotLastSkipped: this.rev3HudCompositeLastSkipped,
-        rev3HudCompositePilotLastError: this.rev3HudCompositeLastError,
-        rev3HudCompositePilotSucceeded: Boolean(this.rev3HudCompositeLastResult),
-        hudOverlayReady: Boolean(this.renderer?.hudInfoBuffer) && !this.usingCpuFallback,
-        hudPanelOverlayReady: Boolean(this.renderer?.hudPanelBuffer && this.renderer?.hudPanelTextures?.length === 2) && !this.usingCpuFallback,
-        hudPanelDoubleBuffered: Boolean(this.renderer?.hudPanelTextures?.length === 2) && !this.usingCpuFallback,
+        canonicalBridge,
+        canonicalBridgeReady: Boolean(canonicalBridge.bridgeAvailable && canonicalBridge.executorAvailable),
+        canonicalShaderSourcesReady: Boolean(canonicalBridge.shaderSourcesReady),
+        canonicalTextureRegistryReady: Boolean(canonicalBridge.textureRegistryReady),
+        canonicalPilotMinIntervalMs: GPU_PILOT_MIN_INTERVAL_MS,
+        canonicalAisthesisPilotEnabled: this.isCanonicalAisthesisPilotEnabled(),
+        canonicalAisthesisPilotInFlight: Boolean(this.canonicalAisthesisDispatchInFlight),
+        canonicalAisthesisPilotFrame: Number(this.canonicalAisthesisLastFrame || 0),
+        canonicalAisthesisPilotAttemptFrame: Number(this.canonicalAisthesisLastAttemptFrame || 0),
+        canonicalAisthesisPilotLastSkipped: this.canonicalAisthesisLastSkipped,
+        canonicalAisthesisPilotLastError: this.canonicalAisthesisLastError,
+        canonicalAisthesisPilotSucceeded: Boolean(this.canonicalAisthesisLastResult),
+        canonicalAisthesisPilotFeatureCount: Number(this.canonicalAisthesisLastResult?.FeatureVector?.length || this.canonicalAisthesisLastResult?.featureVector?.length || 0),
+        canonicalAisthesisSummary: this.canonicalAisthesisLastSummary,
+        canonicalAisthesisParityHistory: this.canonicalAisthesisParityHistory,
+        canonicalSpatialPilotEnabled: this.isCanonicalSpatialPilotEnabled(),
+        canonicalSpatialPilotInFlight: Boolean(this.canonicalSpatialDispatchInFlight),
+        canonicalSpatialPilotFrame: Number(this.canonicalSpatialLastFrame || 0),
+        canonicalSpatialPilotAttemptFrame: Number(this.canonicalSpatialLastAttemptFrame || 0),
+        canonicalSpatialPilotLastSkipped: this.canonicalSpatialLastSkipped,
+        canonicalSpatialPilotLastError: this.canonicalSpatialLastError,
+        canonicalSpatialPilotSucceeded: Boolean(this.canonicalSpatialLastResult),
+        canonicalSpatialPilotVectorCount: Number(this.canonicalSpatialLastResult?.SpatialVector?.length || this.canonicalSpatialLastResult?.spatialVector?.length || 0),
+        canonicalSpatialSummary: this.canonicalSpatialLastSummary,
+        canonicalSpatialParityHistory: this.canonicalSpatialParityHistory,
+        canonicalHudCompositePilotEnabled: this.isCanonicalHudCompositePilotEnabled(),
+        canonicalHudCompositePilotTarget: GPU_HUD_COMPOSITE_PILOT_TARGET,
+        canonicalHudCompositePilotTextureReady: Boolean(this.renderer?.canonicalHudCompositePilotTexture && deviceReady),
+        canonicalHudCompositePilotInFlight: Boolean(this.canonicalHudCompositeDispatchInFlight),
+        canonicalHudCompositePilotFrame: Number(this.canonicalHudCompositeLastFrame || 0),
+        canonicalHudCompositePilotAttemptFrame: Number(this.canonicalHudCompositeLastAttemptFrame || 0),
+        canonicalHudCompositePilotLastSkipped: this.canonicalHudCompositeLastSkipped,
+        canonicalHudCompositePilotLastError: this.canonicalHudCompositeLastError,
+        canonicalHudCompositePilotSucceeded: Boolean(this.canonicalHudCompositeLastResult),
+        hudOverlayReady: Boolean(hudPresentationReady && this.renderer?.hudInfoBuffer),
+        hudPanelOverlayReady: Boolean(hudPresentationReady && this.renderer?.hudPanelReady && this.renderer?.hudPanelBuffer && this.renderer?.hudPanelTextures?.length === 2),
+        hudPanelDoubleBuffered: Boolean(hudPresentationReady && this.renderer?.hudPanelTextures?.length === 2),
+        hudPanelFrame: this.renderer?.hudPanelFrame || 0,
         hudCompositeReady: compositeReady,
-        hudCompositeDoubleBuffered: Boolean(this.renderer?.hudCompositeTextures?.length === 2) && !this.usingCpuFallback,
+        hudCompositeDoubleBuffered: Boolean(hudPresentationReady && this.renderer?.hudCompositeTextures?.length === 2),
         hudCompositeTarget: HUD_COMPOSITE_TARGET,
         rawFramebufferTarget: FRAME_TARGET,
-        displayTarget: compositeReady ? HUD_COMPOSITE_TARGET : FRAME_TARGET,
-        displaySource: compositeActive ? HUD_COMPOSITE_WIRE_NAME : RAW_FRAMEBUFFER_WIRE_NAME,
+        displayTarget: FRAME_TARGET,
+        displaySource: hudSwapchainActive ? SWAPCHAIN_HUD_SINGLE_PASS_WIRE_NAME : RAW_FRAMEBUFFER_WIRE_NAME,
+        displayCompositeTarget: compositeActive ? HUD_COMPOSITE_TARGET : "",
+        hudCompositeDisplayMode: hudSwapchainActive ? "single-pass" : "raw",
+        hudCompositeDisplayUsesOffscreen: false,
         rawCaptureTarget: FRAME_TARGET,
         analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
         analysisOverlayExcluded: true,
-        cssOverlayMode: compositeActive ? "reduced" : "full",
+        cssOverlayMode: hudSwapchainActive ? "reduced" : "full",
         hudCompositeMaxFps: HUD_COMPOSITE_MAX_FPS,
+        hudOffscreenCompositeMaxFps: HUD_OFFSCREEN_COMPOSITE_MAX_FPS,
         hudCompositeFrame: this.renderer?.hudCompositeFrame || 0,
+        hudCompositePresentEnabled: HUD_COMPOSITE_PRESENT_ENABLED,
+        hudOffscreenCompositeConfigured: HUD_OFFSCREEN_COMPOSITE_ENABLED,
+        hudOffscreenCompositeEnabled: Boolean(HUD_OFFSCREEN_COMPOSITE_ENABLED && !this.hudOffscreenCompositeRuntimeDisabled),
+        hudOffscreenCompositeRuntimeDisabled: Boolean(this.hudOffscreenCompositeRuntimeDisabled),
+        hudOffscreenCompositeFailureCount: Number(this.hudOffscreenCompositeFailureCount || 0),
+        hudOffscreenCompositeLastError: this.hudOffscreenCompositeLastError || "",
+        hudOffscreenCompositeLastDisabledAt: Number(this.hudOffscreenCompositeLastDisabledAt || 0),
+        hudSwapchainActive,
         hudCompositeActive: compositeActive,
         hudOverlayEnabled: this.hudOverlayEnabled,
-        hudOverlayActive: Boolean(this.renderer?.hudInfoBuffer && this.hudOverlayEnabled && this.hudOverlayState?.enabled !== false && !this.usingCpuFallback),
+        hudOverlayActive: Boolean(hudPresentationReady && this.renderer?.hudInfoBuffer && this.hudOverlayEnabled && this.hudOverlayState?.enabled !== false),
         hudContractVersion: Number(this.hudOverlayState?.contractVersion || 0),
         hudContractName: this.hudOverlayState?.contractName || "none",
         hudRectSource: this.hudOverlayState?.rectangleSource || "none",
@@ -3193,8 +3450,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           rawTextureReady,
           gpuBufferReady,
           lastSummary: this.gpuAisthesisLastSummary,
-          rev3Pilot: this.rev3AisthesisLastSummary,
-          rev3ParityHistory: this.rev3AisthesisParityHistory
+          canonicalPilot: this.canonicalAisthesisLastSummary,
+          canonicalParityHistory: this.canonicalAisthesisParityHistory
         }),
         gpuSpatialReasoning: Object.assign({}, gpuSpatialReasoningState, {
           infoBufferReady: Boolean(this.renderer?.gpuSpatialInfoBuffer),
@@ -3214,8 +3471,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
           gpuBufferReady,
           aisthesisFeatureFrame: this.renderer?.gpuAisthesisFrame || 0,
           lastSummary: this.gpuSpatialReasoningLastSummary,
-          rev3Pilot: this.rev3SpatialLastSummary,
-          rev3ParityHistory: this.rev3SpatialParityHistory
+          canonicalPilot: this.canonicalSpatialLastSummary,
+          canonicalParityHistory: this.canonicalSpatialParityHistory
         }),
         usingCpuFallback: this.usingCpuFallback,
         lastError: this.lastError
@@ -3229,6 +3486,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 
     return Math.max(0, Math.min(1, value));
+  }
+
+  function clampRange(value, min, max, fallback = 0) {
+    const number = Number(value);
+    const safe = Number.isFinite(number) ? number : fallback;
+    return Math.max(min, Math.min(max, safe));
   }
 
   function normalizeRadarAngle(value) {
@@ -3274,7 +3537,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     const frameBytes = textureBytes(width, height);
     const hudPanelTextureBytes = textureBytes(width, height, renderer.hudPanelTextures?.length || 0);
     const hudCompositeTextureBytes = textureBytes(width, height, renderer.hudCompositeTextures?.length || 0);
-    const rev3HudPilotTextureBytes = textureBytes(width, height, renderer.rev3HudCompositePilotTexture ? 1 : 0);
+    const canonicalHudPilotTextureBytes = textureBytes(width, height, renderer.canonicalHudCompositePilotTexture ? 1 : 0);
     const maskTextureBytes = textureBytes(HUD_GRID_SIZE, HUD_GRID_SIZE);
     const coreBuffersBytes = ((renderer.framePixels || 0) * 4)
       + (256 * 16)
@@ -3289,14 +3552,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     const spatialBuffersBytes = (GPU_SPATIAL_INFO_FLOATS * 4)
       + (GPU_SPATIAL_OUTPUT_FLOATS * 4);
     const buffersBytes = coreBuffersBytes + aisthesisBuffersBytes + spatialBuffersBytes;
-    const texturesBytes = frameBytes + hudPanelTextureBytes + hudCompositeTextureBytes + rev3HudPilotTextureBytes + maskTextureBytes;
+    const texturesBytes = frameBytes + hudPanelTextureBytes + hudCompositeTextureBytes + canonicalHudPilotTextureBytes + maskTextureBytes;
     const hudBytes = (HUD_UNIFORM_FLOATS * 4)
       + (HUD_CELL_COUNT * 4)
       + (HUD_PANEL_VALUE_COUNT * 4)
       + (HUD_RECT_FLOATS * 4)
       + hudPanelTextureBytes
       + hudCompositeTextureBytes
-      + rev3HudPilotTextureBytes;
+      + canonicalHudPilotTextureBytes;
     const aisthesisBytes = aisthesisBuffersBytes + maskTextureBytes;
     const spatialBytes = spatialBuffersBytes;
     const totalBytes = buffersBytes + texturesBytes;
@@ -3319,8 +3582,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       spatialMB: mb(spatialBytes),
       hudCompositeBytes: hudCompositeTextureBytes,
       hudCompositeMB: mb(hudCompositeTextureBytes),
-      rev3HudPilotBytes: rev3HudPilotTextureBytes,
-      rev3HudPilotMB: mb(rev3HudPilotTextureBytes),
+      canonicalHudPilotBytes: canonicalHudPilotTextureBytes,
+      canonicalHudPilotMB: mb(canonicalHudPilotTextureBytes),
       zeroCopyReady: Boolean(renderer.frameTexture),
       scope: "doom-known-webgpu-allocations",
       note: "provider-known-framebuffer-hud-aisthesis-only"
@@ -3486,30 +3749,30 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     };
   }
 
-  function readRev3Vector(result, pascalName, camelName) {
+  function readCanonicalVector(result, pascalName, camelName) {
     const values = result?.[pascalName] || result?.[camelName] || [];
     return Array.isArray(values) ? values.map(value => roundGpuFeature(value)) : [];
   }
 
-  function rev3FrameIndex(result, fallbackFrame) {
+  function canonicalFrameIndex(result, fallbackFrame) {
     const value = Number(result?.Frame?.FrameIndex ?? result?.frame?.frameIndex ?? fallbackFrame ?? 0);
     return Number.isFinite(value) ? value : 0;
   }
 
-  function rev3FrameId(result) {
+  function canonicalFrameId(result) {
     return String(result?.Frame?.FrameId ?? result?.frame?.frameId ?? "");
   }
 
-  function rev3Diagnostics(result) {
+  function canonicalDiagnostics(result) {
     return result?.Diagnostics || result?.diagnostics || {};
   }
 
-  function rev3DiagnosticsMetadata(result) {
-    const diagnostics = rev3Diagnostics(result);
+  function canonicalDiagnosticsMetadata(result) {
+    const diagnostics = canonicalDiagnostics(result);
     return diagnostics?.Metadata || diagnostics?.metadata || {};
   }
 
-  function rev3MetadataBool(metadata, key) {
+  function canonicalMetadataBool(metadata, key) {
     const value = metadata?.[key];
     if (typeof value === "boolean") {
       return value;
@@ -3519,7 +3782,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     return text === "true" || text === "1" || text === "yes" || text === "on";
   }
 
-  function rev3VectorStats(values) {
+  function canonicalVectorStats(values) {
     let nonZero = 0;
     let sumAbs = 0;
     let maxAbs = 0;
@@ -3618,7 +3881,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     });
   }
 
-  function createRev3PilotParityHistory(source, requiredStreak, mode = "parity") {
+  function createCanonicalPilotParityHistory(source, requiredStreak, mode = "parity") {
     const safeRequired = Math.max(1, Math.floor(Number(requiredStreak || 0)) || 1);
     return Object.freeze({
       source,
@@ -3638,10 +3901,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     });
   }
 
-  function updateRev3PilotParityHistory(previous, summary, requiredStreak, mode = "parity") {
-    const source = String(summary?.source || previous?.source || "gpu.rev3-pilot");
+  function updateCanonicalPilotParityHistory(previous, summary, requiredStreak, mode = "parity") {
+    const source = String(summary?.source || previous?.source || "gpu.canonical-pilot");
     const safeRequired = Math.max(1, Math.floor(Number(requiredStreak || previous?.requiredStreak || 0)) || 1);
-    const base = previous || createRev3PilotParityHistory(source, safeRequired, mode);
+    const base = previous || createCanonicalPilotParityHistory(source, safeRequired, mode);
     const comparison = summary?.comparison || {};
     const thresholdState = String(comparison.thresholdState || comparison.ThresholdState || "unavailable").toLowerCase();
     const promotionGate = String(comparison.promotionGate || comparison.PromotionGate || "not-evaluated").toLowerCase();
@@ -3671,12 +3934,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     });
   }
 
-  function createRev3AisthesisPilotSummary(result, fallbackFrame, localSummaryRecord) {
-    const values = readRev3Vector(result, "FeatureVector", "featureVector");
-    const diagnostics = rev3Diagnostics(result);
-    const metadata = rev3DiagnosticsMetadata(result);
+  function createCanonicalAisthesisSummary(result, fallbackFrame, localSummaryRecord) {
+    const values = readCanonicalVector(result, "FeatureVector", "featureVector");
+    const diagnostics = canonicalDiagnostics(result);
+    const metadata = canonicalDiagnosticsMetadata(result);
     const mask = result?.MaskTexture || result?.maskTexture || {};
-    const featureMaskStorageTexture = rev3MetadataBool(metadata, "rev3_feature_mask_storage_texture");
+    const featureMaskStorageTexture = canonicalMetadataBool(metadata, "feature_mask_storage_texture");
     const metadataMode = values.length >= 4 && values[0] > 4 && values[1] > 4;
     const summary = metadataMode
       ? {
@@ -3706,24 +3969,24 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
     return {
       source: "gpu.aisthesis.raw-frame",
-      frame: rev3FrameIndex(result, fallbackFrame),
-      frameId: rev3FrameId(result),
-      vector: rev3VectorStats(values),
+      frame: canonicalFrameIndex(result, fallbackFrame),
+      frameId: canonicalFrameId(result),
+      vector: canonicalVectorStats(values),
       maskTarget: String(mask.TargetId || mask.targetId || ""),
       maskKind: Number(mask.Kind ?? mask.kind ?? 0) || 0,
       featureMaskStorageTexture,
-      featureMaskMetadata: String(metadata.rev3_feature_mask_storage_texture || ""),
+      featureMaskMetadata: String(metadata.feature_mask_storage_texture || ""),
       zeroCopy: Boolean(diagnostics.ZeroCopy ?? diagnostics.zeroCopy ?? mask.ZeroCopy ?? mask.zeroCopy ?? false),
       fallbackReason: String(diagnostics.FallbackReason || diagnostics.fallbackReason || ""),
       summary,
-      comparison: applyGpuPilotParityGate(comparison, REV3_AISTHESIS_PARITY_THRESHOLDS, "parity"),
+      comparison: applyGpuPilotParityGate(comparison, GPU_AISTHESIS_PARITY_THRESHOLDS, "parity"),
       capturedAt: Date.now()
     };
   }
 
-  function createRev3SpatialPilotSummary(result, fallbackFrame, localSummaryRecord) {
-    const values = readRev3Vector(result, "SpatialVector", "spatialVector");
-    const diagnostics = rev3Diagnostics(result);
+  function createCanonicalSpatialSummary(result, fallbackFrame, localSummaryRecord) {
+    const values = readCanonicalVector(result, "SpatialVector", "spatialVector");
+    const diagnostics = canonicalDiagnostics(result);
     const summary = {
       mode: "matrix-state-vector",
       toposAverage: values[0] || 0,
@@ -3734,7 +3997,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       state1: values[17] || 0,
       state2: values[18] || 0,
       state3: values[19] || 0,
-      reasoningEnergy: rev3VectorStats(values.slice(16, 32)).sumAbs
+      reasoningEnergy: canonicalVectorStats(values.slice(16, 32)).sumAbs
     };
     const comparison = compareGpuPilotSummary(localSummaryRecord, summary, [
       { name: "route", local: "routeScore", canonical: "routeAverage" },
@@ -3745,13 +4008,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
     return {
       source: "gpu.spatial-reasoning",
-      frame: rev3FrameIndex(result, fallbackFrame),
-      frameId: rev3FrameId(result),
-      vector: rev3VectorStats(values),
+      frame: canonicalFrameIndex(result, fallbackFrame),
+      frameId: canonicalFrameId(result),
+      vector: canonicalVectorStats(values),
       zeroCopy: Boolean(diagnostics.ZeroCopy ?? diagnostics.zeroCopy ?? false),
       fallbackReason: String(diagnostics.FallbackReason || diagnostics.fallbackReason || ""),
       summary,
-      comparison: applyGpuPilotParityGate(comparison, REV3_SPATIAL_PARITY_THRESHOLDS, "diagnostic"),
+      comparison: applyGpuPilotParityGate(comparison, GPU_SPATIAL_PARITY_THRESHOLDS, "diagnostic"),
       capturedAt: Date.now()
     };
   }

@@ -2,6 +2,22 @@ namespace AIKernel.Doom.Provider.Autoplay;
 
 internal static class DynamicPipelineDslStatementParser
 {
+    /// <summary>
+    /// [EN] Executes the <c></c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c></c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="line">
+    /// [EN] Supplies the <c>line</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>line</c> value です。
+    /// </param>
+    /// <param name="state">
+    /// [EN] Supplies the <c>state</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>state</c> value です。
+    /// </param>
     public static void Parse(string line, DynamicPipelineDslParseState state)
     {
         var current = state.CurrentBlock;

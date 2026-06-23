@@ -247,6 +247,7 @@
 
   function enemyCirclePacket(values, action, combatScore) {
     const visualSuppressed = Boolean(values.visualEnemySuppressed);
+    const structuralDecoy = Boolean(values.enemyStructuralDecoy);
     const visualScore = visualSuppressed
       ? 0
       : clamp01(number(values.visualEnemyConfidence, values.enemyConfidence));
@@ -283,7 +284,8 @@
       top,
       width,
       height,
-      active
+      active: active && !structuralDecoy,
+      structuralDecoy
     };
   }
 
@@ -323,8 +325,13 @@
       values.routeFootObstacle ? 0.46 : 0,
       values.routeWallObstacle ? 0.52 : 0,
       number(values.motionForwardProgress, 0) < 0.10 ? number(values.motionObstacleScore, 0) : 0));
-    const threat = clamp01(maxValue(
+    const trustedThreat = clamp01(number(values.trustedEnemyThreat, 0));
+    const structuralDecoy = Boolean(values.enemyStructuralDecoy);
+    const threat = structuralDecoy
+      ? clamp01(maxValue(values.lethalRisk, values.projectileScore, values.dynamicObjectScore))
+      : clamp01(maxValue(
       values.lethalRisk,
+      trustedThreat,
       values.enemyConfidence,
       values.audioEnemyConfidence,
       values.visualEnemyVisible ? 0.32 : 0,
@@ -339,7 +346,10 @@
       stuck,
       oscillation: clamp01(number(values.turnRepeatFrames, 0) / 16),
       looming: clamp01(number(values.loomingScore, 0)),
-      enemyPresence: clamp01(number(values.enemyConfidence, 0)),
+      enemyPresence: structuralDecoy ? 0 : clamp01(maxValue(values.enemyConfidence, trustedThreat)),
+      enemyStructuralDecoy: structuralDecoy ? 1 : 0,
+      trustedEnemyThreat: trustedThreat,
+      trustedCombatEvidence: Boolean(values.trustedCombatEvidence) ? 1 : 0,
       damageLocalization: clamp01(number(values.lethalRisk, 0)),
       projectileFlow: clamp01(number(values.projectileScore, 0)),
       threatField: threat,
@@ -376,6 +386,8 @@
       values.routeActionHint,
       values.routeAbortHint,
       number(values.audioEnemyConfidence, 0) >= 0.24 ? `audio-enemy-${values.audioEnemyDirection || "front"}` : "",
+      values.enemyStructuralDecoy ? "enemy-structural-decoy" : "",
+      values.trustedCombatEvidence ? "trusted-combat" : "",
       values.visualEnemyVisible ? "visual-combat" : "",
       values.routeCorridorBridgeLock ? "corridor-bridge-lock" : "",
       values.routeFootObstacle ? "foot-obstacle" : "",
@@ -754,6 +766,7 @@
       || kind === "enemy"
       || kind === "enemy-circle"
       || kind.includes("objective")
+      || kind.includes("route")
       || kind === "door"
       || kind === "bridge";
   }
@@ -779,7 +792,7 @@
       width,
       height,
       score: region.active ?? region.Active ? 1 : 0.45,
-      alpha: kind === "zoe" || kind === "combat" ? 0.78 : 0.68,
+      alpha: clamp01(number(region.alpha ?? region.Alpha, kind === "zoe" || kind === "combat" ? 0.78 : 0.68)),
       color: gpuRectColor(kind)
     };
   }
@@ -1095,6 +1108,31 @@
     }
   }
 
+  function routeTargetDiagnosticValue(values) {
+    const currentRoute = String(values.currentRoute || (values.firstDoorRouteEvidenceReady ? "first-door-route" : "route")).replace(/\s+/g, "-");
+    const evidence = clamp01(values.firstDoorRouteEvidence);
+    const confidence = clamp01(values.routeConfidence);
+    const gap = clamp01(maxValue(values.spawnCorridorGapScore, values.gapVector));
+    const landmark = clamp01(maxValue(values.spawnLandmarkRouteEvidence, values.landmarkVector));
+    const wall = clamp01(maxValue(values.routeTopologyWallDistanceNormalized !== undefined ? 1 - number(values.routeTopologyWallDistanceNormalized, 1) : 0, values.routeWallObstacle ? 1 : 0));
+    const barrel = clamp01(number(values.routeTopologyBarrelZoneEvidence, 0));
+    const align = number(values.routeTopologyCenterCorridorAlignment, 0);
+    const yaw = number(values.recommendedYaw, 0) || number(values.routeFallbackYaw, 0);
+    const mode = String(values.routeMode || "").replace(/\s+/g, "-");
+    const phase = mode ? `mode=${mode}` : "";
+    const obstacle = values.routeFootObstacle
+      ? "foot"
+      : (values.routeWallObstacle ? "wall" : "clear");
+    return [
+      currentRoute,
+      `ev=${evidence.toFixed(2)} cf=${confidence.toFixed(2)}`,
+      `gap=${gap.toFixed(2)} lm=${landmark.toFixed(2)}`,
+      `wall=${wall.toFixed(2)} barrel=${barrel.toFixed(2)}`,
+      `align=${align.toFixed(2)} yaw=${yaw.toFixed(0)} ${obstacle}`,
+      phase
+    ].filter(Boolean).join("\n");
+  }
+
   function createGpuHudPanelValues(values, pipelineState, action) {
     const noesis = pipelineState?.noesis || {};
     const topology = noesis.topology || {};
@@ -1107,7 +1145,9 @@
       number(values.routeSlideBudget, 0) > 0 ? number(values.routeSlideUsed, 0) / number(values.routeSlideBudget, 1) : 0,
       number(values.routeBackoffBudget, 0) > 0 ? number(values.routeBackoffUsed, 0) / number(values.routeBackoffBudget, 1) : 0));
     const actionActive = action?.move !== "none" || action?.turn !== "none" || action?.use || action?.fire || action?.strafe;
-    const combat = clamp01(maxValue(values.enemyConfidence, values.audioEnemyConfidence, values.visualEnemyFireReady ? 0.50 : 0, action?.fire ? 1 : 0));
+    const combat = Boolean(values.enemyStructuralDecoy)
+      ? clamp01(maxValue(values.trustedEnemyThreat, values.audioEnemyConfidence >= 0.34 ? values.audioEnemyConfidence : 0, action?.fire ? 1 : 0))
+      : clamp01(maxValue(values.trustedEnemyThreat, values.enemyConfidence, values.audioEnemyConfidence, values.visualEnemyFireReady ? 0.50 : 0, action?.fire ? 1 : 0));
     const zoeValue = clamp01(maxValue(zoe.vetoed ? 1 : 0, zoe.lethalRisk, zoe.lowHealth ? 0.55 : 0));
     return [
       clamp01(maxValue(values.gameplayLuma, values.blueFloorScore, values.spawnCorridorGapScore)),
@@ -1133,11 +1173,11 @@
     const rects = [];
     const labels = [];
     for (const candidate of visionCandidates?.doorCandidates || []) {
-      appendGpuRect(rects, gpuRectFromCandidate("door", candidate, 0.86));
+      appendGpuRect(rects, gpuRectFromCandidate("door", candidate, 0.46));
       appendGpuLabel(labels, gpuLabelFromCandidate("door", candidate, labels.length));
     }
     for (const candidate of visionCandidates?.cornerCandidates || []) {
-      appendGpuRect(rects, gpuRectFromCandidate("corner", candidate, 0.62));
+      appendGpuRect(rects, gpuRectFromCandidate("corner", candidate, 0.34));
       appendGpuLabel(labels, gpuLabelFromCandidate("corner", candidate, labels.length));
     }
     appendGpuRect(rects, gpuRectFromEnemyCircle(enemyCircle));
@@ -1168,15 +1208,15 @@
       contractVersion: 1,
       contractName: "DoomGpuHudOverlay",
       enabled: true,
-      cssOverlayMode: "reduced",
+      cssOverlayMode: "full",
       rawFramebufferTarget: RAW_FRAMEBUFFER_TARGET,
       rawFrameTarget: gpuFrameTarget("RawFramebuffer", RAW_FRAMEBUFFER_TARGET, RAW_FRAMEBUFFER_WIRE_NAME, "analysis", true),
       hudTarget: HUD_COMPOSITE_TARGET,
       hudFrameTarget: gpuFrameTarget("HudCompositeOffscreen", HUD_COMPOSITE_TARGET, HUD_COMPOSITE_WIRE_NAME, "display", false),
       analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
       analysisFrameTarget: gpuFrameTarget("RawFramebuffer", RAW_FRAMEBUFFER_TARGET, RAW_FRAMEBUFFER_WIRE_NAME, "analysis", true),
-      displaySource: HUD_COMPOSITE_WIRE_NAME,
-      displayFrameTarget: gpuFrameTarget("HudCompositeOffscreen", HUD_COMPOSITE_TARGET, HUD_COMPOSITE_WIRE_NAME, "display", false),
+      displaySource: RAW_FRAMEBUFFER_WIRE_NAME,
+      displayFrameTarget: gpuFrameTarget("RawFramebuffer", RAW_FRAMEBUFFER_TARGET, RAW_FRAMEBUFFER_WIRE_NAME, "display", true),
       readbackPolicy: "none",
       readback: gpuReadbackPolicy("None", "none", false, false, false),
       frameToken: gpuFrameToken(RAW_FRAMEBUFFER_TARGET, HUD_COMPOSITE_TARGET, "hud-fallback"),
@@ -1197,7 +1237,9 @@
 
   function createGpuAisthesis(values, pipelineState, action) {
     const routePlan = pipelineState?.aisthesis?.routePlan || {};
-    const combat = maxValue(values.enemyConfidence, values.audioEnemyConfidence, action?.fire ? 1 : 0) > 0.08;
+    const combat = Boolean(values.enemyStructuralDecoy)
+      ? maxValue(values.trustedEnemyThreat, values.audioEnemyConfidence >= 0.34 ? values.audioEnemyConfidence : 0, action?.fire ? 1 : 0) > 0.08
+      : maxValue(values.trustedEnemyThreat, values.enemyConfidence, values.audioEnemyConfidence, action?.fire ? 1 : 0) > 0.08;
     const door = maxValue(values.firstDoorRouteEvidence, values.useProbeConfidence, values.firstDoorVision9x9RedScore) > 0.04;
     const corner = Boolean(routePlan.routeWallObstacle || routePlan.routeFootObstacle || values.routeWallObstacle || values.routeFootObstacle);
     const features = ["vision-heatmap", "edge-detect", "mask9x9-texture"];
@@ -1367,7 +1409,9 @@
   }
 
   function createGpuThreatMatrix(values, action) {
-    const enemy = clamp01(maxValue(values.enemyConfidence, values.audioEnemyConfidence, values.threatField));
+    const enemy = Boolean(values.enemyStructuralDecoy)
+      ? clamp01(maxValue(values.trustedEnemyThreat, values.audioEnemyConfidence >= 0.34 ? values.audioEnemyConfidence : 0, values.threatField))
+      : clamp01(maxValue(values.trustedEnemyThreat, values.enemyConfidence, values.audioEnemyConfidence, values.threatField));
     const yaw = Math.max(-1, Math.min(1, number(action?.yaw ?? action?.turnYaw ?? values.enemyCombatYaw, 0) / 32));
     const output = [];
     const centerIndex = Math.floor((HUD_GRID_SIZE - 1) / 2);
@@ -1410,7 +1454,9 @@
       clamp01(topology.barrelZoneEvidence ?? values.routeTopologyBarrelZoneEvidence),
       clamp01((number(topology.centerCorridorAlignment ?? values.routeTopologyCenterCorridorAlignment, 0) + 1) / 2),
       clamp01(combat ? 1 : 0),
-      clamp01(maxValue(values.enemyConfidence, values.audioEnemyConfidence, values.threatField)),
+      Boolean(values.enemyStructuralDecoy)
+        ? clamp01(maxValue(values.trustedEnemyThreat, values.audioEnemyConfidence >= 0.34 ? values.audioEnemyConfidence : 0, values.threatField))
+        : clamp01(maxValue(values.trustedEnemyThreat, values.enemyConfidence, values.audioEnemyConfidence, values.threatField)),
       clamp01(zoe.lethalRisk),
       clamp01(zoe.lowHealth ? 1 : 0),
       clamp01(action?.move === "forward" ? 1 : 0),
@@ -1542,14 +1588,16 @@
     ];
     if (values.firstDoorRouteEvidenceReady) {
       regions.push({
-        kind: "door",
-        label: "route",
-        value: `${values.currentRoute || "first-door"} ${clamp01(values.firstDoorRouteEvidence).toFixed(2)}/${clamp01(values.routeConfidence).toFixed(2)}`,
+        kind: "route-target",
+        className: "is-route-target",
+        label: "ROUTE TARGET",
+        value: routeTargetDiagnosticValue(values),
         left: 30,
         top: 18,
         width: 40,
         height: 42,
         priority: "high",
+        alpha: 0.50,
         active: true
       });
     }
@@ -1566,19 +1614,27 @@
         active: true
       });
     }
-    const combatScore = clamp01(maxValue(
-      values.enemyConfidence,
-      values.audioEnemyConfidence,
-      values.visualEnemyFireReady ? 0.50 : 0,
-      action?.fire ? 1 : 0));
+    const structuralDecoy = Boolean(values.enemyStructuralDecoy);
+    const combatScore = structuralDecoy
+      ? clamp01(maxValue(
+        values.trustedEnemyThreat,
+        number(values.audioEnemyConfidence, 0) >= 0.34 ? values.audioEnemyConfidence : 0,
+        action?.fire ? 1 : 0))
+      : clamp01(maxValue(
+        values.trustedEnemyThreat,
+        values.enemyConfidence,
+        values.postDoorEnemyMemoryEvidence ? 0.26 : 0,
+        values.audioEnemyConfidence,
+        values.visualEnemyFireReady ? 0.50 : 0,
+        action?.fire ? 1 : 0));
     const combatText = `${action?.stage || ""} ${action?.pipeline || ""} ${action?.objective || ""}`;
     const combatOverlayContext = number(values.doorOpenedCount, 0) > 0
-      || Boolean(values.computerRoomCombatContext)
+      || (Boolean(values.computerRoomCombatContext) && !structuralDecoy)
       || Boolean(values.centralHallEntered)
       || Boolean(action?.fire)
       || /combat|enemy|fire/i.test(combatText);
     let debugEnemyCircle = null;
-    if (combatOverlayContext && (combatScore >= 0.24 || /combat|enemy|fire/i.test(combatText))) {
+    if (combatOverlayContext && !structuralDecoy && (combatScore >= 0.24 || /combat|enemy|fire/i.test(combatText))) {
       const enemyCircle = enemyCirclePacket(values, action, combatScore);
       regions.push({
         kind: "combat",
@@ -1818,6 +1874,11 @@
       spawnCorridorGapScore: number(context?.values?.spawnCorridorGapScore, 0),
       spawnCorridorGapTurn: context?.values?.spawnCorridorGapTurn || "none",
       enemyConfidence: number(context?.values?.enemyConfidence, 0),
+      enemyConfidencePeak: number(context?.values?.enemyConfidencePeak, 0),
+      enemyStructuralDecoy: Boolean(context?.values?.enemyStructuralDecoy),
+      trustedEnemyThreat: number(context?.values?.trustedEnemyThreat, 0),
+      trustedCombatEvidence: Boolean(context?.values?.trustedCombatEvidence),
+      postDoorEnemyMemoryEvidence: Boolean(context?.values?.postDoorEnemyMemoryEvidence),
       audioEnemyConfidence: number(context?.values?.audioEnemyConfidence, 0),
       audioEnemyDirection: context?.values?.audioEnemyDirection || "none",
       visualEnemyVisible: Boolean(context?.values?.visualEnemyVisible),
@@ -1885,6 +1946,13 @@
         bridgeConfidence: number(context?.values?.bridgeConfidence, 0),
         doorOpenedCount: number(context?.values?.doorOpenedCount, 0),
         centralHallEntered: Boolean(context?.values?.centralHallEntered),
+        enemyConfidencePeak: number(context?.values?.enemyConfidencePeak, 0),
+        enemyStructuralDecoy: Boolean(context?.values?.enemyStructuralDecoy),
+        trustedEnemyThreat: number(context?.values?.trustedEnemyThreat, 0),
+        trustedCombatEvidence: Boolean(context?.values?.trustedCombatEvidence),
+        postDoorEnemyMemoryEvidence: Boolean(context?.values?.postDoorEnemyMemoryEvidence),
+        visualEnemyConfidence: number(context?.values?.visualEnemyConfidence, 0),
+        audioEnemyConfidence: number(context?.values?.audioEnemyConfidence, 0),
         visualEnemyVisible: Boolean(context?.values?.visualEnemyVisible),
         spawnCorridorGapScore: number(context?.values?.spawnCorridorGapScore, 0),
         spawnLandmarkRouteEvidence: number(context?.values?.spawnLandmarkRouteEvidence, 0),

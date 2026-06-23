@@ -3,7 +3,7 @@
 
   const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   const CTG_ROM_CANON_ID = "Canon.CTG.Monolith";
-  const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.1";
+  const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.3";
 
   function clamp01(value) {
     return Math.max(0, Math.min(1, Number(value) || 0));

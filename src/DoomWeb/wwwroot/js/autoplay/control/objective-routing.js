@@ -100,6 +100,14 @@
     const requested = String(signals?.semanticObjective || signals?.currentObjective || "").trim();
     const canonical = CANONICAL_OBJECTIVE_MAP[requested];
     const firstDoorOpened = bool(signals.firstDoorOpened);
+    const structuralDecoy = bool(signals.enemyStructuralDecoy) || bool(signals.visualEnemySuppressed);
+    const trustedCombatEvidence = bool(signals.trustedCombatEvidence)
+      || bool(signals.postDoorEnemyMemoryEvidence)
+      || number(signals.trustedEnemyThreat) >= 0.26
+      || (!structuralDecoy && number(signals.visualEnemyConfidence) >= 0.35)
+      || (!structuralDecoy && number(signals.enemyConfidence) >= 0.42)
+      || number(signals.audioEnemyConfidence) >= 0.34;
+    const actionableEnemy = !structuralDecoy && trustedCombatEvidence;
     if (!firstDoorOpened && POST_FIRST_DOOR_OBJECTIVES.includes(canonical)) {
       return objectiveRoute("find-corridor-to-first-door", "find-route", "first-door-locked", requested);
     }
@@ -133,6 +141,17 @@
       return objectiveRoute("reach-final-room", "advance-exit-route", "final-route-evidence", requested);
     }
 
+    if (firstDoorOpened
+      && !bool(signals.centralHallEntered)
+      && (structuralDecoy || !trustedCombatEvidence)
+      && number(signals.computerRoomConfidence) >= 0.18) {
+      return objectiveRoute(
+        bool(signals.computerRoomEntered) ? "reach-central-hall" : "enter-computer-room",
+        "navigate-landmark",
+        structuralDecoy ? "post-door-structural-decoy" : "post-door-route-hold",
+        requested);
+    }
+
     if (canonical && !(firstDoorOpened && PRE_FIRST_DOOR_CANONICAL_OBJECTIVES.includes(canonical))) {
       return objectiveRoute(canonical, "canonical-objective", "canonical-map", requested);
     }
@@ -142,14 +161,14 @@
         return objectiveRoute("reach-final-room", "advance-exit-route", "central-hall-cleared", requested);
       }
 
-      if (number(signals.enemyConfidence) >= 0.18 || number(signals.audioEnemyConfidence) >= 0.18) {
+      if (actionableEnemy || number(signals.audioEnemyConfidence) >= 0.34) {
         return objectiveRoute("engage-front-enemy", "fire-and-advance", "central-hall-enemy", requested);
       }
 
       return objectiveRoute("secure-central-hall", "survey-threat", "central-hall-entered", requested);
     }
 
-    if (number(signals.enemyConfidence) >= 0.35) {
+    if (actionableEnemy && number(signals.enemyConfidence) >= 0.35) {
       return objectiveRoute("avoid-enemy", "evade", "enemy-evidence", requested);
     }
 

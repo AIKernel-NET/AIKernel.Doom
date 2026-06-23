@@ -107,34 +107,34 @@
     });
   }
 
-  function installRev3Bridge(module) {
+  function installCanonicalBridge(module) {
     if (!module) {
       return false;
     }
 
-    window.AIKernelWebGpuRev3 = Object.assign({}, window.AIKernelWebGpuRev3 || {}, {
-      createWebGpuRev3EnvelopeBridge: module.createWebGpuRev3EnvelopeBridge,
-      createWebGpuRev3BrowserExecutor: module.createWebGpuRev3BrowserExecutor,
-      createNullWebGpuRev3Executor: module.createNullWebGpuRev3Executor
+    window.AIKernelWebGpu = Object.assign({}, window.AIKernelWebGpu || {}, {
+      createWebGpuEnvelopeBridge: module.createWebGpuEnvelopeBridge,
+      createWebGpuBrowserExecutor: module.createWebGpuBrowserExecutor,
+      createNullWebGpuExecutor: module.createNullWebGpuExecutor
     });
     return true;
   }
 
-  function loadRev3Bridge() {
+  function loadCanonicalBridge() {
     const assetBase = `${base}aikernel/`;
-    window.AIKernelDoomRev3AssetBase = assetBase;
-    const moduleUrl = `${assetBase}webgpu-rev3-envelope-bridge.js?v=${encodeURIComponent(version)}`;
-    window.AIKernelWebGpuRev3Ready = import(moduleUrl)
-      .then(module => installRev3Bridge(module))
+    window.AIKernelDoomGpuAssetBase = assetBase;
+    const moduleUrl = `${assetBase}webgpu-envelope-bridge.js?v=${encodeURIComponent(version)}`;
+    window.AIKernelWebGpuReady = import(moduleUrl)
+      .then(module => installCanonicalBridge(module))
       .catch(error => {
-        window.AIKernelWebGpuRev3Error = error?.message || String(error);
-        console.warn("[AIKernel.Doom] rev3 WebGPU bridge unavailable", error);
+        window.AIKernelWebGpuError = error?.message || String(error);
+        console.warn("[AIKernel.Doom] canonical WebGPU bridge unavailable", error);
         return false;
       });
-    return window.AIKernelWebGpuRev3Ready;
+    return window.AIKernelWebGpuReady;
   }
 
-  loadRev3Bridge()
+  loadCanonicalBridge()
     .then(() => scripts.reduce((chain, relativePath) => chain.then(() => loadScript(relativePath)), Promise.resolve()))
     .then(() => {
       document.documentElement.dataset.doomPublicBundle = version;

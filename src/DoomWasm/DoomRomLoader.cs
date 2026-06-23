@@ -2,17 +2,21 @@ namespace AIKernel.Doom.Wasm;
 
 using System.Text.Json;
 using AIKernel.Common.Results;
-/// <summary>
-/// EN: Represents DoomRomLoader.
-/// EN: Documentation for public API. JA: DoomRomLoader を表します。
-/// </summary>
 
+/// <summary>
+/// [EN] Loads and validates the DOOM ROM manifest used by the standalone WASM demo before the runtime is allowed to resolve assets.
+/// [JA] standalone WASM demo が asset 解決へ進む前に使用する DOOM ROM manifest を読み込み、検証します。
+/// </summary>
+/// <remarks>
+/// [EN] Keep validation fail-closed: callers depend on the returned <see cref="Result{T}"/> to decide whether hosted WAD, wasm, and capability metadata are safe to expose.
+/// [JA] validation は fail-closed を維持してください。呼び出し側は返却される <see cref="Result{T}"/> により、hosted WAD、wasm、capability metadata を公開してよいか判断します。
+/// </remarks>
 public static class DoomRomLoader
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     /// <summary>
     /// EN: Gets LoadAsync.
-    /// EN: Documentation for public API. JA: LoadAsync を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] LoadAsync を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static async Task<Result<DoomRomManifest>> LoadAsync(
@@ -45,7 +49,7 @@ public static class DoomRomLoader
     }
     /// <summary>
     /// EN: Executes Validate.
-    /// EN: Documentation for public API. JA: Validate を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Validate を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static Result<DoomRomManifest> Validate(DoomRomManifest? manifest)

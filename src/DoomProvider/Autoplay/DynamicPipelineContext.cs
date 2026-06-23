@@ -1,5 +1,13 @@
 namespace AIKernel.Doom.Provider.Autoplay;
 
+/// <summary>
+/// [EN] Defines the <c>DynamicPipelineContext</c> public integration contract used by the Doom runtime, HUD projection, autoplay planner, and test fixtures.
+/// [JA] Doom runtime、HUD 投影、autoplay planner、および test fixture が共有する public integration contract として <c>DynamicPipelineContext</c> を定義します。
+/// </summary>
+/// <remarks>
+/// [EN] Keep this shape stable: consumers may bind it from C#, JavaScript DTO projection, profile fixtures, or generated reference documentation.
+/// [JA] この形状は安定させてください。C#、JavaScript DTO 投影、profile fixture、生成 reference documentation から参照される可能性があります。
+/// </remarks>
 public sealed record DynamicPipelineContext
 {
     /// <summary>

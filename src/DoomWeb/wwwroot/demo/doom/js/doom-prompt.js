@@ -960,6 +960,95 @@
         }
         .doom-panel-signal-chip strong { color: #fff7c0; font-weight: 700; }
         .doom-panel-signal-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .78; }
+        .doom-sensor-node.is-krisis .doom-sensor-stage[data-sensor-stage="kairos"] .doom-sensor-node-buttons {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 5px;
+          align-items: start;
+        }
+        .doom-kairos-radar {
+          --kairos-fill: rgba(255,225,122,.28);
+          --kairos-stroke: rgba(255,225,122,.72);
+          --kairos-alpha: .34;
+          display: grid;
+          grid-template-columns: 88px minmax(0, 1fr);
+          gap: 6px;
+          align-items: center;
+          width: 100%;
+          min-height: 74px;
+          padding: 5px;
+          box-sizing: border-box;
+          border: 1px solid rgba(255,225,122,.24);
+          border-radius: 6px;
+          background: radial-gradient(circle at 50% 42%, rgba(255,225,122,.08), rgba(0,0,0,.08) 62%);
+          color: #fff7c0;
+          overflow: hidden;
+        }
+        .doom-kairos-radar svg {
+          width: 88px;
+          height: 74px;
+          display: block;
+          overflow: visible;
+        }
+        .doom-kairos-radar .kairos-grid {
+          fill: none;
+          stroke: rgba(255,247,192,.20);
+          stroke-width: 1;
+        }
+        .doom-kairos-radar .kairos-spoke {
+          stroke: rgba(255,247,192,.16);
+          stroke-width: 1;
+        }
+        .doom-kairos-radar .kairos-fill {
+          fill: var(--kairos-fill);
+          fill-opacity: var(--kairos-alpha);
+          stroke: var(--kairos-stroke);
+          stroke-width: 1.65;
+          filter: drop-shadow(0 0 4px var(--kairos-stroke));
+        }
+        .doom-kairos-radar .kairos-point {
+          fill: var(--kairos-stroke);
+          stroke: rgba(255,255,255,.70);
+          stroke-width: .8;
+        }
+        .doom-kairos-radar .kairos-label {
+          font: 800 10px/1 ui-monospace, Consolas, monospace;
+          text-anchor: middle;
+          dominant-baseline: middle;
+          text-shadow: 0 1px 2px #000;
+        }
+        .doom-kairos-radar .kairos-label.is-logos { fill: #45d8ff; }
+        .doom-kairos-radar .kairos-label.is-pathos { fill: #ff7468; }
+        .doom-kairos-radar .kairos-label.is-ethos { fill: #9cff86; }
+        .doom-kairos-readout {
+          min-width: 0;
+          display: grid;
+          gap: 2px;
+          font: 9.5px/1.15 ui-monospace, Consolas, monospace;
+          color: #e9fbff;
+        }
+        .doom-kairos-readout strong {
+          color: var(--kairos-stroke);
+          font: 800 10.5px/1.1 ui-monospace, Consolas, monospace;
+          text-transform: uppercase;
+        }
+        .doom-kairos-values {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 3px;
+        }
+        .doom-kairos-values span {
+          min-width: 0;
+          padding: 2px 3px;
+          border: 1px solid rgba(255,255,255,.12);
+          border-radius: 4px;
+          background: rgba(255,255,255,.04);
+          text-align: center;
+          white-space: nowrap;
+        }
+        .doom-kairos-values .is-logos { color: #45d8ff; }
+        .doom-kairos-values .is-pathos { color: #ff7468; }
+        .doom-kairos-values .is-ethos { color: #9cff86; }
         .doom-sensor-switch {
           min-width: 0;
           padding: 3px 5px;
@@ -1149,6 +1238,8 @@
           padding: 0 !important;
           border-radius: 0 !important;
           pointer-events: none;
+          opacity: var(--label-alpha, 1);
+          transition: opacity .18s linear;
           z-index: 46;
         }
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label[data-gpu-label-layout="rect"] {
@@ -1237,6 +1328,22 @@
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door,
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-door-candidate {
           color: rgba(255,210,210,.98);
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-route-target {
+          display: block;
+          width: calc(var(--label-width, 40) * 1%);
+          max-width: calc(var(--label-width, 40) * 1%);
+          color: rgba(182,246,255,.98);
+          font: 800 8.6px/1.16 ui-monospace, Consolas, monospace;
+          white-space: pre-line;
+          overflow: visible;
+          text-overflow: clip;
+          text-transform: none;
+          text-shadow: 0 1px 2px rgba(0,0,0,.98), 0 0 10px rgba(48,210,255,.66);
+          z-index: 52;
+        }
+        #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-route-target.is-held {
+          filter: saturate(.88);
         }
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-wall,
         #doom-debug-overlay.is-gpu-backed .debug-gpu-label.is-corner-candidate {
@@ -3023,12 +3130,15 @@
 
       const providerStatus = typeof provider.status === "function" ? provider.status() : {};
       const renderer = `${status?.renderer || ""} ${providerStatus?.backend || ""}`;
-      const webGpuReady = Boolean(providerStatus?.rendererInitialized || providerStatus?.hudOverlayReady || providerStatus?.zeroCopy);
-      const ready = Boolean(webGpuReady && providerStatus?.usingCpuFallback === false && /webgpu/i.test(renderer));
+      const webGpuHudReady = Boolean(
+        providerStatus?.hudCompositePresentEnabled
+        && (providerStatus?.hudOverlayReady || providerStatus?.hudCompositeReady || providerStatus?.hudCompositeActive)
+      );
+      const ready = Boolean(webGpuHudReady && providerStatus?.usingCpuFallback === false && /webgpu/i.test(renderer));
       const autoplayActive = Boolean(status?.autoplay?.enabled);
       provider.setHudOverlayEnabled(Boolean(ready && (doomDebugOverlayEnabled || autoplayActive)));
       const nextStatus = typeof provider.status === "function" ? provider.status() : providerStatus;
-      return runtimeCompositeActive || Boolean(nextStatus?.hudCompositeActive || nextStatus?.hudOverlayActive || (ready && (doomDebugOverlayEnabled || autoplayActive) && nextStatus?.hudOverlayEnabled));
+      return runtimeCompositeActive || Boolean(nextStatus?.hudCompositeActive || nextStatus?.hudOverlayActive);
     }
 
     function firstFiniteNumber(values, fallback = 0) {
@@ -3526,7 +3636,7 @@
       return [
         { key: "aisthesis", className: "is-aisthesis", title: "Aisthesis", subtitle: "Perception layer", stages: [{ key: "primary", title: "Primary sensors", items: [{ type: "sensor", key: "visual" }, { type: "sensor", key: "audio" }, { type: "sensor", key: "movement" }, { type: "sensor", key: "compass" }, { type: "detection", key: "foot" }, { type: "sensor", key: "health" }] }] },
         { key: "noesis", className: "is-noesis", title: "Noesis", subtitle: "Cognition layer", stages: [{ key: "phainesis", title: "Phainesis", items: [{ type: "detection", key: "motion" }, { type: "detection", key: "wall" }, { type: "detection", key: "enemy" }, { type: "detection", key: "hud" }, { type: "detection", key: "computer" }] }] },
-        { key: "krisis", className: "is-krisis", title: "Krisis", subtitle: "Judgement layer", stages: [{ key: "topos", title: "Topos", items: [{ type: "sensor", key: "spatial" }, { type: "detection", key: "objective" }, { type: "detection", key: "door" }, { type: "detection", key: "spatial" }] }] },
+        { key: "krisis", className: "is-krisis", title: "Krisis", subtitle: "Judgement layer", stages: [{ key: "topos", title: "Topos", items: [{ type: "sensor", key: "spatial" }, { type: "detection", key: "objective" }, { type: "detection", key: "door" }, { type: "detection", key: "spatial" }] }, { key: "kairos", title: "Kairos", items: [{ type: "kairos-radar" }, { type: "signal", label: "Pathos-priority", signal: "danger first" }, { type: "signal", label: "Ethos-priority", signal: "fail closed" }, { type: "signal", label: "Logos-priority", signal: "route proof" }] }] },
         { key: "kinesis", className: "is-kinesis", title: "Kinesis", subtitle: "Action layer", stages: [{ key: "motion", title: "Kinesis", items: [{ type: "sensor", key: "motor" }, { type: "detection", key: "health" }] }] }
       ];
     }
@@ -3816,6 +3926,146 @@
       return chip;
     }
 
+    function createKairosRadarNode() {
+      const node = document.createElement("div");
+      node.className = "doom-kairos-radar";
+      node.dataset.panelSignal = "KairosRadar";
+      node.innerHTML = [
+        '<svg viewBox="0 0 100 82" aria-hidden="true">',
+        '<polygon class="kairos-grid" points="50,7 12,72 88,72"></polygon>',
+        '<polygon class="kairos-grid" points="50,24 27,63 73,63"></polygon>',
+        '<line class="kairos-spoke" x1="50" y1="48" x2="50" y2="7"></line>',
+        '<line class="kairos-spoke" x1="50" y1="48" x2="12" y2="72"></line>',
+        '<line class="kairos-spoke" x1="50" y1="48" x2="88" y2="72"></line>',
+        '<polygon class="kairos-fill" points="50,48 50,48 50,48"></polygon>',
+        '<circle class="kairos-point is-logos" cx="50" cy="48" r="2.2"></circle>',
+        '<circle class="kairos-point is-pathos" cx="50" cy="48" r="2.2"></circle>',
+        '<circle class="kairos-point is-ethos" cx="50" cy="48" r="2.2"></circle>',
+        '<text class="kairos-label is-logos" x="50" y="3">L</text>',
+        '<text class="kairos-label is-pathos" x="8" y="76">P</text>',
+        '<text class="kairos-label is-ethos" x="92" y="76">E</text>',
+        '</svg>',
+        '<div class="doom-kairos-readout">',
+        '<strong>Kairos LPE</strong>',
+        '<div class="doom-kairos-values">',
+        '<span class="is-logos">L 0.00</span>',
+        '<span class="is-pathos">P 0.00</span>',
+        '<span class="is-ethos">E 0.00</span>',
+        '</div>',
+        '<span class="doom-kairos-axis">axis monitor</span>',
+        '</div>'
+      ].join("");
+      return node;
+    }
+
+    function resolveKairosRadarState(status = latestRuntimeStatus || {}) {
+      const autoplay = status?.autoplay || {};
+      const pipeline = autoplay.pipelineState || autoplay.PipelineState || {};
+      const krisis = pipeline.krisis || pipeline.Krisis || {};
+      const kairos = krisis.kairos || krisis.Kairos || autoplay.kairosPriorityAxis || {};
+      const logos = clampHud01(Number(kairos.logos ?? kairos.Logos ?? autoplay.kairosLogos ?? 0));
+      const pathos = clampHud01(Number(kairos.pathos ?? kairos.Pathos ?? autoplay.kairosPathos ?? 0));
+      const ethos = clampHud01(Number(kairos.ethos ?? kairos.Ethos ?? autoplay.kairosEthos ?? 0));
+      let axis = String(kairos.selectedAxis || kairos.SelectedAxis || autoplay.kairosPriorityAxis?.selectedAxis || "").toUpperCase();
+      if (!axis || axis === "MONITOR") {
+        const strongest = [
+          ["L", logos],
+          ["P", pathos],
+          ["E", ethos]
+        ].sort((left, right) => right[1] - left[1])[0];
+        axis = strongest && strongest[1] > 0.05 ? strongest[0] : "MONITOR";
+      }
+      return { logos, pathos, ethos, axis };
+    }
+
+    function mixKairosColor(logos, pathos, ethos) {
+      const total = Math.max(0.001, logos + pathos + ethos);
+      const l = [69, 216, 255];
+      const p = [255, 116, 104];
+      const e = [156, 255, 134];
+      const channel = index => Math.round((l[index] * logos + p[index] * pathos + e[index] * ethos) / total);
+      if (total < 0.05) {
+        return { fill: "rgba(255,225,122,.18)", stroke: "rgba(255,225,122,.50)", alpha: 0.18 };
+      }
+      const alpha = Math.max(0.22, Math.min(0.58, 0.22 + Math.max(logos, pathos, ethos) * 0.42));
+      return {
+        fill: `rgba(${channel(0)},${channel(1)},${channel(2)},${alpha.toFixed(3)})`,
+        stroke: `rgba(${channel(0)},${channel(1)},${channel(2)},.82)`,
+        alpha
+      };
+    }
+
+    function kairosRadarPoint(value, vertex) {
+      const center = { x: 50, y: 48 };
+      const amount = clampHud01(value);
+      return {
+        x: center.x + (vertex.x - center.x) * amount,
+        y: center.y + (vertex.y - center.y) * amount
+      };
+    }
+
+    function updateKairosRadarNode(node, status) {
+      if (!node) {
+        return;
+      }
+      const next = resolveKairosRadarState(status);
+      const previous = node._kairosRadarState || next;
+      const alpha = 0.24;
+      const state = {
+        logos: previous.logos + (next.logos - previous.logos) * alpha,
+        pathos: previous.pathos + (next.pathos - previous.pathos) * alpha,
+        ethos: previous.ethos + (next.ethos - previous.ethos) * alpha,
+        axis: next.axis
+      };
+      node._kairosRadarState = state;
+      const logosPoint = kairosRadarPoint(state.logos, { x: 50, y: 7 });
+      const pathosPoint = kairosRadarPoint(state.pathos, { x: 12, y: 72 });
+      const ethosPoint = kairosRadarPoint(state.ethos, { x: 88, y: 72 });
+      const points = `${logosPoint.x.toFixed(1)},${logosPoint.y.toFixed(1)} ${pathosPoint.x.toFixed(1)},${pathosPoint.y.toFixed(1)} ${ethosPoint.x.toFixed(1)},${ethosPoint.y.toFixed(1)}`;
+      const fill = node.querySelector(".kairos-fill");
+      if (fill) {
+        fill.setAttribute("points", points);
+      }
+      const pointMap = [
+        [".kairos-point.is-logos", logosPoint],
+        [".kairos-point.is-pathos", pathosPoint],
+        [".kairos-point.is-ethos", ethosPoint]
+      ];
+      for (const [selector, point] of pointMap) {
+        const element = node.querySelector(selector);
+        if (element) {
+          element.setAttribute("cx", point.x.toFixed(1));
+          element.setAttribute("cy", point.y.toFixed(1));
+        }
+      }
+      const color = mixKairosColor(state.logos, state.pathos, state.ethos);
+      node.style.setProperty("--kairos-fill", color.fill);
+      node.style.setProperty("--kairos-stroke", color.stroke);
+      node.style.setProperty("--kairos-alpha", color.alpha.toFixed(3));
+      const labels = [
+        [".doom-kairos-values .is-logos", "L", state.logos],
+        [".doom-kairos-values .is-pathos", "P", state.pathos],
+        [".doom-kairos-values .is-ethos", "E", state.ethos]
+      ];
+      for (const [selector, label, value] of labels) {
+        const element = node.querySelector(selector);
+        if (element) {
+          element.textContent = `${label} ${value.toFixed(2)}`;
+        }
+      }
+      const axis = node.querySelector(".doom-kairos-axis");
+      if (axis) {
+        axis.textContent = `axis ${state.axis}`;
+      }
+    }
+
+    function syncKairosRadar(status = latestRuntimeStatus || doomRuntime?.status?.() || {}) {
+      const nodes = document.querySelectorAll(".doom-kairos-radar");
+      for (const node of nodes) {
+        updateKairosRadarNode(node, status);
+      }
+    }
+
     function appendSensorPanelItem(stageBody, item, sensorRow) {
       if (!item || !item.type) {
         return;
@@ -3833,6 +4083,11 @@
 
       if (item.type === "signal") {
         stageBody.appendChild(createSensorSignalChip(item));
+        return;
+      }
+
+      if (item.type === "kairos-radar") {
+        stageBody.appendChild(createKairosRadarNode());
       }
     }
 
@@ -4565,6 +4820,7 @@
         );
         syncCompassNeedle(button, status);
       }
+      syncKairosRadar(status);
     }
 
     function syncSingleSensorToggle(kind, enabled, status = latestRuntimeStatus || {}, button = null) {

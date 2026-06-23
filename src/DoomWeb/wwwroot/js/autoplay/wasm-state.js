@@ -459,6 +459,14 @@
       frame.enemyConfidence,
       frame.enemyAllRegionPeak,
       Math.abs(faceSig));
+    const enemyConfidencePeak = maxScore(
+      runtime?.autoplayEnemyConfidencePeak,
+      runtime?.autoplayMilestones?.enemyConfidencePeak,
+      runtime?.milestones?.enemyConfidencePeak,
+      supervisorStatus.enemyConfidencePeak,
+      milestones.enemyConfidencePeak,
+      frame.enemyConfidencePeak,
+      rawVisualEnemyConfidence);
     const terminalSurface = maxScore(
       frame.computerPanelScore,
       frame.computerDarkPanelScore,
@@ -476,18 +484,21 @@
       && rawVisualEnemyConfidence >= 0.46
       && audioEnemyConfidence < 0.18
       && firstDoorVision.redScore <= 0.08;
+    const structuralVisualEnemy = Boolean(frame.enemyStructuralDecoy);
     const visualEnemySuppressed = terminalSurface >= 0.24
       && rawVisualEnemyConfidence <= 0.46
       && (weakTerminalSurfaceEnemy
         || (audioEnemyConfidence >= 0.24 && audioEnemyDirection !== "front"))
-      || terminalOnlyVisualEnemy;
+      || terminalOnlyVisualEnemy
+      || structuralVisualEnemy;
     const visualEnemyConfidence = visualEnemySuppressed
       ? Math.min(rawVisualEnemyConfidence, 0.10)
       : rawVisualEnemyConfidence;
     const enemyConfidence = maxScore(
       visualEnemyConfidence,
       audioEnemyConfidence);
-    const visualEnemyVisible = visualEnemyConfidence >= 0.28 || (!visualEnemySuppressed && Math.abs(faceSig) >= 0.20);
+    const visualEnemyVisible = visualEnemyConfidence >= 0.28
+      || (!visualEnemySuppressed && visualEnemyConfidence >= 0.18 && Math.abs(faceSig) >= 0.20);
     const visualEnemyCentered = visualEnemyConfidence >= 0.28 && Math.abs(faceSig) <= 0.12;
     const visualEnemyYaw = visualEnemyCentered
       ? 0
@@ -496,6 +507,12 @@
     const audioEnemyYaw = audioEnemyDirection === "right"
       ? 18
       : (audioEnemyDirection === "left" ? -18 : 0);
+    let trustedEnemyThreat = maxScore(
+      structuralVisualEnemy ? 0 : (visualEnemyConfidence >= 0.52 ? visualEnemyConfidence : 0),
+      audioEnemyConfidence >= 0.34 ? audioEnemyConfidence : 0);
+    let trustedCombatEvidence = trustedEnemyThreat >= 0.26
+      || (!structuralVisualEnemy && visualEnemyFireReady)
+      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none");
     const enemyCombatYaw = visualEnemyVisible && !visualEnemyCentered
       ? visualEnemyYaw
       : (audioEnemyConfidence >= 0.24 ? audioEnemyYaw : visualEnemyYaw);
@@ -572,6 +589,15 @@
     const postDoorTerminalSurface = effectiveDoorOpened
       ? maxScore(frame.computerPanelScore, frame.computerDarkPanelScore, frame.computerRoomScore)
       : 0;
+    const postDoorEnemyMemoryEvidence = effectiveDoorOpened
+      && !structuralVisualEnemy
+      && enemyConfidencePeak >= 0.62
+      && rawVisualEnemyConfidence >= 0.08
+      && postDoorTerminalSurface >= 0.28;
+    if (postDoorEnemyMemoryEvidence) {
+      trustedEnemyThreat = maxScore(trustedEnemyThreat, Math.min(0.34, enemyConfidencePeak * 0.42));
+      trustedCombatEvidence = true;
+    }
     const centralHallConfidence = maxScore(
       semantic.centralHall?.confidence,
       centralHallEntered ? 1 : 0,
@@ -605,8 +631,13 @@
       doorConfidence,
       corridorConfidence,
       enemyConfidence,
+      enemyConfidencePeak,
+      trustedEnemyThreat,
+      trustedCombatEvidence,
+      postDoorEnemyMemoryEvidence,
       visualEnemyConfidence,
       visualEnemySuppressed,
+      enemyStructuralDecoy: structuralVisualEnemy,
       audioEnemyConfidence,
       audioEnemyDirection,
       visualEnemyVisible,
@@ -682,6 +713,9 @@
     if (audioEnemyConfidence >= 0.24) {
       activeDetections.push(`audio-enemy-${audioEnemyDirection}`);
     }
+    if (postDoorEnemyMemoryEvidence) {
+      activeDetections.push("post-door-enemy-memory");
+    }
 
     return {
       frame: runtime?.frameCount || 0,
@@ -724,8 +758,13 @@
       doorConfidence,
       corridorConfidence,
       enemyConfidence,
+      enemyConfidencePeak,
+      trustedEnemyThreat,
+      trustedCombatEvidence,
+      postDoorEnemyMemoryEvidence,
       visualEnemyConfidence,
       visualEnemySuppressed,
+      enemyStructuralDecoy: structuralVisualEnemy,
       visualEnemyVisible,
       visualEnemyCentered,
       visualEnemyFireReady,

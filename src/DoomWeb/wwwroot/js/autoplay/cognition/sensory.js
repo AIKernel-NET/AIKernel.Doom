@@ -186,6 +186,9 @@
   function createHealthSensorSnapshot(overrides = {}) {
     const zeroScore = clamp01(Number(overrides.zeroScore ?? 0));
     const faceDeathScore = clamp01(Number(overrides.faceDeathScore ?? 0));
+    const deathTintScore = clamp01(Number(overrides.deathTintScore ?? overrides.healthDeathTintScore ?? 0));
+    const statusDeathTintScore = clamp01(Number(overrides.statusDeathTintScore ?? overrides.healthStatusDeathTintScore ?? 0));
+    const faceDeathTintScore = clamp01(Number(overrides.faceDeathTintScore ?? overrides.healthFaceDeathTintScore ?? 0));
     const freezeScore = clamp01(Number(overrides.freezeScore ?? 0));
     const activeCells = Number(overrides.activeCells || 0);
     const activeColumns = Number(overrides.activeColumns || 0);
@@ -197,27 +200,39 @@
     const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(Number(overrides.lowHealthThreshold ?? 50))));
     const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
     const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
-    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, freezeScore * 0.55)));
+    const noHealthDigits = activeCells <= 1 && zeroScore <= 0.36;
+    const tintDeath = noHealthDigits
+      && deathTintScore >= 0.5
+      && (statusDeathTintScore >= 0.36
+        || faceDeathTintScore >= 0.18
+        || faceDeathScore >= 0.12
+        || freezeScore >= 0.5);
+    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, deathTintScore * 0.78, freezeScore * 0.55)));
     const likelyDead = Boolean(overrides.likelyDead)
       || (sparseHealthDigits && zeroScore >= 0.44 && faceDeathScore >= 0.24)
       || (severeHealthDigits && faceDeathScore >= 0.22)
-      || (sparseHealthDigits && zeroScore >= 0.52 && faceDeathScore >= 0.14 && freezeScore >= 0.75);
-    const retryReason = overrides.retryReason || (likelyDead ? "health-death" : "none");
+      || (sparseHealthDigits && zeroScore >= 0.52 && faceDeathScore >= 0.14 && freezeScore >= 0.75)
+      || tintDeath;
+    const retryReason = overrides.retryReason || (likelyDead ? (tintDeath ? "health-red-tint-death" : "health-death") : "none");
     const retryRequested = Boolean(overrides.retryRequested ?? (Boolean(overrides.active) && (likelyDead || zeroScore >= 0.78)));
+    const stablePercent = tintDeath ? 0 : estimatedPercent;
     return {
       active: Boolean(overrides.active),
       signature: overrides.signature || "000000000000000000000000",
       faceSignature: overrides.faceSignature || "0000000000000000",
       faceQuantizedFrameChange: round2(Number(overrides.faceQuantizedFrameChange ?? 255)),
       faceDeathScore: round2(faceDeathScore),
+      deathTintScore: round2(deathTintScore),
+      statusDeathTintScore: round2(statusDeathTintScore),
+      faceDeathTintScore: round2(faceDeathTintScore),
       freezeScore: round2(freezeScore),
       zeroScore: round2(zeroScore),
       activeColumns,
       activeCells,
-      estimatedPercent,
-      value: estimatedPercent,
-      health: estimatedPercent,
-      lowHealth: estimatedPercent > 0 && estimatedPercent < lowHealthThreshold,
+      estimatedPercent: stablePercent,
+      value: stablePercent,
+      health: stablePercent,
+      lowHealth: stablePercent > 0 && stablePercent < lowHealthThreshold,
       lowHealthThreshold,
       likelyDead,
       confidence: round2(confidence),
@@ -273,6 +288,9 @@
   function refineHealthState(healthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta) {
     const zeroScore = clamp01(Number(healthState?.zeroScore || 0));
     const faceScore = clamp01(Number(faceDeathScore || 0));
+    const deathTintScore = clamp01(Number(healthState?.deathTintScore ?? healthState?.healthDeathTintScore ?? 0));
+    const statusDeathTintScore = clamp01(Number(healthState?.statusDeathTintScore ?? healthState?.healthStatusDeathTintScore ?? 0));
+    const faceDeathTintScore = clamp01(Number(healthState?.faceDeathTintScore ?? healthState?.healthFaceDeathTintScore ?? 0));
     const activeCells = Number(healthState?.activeCells || 0);
     const activeColumns = Number(healthState?.activeColumns || 0);
     const faceStable = Number(faceQuantizedFrameChange ?? 255) <= 0.08;
@@ -283,13 +301,26 @@
     const faceDeath = (sparseHealthDigits && zeroScore >= 0.44 && faceScore >= 0.24)
       || (severeHealthDigits && faceScore >= 0.22);
     const frozenDeath = sparseHealthDigits && zeroScore >= 0.52 && faceScore >= 0.14 && freezeScore >= 0.75;
-    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath;
+    const noHealthDigits = activeCells <= 1 && zeroScore <= 0.36;
+    const tintDeath = noHealthDigits
+      && deathTintScore >= 0.5
+      && (statusDeathTintScore >= 0.36
+        || faceDeathTintScore >= 0.18
+        || faceScore >= 0.12
+        || freezeScore >= 0.5);
+    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath || tintDeath;
     return Object.assign({}, healthState || {}, {
       likelyDead,
       faceDeathScore: faceScore,
+      deathTintScore: round2(deathTintScore),
+      statusDeathTintScore: round2(statusDeathTintScore),
+      faceDeathTintScore: round2(faceDeathTintScore),
       freezeScore,
+      estimatedPercent: tintDeath ? 0 : healthState?.estimatedPercent,
+      value: tintDeath ? 0 : healthState?.value,
+      health: tintDeath ? 0 : healthState?.health,
       retryReason: likelyDead
-        ? (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score"))
+        ? (tintDeath ? "health-red-tint-death" : (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score")))
         : "none"
     });
   }

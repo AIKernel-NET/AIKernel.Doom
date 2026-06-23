@@ -2,18 +2,22 @@ namespace AIKernel.Doom.Wasm;
 
 using System.Security.Cryptography;
 using AIKernel.Common.Results;
-/// <summary>
-/// EN: Represents DoomWasmAssetResolver.
-/// EN: Documentation for public API. JA: DoomWasmAssetResolver を表します。
-/// </summary>
 
+/// <summary>
+/// [EN] Resolves the DOOM WASM asset from configured candidate paths, cache, or the offline simulation path used by the demo host.
+/// [JA] demo host が使用する設定済み候補 path、cache、または offline simulation path から DOOM WASM asset を解決します。
+/// </summary>
+/// <remarks>
+/// [EN] The resolver is intentionally explicit about simulated assets so production hosting cannot accidentally treat placeholder bytes as a real runtime.
+/// [JA] production hosting が placeholder byte sequence を実 runtime と誤認しないように、simulated asset の扱いは意図的に明示しています。
+/// </remarks>
 public sealed class DoomWasmAssetResolver : IDoomWasmAssetResolver
 {
     private static readonly byte[] SimulatedWasmModule = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     private readonly DoomWasmOptions _options;
     /// <summary>
     /// EN: Executes DoomWasmAssetResolver.
-    /// EN: Documentation for public API. JA: DoomWasmAssetResolver を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] DoomWasmAssetResolver を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public DoomWasmAssetResolver(DoomWasmOptions options)
@@ -22,7 +26,7 @@ public sealed class DoomWasmAssetResolver : IDoomWasmAssetResolver
     }
     /// <summary>
     /// EN: Gets ResolveAsync.
-    /// EN: Documentation for public API. JA: ResolveAsync を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ResolveAsync を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<Result<DoomWasmAsset>> ResolveAsync(

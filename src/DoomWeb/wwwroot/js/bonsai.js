@@ -176,7 +176,7 @@
     }
   };
   const DEFAULT_AUTOPLAY_PROFILE = {
-    version: "0.1.1-dev1",
+    version: "0.1.3-dev1",
     strategyName: STRATEGY_NAME,
     doorAimToleranceDegrees: 14,
     doorSoftAimToleranceDegrees: 28,
@@ -298,7 +298,7 @@
   const EMERGENCY_STUCK_TICKS = 54;
   const BACKSTEP_DEPTH_GUARD = 0.66;
   const CTG_ROM_CANON_ID = "Canon.CTG.Monolith";
-  const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.1";
+  const CTG_ROM_POLICY_ID = "ctg-rom.monolith.v0.1.3";
   const DEFAULT_SNAPSHOT_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
   class AIKernelBonsaiSupervisor {
@@ -515,6 +515,9 @@
       this.healthZeroScore = 0;
       this.healthActiveColumns = 0;
       this.healthActiveCells = 0;
+      this.healthDeathTintScore = 0;
+      this.healthStatusDeathTintScore = 0;
+      this.healthFaceDeathTintScore = 0;
       this.healthEstimatedPercent = 100;
       this.doorOpenedCount = 0;
       this.enemyDefeatedCount = 0;
@@ -757,6 +760,9 @@
         this.healthZeroScore = 0;
         this.healthActiveColumns = 0;
         this.healthActiveCells = 0;
+        this.healthDeathTintScore = 0;
+        this.healthStatusDeathTintScore = 0;
+        this.healthFaceDeathTintScore = 0;
         this.healthEstimatedPercent = 100;
         this.doorOpenedCount = 0;
         this.enemyDefeatedCount = 0;
@@ -920,6 +926,9 @@
         healthActiveColumns: this.healthActiveColumns,
         healthActiveCells: this.healthActiveCells,
         healthEstimatedPercent: this.healthEstimatedPercent,
+        healthDeathTintScore: round2(this.healthDeathTintScore),
+        healthStatusDeathTintScore: round2(this.healthStatusDeathTintScore),
+        healthFaceDeathTintScore: round2(this.healthFaceDeathTintScore),
         milestones: {
           doorOpened: this.doorOpenedCount,
           enemyDefeated: this.enemyDefeatedCount,
@@ -4718,11 +4727,13 @@
     resolveCombatContext(enemy, targetConfidence, hostileZoneSignal) {
       const trustedEnemy = getTrustedEnemyThreatFromCandidate(enemy);
       const trustedAlert = this.enemyAlertFrames > 0
+        && !this.enemyStructuralDecoy
         && isTrustedEnemyCluster(this.enemyAlertCluster, this.enemyAlertDepth)
         && isTrustedEnemyDepth(this.enemyAlertCluster, this.enemyAlertDepth, this.enemyAlertPeakConfidence);
       return Boolean(hostileZoneSignal && (trustedEnemy >= 0.26 || trustedAlert))
         || trustedEnemy >= 0.36
         || (Number(targetConfidence || 0) >= 0.48 && trustedEnemy >= 0.24)
+        || hasPostDoorEnemyMemoryEvidence(this)
         || trustedAlert
         || (Number(this.enemyConfidencePeak || 0) >= 0.56 && trustedEnemy >= 0.28)
         || (Number(this.combatFireFrames || 0) > 0 && trustedEnemy >= 0.2);
@@ -4979,6 +4990,7 @@
       const trustedDepth = isTrustedEnemyDepth(cluster, this.enemyAlertDepth, this.enemyAlertPeakConfidence);
       const trustedEnemyZone = this.darkZoneEntered
         && this.mapEnemyZoneMatch
+        && !this.enemyStructuralDecoy
         && trustedDepth
         && Number(this.enemyAlertPeakConfidence || 0) >= alertPeakThreshold
         && trustedEnemyCluster;
@@ -5010,6 +5022,9 @@
         depth: this.depthEstimate,
         enemyCenterCellConfidence: this.enemyCenterCellConfidence,
         enemyConfidence: this.enemyConfidence,
+        enemyStructuralDecoy: this.enemyStructuralDecoy,
+        trustedCombatEvidence: hasTrustedCombatEvidence(this),
+        trustedEnemyThreat: getTrustedEnemyThreat(this),
         fireCooldown: this.fireCooldown,
         frameIndex: state?.frame,
         inputStallFrames: this.inputStallFrames,
@@ -5197,11 +5212,19 @@
     const ammoState = estimateAmmoState(frame.ammoSample, quantizedAmmo);
     const quantizedHealth = quantizeFrameSample(frame.healthSample);
     const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
-    const rawHealthState = estimateHealthState(frame.healthSample, quantizedHealth);
+    const rawHealthState = Object.assign(
+      estimateHealthState(frame.healthSample, quantizedHealth),
+      {
+        deathTintScore: clamp01(Number(frame.healthDeathTintScore ?? frame.deathTintScore ?? 0)),
+        statusDeathTintScore: clamp01(Number(frame.healthStatusDeathTintScore ?? 0)),
+        faceDeathTintScore: clamp01(Number(frame.healthFaceDeathTintScore ?? 0))
+      });
     const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
     const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
     const visualStallDelta = Math.min(quantizedFrameChange, regionQuantizedFrameChange, region9QuantizedFrameChange);
-    const faceDeathScore = healthSensorEnabled ? estimateFaceDeathScore(quantizedFace) : 0;
+    const faceDeathScore = healthSensorEnabled
+      ? Math.max(estimateFaceDeathScore(quantizedFace), rawHealthState.faceDeathTintScore * 0.75)
+      : 0;
     const healthState = healthSensorEnabled
       ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
       : createDisabledHealthState(rawHealthState.signature);
@@ -5423,6 +5446,7 @@
     controller.enemyTurn = enemy.turn;
     controller.enemyDistance = enemy.distance;
     controller.enemyCluster = enemy.cluster;
+    controller.enemyStructuralDecoy = Boolean(enemy.structuralDecoy);
     controller.enemyFireReady = enemy.fireReady;
     controller.enemyCenterCellConfidence = enemy.centerCellConfidence || 0;
     controller.enemyAllRegionPeak = enemy.allRegionPeak || 0;
@@ -5468,6 +5492,9 @@
     controller.healthZeroScore = healthState.zeroScore || 0;
     controller.healthActiveColumns = healthState.activeColumns || 0;
     controller.healthActiveCells = healthState.activeCells || 0;
+    controller.healthDeathTintScore = healthState.deathTintScore || 0;
+    controller.healthStatusDeathTintScore = healthState.statusDeathTintScore || 0;
+    controller.healthFaceDeathTintScore = healthState.faceDeathTintScore || 0;
     controller.healthEstimatedPercent = Number.isFinite(Number(healthState.estimatedPercent))
       ? Math.max(0, Math.min(100, Math.round(Number(healthState.estimatedPercent))))
       : 100;
@@ -5475,6 +5502,9 @@
       active: healthSensorEnabled,
       likelyDead: controller.healthLikelyDead,
       zeroScore: controller.healthZeroScore,
+      deathTintScore: controller.healthDeathTintScore,
+      statusDeathTintScore: controller.healthStatusDeathTintScore,
+      faceDeathTintScore: controller.healthFaceDeathTintScore,
       activeColumns: controller.healthActiveColumns,
       activeCells: controller.healthActiveCells,
       estimatedPercent: controller.healthEstimatedPercent,
@@ -5505,7 +5535,8 @@
       const alertPeakThreshold = profileNumber(controller.profile, "combatAlertPeakConfidence", COMBAT_ALERT_PEAK_CONFIDENCE);
       const alertFrames = profileNumber(controller.profile, "combatAlertFrames", COMBAT_ALERT_FRAMES);
       const trustedEnemyAlert = isTrustedEnemyCluster(enemy.cluster, enemy.distance)
-        && isTrustedEnemyDepth(enemy.cluster, enemy.distance, alertConfidence, enemy.centerCellConfidence);
+        && isTrustedEnemyDepth(enemy.cluster, enemy.distance, alertConfidence, enemy.centerCellConfidence)
+        && !enemy.structuralDecoy;
       if (trustedEnemyAlert
         && ((alertConfidence >= 0.46 || controller.enemyConfidencePeak >= alertPeakThreshold)
           || faceQuantizedFrameChange >= COMBAT_FACE_DANGER_DELTA)) {
@@ -6157,6 +6188,13 @@
         healthSample: [],
         healthSignature: "000000000000000000000000",
         healthLikelyDead: false,
+        healthZeroScore: 0,
+        healthActiveColumns: 0,
+        healthActiveCells: 0,
+        healthRetryReason: "none",
+        healthDeathTintScore: 0,
+        healthStatusDeathTintScore: 0,
+        healthFaceDeathTintScore: 0,
         faceSample: [],
         faceAverage: 0,
         statusBarAverage: 0,
@@ -6242,6 +6280,15 @@
     let faceTotal = 0;
     let gameplayLumaTotal = 0;
     let gameplayLumaCount = 0;
+    let gameplayDeathTintTotal = 0;
+    let gameplayDeathTintMax = 0;
+    let gameplayDeathTintCount = 0;
+    let statusDeathTintTotal = 0;
+    let statusDeathTintMax = 0;
+    let statusDeathTintCount = 0;
+    let faceDeathTintTotal = 0;
+    let faceDeathTintMax = 0;
+    let faceDeathTintCount = 0;
     let darkAreaTotal = 0;
     let blueFloorTotal = 0;
     let blueFloorLowerTotal = 0;
@@ -6313,6 +6360,10 @@
         const darkScore = scoreDarkPaletteIndex(value, rgbaBytes);
         lumaGrid[row * SAMPLE_COLUMNS + column] = darkScore.luma;
         darkAreaTotal += darkScore.score;
+        const deathTintScore = scoreDeathTintPaletteIndex(value, rgbaBytes);
+        gameplayDeathTintTotal += deathTintScore;
+        gameplayDeathTintMax = Math.max(gameplayDeathTintMax, deathTintScore);
+        gameplayDeathTintCount += 1;
         const blueFloorCell = scoreBlueFloorPaletteIndex(value, rgbaBytes);
         blueFloorTotal += blueFloorCell;
         if (row >= Math.floor(SAMPLE_ROWS * 0.50)) {
@@ -6511,6 +6562,10 @@
       const value = indices[y * WIDTH + x] || 0;
       statusSample.push(value);
       statusTotal += value;
+      const deathTintScore = scoreDeathTintPaletteIndex(value, rgbaBytes);
+      statusDeathTintTotal += deathTintScore;
+      statusDeathTintMax = Math.max(statusDeathTintMax, deathTintScore);
+      statusDeathTintCount += 1;
     }
 
     for (let row = 0; row < AMMO_SAMPLE_ROWS; row += 1) {
@@ -6536,6 +6591,10 @@
         const value = indices[y * WIDTH + x] || 0;
         faceSample.push(value);
         faceTotal += value;
+        const deathTintScore = scoreDeathTintPaletteIndex(value, rgbaBytes);
+        faceDeathTintTotal += deathTintScore;
+        faceDeathTintMax = Math.max(faceDeathTintMax, deathTintScore);
+        faceDeathTintCount += 1;
       }
     }
 
@@ -6574,7 +6633,25 @@
     const depthSample = depthTotals.map((total, index) => depthCounts[index] ? Math.round(total / depthCounts[index]) : 0);
     const depthEstimate = estimateDepthDistance(depthSample);
     const ammoState = estimateAmmoState(ammoSample, quantizeFrameSample(ammoSample));
-    const healthState = estimateHealthState(healthSample, quantizeFrameSample(healthSample));
+    const gameplayDeathTintAverage = gameplayDeathTintCount ? gameplayDeathTintTotal / gameplayDeathTintCount : 0;
+    const statusDeathTintAverage = statusDeathTintCount ? statusDeathTintTotal / statusDeathTintCount : 0;
+    const faceDeathTintAverage = faceDeathTintCount ? faceDeathTintTotal / faceDeathTintCount : 0;
+    const gameplayDeathTintScore = round2(clamp01(Math.max(gameplayDeathTintAverage * 1.16, gameplayDeathTintMax * 0.72)));
+    const statusDeathTintScore = round2(clamp01(Math.max(statusDeathTintAverage * 1.08, statusDeathTintMax * 0.68)));
+    const faceDeathTintScore = round2(clamp01(Math.max(faceDeathTintAverage * 1.12, faceDeathTintMax * 0.78)));
+    const deathTintScore = round2(clamp01(Math.max(
+      (gameplayDeathTintScore * 0.54) + (statusDeathTintScore * 0.28) + (faceDeathTintScore * 0.18),
+      faceDeathTintScore * 0.82,
+      statusDeathTintScore * 0.72)));
+    const rawHealthState = Object.assign(
+      estimateHealthState(healthSample, quantizeFrameSample(healthSample)),
+      {
+        deathTintScore,
+        statusDeathTintScore,
+        faceDeathTintScore
+      });
+    const summaryFaceDeathScore = Math.max(estimateFaceDeathScore(quantizeFrameSample(faceSample)), faceDeathTintScore * 0.75);
+    const healthState = refineHealthState(rawHealthState, summaryFaceDeathScore, 255, 255);
     const courtyardLowerLeftScore = ((courtyardLowerLeftCount ? courtyardLowerLeft / courtyardLowerLeftCount : 0) * 0.68)
       + (courtyardLowerLeftMax * 0.32);
     const courtyardLowerRightScore = ((courtyardLowerRightCount ? courtyardLowerRight / courtyardLowerRightCount : 0) * 0.68)
@@ -6670,6 +6747,13 @@
       healthSignature: healthState.signature,
       healthLikelyDead: healthState.likelyDead,
       healthEstimatedPercent: healthState.estimatedPercent,
+      healthZeroScore: healthState.zeroScore || 0,
+      healthActiveColumns: healthState.activeColumns || 0,
+      healthActiveCells: healthState.activeCells || 0,
+      healthRetryReason: healthState.retryReason || "none",
+      healthDeathTintScore: healthState.deathTintScore || 0,
+      healthStatusDeathTintScore: healthState.statusDeathTintScore || 0,
+      healthFaceDeathTintScore: healthState.faceDeathTintScore || 0,
       faceSample,
       faceAverage: faceSample.length ? Math.round(faceTotal / faceSample.length) : 0,
       statusBarAverage: statusSample.length ? Math.round(statusTotal / statusSample.length) : 0,
@@ -6715,6 +6799,7 @@
       enemyTurn: enemy.turn,
       enemyCentered: enemy.centered,
       enemyCluster: enemy.cluster,
+      enemyStructuralDecoy: Boolean(enemy.structuralDecoy),
       enemyCenterCellConfidence: enemy.centerCellConfidence,
       center: centerAverage,
       left: leftCount ? Math.round(left / leftCount) : 0,
@@ -6806,6 +6891,10 @@
 
   function scoreDarkPaletteIndex(index, rgbaBytes) {
     return requireVisionPalette("scoreDarkPaletteIndex")(index, rgbaBytes);
+  }
+
+  function scoreDeathTintPaletteIndex(index, rgbaBytes) {
+    return requireVisionPalette("scoreDeathTintPaletteIndex")(index, rgbaBytes);
   }
 
   function scoreBlueFloorPaletteIndex(index, rgbaBytes) {
@@ -6995,6 +7084,10 @@
     const depth = Number(enemy?.distance ?? 1);
     const confidence = clamp01(Number(enemy?.confidence || 0));
     const centerConfidence = clamp01(Number(enemy?.centerCellConfidence || 0));
+    if (Boolean(enemy?.structuralDecoy)) {
+      return Math.min(confidence, 0.10);
+    }
+
     if (isTrustedEnemyCluster(cluster, depth)
       && isTrustedEnemyDepth(cluster, depth, confidence, centerConfidence)) {
       return confidence;
@@ -7011,14 +7104,32 @@
     return Math.min(confidence, 0.28);
   }
 
+  function hasPostDoorEnemyMemoryEvidence(controller) {
+    const terminalSurface = Math.max(
+      Number(controller?.computerPanelScore || 0),
+      Number(controller?.computerDarkPanelScore || 0),
+      Number(controller?.computerRoomScore || 0));
+    const visualTrace = Math.max(
+      Number(controller?.enemyConfidence || 0),
+      Number(controller?.enemyAllRegionPeak || 0),
+      Number(controller?.enemyCenterCellConfidence || 0));
+    return Number(controller?.doorOpenedCount || 0) > 0
+      && !controller?.enemyStructuralDecoy
+      && Number(controller?.enemyConfidencePeak || 0) >= 0.62
+      && visualTrace >= 0.08
+      && terminalSurface >= 0.28;
+  }
+
   function getTrustedEnemyThreat(controller) {
     const direct = getTrustedEnemyThreatFromCandidate({
       cluster: controller?.enemyCluster,
       distance: controller?.enemyDistance ?? controller?.depthEstimate,
       confidence: controller?.enemyConfidence,
-      centerCellConfidence: controller?.enemyCenterCellConfidence
+      centerCellConfidence: controller?.enemyCenterCellConfidence,
+      structuralDecoy: controller?.enemyStructuralDecoy
     });
     const alertTrusted = Number(controller?.enemyAlertFrames || 0) > 0
+      && !controller?.enemyStructuralDecoy
       && isTrustedEnemyCluster(controller?.enemyAlertCluster, controller?.enemyAlertDepth)
       && isTrustedEnemyDepth(
         controller?.enemyAlertCluster,
@@ -7026,7 +7137,10 @@
         controller?.enemyAlertPeakConfidence,
         controller?.enemyCenterCellConfidence);
     const alert = alertTrusted ? clamp01(Number(controller?.enemyAlertPeakConfidence || 0) * 0.72) : 0;
-    return Math.max(direct, alert);
+    const memory = hasPostDoorEnemyMemoryEvidence(controller)
+      ? Math.min(0.34, Number(controller?.enemyConfidencePeak || 0) * 0.42)
+      : 0;
+    return Math.max(direct, alert, memory);
   }
 
   function hasTrustedCombatEvidence(controller) {
@@ -7035,6 +7149,7 @@
     const looming = Boolean(phainomenon?.looming?.active);
     const damage = Boolean(phainomenon?.damageLocalization?.active);
     const alertTrusted = Number(controller?.enemyAlertFrames || 0) > 0
+      && !controller?.enemyStructuralDecoy
       && isTrustedEnemyCluster(controller?.enemyAlertCluster, controller?.enemyAlertDepth)
       && isTrustedEnemyDepth(
         controller?.enemyAlertCluster,
@@ -7042,7 +7157,47 @@
         controller?.enemyAlertPeakConfidence,
         controller?.enemyCenterCellConfidence);
     const projectile = looming && clamp01(Number(controller?.projectileScore || controller?.phantasiaSnapshot?.projectileScore || 0)) >= 0.16;
-    return trustedEnemy >= 0.26 || alertTrusted || projectile || damage;
+    return trustedEnemy >= 0.26 || hasPostDoorEnemyMemoryEvidence(controller) || alertTrusted || projectile || damage;
+  }
+
+  function detectEnemyStructureDecoy(enemyRegion9Sample = [], cluster = "none", depth = 1) {
+    const value = String(cluster || "none");
+    if (value !== "brown" && value !== "gray") {
+      return false;
+    }
+
+    if (!Array.isArray(enemyRegion9Sample) || enemyRegion9Sample.length < 9) {
+      return false;
+    }
+
+    const safeDepth = Number(depth ?? 1);
+    const rows = [0, 0, 0];
+    const columns = [0, 0, 0];
+    let total = 0;
+    let peak = 0;
+    for (let index = 0; index < 9; index += 1) {
+      const score = clamp01(Number(enemyRegion9Sample[index] || 0));
+      rows[Math.floor(index / 3)] += score;
+      columns[index % 3] += score;
+      total += score;
+      peak = Math.max(peak, score);
+    }
+
+    if (total <= 0) {
+      return false;
+    }
+
+    const maxColumn = Math.max(...columns);
+    const maxRow = Math.max(...rows);
+    const center = clamp01(Number(enemyRegion9Sample[4] || 0));
+    const verticalSpan = Math.min(...rows) / Math.max(0.001, maxRow);
+    const columnDominance = maxColumn / total;
+    const topBottomPresent = rows[0] >= total * 0.18 && rows[2] >= total * 0.14;
+    const pillarLike = columnDominance >= 0.42 && verticalSpan >= 0.34 && topBottomPresent;
+    const broadWallLike = maxRow > 0 && peak <= 0.62 && rows[1] >= total * 0.24 && verticalSpan >= 0.28;
+    return safeDepth >= 0.30
+      && center < 0.50
+      && (pillarLike || broadWallLike);
   }
 
   function summarizeEnemyRegions(enemyRegionSample, clusterTotals, depthEstimate, enemyRegion9Sample = null) {
@@ -7054,6 +7209,7 @@
         distance: Number(depthEstimate ?? 1),
         cluster: "none",
         centerCellConfidence: 0,
+        structuralDecoy: false,
         fireReady: false
       };
     }
@@ -7092,6 +7248,10 @@
     if ((cluster === "brown" || cluster === "gray") && distance >= 0.78) {
       confidence = Math.min(confidence, 0.28);
     }
+    const structuralDecoy = detectEnemyStructureDecoy(enemyRegion9Sample, cluster, distance);
+    if (structuralDecoy) {
+      confidence = Math.min(confidence, 0.18);
+    }
     if (cluster === "none") {
       confidence = Math.min(confidence, 0.22);
     }
@@ -7103,6 +7263,7 @@
       distance,
       cluster,
       centerCellConfidence,
+      structuralDecoy,
       allRegionPeak: round2(clamp01(allRegionPeak)),
       lateralBias: round2(lateralBias),
       fireReady: confidence >= COMBAT_FIRE_CONFIDENCE && centered && distance <= COMBAT_CLOSE_DEPTH_THRESHOLD
@@ -7120,6 +7281,7 @@
       distance,
       cluster: frame.enemyCluster || summarized.cluster || "none",
       centerCellConfidence,
+      structuralDecoy: Boolean(frame.enemyStructuralDecoy ?? summarized.structuralDecoy),
       allRegionPeak: clamp01(Number(frame.enemyAllRegionPeak ?? summarized.allRegionPeak) || 0),
       lateralBias: Number(frame.enemyLateralBias ?? summarized.lateralBias) || 0,
       fireReady: Boolean(frame.enemyFireReady ?? summarized.fireReady)

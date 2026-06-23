@@ -573,6 +573,90 @@ assert(observedPostDoorTerminalSurfaceState.postDoorTerminalSurface >= 0.37, "Ob
 assert(observedPostDoorTerminalSurfaceState.computerRoomConfidence >= 0.37, "Post-door terminal surface should keep computer-room confidence high enough for route arbitration");
 assert(observedPostDoorTerminalSurfaceState.objective !== "avoid-enemy", "Observed post-door terminal surface must not become a combat false positive");
 
+const postDoorEnemyMemoryState = wasmState.createState({
+  frameCount: 1418,
+  autoplayPredictions: 1353,
+  autoplayObjective: "reach-central-hall",
+  bonsaiSupervisor: {
+    status() {
+      return {
+        objective: "reach-central-hall",
+        predictions: 1353,
+        doorOpenedCount: 1,
+        enemyConfidencePeak: 0.77,
+        milestones: {
+          doorOpened: 1,
+          enemyConfidencePeak: 0.77
+        }
+      };
+    }
+  }
+}, {
+  framebuffer: {
+    depthEstimate: 1,
+    left: 12,
+    center: 12,
+    right: 12,
+    enemyConfidence: 0.11,
+    enemyAllRegionPeak: 0.11,
+    enemyStructuralDecoy: false,
+    computerRoomScore: 0.16,
+    computerPanelScore: 0.53,
+    computerDarkPanelScore: 0.11,
+    bridgeBrownScore: 0.35,
+    bridgeGreenLeft: 0.26,
+    bridgeGreenCenter: 0.39,
+    bridgeGreenRight: 0.03
+  },
+  audio: {},
+  player: { health: 100 }
+});
+
+assert(postDoorEnemyMemoryState.visualEnemySuppressed === true, "Post-door terminal surface should still suppress the current-frame weak visual enemy");
+assert(postDoorEnemyMemoryState.visualEnemyVisible === false, "Enemy memory must not pretend the current frame has a centered visible enemy");
+assert(postDoorEnemyMemoryState.postDoorEnemyMemoryEvidence === true, "Recent post-door enemy peak should remain as memory evidence through terminal masking");
+assert(postDoorEnemyMemoryState.trustedCombatEvidence === true, "Post-door enemy memory should feed trusted combat evidence");
+assert(postDoorEnemyMemoryState.trustedEnemyThreat >= 0.26, "Post-door enemy memory should provide a bounded trusted threat");
+assert(postDoorEnemyMemoryState.objective !== "avoid-enemy", "Post-door enemy memory should not force an immediate avoid-enemy route while the visual is suppressed");
+
+const postDoorStructuralDecoyMemoryState = wasmState.createState({
+  frameCount: 1419,
+  autoplayPredictions: 1354,
+  autoplayObjective: "reach-central-hall",
+  bonsaiSupervisor: {
+    status() {
+      return {
+        objective: "reach-central-hall",
+        predictions: 1354,
+        doorOpenedCount: 1,
+        enemyConfidencePeak: 0.77,
+        milestones: {
+          doorOpened: 1,
+          enemyConfidencePeak: 0.77
+        }
+      };
+    }
+  }
+}, {
+  framebuffer: {
+    depthEstimate: 1,
+    left: 12,
+    center: 12,
+    right: 12,
+    enemyConfidence: 0.11,
+    enemyAllRegionPeak: 0.11,
+    enemyStructuralDecoy: true,
+    computerRoomScore: 0.16,
+    computerPanelScore: 0.53,
+    computerDarkPanelScore: 0.11
+  },
+  audio: {},
+  player: { health: 100 }
+});
+
+assert(postDoorStructuralDecoyMemoryState.postDoorEnemyMemoryEvidence === false, "Explicit structural decoys must not be promoted by enemy peak memory");
+assert(postDoorStructuralDecoyMemoryState.trustedCombatEvidence === false, "Explicit structural decoys must keep trusted combat evidence off without audio or damage");
+
 const staleDoorVisualState = wasmState.createState({
   frameCount: 4060,
   autoplayPredictions: 3860,

@@ -266,7 +266,10 @@ public sealed class DynamicPipelineEvaluator
         int criticalHealthThreshold)
     {
         var tensor = sensor.SensorTensor.IsEmpty ? BuildTensor(sensor) : sensor.SensorTensor;
-        var visualEnemy = VisualEnemyConfidence(tensor);
+        var structuralDecoy = EnemyStructuralDecoy(sensor, tensor);
+        var hardStructuralDecoy = EnemyHardStructuralDecoy(sensor, tensor);
+        var rawVisualEnemy = RawVisualEnemyConfidence(tensor);
+        var visualEnemy = hardStructuralDecoy ? Math.Min(rawVisualEnemy, 0.10f) : VisualEnemyConfidence(tensor);
         var audioEnemy = AudioEnemyConfidence(tensor);
         var visualEnemyCentered = visualEnemy >= 0.28f && Math.Abs(sensor.FaceSig) <= 0.12f;
         var visualEnemyYaw = visualEnemyCentered
@@ -274,6 +277,16 @@ public sealed class DynamicPipelineEvaluator
             : Math.Clamp(sensor.FaceSig * 48f, -18f, 18f);
         var bridgeConfidence = tensor.SemanticScore("bridge");
         var computerRoomConfidence = tensor.SemanticScore("computer-room");
+        var enemyConfidencePeak = Max(sensor.EnemyConfidencePeak, rawVisualEnemy);
+        var postDoorRouteContext = sensor.ContextDict is "computer-room" or "bridge" or "central-hall"
+            || computerRoomConfidence >= 0.28f
+            || bridgeConfidence >= 0.18f;
+        var terminalSurface = Max(tensor.Get("semantic.computer"), tensor.Get("vision.dark"));
+        var postDoorEnemyMemoryEvidence = postDoorRouteContext
+            && !hardStructuralDecoy
+            && enemyConfidencePeak >= 0.62f
+            && rawVisualEnemy >= 0.08f
+            && terminalSurface >= 0.28f;
         var health = Math.Clamp(float.IsFinite(sensor.Health) ? sensor.Health : 100, 0, 100);
         var healthRisk = health <= 0 ? 1 : Clamp01((100 - health) / 100f);
         var lowThreshold = Math.Max(1, lowHealthThreshold);
@@ -281,6 +294,16 @@ public sealed class DynamicPipelineEvaluator
         var lowHealth = health > 0 && health < lowThreshold ? 1 : 0;
         var criticalHealth = health > 0 && health < criticalThreshold ? 1 : 0;
         var fatalHealth = health <= 0 ? 1 : 0;
+        var trustedEnemyThreat = hardStructuralDecoy
+            ? 0
+            : Max(
+                visualEnemy >= 0.52f ? visualEnemy : 0,
+                audioEnemy >= 0.34f ? audioEnemy : 0,
+                postDoorEnemyMemoryEvidence ? Math.Min(0.34f, enemyConfidencePeak * 0.42f) : 0,
+                tensor.Get("semantic.mapenemy"));
+        var trustedCombatEvidence = trustedEnemyThreat >= 0.26f
+            || postDoorEnemyMemoryEvidence
+            || (visualEnemy >= 0.35f && !structuralDecoy);
         return new Dictionary<string, float>(StringComparer.Ordinal)
         {
             ["visual"] = Max(tensor.Get("vision.target"), tensor.Get("vision.open"), tensor.Get("vision.wall"), tensor.Get("semantic.door")),
@@ -300,11 +323,16 @@ public sealed class DynamicPipelineEvaluator
             ["computerRoomConfidence"] = computerRoomConfidence,
             ["bridgeGreenHazard"] = bridgeConfidence,
             ["bridgeLaneVisible"] = bridgeConfidence >= 0.18f ? 1 : 0,
-            ["computerRoomCombatContext"] = computerRoomConfidence >= 0.28f ? 1 : 0,
+            ["computerRoomCombatContext"] = computerRoomConfidence >= 0.28f && !structuralDecoy ? 1 : 0,
+            ["enemyStructuralDecoy"] = structuralDecoy ? 1 : 0,
+            ["enemyConfidencePeak"] = enemyConfidencePeak,
+            ["trustedEnemyThreat"] = trustedEnemyThreat,
+            ["trustedCombatEvidence"] = trustedCombatEvidence ? 1 : 0,
+            ["postDoorEnemyMemoryEvidence"] = postDoorEnemyMemoryEvidence ? 1 : 0,
             ["visualEnemyConfidence"] = visualEnemy,
             ["audioEnemyConfidence"] = audioEnemy,
-            ["audioEnemyStrong"] = audioEnemy >= 0.24f ? 1 : 0,
-            ["audioEnemyFront"] = audioEnemy >= 0.24f ? 1 : 0,
+            ["audioEnemyStrong"] = audioEnemy >= 0.24f && !structuralDecoy ? 1 : 0,
+            ["audioEnemyFront"] = audioEnemy >= 0.24f && !structuralDecoy ? 1 : 0,
             ["audioEnemyLeft"] = 0,
             ["audioEnemyRight"] = 0,
             ["visualEnemyVisible"] = visualEnemy >= 0.28f ? 1 : 0,
@@ -406,12 +434,29 @@ public sealed class DynamicPipelineEvaluator
 
     private static float VisualEnemyConfidence(AutoplaySensorTensor tensor)
     {
-        var visual = Max(tensor.Get("vision.enemy"), tensor.Get("semantic.mapenemy"));
+        var visual = RawVisualEnemyConfidence(tensor);
         var terminalSurface = Max(tensor.Get("semantic.computer"), tensor.Get("vision.dark"));
         return terminalSurface >= 0.24f && tensor.Get("system.combat") < 0.18f
             ? Math.Min(visual, 0.10f)
             : visual;
     }
+
+    private static float RawVisualEnemyConfidence(AutoplaySensorTensor tensor)
+        => Max(tensor.Get("vision.enemy"), tensor.Get("semantic.mapenemy"));
+
+    private static bool EnemyStructuralDecoy(SensorFusion sensor, AutoplaySensorTensor tensor)
+        => (Max(tensor.Get("semantic.computer"), tensor.Get("vision.dark")) >= 0.24f || tensor.Get("vision.wall") >= 0.42f)
+            && RawVisualEnemyConfidence(tensor) <= 0.50f
+            && tensor.Get("semantic.mapenemy") < 0.24f
+            && tensor.Get("system.combat") < 0.24f
+            && !sensor.SoundEvent;
+
+    private static bool EnemyHardStructuralDecoy(SensorFusion sensor, AutoplaySensorTensor tensor)
+        => tensor.Get("vision.wall") >= 0.42f
+            && RawVisualEnemyConfidence(tensor) <= 0.50f
+            && tensor.Get("semantic.mapenemy") < 0.24f
+            && tensor.Get("system.combat") < 0.24f
+            && !sensor.SoundEvent;
 
     private static float AudioEnemyConfidence(AutoplaySensorTensor tensor)
     {

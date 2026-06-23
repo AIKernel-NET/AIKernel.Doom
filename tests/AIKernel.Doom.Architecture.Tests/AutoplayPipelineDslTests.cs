@@ -962,7 +962,7 @@ public sealed class AutoplayPipelineDslTests
         var doorPredicate = AutoplayPipelineDslCompiler.CompileDynamicPredicate(
             "bridgeDoorScore >= 0.30 && firstDoorUse3x3Score < 0.22 && spawnCorridorGapScore >= 0.34 && spawnCorridorGapTurn == right");
         var combatPredicate = AutoplayPipelineDslCompiler.CompileDynamicPredicate(
-            "computerRoomCombatContext && audioEnemyStrong && visualEnemyVisible && visualEnemyFireReady == false");
+            "computerRoomCombatContext && trustedCombatEvidence && audioEnemyStrong && visualEnemyVisible && visualEnemyFireReady == false");
         var bridgePredicate = AutoplayPipelineDslCompiler.CompileDynamicPredicate(
             "bridgeLaneVisible && bridgeGreenHazard >= 0.18 && routeCorridorBridgeLock == true");
         var context = new DynamicPipelineContext
@@ -980,6 +980,7 @@ public sealed class AutoplayPipelineDslTests
                 ["audioEnemyStrong"] = 1,
                 ["visualEnemyVisible"] = 1,
                 ["visualEnemyFireReady"] = 0,
+                ["trustedCombatEvidence"] = 1,
                 ["computerRoomCombatContext"] = 1,
                 ["bridgeLaneVisible"] = 1
             },
@@ -1221,19 +1222,19 @@ public sealed class AutoplayPipelineDslTests
         Assert.True(GpuCanonicalValidation.ValidateFrameDiagnostics(canonicalDiagnostics).IsValid);
         Assert.True(canonicalDiagnostics.SensorPath.ZeroCopy);
         Assert.Equal("sensor", canonicalDiagnostics.SensorPath.PassId);
-        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PassId]);
-        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
-        Assert.Equal("dto-projected", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PilotState]);
-        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionGate]);
-        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked]);
-        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady]);
-        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable]);
-        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPassId]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPathRole]);
+        Assert.Equal("dto-projected", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPilotState]);
+        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionGate]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionBlocked]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionCandidateReady]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionDiagnosticStable]);
+        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionReason]);
         Assert.Equal("GPU matrix", canonicalDiagnostics.SensorPath.Metadata["doom_mode"]);
         Assert.Equal("gpu", canonicalDiagnostics.SensorPath.Metadata["doom_tone"]);
         Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata["doom_zero_copy"]);
         Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata["doom_runtime_stamped"]);
-        Assert.Equal("hud", canonicalDiagnostics.HudPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
+        Assert.Equal("hud", canonicalDiagnostics.HudPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPathRole]);
         Assert.Equal("GPU composite", canonicalDiagnostics.HudPath.Metadata["doom_mode"]);
         Assert.Equal(1, state.DebugOverlay.GpuPathStatus.ContractVersion);
         Assert.Equal("DoomGpuPathStatus", state.DebugOverlay.GpuPathStatus.ContractName);
@@ -1258,14 +1259,14 @@ public sealed class AutoplayPipelineDslTests
         var canonicalDiagnostics = DoomGpuPathStatusDto.Empty.ToCanonicalFrameDiagnostics();
 
         Assert.True(GpuCanonicalValidation.ValidateFrameDiagnostics(canonicalDiagnostics).IsValid);
-        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PassId]);
-        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
-        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PilotState]);
-        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionGate]);
-        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked]);
-        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady]);
-        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable]);
-        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPassId]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPathRole]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPilotState]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionGate]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionBlocked]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionCandidateReady]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionDiagnosticStable]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionReason]);
         Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata["doom_missing_row"]);
         Assert.Equal("SENSOR", canonicalDiagnostics.SensorPath.Metadata["doom_label"]);
         Assert.Equal("missing-doom-gpu-path-row", canonicalDiagnostics.SensorPath.Metadata["doom_reason"]);
@@ -1476,16 +1477,17 @@ public sealed class AutoplayPipelineDslTests
         Assert.False(bridge.Action.StrafeRight);
         Assert.Equal(0, bridge.Action.TurnYaw);
 
+        var terminalFalsePositiveTensor = AutoplaySensorTensor.FromChannels(
+            ("semantic.computer", 0.80f),
+            ("vision.enemy", 0.44f),
+            ("system.combat", 0.0f),
+            ("vision.open", 0.80f),
+            ("system.health", 1.0f),
+            ("system.enabled", 1.0f));
         var terminalFalsePositive = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.88f, 100, 0, "computer-room", false, 0, 0)
             {
-                SensorTensor = AutoplaySensorTensor.FromChannels(
-                    ("semantic.computer", 0.80f),
-                    ("vision.enemy", 0.44f),
-                    ("system.combat", 0.0f),
-                    ("vision.open", 0.80f),
-                    ("system.health", 1.0f),
-                    ("system.enabled", 1.0f))
+                SensorTensor = terminalFalsePositiveTensor
             },
             recoveryFrames: 0);
 
@@ -1494,6 +1496,40 @@ public sealed class AutoplayPipelineDslTests
         Assert.False(terminalFalsePositive.Action.AttackKey);
         Assert.False(terminalFalsePositive.Action.StrafeLeft);
         Assert.False(terminalFalsePositive.Action.StrafeRight);
+
+        var terminalEvaluator = new DynamicPipelineEvaluator(
+            DynamicPipelineCompiler.Compile(AutoplayPipelineDefinition.Default).Graph,
+            _ => _ => false);
+        var terminalFalsePositiveSensors = terminalEvaluator.RunAisthesis(new DynamicPipelineContext
+        {
+            Sensor = new SensorFusion([0, 0, 0, 0, 0, 0], 0.88f, 100, 0, "computer-room", false, 0, 0)
+            {
+                SensorTensor = terminalFalsePositiveTensor
+            }
+        });
+        Assert.Equal(1, terminalFalsePositiveSensors.SensorReadings["enemyStructuralDecoy"]);
+        Assert.Equal(0, terminalFalsePositiveSensors.SensorReadings["trustedCombatEvidence"]);
+
+        var terminalEnemyMemoryTensor = AutoplaySensorTensor.FromChannels(
+            ("semantic.computer", 0.53f),
+            ("vision.enemy", 0.11f),
+            ("system.combat", 0.0f),
+            ("vision.open", 0.80f),
+            ("system.health", 1.0f),
+            ("system.enabled", 1.0f));
+        var terminalEnemyMemorySensors = terminalEvaluator.RunAisthesis(new DynamicPipelineContext
+        {
+            Sensor = new SensorFusion([0, 0, 0, 0, 0, 0], 1.0f, 100, 0, "computer-room", false, 0, 0)
+            {
+                EnemyConfidencePeak = 0.77f,
+                SensorTensor = terminalEnemyMemoryTensor
+            }
+        });
+        Assert.Equal(1, terminalEnemyMemorySensors.SensorReadings["enemyStructuralDecoy"]);
+        Assert.True(terminalEnemyMemorySensors.SensorReadings["visualEnemyConfidence"] <= 0.10f);
+        Assert.Equal(1, terminalEnemyMemorySensors.SensorReadings["postDoorEnemyMemoryEvidence"]);
+        Assert.Equal(1, terminalEnemyMemorySensors.SensorReadings["trustedCombatEvidence"]);
+        Assert.True(terminalEnemyMemorySensors.SensorReadings["trustedEnemyThreat"] >= 0.26f);
 
         var centeredEnemy = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.72f, 100, 0.04f, "computer-room", false, 0, 0)

@@ -202,7 +202,7 @@ internal static class Program
             case "version":
             case "aik version":
             case "--version":
-                Console.WriteLine("AIKernel.Doom CLI 0.1.0");
+                Console.WriteLine("AIKernel.Doom CLI 0.1.3");
                 Console.WriteLine(".NET 10 target; AIKernel semantic WASM demo");
                 return true;
 

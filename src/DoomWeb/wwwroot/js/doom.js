@@ -678,6 +678,9 @@
         : null;
       const compositeReady = Boolean(providerStatus?.hudCompositeReady);
       const compositeActive = Boolean(providerStatus?.hudCompositeActive);
+      const hudSwapchainActive = Boolean(
+        providerStatus?.hudSwapchainActive
+        || (providerStatus?.hudOverlayActive && providerStatus?.hudPanelOverlayReady));
 
       return {
         source: "webgpu-hud-offscreen",
@@ -705,13 +708,16 @@
         gpuBufferReady: Boolean(providerStatus?.gpuBufferReady),
         gpuComputeReady: Boolean(providerStatus?.gpuComputeReady),
         gpuComputeActive: Boolean(providerStatus?.gpuComputeActive),
-        displayTarget: compositeReady ? HUD_COMPOSITE_TARGET : RAW_FRAMEBUFFER_TARGET,
-        displaySource: compositeActive ? HUD_COMPOSITE_WIRE_NAME : RAW_FRAMEBUFFER_WIRE_NAME,
+        displayTarget: RAW_FRAMEBUFFER_TARGET,
+        displaySource: hudSwapchainActive ? `${RAW_FRAMEBUFFER_WIRE_NAME}+gpu-hud-single-pass` : RAW_FRAMEBUFFER_WIRE_NAME,
+        displayCompositeTarget: compositeActive ? HUD_COMPOSITE_TARGET : "",
+        hudCompositeDisplayMode: hudSwapchainActive ? "single-pass" : "raw",
+        hudCompositeDisplayUsesOffscreen: false,
         rawCaptureTarget: RAW_FRAMEBUFFER_TARGET,
         rawCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
         analysisCaptureSource: RAW_FRAMEBUFFER_WIRE_NAME,
         analysisOverlayExcluded: true,
-        cssOverlayMode: compositeActive ? "reduced" : "full",
+        cssOverlayMode: hudSwapchainActive ? "reduced" : "full",
         hudOverlayReady: Boolean(providerStatus?.hudOverlayReady),
         hudPanelOverlayReady: Boolean(providerStatus?.hudPanelOverlayReady),
         hudPanelDoubleBuffered: Boolean(providerStatus?.hudPanelDoubleBuffered),
@@ -720,7 +726,16 @@
         hudCompositeActive: compositeActive,
         hudCompositeDoubleBuffered: Boolean(providerStatus?.hudCompositeDoubleBuffered),
         hudCompositeMaxFps: Number(providerStatus?.hudCompositeMaxFps || HUD_COMPOSITE_MAX_FPS),
+        hudOffscreenCompositeMaxFps: Number(providerStatus?.hudOffscreenCompositeMaxFps || 0),
         hudCompositeFrame: Number(hudState?.frame ?? providerStatus?.hudCompositeFrame ?? 0),
+        hudCompositePresentEnabled: Boolean(providerStatus?.hudCompositePresentEnabled),
+        hudOffscreenCompositeConfigured: Boolean(providerStatus?.hudOffscreenCompositeConfigured),
+        hudOffscreenCompositeEnabled: Boolean(providerStatus?.hudOffscreenCompositeEnabled),
+        hudSwapchainActive,
+        hudOffscreenCompositeRuntimeDisabled: Boolean(providerStatus?.hudOffscreenCompositeRuntimeDisabled),
+        hudOffscreenCompositeFailureCount: Number(providerStatus?.hudOffscreenCompositeFailureCount || 0),
+        hudOffscreenCompositeLastError: providerStatus?.hudOffscreenCompositeLastError || "",
+        hudOffscreenCompositeLastDisabledAt: Number(providerStatus?.hudOffscreenCompositeLastDisabledAt || 0),
         rawFrame: Number(rawState?.frame ?? this.frameCount ?? 0),
         rawZeroCopy: Boolean(rawState?.zeroCopy),
         hudZeroCopy: Boolean(hudState?.zeroCopy),
@@ -1813,6 +1828,11 @@
       this.logAutoplayVisionPath();
       if (!this.autoplayPending) {
         const state = this.createAutoplayState(this.visualSensorEnabled ? frameIndices : null, useGpuVision ? gpuVision : null);
+        if (this.scheduleAutoplayFrameRetryDispatch(state)) {
+          this.processAutoplayRetryDispatch();
+          return;
+        }
+
         this.updateGpuHudOverlayState(state);
         this.autoplayPending = true;
         this.autoplayMode = "predicting";
@@ -2036,10 +2056,14 @@
           active: true,
           likelyDead: Boolean(frame.healthLikelyDead),
           retryRequested: Boolean(frame.healthLikelyDead),
-          confidence: this.round2(frame.healthZeroScore),
+          retryReason: frame.healthRetryReason || (frame.healthLikelyDead ? "health-death" : "none"),
+          confidence: this.round2(Math.max(Number(frame.healthZeroScore || 0), Number(frame.healthDeathTintScore || 0) * 0.78)),
           signature: frame.healthSignature || "",
           activeColumns: Number(frame.healthActiveColumns || 0),
           activeCells: Number(frame.healthActiveCells || 0),
+          deathTintScore: this.round2(frame.healthDeathTintScore),
+          statusDeathTintScore: this.round2(frame.healthStatusDeathTintScore),
+          faceDeathTintScore: this.round2(frame.healthFaceDeathTintScore),
           estimatedPercent: Number(frame.healthEstimatedPercent ?? 100),
           value: Number(frame.healthEstimatedPercent ?? 100),
           health: Number(frame.healthEstimatedPercent ?? 100),
@@ -2093,6 +2117,10 @@
         healthActiveColumns: Number(frame.healthActiveColumns || 0),
         healthActiveCells: Number(frame.healthActiveCells || 0),
         healthEstimatedPercent: Number(frame.healthEstimatedPercent ?? 100),
+        healthRetryReason: frame.healthRetryReason || "none",
+        healthDeathTintScore: this.round2(frame.healthDeathTintScore),
+        healthStatusDeathTintScore: this.round2(frame.healthStatusDeathTintScore),
+        healthFaceDeathTintScore: this.round2(frame.healthFaceDeathTintScore),
         milestones
       };
     }
@@ -2263,6 +2291,81 @@
       });
     }
 
+    isGpuHudOverlayReady(state, gpuHud = null, frame = null) {
+      if (!this.autoplayEnabled || !this.visualSensorEnabled || !state) {
+        return false;
+      }
+
+      const frameNumber = Number(state.frame ?? this.frameCount ?? 0);
+      const frameState = frame || state.framebuffer || {};
+      const hasFrameSignal = frameNumber > 0 && (
+        Number(frameState.width || 0) > 0
+        || Number(frameState.height || 0) > 0
+        || Array.isArray(frameState.vision9x9Sample)
+        || Array.isArray(frameState.vision9x9)
+        || typeof frameState.renderFormat === "string"
+        || typeof frameState.format === "string");
+      if (!hasFrameSignal) {
+        return false;
+      }
+
+      const projectedHud = gpuHud || this.resolveGpuHudOverlay(state);
+      const projectedValues = projectedHud?.panelValues || projectedHud?.PanelValues || [];
+      const projectedCells = projectedHud?.cells || projectedHud?.Cells || projectedHud?.heatCells || projectedHud?.HeatCells || [];
+      const projectedRects = projectedHud?.rectangles || projectedHud?.Rectangles || [];
+      const projectedRectValues = projectedHud?.rectangleValues || projectedHud?.RectangleValues || projectedHud?.rectValues || projectedHud?.RectValues || [];
+      const projectedFlags = projectedHud?.featureFlags || projectedHud?.FeatureFlags || [];
+      const hasProjectedHud = Boolean(projectedHud && (
+        Number(projectedHud.contractVersion ?? projectedHud.ContractVersion ?? 0) > 0
+        || (Array.isArray(projectedValues) && projectedValues.length > 0)
+        || (Array.isArray(projectedCells) && projectedCells.length > 0)
+        || (Array.isArray(projectedRects) && projectedRects.length > 0)
+        || (Array.isArray(projectedRectValues) && projectedRectValues.length > 0)
+        || (Array.isArray(projectedFlags) && projectedFlags.length > 0)
+        || projectedHud.frameToken
+        || projectedHud.FrameToken));
+
+      const autoplayState = this.autoplayAutoplayState || state.autoplayState || state.AutoplayState || {};
+      const pipeline = this.autoplayPipelineState
+        || state.pipelineState
+        || state.PipelineState
+        || autoplayState.pipelineState
+        || autoplayState.PipelineState
+        || null;
+      const hasPipeline = Boolean(pipeline && typeof pipeline === "object" && (
+        pipeline.aisthesis || pipeline.Aisthesis
+        || pipeline.noesis || pipeline.Noesis
+        || pipeline.krisis || pipeline.Krisis
+        || pipeline.kinesis || pipeline.Kinesis
+        || Object.keys(pipeline).length >= 2));
+
+      const goal = this.autoplayGoalState
+        || state.goalState
+        || state.GoalState
+        || autoplayState.goalState
+        || autoplayState.GoalState
+        || null;
+      const objective = String(
+        this.autoplayObjective
+        || state.objective
+        || state.Objective
+        || autoplayState.objective
+        || autoplayState.Objective
+        || "").toLowerCase();
+      const stage = String(
+        this.autoplayDecisionStage
+        || this.autoplayControlPipeline
+        || state.controlPipeline
+        || state.ControlPipeline
+        || "").toLowerCase();
+      const hasDecision = Boolean(
+        goal
+        || (objective && objective !== "disabled" && objective !== "idle" && objective !== "unknown")
+        || (stage && stage !== "disabled" && stage !== "idle" && stage !== "unknown"));
+
+      return Boolean(hasProjectedHud || hasPipeline || hasDecision);
+    }
+
     updateGpuHudOverlayState(state) {
       const provider = window.WebGpuComputeProvider || window.webGpuComputeProvider || window.aikernelWebGpuComputeProvider;
       if (typeof provider?.setHudOverlayState !== "function") {
@@ -2275,17 +2378,31 @@
       const compassHud = this.resolveGpuHudCompassState(state);
       const enemyCircle = this.resolveGpuHudEnemyCircle(state);
       const radarHud = this.resolveEgoRadarHudState(state, compassHud, enemyCircle);
+      const hudReady = this.isGpuHudOverlayReady(state, gpuHud, frame);
       if (typeof provider.setHudOverlayEnabled === "function") {
-        provider.setHudOverlayEnabled(Boolean(this.autoplayEnabled && this.visualSensorEnabled && state));
+        provider.setHudOverlayEnabled(hudReady);
       }
 
-      const kairos = Math.max(
+      const kairosTarget = Math.max(
         Number(this.autoplayTargetConfidence || 0),
         Number(this.autoplayCornerSignal || 0),
         this.autoplayWallUseProbeFrames > 0 ? 1 : 0,
         this.autoplayUsePulseFrames > 0 ? 0.9 : 0,
         this.autoplayRecoveryFrames > 0 ? 0.7 : 0
       );
+      const now = Number(self.performance?.now?.() ?? Date.now());
+      const previousKairos = this.gpuHudKairosDisplayState || { value: 0, updatedAt: now };
+      const kairosDt = previousKairos.updatedAt > 0
+        ? Math.max(16, Math.min(220, now - previousKairos.updatedAt))
+        : 33;
+      const kairosAlpha = kairosTarget >= Number(previousKairos.value || 0)
+        ? 1 - Math.pow(0.5, kairosDt / 120)
+        : 1 - Math.pow(0.5, kairosDt / 880);
+      const kairos = this.smoothHudScalar(Number(previousKairos.value || 0), this.clampHudUnit(kairosTarget), kairosAlpha);
+      this.gpuHudKairosDisplayState = {
+        value: kairos,
+        updatedAt: now
+      };
       provider.setHudOverlayState({
         contractVersion: Number(gpuHud?.contractVersion ?? gpuHud?.ContractVersion ?? 1),
         contractName: String(gpuHud?.contractName || gpuHud?.ContractName || "DoomGpuHudOverlay"),
@@ -2296,7 +2413,7 @@
         hudFrameTarget: gpuHud?.hudFrameTarget || gpuHud?.HudFrameTarget || null,
         analysisCaptureSource: String(gpuHud?.analysisCaptureSource || gpuHud?.AnalysisCaptureSource || RAW_FRAMEBUFFER_WIRE_NAME),
         analysisFrameTarget: gpuHud?.analysisFrameTarget || gpuHud?.AnalysisFrameTarget || null,
-        displaySource: String(gpuHud?.displaySource || gpuHud?.DisplaySource || HUD_COMPOSITE_WIRE_NAME),
+        displaySource: String(gpuHud?.displaySource || gpuHud?.DisplaySource || RAW_FRAMEBUFFER_WIRE_NAME),
         displayFrameTarget: gpuHud?.displayFrameTarget || gpuHud?.DisplayFrameTarget || null,
         readbackPolicy: String(gpuHud?.readbackPolicy || gpuHud?.ReadbackPolicy || "none"),
         readback: gpuHud?.readback || gpuHud?.Readback || null,
@@ -2305,8 +2422,8 @@
         rectangleBufferLayout: gpuHud?.rectangleBufferLayout || gpuHud?.RectangleBufferLayout || null,
         panelLayout: String(gpuHud?.panelLayout || gpuHud?.PanelLayout || "panel16"),
         panelBufferLayout: gpuHud?.panelBufferLayout || gpuHud?.PanelBufferLayout || null,
-        enabled: Boolean(this.autoplayEnabled && this.visualSensorEnabled && state),
-        heatmapEnabled: Boolean(this.visualSensorEnabled),
+        enabled: hudReady,
+        heatmapEnabled: Boolean(hudReady && this.visualSensorEnabled),
         cells: this.createGpuHudCells(state, frame),
         panelValues: this.createGpuHudPanelValues(state, frame),
         rectangleValues: this.createGpuHudRectangleValues(state),
@@ -2469,6 +2586,69 @@
       };
     }
 
+    normalizeRadarRelativeYaw(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return 0;
+      }
+
+      return ((((numeric + 180) % 360) + 360) % 360) - 180;
+    }
+
+    resolveRadarReferenceBearingState(compass, northAngleDeg, previous, rawUsable, suppressed, rawConfidence, riseAlpha, decayAlpha) {
+      const referenceCandidates = [
+        {
+          kind: "edge-snap",
+          heading: Number(compass.edgeSnapHeading ?? compass.EdgeSnapHeading),
+          confidence: Number(compass.edgeSnapConfidence ?? compass.EdgeSnapConfidence ?? 0)
+        },
+        {
+          kind: "landmark",
+          heading: Number(compass.landmarkHeading ?? compass.LandmarkHeading),
+          confidence: Number(compass.landmarkConfidence ?? compass.LandmarkConfidence ?? 0)
+        },
+        {
+          kind: "visual-flow",
+          heading: Number(compass.visualFlowHeading ?? compass.VisualFlowHeading),
+          confidence: Number(rawConfidence || 0) * 0.62
+        },
+        {
+          kind: "motor",
+          heading: Number(compass.motorHeading ?? compass.MotorHeading),
+          confidence: Number(rawConfidence || 0) * 0.50
+        }
+      ]
+        .filter(candidate => Number.isFinite(candidate.heading) && Number.isFinite(candidate.confidence) && candidate.confidence >= 0.08)
+        .sort((left, right) => right.confidence - left.confidence);
+
+      const candidate = referenceCandidates[0] || null;
+      const previousAlpha = this.clampHudUnit(Number(previous.referenceAlpha || 0));
+      const previousYaw = Number.isFinite(Number(previous.referenceYaw))
+        ? this.normalizeRadarRelativeYaw(previous.referenceYaw)
+        : 0;
+      if (!candidate) {
+        return {
+          yaw: previousYaw,
+          alpha: this.smoothHudScalar(previousAlpha, 0, decayAlpha),
+          kind: "none"
+        };
+      }
+
+      const rawRelativeYaw = this.signedCompassDelta(northAngleDeg, candidate.heading);
+      const snappedRelativeYaw = this.normalizeRadarRelativeYaw(Math.round(rawRelativeYaw / 45) * 45);
+      const yawDelta = this.normalizeRadarRelativeYaw(snappedRelativeYaw - previousYaw);
+      const yawAlpha = candidate.kind === "edge-snap" ? Math.max(riseAlpha, 0.22) : riseAlpha;
+      const yaw = this.normalizeRadarRelativeYaw(previousYaw + yawDelta * yawAlpha);
+      const shouldShow = !rawUsable || suppressed || rawConfidence < 0.28 || candidate.kind === "edge-snap";
+      const targetAlpha = shouldShow ? this.clampHudUnit(candidate.confidence * 1.95) : 0;
+      const alpha = this.smoothHudScalar(previousAlpha, targetAlpha, targetAlpha >= previousAlpha ? riseAlpha : decayAlpha);
+      return {
+        yaw: Math.round(yaw * 100) / 100,
+        alpha: this.clampHudUnit(alpha),
+        kind: candidate.kind
+      };
+    }
+
     resolveEgoRadarHudState(state, compassHud = null, enemyCircle = null) {
       const now = Number(self.performance?.now?.() ?? Date.now());
       const previous = this.gpuRadarHudDisplayState || {};
@@ -2540,6 +2720,7 @@
         ? 0.30 + (0.70 * (0.5 + 0.5 * Math.sin(now / 1000 * 17.0)))
         : 1;
       const enemy = this.resolveRadarEnemyDirectionState(state, enemyCircle);
+      const reference = this.resolveRadarReferenceBearingState(compass, northAngleDeg, previous, rawUsable, suppressed, rawConfidence, riseAlpha, decayAlpha);
 
       this.gpuRadarHudDisplayState = {
         northAngleDeg: Math.round(northAngleDeg * 100) / 100,
@@ -2558,6 +2739,9 @@
         enemyAudioAlpha: enemy.audioAlpha,
         enemySignalSuppressed: enemy.signalSuppressed,
         enemySignalLost: enemy.signalLost,
+        referenceYaw: reference.yaw,
+        referenceAlpha: reference.alpha,
+        referenceKind: reference.kind,
         rawHeading,
         rawUsable,
         suppressed,
@@ -2758,7 +2942,9 @@
         || state?.GpuAisthesis
         || null;
       if (projected && typeof projected === "object") {
-        return projected;
+        return Object.assign({}, projected, {
+          enabled: Boolean((projected.enabled ?? projected.Enabled ?? true) && this.isGpuHudOverlayReady(state, null, frame))
+        });
       }
 
       const combat = this.clampHudUnit(Number(frame?.enemyConfidence ?? this.autoplayEnemyConfidence ?? 0)) > 0.08;
@@ -2807,7 +2993,7 @@
       return {
         contractVersion: 1,
         contractName: "DoomGpuAisthesis",
-        enabled: Boolean(this.autoplayEnabled && this.visualSensorEnabled && state),
+        enabled: this.isGpuHudOverlayReady(state, null, frame),
         inputTarget: RAW_FRAMEBUFFER_TARGET,
         inputFrameTarget: GPU_CONTRACTS.rawFramebufferFrameTarget("analysis"),
         hudTarget: HUD_COMPOSITE_TARGET,
@@ -4259,6 +4445,93 @@
           this.emitStatus("autoplay-retry-dispatch");
         }
       });
+    }
+
+    scheduleAutoplayFrameRetryDispatch(state) {
+      const frame = state?.framebuffer || {};
+      const likelyDead = Boolean(frame.healthLikelyDead);
+      const zeroScore = Number(frame.healthZeroScore || 0);
+      const activeCells = Number(frame.healthActiveCells || 0);
+      const deathTintScore = Number(frame.healthDeathTintScore || frame.deathTintScore || 0);
+      const statusDeathTintScore = Number(frame.healthStatusDeathTintScore || 0);
+      const faceDeathTintScore = Number(frame.healthFaceDeathTintScore || 0);
+      const noHealthDigits = activeCells <= 1 && zeroScore <= 0.36;
+      const tintRetry = noHealthDigits
+        && deathTintScore >= 0.5
+        && (statusDeathTintScore >= 0.36 || faceDeathTintScore >= 0.18);
+      const retryRequested = likelyDead || tintRetry || (zeroScore >= 0.82 && activeCells >= 3);
+      if (!retryRequested) {
+        return false;
+      }
+
+      const retryReason = likelyDead
+        ? (frame.healthRetryReason || "health-death")
+        : (tintRetry ? "health-red-tint-death" : "health-zero-score");
+      const status = {
+        healthLikelyDead: likelyDead || tintRetry,
+        healthZeroScore: zeroScore,
+        healthSensor: {
+          active: true,
+          likelyDead: likelyDead || tintRetry,
+          retryRequested: true,
+          retryReason,
+          zeroScore,
+          deathTintScore,
+          statusDeathTintScore,
+          faceDeathTintScore,
+          activeCells,
+          activeColumns: Number(frame.healthActiveColumns || 0),
+          estimatedPercent: Number(frame.healthEstimatedPercent ?? 0)
+        }
+      };
+      const before = requireDoomRetryDispatch("snapshot")(this.autoplayRetryDispatch);
+      const scheduled = requireDoomRetryDispatch("schedule")(this.autoplayRetryDispatch, status, {
+        keys: AUTOPLAY_KEYS,
+        enterKey: AUTOPLAY_RETRY_ENTER_KEY,
+        tapFrames: AUTOPLAY_RETRY_TAP_FRAMES,
+        runtimeState: this.state,
+        senseOnly: this.autoplaySenseOnly,
+        releaseInputs: () => this.releaseAutoplayInputs(),
+        resetSensors: (phase, reason) => this.resetAutoplaySensorState(`${phase}:${reason}`),
+        queueInput: (keycode, pressed) => this.queueInput(keycode, pressed),
+        logQueued: reason => {
+          this.log("[AUTOPLAY]", "log-warn", `retry dispatch queued before prediction: reason=${reason}.`);
+          this.emitStatus("autoplay-retry-dispatch");
+        }
+      });
+      const after = requireDoomRetryDispatch("snapshot")(this.autoplayRetryDispatch);
+      if (scheduled?.scheduled || (!before.active && after.active)) {
+        this.neutralizeAutoplayForRetrySignal("retry-dispatch");
+        return true;
+      }
+
+      if (after.active) {
+        this.neutralizeAutoplayForRetrySignal("retry-dispatch");
+        return true;
+      }
+
+      if (scheduled?.reason === "debounce" || scheduled?.reason === "busy" || scheduled?.reason === "settling") {
+        this.neutralizeAutoplayForRetrySignal(`retry-${scheduled.reason}`);
+        return true;
+      }
+
+      return false;
+    }
+
+    neutralizeAutoplayForRetrySignal(mode = "retry-signal") {
+      this.autoplayMode = mode;
+      this.autoplayPending = false;
+      this.autoplayLastAction = self.AIKernelBonsai?.neutralAction?.() || {
+        move: "none",
+        turn: "none",
+        fire: false,
+        strafe: false,
+        use: false,
+        run: false
+      };
+      this.updateAutoplayKinesisActionLoop(this.autoplayLastAction);
+      this.releaseAutoplayInputs();
+      this.updateGpuHudOverlayState(null);
     }
 
     processAutoplayRetryDispatch() {

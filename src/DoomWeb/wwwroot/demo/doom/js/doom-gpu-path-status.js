@@ -2,7 +2,7 @@
   "use strict";
 
   const version = "20260622-gpupathstatus19";
-  const rev3PassReadinessShape = "Passes.{Aisthesis,SpatialReasoning,HudComposite}:ShaderBound=false,PipelineCached=false,BuiltInExecutor=false,InjectedExecutor=false,ReadyForBuiltIn=false";
+  const passReadinessShape = "Passes.{Aisthesis,SpatialReasoning,HudComposite}:ShaderBound=false,PipelineCached=false,BuiltInExecutor=false,InjectedExecutor=false,ReadyForBuiltIn=false";
 
   function readObjectCaseInsensitive(source, names) {
     if (!source || typeof source !== "object") {
@@ -101,7 +101,7 @@
     return reason ? ` · reason=${reason}` : "";
   }
 
-  function rev3PilotMode(pilot) {
+  function canonicalPilotMode(pilot) {
     const summary = readObjectCaseInsensitive(pilot, ["summary", "Summary"]) || {};
     const mode = textValue(summary.mode, summary.Mode, "");
     if (mode) {
@@ -111,10 +111,10 @@
     return textValue(pilot?.source, pilot?.Source, "pilot").replace(/^gpu\./, "");
   }
 
-  function rev3PilotDelta(pilot) {
+  function canonicalPilotDelta(pilot) {
     const comparison = readObjectCaseInsensitive(pilot, ["comparison", "Comparison"]) || {};
     if (comparison.available === false || comparison.Available === false) {
-      return rev3PilotMode(pilot);
+      return canonicalPilotMode(pilot);
     }
 
     const delta = numberValue(comparison.meanAbsDelta, comparison.MeanAbsDelta);
@@ -122,7 +122,7 @@
     const label = state === "within"
       ? "ok"
       : (state === "observe" ? "obs" : (state === "drift" ? "drift" : ""));
-    const history = readObjectCaseInsensitive(pilot, ["history", "History", "rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"]) || {};
+    const history = readObjectCaseInsensitive(pilot, ["history", "History", "canonicalParityHistory", "CanonicalParityHistory", "parityHistory", "ParityHistory"]) || {};
     const required = numberValue(history.requiredStreak, history.RequiredStreak);
     const streak = label === "ok"
       ? numberValue(history.candidateStreak, history.CandidateStreak, history.withinStreak, history.WithinStreak)
@@ -136,31 +136,31 @@
       return label ? `${label}${streakText}:d${delta.toFixed(3)}` : `d${delta.toFixed(3)}`;
     }
 
-    return label ? `${label}${streakText}` : rev3PilotMode(pilot);
+    return label ? `${label}${streakText}` : canonicalPilotMode(pilot);
   }
 
-  function rev3PilotText(aisthesis, spatial) {
-    const ais = readObjectCaseInsensitive(aisthesis, ["rev3Pilot", "Rev3Pilot"]);
-    const sp = readObjectCaseInsensitive(spatial, ["rev3Pilot", "Rev3Pilot"]);
+  function canonicalPilotText(aisthesis, spatial) {
+    const ais = readObjectCaseInsensitive(aisthesis, ["canonicalPilot", "CanonicalPilot"]);
+    const sp = readObjectCaseInsensitive(spatial, ["canonicalPilot", "CanonicalPilot"]);
     const parts = [];
     if (ais) {
-      parts.push(`ais:${rev3PilotDelta(ais)}`);
+      parts.push(`ais:${canonicalPilotDelta(ais)}`);
     }
     if (sp) {
-      parts.push(`sp:${rev3PilotDelta(sp)}`);
+      parts.push(`sp:${canonicalPilotDelta(sp)}`);
     }
 
-    return parts.length > 0 ? ` · rev3=${parts.join("/")}` : "";
+    return parts.length > 0 ? ` · canonical=${parts.join("/")}` : "";
   }
 
-  function rev3FeatureMaskStorageTexture(aisthesis) {
-    const pilot = readObjectCaseInsensitive(aisthesis, ["rev3Pilot", "Rev3Pilot"]) || {};
+  function featureMaskStorageTexture(aisthesis) {
+    const pilot = readObjectCaseInsensitive(aisthesis, ["canonicalPilot", "CanonicalPilot"]) || {};
     return boolValue(pilot.featureMaskStorageTexture, pilot.FeatureMaskStorageTexture);
   }
 
-  function rev3PassReadinessValue(status, gpuHud, passNames) {
-    const bridge = readObjectCaseInsensitive(gpuHud, ["rev3Bridge", "Rev3Bridge"])
-      || readObjectCaseInsensitive(status, ["rev3Bridge", "Rev3Bridge"])
+  function passReadinessValue(status, gpuHud, passNames) {
+    const bridge = readObjectCaseInsensitive(gpuHud, ["canonicalBridge", "CanonicalBridge"])
+      || readObjectCaseInsensitive(status, ["canonicalBridge", "CanonicalBridge"])
       || {};
     const diagnostics = readObjectCaseInsensitive(bridge, ["diagnostics", "Diagnostics"]) || bridge;
     const passes = readObjectCaseInsensitive(diagnostics, ["passes", "Passes"]) || {};
@@ -198,8 +198,8 @@
     return parts.join("/");
   }
 
-  function rev3PassReadinessText(status, gpuHud, passNames) {
-    const value = rev3PassReadinessValue(status, gpuHud, passNames);
+  function passReadinessText(status, gpuHud, passNames) {
+    const value = passReadinessValue(status, gpuHud, passNames);
     return value ? ` · pass=${value}` : "";
   }
 
@@ -282,20 +282,20 @@
     const cpuFallback = boolValue(row.cpuFallback, row.CpuFallback);
     const memoryMB = numberValue(row.memoryMB, row.MemoryMB, row.memoryMb, row.MemoryMb);
     const metadata = {
-      rev3_pass_id: role,
-      rev3_path_role: role,
-      rev3_pilot_state: "dto-projected",
-      rev3_promotion_gate: "runtime-stamp-required",
-      rev3_candidate_streak: "0",
-      rev3_diagnostic_streak: "0",
-      rev3_required_streak: "0",
-      rev3_authoritative_ready: "false",
-      rev3_diagnostic_ready: "false",
-      rev3_execution_mode: cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
-      rev3_feature_mask_storage_texture: role === "sensor" && zeroCopy ? "true" : "false",
-      rev3_frame_index: "0",
-      rev3_pass_readiness: rev3PassReadinessShape,
-      rev3_sample_ticks: "0",
+      pass_id: role,
+      path_role: role,
+      pilot_state: "dto-projected",
+      promotion_gate: "runtime-stamp-required",
+      candidate_streak: "0",
+      diagnostic_streak: "0",
+      required_streak: "0",
+      authoritative_ready: "false",
+      diagnostic_ready: "false",
+      execution_mode: cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
+      feature_mask_storage_texture: role === "sensor" && zeroCopy ? "true" : "false",
+      frame_index: "0",
+      pass_readiness: passReadinessShape,
+      sample_ticks: "0",
       doom_runtime_stamped: boolValue(row.runtimeStamped, row.RuntimeStamped) ? "true" : "false",
       doom_missing_row: "false",
       doom_label: textValue(row.label, row.Label, role.toUpperCase()),
@@ -313,7 +313,7 @@
 
   function canonicalRowReason(row, suppliedMetadata = null) {
     const supplied = suppliedMetadata || readMetadataCaseInsensitive(row);
-    const metadataError = textValue(supplied.rev3_metadata_validation_error, supplied.rev3MetadataValidationError, "");
+    const metadataError = textValue(supplied.metadata_validation_error, supplied.canonicalMetadataValidationError, "");
     return textValue(
       row?.reason,
       row?.Reason,
@@ -365,7 +365,7 @@
   }
 
   function resolvePromotionReason(metadata) {
-    const gate = lowerText(metadata?.rev3_promotion_gate || "");
+    const gate = lowerText(metadata?.promotion_gate || "");
     if (!gate) {
       return "metadata-missing";
     }
@@ -387,12 +387,12 @@
       return "not-applicable";
     }
 
-    const storageReady = readMetadataBool(metadata, "rev3_feature_mask_storage_texture");
-    const diagnosticReady = readMetadataBool(metadata, "rev3_diagnostic_ready");
-    const authoritativeReady = readMetadataBool(metadata, "rev3_authoritative_ready");
-    const candidateStreak = readMetadataInt(metadata, "rev3_candidate_streak");
-    const diagnosticStreak = readMetadataInt(metadata, "rev3_diagnostic_streak");
-    const requiredStreak = readMetadataInt(metadata, "rev3_required_streak");
+    const storageReady = readMetadataBool(metadata, "feature_mask_storage_texture");
+    const diagnosticReady = readMetadataBool(metadata, "diagnostic_ready");
+    const authoritativeReady = readMetadataBool(metadata, "authoritative_ready");
+    const candidateStreak = readMetadataInt(metadata, "candidate_streak");
+    const diagnosticStreak = readMetadataInt(metadata, "diagnostic_streak");
+    const requiredStreak = readMetadataInt(metadata, "required_streak");
     const diagnosticStable = diagnosticReady && requiredStreak > 0 && diagnosticStreak >= requiredStreak;
     const candidateStable = requiredStreak > 0 && candidateStreak >= requiredStreak;
 
@@ -420,37 +420,37 @@
   }
 
   function withPromotionReadinessMetadata(metadata) {
-    const reason = textValue(metadata.rev3_promotion_reason, resolvePromotionReason(metadata));
-    const storageReady = readMetadataBool(metadata, "rev3_feature_mask_storage_texture");
-    const diagnosticReady = readMetadataBool(metadata, "rev3_diagnostic_ready");
-    const candidateStreak = readMetadataInt(metadata, "rev3_candidate_streak");
-    const diagnosticStreak = readMetadataInt(metadata, "rev3_diagnostic_streak");
-    const requiredStreak = readMetadataInt(metadata, "rev3_required_streak");
+    const reason = textValue(metadata.promotion_reason, resolvePromotionReason(metadata));
+    const storageReady = readMetadataBool(metadata, "feature_mask_storage_texture");
+    const diagnosticReady = readMetadataBool(metadata, "diagnostic_ready");
+    const candidateStreak = readMetadataInt(metadata, "candidate_streak");
+    const diagnosticStreak = readMetadataInt(metadata, "diagnostic_streak");
+    const requiredStreak = readMetadataInt(metadata, "required_streak");
     const diagnosticStable = diagnosticReady && requiredStreak > 0 && diagnosticStreak >= requiredStreak;
     const candidateStable = requiredStreak > 0 && candidateStreak >= requiredStreak;
     const candidateReady = storageReady && diagnosticStable && candidateStable;
-    if (!hasMetadataValue(metadata, "rev3_promotion_reason")) {
-      metadata.rev3_promotion_reason = reason;
+    if (!hasMetadataValue(metadata, "promotion_reason")) {
+      metadata.promotion_reason = reason;
     }
-    if (!hasMetadataValue(metadata, "rev3_promotion_blocked")) {
-      metadata.rev3_promotion_blocked = reason === "not-applicable" || reason === "authoritative-ready" ? "false" : "true";
+    if (!hasMetadataValue(metadata, "promotion_blocked")) {
+      metadata.promotion_blocked = reason === "not-applicable" || reason === "authoritative-ready" ? "false" : "true";
     }
-    if (!hasMetadataValue(metadata, "rev3_promotion_candidate_ready")) {
-      metadata.rev3_promotion_candidate_ready = candidateReady ? "true" : "false";
+    if (!hasMetadataValue(metadata, "promotion_candidate_ready")) {
+      metadata.promotion_candidate_ready = candidateReady ? "true" : "false";
     }
-    if (!hasMetadataValue(metadata, "rev3_promotion_diagnostic_stable")) {
-      metadata.rev3_promotion_diagnostic_stable = diagnosticStable ? "true" : "false";
+    if (!hasMetadataValue(metadata, "promotion_diagnostic_stable")) {
+      metadata.promotion_diagnostic_stable = diagnosticStable ? "true" : "false";
     }
     return metadata;
   }
 
   function readPilotFrom(source) {
-    return readObjectCaseInsensitive(source, ["rev3Pilot", "Rev3Pilot"]) || {};
+    return readObjectCaseInsensitive(source, ["canonicalPilot", "CanonicalPilot"]) || {};
   }
 
   function readPilotHistory(source, pilot) {
-    return readObjectCaseInsensitive(pilot, ["history", "History", "rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"])
-      || readObjectCaseInsensitive(source, ["rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"])
+    return readObjectCaseInsensitive(pilot, ["history", "History", "canonicalParityHistory", "CanonicalParityHistory", "parityHistory", "ParityHistory"])
+      || readObjectCaseInsensitive(source, ["canonicalParityHistory", "CanonicalParityHistory", "parityHistory", "ParityHistory"])
       || {};
   }
 
@@ -488,7 +488,7 @@
       requiredStreak: Math.max(ais.requiredStreak, sp.requiredStreak),
       authoritativeReady: ais.authoritativeReady,
       diagnosticReady: ais.diagnosticReady || sp.diagnosticReady,
-      featureMaskStorageTexture: rev3FeatureMaskStorageTexture(aisthesis)
+      featureMaskStorageTexture: featureMaskStorageTexture(aisthesis)
     });
   }
 
@@ -497,20 +497,20 @@
     const pilot = pilotMetadata || resolveRuntimePilotMetadata(null);
     const memoryMB = numberValue(row?.memoryMB, row?.memoryMb);
     const metadata = {
-      rev3_pass_id: role,
-      rev3_path_role: role,
-      rev3_pilot_state: textValue(pilot.state, "runtime-observed"),
-      rev3_promotion_gate: textValue(pilot.gate, "not-applicable"),
-      rev3_candidate_streak: metadataStreakText(pilot.candidateStreak),
-      rev3_diagnostic_streak: metadataStreakText(pilot.diagnosticStreak),
-      rev3_required_streak: metadataStreakText(pilot.requiredStreak),
-      rev3_authoritative_ready: metadataBoolText(Boolean(pilot.authoritativeReady)),
-      rev3_diagnostic_ready: metadataBoolText(Boolean(pilot.diagnosticReady)),
-      rev3_execution_mode: row?.cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
-      rev3_feature_mask_storage_texture: metadataBoolText(Boolean(pilot.featureMaskStorageTexture)),
-      rev3_frame_index: metadataStreakText(row?.frameIndex),
-      rev3_pass_readiness: textValue(row?.passReadiness, rev3PassReadinessShape),
-      rev3_sample_ticks: metadataStreakText(row?.sampleTicks),
+      pass_id: role,
+      path_role: role,
+      pilot_state: textValue(pilot.state, "runtime-observed"),
+      promotion_gate: textValue(pilot.gate, "not-applicable"),
+      candidate_streak: metadataStreakText(pilot.candidateStreak),
+      diagnostic_streak: metadataStreakText(pilot.diagnosticStreak),
+      required_streak: metadataStreakText(pilot.requiredStreak),
+      authoritative_ready: metadataBoolText(Boolean(pilot.authoritativeReady)),
+      diagnostic_ready: metadataBoolText(Boolean(pilot.diagnosticReady)),
+      execution_mode: row?.cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
+      feature_mask_storage_texture: metadataBoolText(Boolean(pilot.featureMaskStorageTexture)),
+      frame_index: metadataStreakText(row?.frameIndex),
+      pass_readiness: textValue(row?.passReadiness, passReadinessShape),
+      sample_ticks: metadataStreakText(row?.sampleTicks),
       doom_runtime_stamped: "true",
       doom_missing_row: "false",
       doom_label: textValue(row?.label, role.toUpperCase()),
@@ -652,6 +652,8 @@
     const zeroCopy = boolValue(autoplay.zeroCopy, rawZeroCopy, gpuAisthesis.zeroCopyReady, gpuAisthesis.ZeroCopyReady);
     const bonsaiZero = boolValue(autoplay.zeroCopy, framebuffer.zeroCopy);
     const hudCompositeReady = boolValue(gpuHud.hudCompositeReady, gpuHud.HudCompositeReady);
+    const hudSwapchainActive = boolValue(gpuHud.hudSwapchainActive, gpuHud.HudSwapchainActive)
+      || String(hudSource).toLowerCase().includes("gpu-hud-single-pass");
     const hudComposite = boolValue(gpuHud.hudCompositeActive, gpuHud.HudCompositeActive, gpuHud.compositeActive, gpuHud.CompositeActive);
     const sensorZero = boolValue(gpuAisthesis.zeroCopyReady, gpuAisthesis.ZeroCopyReady);
     const sensorFeature = boolValue(gpuAisthesis.featureBufferReady, gpuAisthesis.FeatureBufferReady, gpuAisthesis.maskTextureReady, gpuAisthesis.MaskTextureReady);
@@ -714,45 +716,54 @@
     const gameTone = cpuFallback || canvasFallback ? "warn" : (gameTextureReady ? "gpu" : "");
     const bonsaiMode = bonsaiZero ? "zero-copy" : "CPU/readback";
     const bonsaiTone = bonsaiZero ? "gpu" : (vision.includes("none") ? "" : "warn");
-    const hudMode = hudComposite ? "GPU composite" : (hudCompositeReady ? "GPU ready / CSS active" : "DTO/CSS overlay");
-    const hudTone = hudComposite ? "gpu" : (hudCompositeReady ? "warn" : (String(hudSource).toLowerCase().includes("fallback") ? "warn" : ""));
+    const hudGpuActive = Boolean(hudComposite || hudSwapchainActive);
+    const hudMode = hudComposite ? "GPU composite" : (hudGpuActive ? "GPU HUD single-pass" : (hudCompositeReady ? "GPU ready / CSS active" : "DTO/CSS overlay"));
+    const hudTone = hudGpuActive ? "gpu" : (hudCompositeReady ? "warn" : (String(hudSource).toLowerCase().includes("fallback") ? "warn" : ""));
     const hudPanelReady = boolValue(gpuHud.hudPanelOverlayReady, gpuHud.HudPanelOverlayReady);
     const hudPanelDoubleBuffered = boolValue(gpuHud.hudPanelDoubleBuffered, gpuHud.HudPanelDoubleBuffered);
+    const hudOffscreenConfigured = boolValue(gpuHud.hudOffscreenCompositeConfigured, gpuHud.HudOffscreenCompositeConfigured, gpuHud.hudOffscreenCompositeEnabled, gpuHud.HudOffscreenCompositeEnabled);
+    const hudOffscreenEnabled = boolValue(gpuHud.hudOffscreenCompositeEnabled, gpuHud.HudOffscreenCompositeEnabled);
+    const hudOffscreenDisabled = boolValue(gpuHud.hudOffscreenCompositeRuntimeDisabled, gpuHud.HudOffscreenCompositeRuntimeDisabled);
+    const hudOffscreenFailures = numberValue(gpuHud.hudOffscreenCompositeFailureCount, gpuHud.HudOffscreenCompositeFailureCount);
+    const hudOffscreenFps = numberValue(gpuHud.hudOffscreenCompositeMaxFps, gpuHud.HudOffscreenCompositeMaxFps);
     const matrixSource = lowerText(textValue(gpuAisthesis.matrixUploadSource, gpuAisthesis.MatrixUploadSource, gpuAisthesis.matrixSource, gpuAisthesis.MatrixSource, gpuSpatial.matrixUploadSource, gpuSpatial.MatrixUploadSource, ""));
     const cpuPackingFallback = boolValue(gpuAisthesis.cpuPackingFallback, gpuAisthesis.CpuPackingFallback, gpuSpatial.cpuPackingFallback, gpuSpatial.CpuPackingFallback)
       || matrixSource === "js-fallback-flatten";
     const sensorMode = aisthesisComputeActive ? "gpu" : (sensorZero ? "zero" : (aisthesisReady ? "gpu-ready" : "dto"));
     const spatialMode = spatialComputeActive ? "gpu" : (spatialReady ? "gpu-ready" : "dto");
     const sensorMask = boolValue(gpuAisthesis.maskTextureReady, gpuAisthesis.MaskTextureReady);
-    const sensorMaskRev3 = rev3FeatureMaskStorageTexture(gpuAisthesis);
+    const sensorMaskCanonical = featureMaskStorageTexture(gpuAisthesis);
     const sensorTone = aisthesisComputeActive || spatialComputeActive || sensorZero || aisthesisReady || spatialReady ? "gpu" : (sensorFeature ? "warn" : "");
     const gameReason = cpuFallback
       ? (providerLastError || adapterRequestError || (providerSupported ? "cpu-fallback" : "webgpu-unsupported"))
       : (gameTextureReady ? "" : (!deviceReady ? "webgpu-device-pending" : (!providerInitialized ? "provider-pending" : (!providerRendererInitialized ? "renderer-pending" : (!rawTextureReady ? "raw-gpu-texture-missing" : "")))));
     const gameValue = `${gameMode} · ${gpuDelegate} · render=${renderer} · provider=${providerBackend}${adapterText(adapterSummary, adapterPowerPreference, adapterFallbackUsed)} · wait=${waitMs}ms/${waitTimeouts}${memoryText(memoryMb, cpuFallback)}${reasonText(gameReason)}`;
     const bonsaiValue = `${bonsaiMode} · raw=${rawTextureReady ? "zcp" : "copy"} · vision=${vision} · backend=${visionBackend}`;
-    const hudPassReadiness = rev3PassReadinessValue(status, gpuHud, ["HudComposite"]);
+    const hudPassReadiness = passReadinessValue(status, gpuHud, ["HudComposite"]);
     const hudPassText = hudPassReadiness ? ` · pass=${hudPassReadiness}` : "";
-    const hudValue = `${hudMode} · panel=${hudPanelReady ? "gpu" : "dto"}${hudPanelDoubleBuffered ? "x2" : ""}${hudPassText} · source=${hudSource} · mode=${textValue(gpuHud.cssOverlayMode, gpuHud.CssOverlayMode, "unknown")} · buffers=${gpuBufferReady ? "gpu" : "pending"}`;
+    const hudOffscreenText = hudOffscreenDisabled
+      ? ` · offscreen=disabled/${hudOffscreenFailures}`
+      : (hudOffscreenConfigured ? ` · offscreen=${hudOffscreenEnabled ? `${hudOffscreenFps || "?"}fps` : "ready"}` : "");
+    const hudValue = `${hudMode} · panel=${hudPanelReady ? "gpu" : "dto"}${hudPanelDoubleBuffered ? "x2" : ""}${hudPassText}${hudOffscreenText} · source=${hudSource} · mode=${textValue(gpuHud.cssOverlayMode, gpuHud.CssOverlayMode, "unknown")} · buffers=${gpuBufferReady ? "gpu" : "pending"}`;
     const matrixText = matrixSource ? ` · matrix=${matrixSource}` : "";
     const packText = cpuPackingFallback ? " · pack=cpu" : "";
-    const rev3Text = rev3PilotText(gpuAisthesis, gpuSpatial);
-    const sensorPassReadiness = rev3PassReadinessValue(status, gpuHud, ["Aisthesis", "SpatialReasoning"]);
+    const canonicalText = canonicalPilotText(gpuAisthesis, gpuSpatial);
+    const sensorPassReadiness = passReadinessValue(status, gpuHud, ["Aisthesis", "SpatialReasoning"]);
     const sensorPassText = sensorPassReadiness ? ` · pass=${sensorPassReadiness}` : "";
-    const sensorValue = `ais=${sensorMode} · spatial=${spatialMode}${matrixText}${packText}${rev3Text}${sensorPassText} · compute=${gpuComputeActive ? "active" : (gpuComputeReady ? "ready" : "pending")} · feature=${sensorFeature ? "ready" : "pending"} · mask=${sensorMaskRev3 ? "rev3" : (sensorMask ? "gpu" : "dto")}`;
+    const sensorValue = `ais=${sensorMode} · spatial=${spatialMode}${matrixText}${packText}${canonicalText}${sensorPassText} · compute=${gpuComputeActive ? "active" : (gpuComputeReady ? "ready" : "pending")} · feature=${sensorFeature ? "ready" : "pending"} · mask=${sensorMaskCanonical ? "canonical" : (sensorMask ? "gpu" : "dto")}`;
     const sensorPilotMetadata = mergeSensorPilotMetadata(gpuAisthesis, gpuSpatial);
     const rows = [
       { label: "GAME", mode: gameMode, value: gameValue, tone: gameTone, zeroCopy: gameTextureReady, cpuFallback, memoryMB: memoryMb, reason: gameReason },
       { label: "BONSAI", mode: bonsaiMode, value: bonsaiValue, tone: bonsaiTone, zeroCopy: bonsaiZero, cpuFallback: !bonsaiZero, memoryMB: 0, reason: bonsaiZero ? "" : "readback-copy" },
-      { label: "HUD", mode: hudMode, value: hudValue, tone: hudTone, zeroCopy: hudComposite, cpuFallback: false, memoryMB: 0, reason: hudComposite ? "" : hudMode, passReadiness: hudPassReadiness },
+      { label: "HUD", mode: hudMode, value: hudValue, tone: hudTone, zeroCopy: hudGpuActive, cpuFallback: false, memoryMB: 0, reason: hudGpuActive ? "" : hudMode, passReadiness: hudPassReadiness },
       { label: "SENSOR", mode: `${sensorMode}/${spatialMode}`, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, cpuFallback: !(aisthesisComputeActive || spatialComputeActive || sensorZero), memoryMB: 0, reason: sensorFeature ? "" : "sensor-feature-pending", passReadiness: sensorPassReadiness }
     ];
     for (const row of rows) {
       row.metadata = createRuntimeRowMetadata(row, row.label === "SENSOR" ? sensorPilotMetadata : null);
     }
     const sensorSummary = aisthesisComputeActive || spatialComputeActive ? "gpu" : (sensorZero ? "zcp" : (aisthesisReady || spatialReady ? "gpu-ready" : "dto"));
-    const text = `game=${gameMode}; bonsai=${bonsaiZero ? "zcp" : "copy"}; hud=${hudComposite ? "gpu" : (hudCompositeReady ? "ready" : "dto")}; sensor=${sensorSummary}`;
-    const shortText = `${gameMode} | B:${bonsaiZero ? "zcp" : "copy"} H:${hudComposite ? "gpu" : (hudCompositeReady ? "ready" : "dto")} S:${sensorSummary}`;
+    const text = `game=${gameMode}; bonsai=${bonsaiZero ? "zcp" : "copy"}; hud=${hudGpuActive ? "gpu" : (hudCompositeReady ? "ready" : "dto")}; sensor=${sensorSummary}`;
+    const shortText = `${gameMode} | B:${bonsaiZero ? "zcp" : "copy"} H:${hudGpuActive ? "gpu" : (hudCompositeReady ? "ready" : "dto")} S:${sensorSummary}`;
 
     return Object.freeze({
       version,
@@ -762,7 +773,7 @@
       game: Object.freeze({ mode: gameMode, value: gameValue, tone: gameTone, cpuFallback, gpuAvailable: gameTextureReady, providerGpuAvailable, rawZeroCopy: rawTextureReady, memoryMB: memoryMb, memoryBytes, reason: shortReason(gameReason), providerBackend, providerSupported, providerInitialized, providerRendererInitialized, deviceReady, adapterPowerPreference, adapterSummary, adapterFallbackUsed, metadata: rows[0].metadata }),
       bonsai: Object.freeze({ mode: bonsaiMode, value: bonsaiValue, tone: bonsaiTone, zeroCopy: bonsaiZero, metadata: rows[1].metadata }),
       hud: Object.freeze({ mode: hudMode, value: hudValue, tone: hudTone, compositeActive: hudComposite, compositeReady: hudCompositeReady, panelReady: hudPanelReady, panelDoubleBuffered: hudPanelDoubleBuffered, metadata: rows[2].metadata }),
-      sensor: Object.freeze({ mode: sensorMode, spatialMode, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, featureReady: sensorFeature, maskReady: sensorMask, gpuComputeReady, gpuComputeActive, gpuBufferReady, rev3Aisthesis: readObjectCaseInsensitive(gpuAisthesis, ["rev3Pilot", "Rev3Pilot"]), rev3Spatial: readObjectCaseInsensitive(gpuSpatial, ["rev3Pilot", "Rev3Pilot"]), metadata: rows[3].metadata })
+      sensor: Object.freeze({ mode: sensorMode, spatialMode, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, featureReady: sensorFeature, maskReady: sensorMask, gpuComputeReady, gpuComputeActive, gpuBufferReady, canonicalAisthesis: readObjectCaseInsensitive(gpuAisthesis, ["canonicalPilot", "CanonicalPilot"]), canonicalSpatial: readObjectCaseInsensitive(gpuSpatial, ["canonicalPilot", "CanonicalPilot"]), metadata: rows[3].metadata })
     });
   }
 

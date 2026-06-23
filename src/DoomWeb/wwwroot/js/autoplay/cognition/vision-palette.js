@@ -122,6 +122,32 @@
     };
   }
 
+  function scoreDeathTintPaletteIndex(index, rgbaBytes) {
+    if (!rgbaBytes || index < 0 || index > 255) {
+      return 0;
+    }
+
+    const offset = index * 4;
+    const red = rgbaBytes[offset] || 0;
+    const green = rgbaBytes[offset + 1] || 0;
+    const blue = rgbaBytes[offset + 2] || 0;
+    const luma = red * 0.299 + green * 0.587 + blue * 0.114;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const saturation = max - min;
+    const redDominance = red - Math.max(green * 0.92, blue * 1.05);
+    const deathRed = red >= 44
+      && luma >= 18
+      && luma <= 158
+      && redDominance >= 10
+      && saturation >= 14;
+    return deathRed
+      ? clamp01((redDominance / 132) * 0.62
+        + (saturation / 190) * 0.24
+        + clamp01(1 - Math.abs(luma - 78) / 118) * 0.14)
+      : 0;
+  }
+
   function scoreBlueFloorPaletteIndex(index, rgbaBytes) {
     if (!rgbaBytes || index < 0 || index > 255) {
       return 0;
@@ -471,6 +497,7 @@
     scoreCourtyardLowerPaletteIndex,
     scoreCourtyardUpperPaletteIndex,
     scoreDarkPaletteIndex,
+    scoreDeathTintPaletteIndex,
     scoreEnemyPaletteIndex,
     scoreEnemyRgb,
     scoreFirstDoorRedAccentPaletteIndex,

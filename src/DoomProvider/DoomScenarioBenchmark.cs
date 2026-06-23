@@ -2,7 +2,7 @@ namespace AIKernel.Doom.Provider;
 
 /// <summary>
 /// EN: Describes a Doom scenario benchmark carrier without executing the scenario.
-/// EN: Documentation for public API. JA: scenario を実行せず Doom scenario benchmark carrier を記述します。
+/// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] scenario を実行せず Doom scenario benchmark carrier を記述します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
 /// </summary>
 public sealed record DoomScenarioBenchmark
 {
@@ -25,13 +25,13 @@ public sealed record DoomScenarioBenchmark
 
 /// <summary>
 /// EN: Creates Doom scenario benchmark descriptors for tooling and demos.
-/// EN: Documentation for public API. JA: tooling / demo 向け Doom scenario benchmark descriptor を作成します。
+/// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] tooling / demo 向け Doom scenario benchmark descriptor を作成します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
 /// </summary>
 public sealed class DoomScenarioBenchmarkCatalog
 {
     /// <summary>
     /// EN: Lists deterministic benchmark descriptors for Doom demo integration.
-    /// EN: Documentation for public API. JA: Doom demo integration 向け deterministic benchmark descriptor を列挙します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Doom demo integration 向け deterministic benchmark descriptor を列挙します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     /// <returns>EN: Benchmark descriptors. JA: benchmark descriptor を返します。</returns>
     public IReadOnlyList<DoomScenarioBenchmark> List()

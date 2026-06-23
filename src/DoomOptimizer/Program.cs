@@ -136,7 +136,7 @@ internal sealed class ObserverRomOptimizer
 {
     /// <summary>
     /// EN: Executes Optimize.
-    /// EN: Documentation for public API. JA: Optimize を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Optimize を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public OptimizationResult Optimize(AutoplayOptimizationProfile seed)
     {
@@ -208,7 +208,7 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
     private int _attackBursts;
     /// <summary>
     /// EN: Executes RunDoorScenario.
-    /// EN: Documentation for public API. JA: RunDoorScenario を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunDoorScenario を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public void RunDoorScenario(IAutoplayStrategy strategy)
@@ -244,7 +244,7 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
     }
     /// <summary>
     /// EN: Executes RunCombatScenario.
-    /// EN: Documentation for public API. JA: RunCombatScenario を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunCombatScenario を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public void RunCombatScenario(IAutoplayStrategy strategy)
@@ -278,7 +278,7 @@ internal sealed class ObserverRomRun(AutoplayOptimizationProfile profile)
     }
     /// <summary>
     /// EN: Executes ToResult.
-    /// EN: Documentation for public API. JA: ToResult を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ToResult を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public OptimizationResult ToResult()
@@ -341,7 +341,7 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
 {
     /// <summary>
     /// EN: Executes RunRestartOnCurrentPageAsync.
-    /// EN: Documentation for public API. JA: RunRestartOnCurrentPageAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunRestartOnCurrentPageAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public async Task<WebRestartResult> RunRestartOnCurrentPageAsync()
     {
@@ -383,7 +383,7 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
     }
     /// <summary>
     /// EN: Executes RunUseTestOnCurrentPageAsync.
-    /// EN: Documentation for public API. JA: RunUseTestOnCurrentPageAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunUseTestOnCurrentPageAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<WebUseTestResult> RunUseTestOnCurrentPageAsync()
@@ -410,7 +410,7 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
     }
     /// <summary>
     /// EN: Executes RunUseTestAsync.
-    /// EN: Documentation for public API. JA: RunUseTestAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunUseTestAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<WebUseTestResult> RunUseTestAsync()
@@ -447,7 +447,7 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
     }
     /// <summary>
     /// EN: Executes RunUntilDoorAsync.
-    /// EN: Documentation for public API. JA: RunUntilDoorAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunUntilDoorAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<WebRunnerResult> RunUntilDoorAsync(TimeSpan timeout)
@@ -523,7 +523,7 @@ internal sealed class DoomWebAutoplayRunner(Uri cdpEndpoint, string screenshotPa
     }
     /// <summary>
     /// EN: Executes RunUntilGoalAsync.
-    /// EN: Documentation for public API. JA: RunUntilGoalAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] RunUntilGoalAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<WebRunnerResult> RunUntilGoalAsync(TimeSpan timeout, int targetEnemies, string goal)
@@ -714,7 +714,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes ConnectAsync.
-    /// EN: Documentation for public API. JA: ConnectAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ConnectAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static async Task<CdpClient> ConnectAsync(Uri cdpEndpoint)
@@ -742,7 +742,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes SendAsync.
-    /// EN: Documentation for public API. JA: SendAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] SendAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<JsonElement> SendAsync(string method, object? parameters)
@@ -775,7 +775,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes EvaluateAsync&lt;T&gt;.
-    /// EN: Documentation for public API. JA: EvaluateAsync&lt;T&gt; を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] EvaluateAsync&lt;T&gt; を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<T> EvaluateAsync<T>(string expression)
@@ -785,7 +785,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes EvaluateJsonAsync.
-    /// EN: Documentation for public API. JA: EvaluateJsonAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] EvaluateJsonAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task<JsonElement> EvaluateJsonAsync(string expression)
@@ -812,7 +812,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes CaptureScreenshotAsync.
-    /// EN: Documentation for public API. JA: CaptureScreenshotAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] CaptureScreenshotAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async Task CaptureScreenshotAsync(string path)
@@ -856,7 +856,7 @@ internal sealed class CdpClient : IAsyncDisposable
     }
     /// <summary>
     /// EN: Executes DisposeAsync.
-    /// EN: Documentation for public API. JA: DisposeAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] DisposeAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public async ValueTask DisposeAsync()
@@ -887,13 +887,13 @@ internal sealed record WebRunnerResult(
 {
     /// <summary>
     /// EN: Executes Failed.
-    /// EN: Documentation for public API. JA: Failed を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Failed を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public static WebRunnerResult Failed(string error)
         => new(false, false, false, 0, 0, 0, 0, 0, "none", "none", error, [], []);
     /// <summary>
     /// EN: Gets FromStatus.
-    /// EN: Documentation for public API. JA: FromStatus を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] FromStatus を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static WebRunnerResult FromStatus(
@@ -928,7 +928,7 @@ internal static class JsonElementExtensions
 {
     /// <summary>
     /// EN: Executes GetPropertyOrDefault.
-    /// EN: Documentation for public API. JA: GetPropertyOrDefault を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetPropertyOrDefault を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public static JsonElement GetPropertyOrDefault(this JsonElement element, string name)
     {
@@ -941,7 +941,7 @@ internal static class JsonElementExtensions
     }
     /// <summary>
     /// EN: Executes GetStringOrDefault.
-    /// EN: Documentation for public API. JA: GetStringOrDefault を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetStringOrDefault を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static string GetStringOrDefault(this JsonElement element, string name)
@@ -951,7 +951,7 @@ internal static class JsonElementExtensions
     }
     /// <summary>
     /// EN: Executes GetInt32OrDefault.
-    /// EN: Documentation for public API. JA: GetInt32OrDefault を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetInt32OrDefault を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static int GetInt32OrDefault(this JsonElement element, string name)
@@ -966,7 +966,7 @@ internal static class JsonElementExtensions
     }
     /// <summary>
     /// EN: Executes GetDoubleOrDefault.
-    /// EN: Documentation for public API. JA: GetDoubleOrDefault を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetDoubleOrDefault を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static double GetDoubleOrDefault(this JsonElement element, string name)
@@ -981,7 +981,7 @@ internal static class JsonElementExtensions
     }
     /// <summary>
     /// EN: Executes GetBoolOrDefault.
-    /// EN: Documentation for public API. JA: GetBoolOrDefault を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetBoolOrDefault を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public static bool GetBoolOrDefault(this JsonElement element, string name)
@@ -996,7 +996,7 @@ internal static class OptimizerJson
 {
     /// <summary>
     /// EN: Executes Options.
-    /// EN: Documentation for public API. JA: Options を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Options を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web)
     {

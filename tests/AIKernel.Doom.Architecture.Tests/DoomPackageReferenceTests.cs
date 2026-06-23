@@ -17,13 +17,15 @@ public sealed class DoomPackageReferenceTests
         Assert.Contains("<AIKernelProvidersPackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelProvidersPackageVersion>", props, StringComparison.Ordinal);
         Assert.Contains("<AIKernelWasmRuntimePackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelWasmRuntimePackageVersion>", props, StringComparison.Ordinal);
         Assert.Contains("<AIKernelWasmWebGpuComputeProviderPackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelWasmWebGpuComputeProviderPackageVersion>", props, StringComparison.Ordinal);
-        Assert.DoesNotContain("0.1.2", props, StringComparison.Ordinal);
-        Assert.DoesNotContain("0.1.1.1-dev", props, StringComparison.Ordinal);
-        Assert.DoesNotContain("<AIKernelPackageVersion>[0.1.1.1]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
+        Assert.DoesNotContain(OldVersion(2), props, StringComparison.Ordinal);
+        Assert.DoesNotContain($"{OldVersion(1)}.1-dev", props, StringComparison.Ordinal);
+        Assert.DoesNotContain($"<AIKernelPackageVersion>[{OldVersion(1)}.1]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
         Assert.Contains("https://api.nuget.org/v3/index.json", nugetConfig, StringComparison.Ordinal);
         Assert.DoesNotContain("artifacts", nugetConfig, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("local-packages", nugetConfig, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string OldVersion(int patch) => $"0.1.{patch}";
 
     private static string FindRepoRoot(string start)
     {

@@ -316,6 +316,15 @@
       : "none";
     const rawEnemyConfidence = number(state?.enemyConfidence, 0);
     const rawVisualEnemyConfidence = number(state?.visualEnemyConfidence, rawEnemyConfidence);
+    const enemyConfidencePeak = Math.max(
+      number(state?.enemyConfidencePeak, 0),
+      number(state?.milestones?.enemyConfidencePeak, 0),
+      rawVisualEnemyConfidence);
+    const postDoorDoorOpenedCount = Math.max(
+      number(state?.doorOpenedCount, 0),
+      number(state?.milestones?.doorOpened, 0),
+      number(state?.milestones?.doorOpenedCount, 0),
+      number(state?.autoplayState?.doorOpenedCount, 0));
     const firstDoorVisionRedScore = number(state?.firstDoorVision9x9RedScore, 0);
     const computerPanelScore = number(state?.computerPanelScore ?? state?.milestones?.computerPanelScore, 0);
     const computerDarkPanelScore = number(state?.computerDarkPanelScore ?? state?.milestones?.computerDarkPanelScore, 0);
@@ -339,7 +348,9 @@
       && rawVisualEnemyConfidence >= 0.46
       && audioEnemyConfidence < 0.18
       && firstDoorVisionRedScore <= 0.08;
+    const enemyStructuralDecoy = Boolean(state?.enemyStructuralDecoy);
     const visualEnemySuppressed = Boolean(state?.visualEnemySuppressed)
+      || enemyStructuralDecoy
       || (terminalSurface >= 0.24
         && rawVisualEnemyConfidence <= 0.46
         && (weakTerminalSurfaceEnemy
@@ -354,12 +365,28 @@
     const audioCombatYaw = audioEnemyDirection === "left"
       ? -audioCombatYawDegrees
       : (audioEnemyDirection === "right" ? audioCombatYawDegrees : 0);
-    const visualEnemyVisible = visualEnemyConfidence >= 0.28 || (!visualEnemySuppressed && absFaceSig >= combatFaceThreshold);
+    const visualEnemyVisible = visualEnemyConfidence >= 0.28
+      || (!visualEnemySuppressed && visualEnemyConfidence >= 0.18 && absFaceSig >= combatFaceThreshold);
     const visualEnemyCentered = visualEnemyConfidence >= 0.28 && absFaceSig <= Math.max(0.10, combatFaceThreshold * 0.5);
     const visualEnemyYaw = visualEnemyCentered
       ? 0
       : Math.max(-18, Math.min(18, faceSig * Math.max(24, combatYawDegrees * 2)));
     const visualEnemyFireReady = visualEnemyCentered && visualEnemyConfidence >= 0.36;
+    const postDoorEnemyMemoryEvidence = postDoorDoorOpenedCount > 0
+      && !enemyStructuralDecoy
+      && enemyConfidencePeak >= 0.62
+      && rawVisualEnemyConfidence >= 0.08
+      && terminalSurface >= 0.28;
+    const trustedEnemyThreat = Math.max(
+      number(state?.trustedEnemyThreat, 0),
+      enemyStructuralDecoy ? 0 : (visualEnemyConfidence >= 0.52 && rawVisualEnemyConfidence >= 0.52 ? visualEnemyConfidence : 0),
+      audioEnemyConfidence >= 0.34 ? audioEnemyConfidence : 0,
+      postDoorEnemyMemoryEvidence ? Math.min(0.34, enemyConfidencePeak * 0.42) : 0);
+    const trustedCombatEvidence = Boolean(state?.trustedCombatEvidence)
+      || trustedEnemyThreat >= 0.26
+      || postDoorEnemyMemoryEvidence
+      || (!enemyStructuralDecoy && visualEnemyFireReady)
+      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none");
     const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(number(readParameter(parameters, "lowHealthThreshold"), 50))));
     const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, Math.round(number(readParameter(parameters, "criticalHealthThreshold"), 18))));
     const lowHealthGoalFirst = health > 0 && health < lowHealthThreshold;
@@ -386,11 +413,7 @@
     const usePulseAgeFrames = lastUsePulsePrediction >= 0 && predictions >= lastUsePulsePrediction
       ? Math.max(0, Math.floor(predictions - lastUsePulsePrediction))
       : 9999;
-    const doorOpenedCount = Math.max(
-      number(state?.doorOpenedCount, 0),
-      number(state?.milestones?.doorOpened, 0),
-      number(state?.milestones?.doorOpenedCount, 0),
-      number(state?.autoplayState?.doorOpenedCount, 0));
+    const doorOpenedCount = postDoorDoorOpenedCount;
     const postDoorTerminalSurface = doorOpenedCount > 0 ? terminalSurface : 0;
     const postDoorAudioCue = Boolean(state?.postDoorAudioCue);
     const computerRoomEntered = Boolean(state?.computerRoomEntered);
@@ -661,6 +684,11 @@
         centralHallBypassAllowed,
         finalRoomRouteCandidate,
         enemyConfidence,
+        enemyConfidencePeak,
+        trustedEnemyThreat,
+        trustedCombatEvidence,
+        postDoorEnemyMemoryEvidence,
+        enemyStructuralDecoy,
         visualEnemyConfidence,
         visualEnemySuppressed,
         audioEnemyConfidence,

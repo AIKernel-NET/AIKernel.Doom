@@ -54,7 +54,7 @@ const healthy = gpuPath.resolveGpuPathStatus({
     gpuBufferReady: true,
     gpuComputeReady: true,
     gpuComputeActive: true,
-    rev3Bridge: {
+    canonicalBridge: {
       diagnostics: {
         Passes: {
           Aisthesis: {
@@ -97,9 +97,10 @@ const healthy = gpuPath.resolveGpuPathStatus({
     },
     debugOverlay: {
       gpuHud: {
-        hudCompositeActive: true,
+        hudCompositeActive: false,
+        hudSwapchainActive: true,
         hudCompositeReady: true,
-        displaySource: "hud-composite-offscreen",
+        displaySource: "raw-framebuffer+gpu-hud-single-pass",
         cssOverlayMode: "reduced",
         gpuAisthesis: {
           zeroCopyReady: true,
@@ -108,7 +109,7 @@ const healthy = gpuPath.resolveGpuPathStatus({
           featureBufferReady: true,
           maskTextureReady: true,
           matrixUploadSource: "dto-flat",
-          rev3Pilot: {
+          canonicalPilot: {
             summary: { mode: "compute-vector" },
             featureMaskStorageTexture: true,
             comparison: { available: true, meanAbsDelta: 0.125, thresholdState: "within", promotionGate: "trace-candidate" },
@@ -119,7 +120,7 @@ const healthy = gpuPath.resolveGpuPathStatus({
           computeReady: true,
           gpuComputeActive: true,
           matrixUploadSource: "dto-flat",
-          rev3Pilot: {
+          canonicalPilot: {
             summary: { mode: "matrix-state-vector" },
             comparison: { available: false, reason: "diagnostic-only" }
           }
@@ -137,30 +138,30 @@ assert(healthy.rows.some(row => row.label === "GAME" && row.value.includes("pref
 assert(healthy.rows.some(row => row.label === "GAME" && row.value.includes("mem≈27MB")), "GAME row should expose estimated WebGPU allocation memory");
 assert(healthy.rows.some(row => row.label === "BONSAI" && row.value.includes("raw=zcp")), "BONSAI row should expose raw framebuffer zero-copy state");
 assert(healthy.rows.some(row => row.label === "HUD" && row.value.includes("panel=gpux2")), "HUD row should expose GPU panel double-buffer state");
-assert(healthy.rows.some(row => row.label === "HUD" && row.value.includes("pass=hud:on")), "HUD row should expose rev3 HUD pass readiness");
-assert(healthy.hud.metadata.rev3_pass_readiness === "hud:on", "runtime HUD metadata should expose rev3 HUD pass readiness");
-assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("mask=rev3")), "SENSOR row should expose canonical FeatureMask storage texture readiness");
-assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("rev3=ais:ok3/8:d0.125/sp:matrix-state")), "SENSOR row should expose rev3 pilot parity diagnostics");
-assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("pass=ais:on/sp:on")), "SENSOR row should expose rev3 Aisthesis/Spatial pass readiness");
-assert(healthy.sensor.metadata.rev3_pass_readiness === "ais:on/sp:on", "runtime SENSOR metadata should expose rev3 Aisthesis/Spatial pass readiness");
-assert(healthy.sensor.metadata.rev3_feature_mask_storage_texture === "true", "runtime SENSOR metadata should expose canonical FeatureMask storage texture readiness");
-assert(healthy.sensor.rev3Aisthesis?.summary?.mode === "compute-vector", "resolved sensor status should retain rev3 Aisthesis pilot summary");
-assert(healthy.sensor.rev3Spatial?.summary?.mode === "matrix-state-vector", "resolved sensor status should retain rev3 Spatial pilot summary");
-assert(healthy.sensor.metadata.rev3_pass_id === "sensor", "runtime SENSOR metadata should expose the canonical pass id");
-assert(healthy.sensor.metadata.rev3_pilot_state === "ais:within;sp:unavailable", "runtime SENSOR metadata should combine Aisthesis and Spatial pilot states");
-assert(healthy.sensor.metadata.rev3_promotion_gate === "ais:trace-candidate;sp:unavailable", "runtime SENSOR metadata should combine Aisthesis and Spatial promotion gates");
-assert(healthy.sensor.metadata.rev3_promotion_blocked === "true", "runtime SENSOR metadata should mark blocked composite promotion readiness");
-assert(healthy.sensor.metadata.rev3_promotion_candidate_ready === "false", "runtime SENSOR metadata should expose promotion candidate readiness");
-assert(healthy.sensor.metadata.rev3_promotion_diagnostic_stable === "false", "runtime SENSOR metadata should expose diagnostic stability");
-assert(healthy.sensor.metadata.rev3_promotion_reason === "sp:unavailable", "runtime SENSOR metadata should identify the blocking promotion side");
-assert(healthy.sensor.metadata.rev3_candidate_streak === "3", "runtime SENSOR metadata should expose Aisthesis candidate streak");
-assert(healthy.sensor.metadata.rev3_diagnostic_streak === "3", "runtime SENSOR metadata should expose the strongest diagnostic streak");
-assert(healthy.sensor.metadata.rev3_required_streak === "8", "runtime SENSOR metadata should expose the required streak");
+assert(healthy.rows.some(row => row.label === "HUD" && row.value.includes("pass=hud:on")), "HUD row should expose canonical HUD pass readiness");
+assert(healthy.hud.metadata.pass_readiness === "hud:on", "runtime HUD metadata should expose canonical HUD pass readiness");
+assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("mask=canonical")), "SENSOR row should expose canonical FeatureMask storage texture readiness");
+assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("canonical=ais:ok3/8:d0.125/sp:matrix-state")), "SENSOR row should expose canonical pilot parity diagnostics");
+assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("pass=ais:on/sp:on")), "SENSOR row should expose canonical Aisthesis/Spatial pass readiness");
+assert(healthy.sensor.metadata.pass_readiness === "ais:on/sp:on", "runtime SENSOR metadata should expose canonical Aisthesis/Spatial pass readiness");
+assert(healthy.sensor.metadata.feature_mask_storage_texture === "true", "runtime SENSOR metadata should expose canonical FeatureMask storage texture readiness");
+assert(healthy.sensor.canonicalAisthesis?.summary?.mode === "compute-vector", "resolved sensor status should retain canonical Aisthesis pilot summary");
+assert(healthy.sensor.canonicalSpatial?.summary?.mode === "matrix-state-vector", "resolved sensor status should retain canonical Spatial pilot summary");
+assert(healthy.sensor.metadata.pass_id === "sensor", "runtime SENSOR metadata should expose the canonical pass id");
+assert(healthy.sensor.metadata.pilot_state === "ais:within;sp:unavailable", "runtime SENSOR metadata should combine Aisthesis and Spatial pilot states");
+assert(healthy.sensor.metadata.promotion_gate === "ais:trace-candidate;sp:unavailable", "runtime SENSOR metadata should combine Aisthesis and Spatial promotion gates");
+assert(healthy.sensor.metadata.promotion_blocked === "true", "runtime SENSOR metadata should mark blocked composite promotion readiness");
+assert(healthy.sensor.metadata.promotion_candidate_ready === "false", "runtime SENSOR metadata should expose promotion candidate readiness");
+assert(healthy.sensor.metadata.promotion_diagnostic_stable === "false", "runtime SENSOR metadata should expose diagnostic stability");
+assert(healthy.sensor.metadata.promotion_reason === "sp:unavailable", "runtime SENSOR metadata should identify the blocking promotion side");
+assert(healthy.sensor.metadata.candidate_streak === "3", "runtime SENSOR metadata should expose Aisthesis candidate streak");
+assert(healthy.sensor.metadata.diagnostic_streak === "3", "runtime SENSOR metadata should expose the strongest diagnostic streak");
+assert(healthy.sensor.metadata.required_streak === "8", "runtime SENSOR metadata should expose the required streak");
 assert(healthy.sensor.metadata.doom_runtime_stamped === "true", "runtime SENSOR metadata should be marked as runtime stamped");
 assert(healthy.rows.find(row => row.label === "SENSOR")?.metadata?.doom_zero_copy === "true", "runtime SENSOR row metadata should preserve zero-copy state");
 assert(healthy.game.memoryMB === 27, "resolved game status should expose estimated memory as a numeric diagnostic");
 assert(healthy.game.providerBackend === "browser-webgpu" && healthy.game.providerRendererInitialized === true, "resolved game status should expose provider backend and renderer state");
-assert(healthy.rows.some(row => row.label === "HUD" && row.value.includes("GPU composite")), "HUD row should show active composite");
+assert(healthy.rows.some(row => row.label === "HUD" && row.value.includes("GPU HUD single-pass")), "HUD row should show active GPU single-pass presentation");
 assert(healthy.rows.some(row => row.label === "SENSOR" && row.value.includes("ais=gpu") && row.value.includes("spatial=gpu") && row.value.includes("matrix=dto-flat") && row.value.includes("compute=active")), "SENSOR row should show active GPU Aisthesis, GPU Spatial, DTO-flat matrix upload, and compute activity");
 
 const stringFalseMask = gpuPath.resolveGpuPathStatus({
@@ -173,7 +174,7 @@ const stringFalseMask = gpuPath.resolveGpuPathStatus({
       computeReady: true,
       gpuComputeActive: true,
       maskTextureReady: true,
-      rev3Pilot: {
+      canonicalPilot: {
         featureMaskStorageTexture: "false"
       }
     }
@@ -184,7 +185,7 @@ const stringFalseMask = gpuPath.resolveGpuPathStatus({
 });
 
 assert(stringFalseMask.rows.some(row => row.label === "SENSOR" && row.value.includes("mask=gpu")), "SENSOR row should keep legacy GPU mask when canonical FeatureMask storage metadata is string false");
-assert(!stringFalseMask.rows.some(row => row.label === "SENSOR" && row.value.includes("mask=rev3")), "SENSOR row should not promote string false canonical FeatureMask metadata to rev3");
+assert(!stringFalseMask.rows.some(row => row.label === "SENSOR" && row.value.includes("mask=canonical")), "SENSOR row should not promote string false canonical FeatureMask metadata to canonical");
 
 const canvasCpu = gpuPath.resolveGpuPathStatus({
   renderer: "canvas-fallback(WebGpuComputeProvider)",
@@ -257,11 +258,11 @@ assert(canonical.text === "game=contract; bonsai=zcp; hud=gpu-contract; sensor=m
 assert(canonical.shortText === "GPU contract | B:zcp H:panel S:matrix", "canonical GPU path short text should be preserved");
 assert(canonical.rows.length === 4, "canonical GPU path DTO should preserve four lanes");
 assert(canonical.rows.some(row => row.label === "SENSOR" && row.value.includes("doom.gpu.spatial.reasoning")), "canonical SENSOR row should preserve spatial target");
-assert(canonical.sensor.metadata.rev3_pass_id === "sensor", "canonical SENSOR metadata should preserve the Rev3 pass id");
-assert(canonical.sensor.metadata.rev3_path_role === "sensor", "canonical SENSOR metadata should preserve the Rev3 path role");
-assert(canonical.sensor.metadata.rev3_pilot_state === "dto-projected", "canonical SENSOR metadata should expose pre-runtime pilot state");
-assert(canonical.sensor.metadata.rev3_promotion_blocked === "true", "canonical SENSOR metadata should expose blocked promotion readiness before runtime stamp");
-assert(canonical.sensor.metadata.rev3_promotion_reason === "runtime-stamp-required", "canonical SENSOR metadata should expose runtime-stamp-required as the promotion reason");
+assert(canonical.sensor.metadata.pass_id === "sensor", "canonical SENSOR metadata should preserve the Canonical pass id");
+assert(canonical.sensor.metadata.path_role === "sensor", "canonical SENSOR metadata should preserve the Canonical path role");
+assert(canonical.sensor.metadata.pilot_state === "dto-projected", "canonical SENSOR metadata should expose pre-runtime pilot state");
+assert(canonical.sensor.metadata.promotion_blocked === "true", "canonical SENSOR metadata should expose blocked promotion readiness before runtime stamp");
+assert(canonical.sensor.metadata.promotion_reason === "runtime-stamp-required", "canonical SENSOR metadata should expose runtime-stamp-required as the promotion reason");
 assert(canonical.sensor.metadata.doom_mode === "GPU matrix", "canonical SENSOR metadata should preserve Doom row mode");
 assert(canonical.sensor.metadata.doom_zero_copy === "true", "canonical SENSOR metadata should preserve zero-copy state");
 
@@ -280,10 +281,10 @@ const providerMetadata = gpuPath.resolveGpuPathStatus({
             tone: "gpu",
             zeroCopy: true,
             metadata: {
-              rev3_promotion_reason: "authoritative-not-ready",
-              rev3_promotion_blocked: "false",
-              rev3_promotion_candidate_ready: "true",
-              rev3_promotion_diagnostic_stable: "true"
+              promotion_reason: "authoritative-not-ready",
+              promotion_blocked: "false",
+              promotion_candidate_ready: "true",
+              promotion_diagnostic_stable: "true"
             }
           }
         ],
@@ -294,10 +295,10 @@ const providerMetadata = gpuPath.resolveGpuPathStatus({
   }
 });
 
-assert(providerMetadata.sensor.metadata.rev3_promotion_reason === "authoritative-not-ready", "canonical SENSOR metadata should preserve provider-supplied promotion reason");
-assert(providerMetadata.sensor.metadata.rev3_promotion_blocked === "false", "canonical SENSOR metadata should preserve provider-supplied blocked value");
-assert(providerMetadata.sensor.metadata.rev3_promotion_candidate_ready === "true", "canonical SENSOR metadata should preserve provider-supplied candidate readiness");
-assert(providerMetadata.sensor.metadata.rev3_promotion_diagnostic_stable === "true", "canonical SENSOR metadata should preserve provider-supplied diagnostic stability");
+assert(providerMetadata.sensor.metadata.promotion_reason === "authoritative-not-ready", "canonical SENSOR metadata should preserve provider-supplied promotion reason");
+assert(providerMetadata.sensor.metadata.promotion_blocked === "false", "canonical SENSOR metadata should preserve provider-supplied blocked value");
+assert(providerMetadata.sensor.metadata.promotion_candidate_ready === "true", "canonical SENSOR metadata should preserve provider-supplied candidate readiness");
+assert(providerMetadata.sensor.metadata.promotion_diagnostic_stable === "true", "canonical SENSOR metadata should preserve provider-supplied diagnostic stability");
 
 const metadataInvalid = gpuPath.resolveGpuPathStatus({
   autoplay: {
@@ -315,7 +316,7 @@ const metadataInvalid = gpuPath.resolveGpuPathStatus({
             zeroCopy: false,
             cpuFallback: true,
             metadata: {
-              rev3_metadata_validation_error: "rev3_promotion_gate"
+              metadata_validation_error: "promotion_gate"
             }
           }
         ],
@@ -326,9 +327,9 @@ const metadataInvalid = gpuPath.resolveGpuPathStatus({
   }
 });
 
-assert(metadataInvalid.sensor.reason === "metadata-invalid:rev3_promotion_gate", "canonical SENSOR reason should expose Rev3 metadata validation errors");
-assert(metadataInvalid.sensor.metadata.doom_reason === "metadata-invalid:rev3_promotion_gate", "canonical SENSOR metadata should expose metadata validation fallback reason");
-assert(metadataInvalid.sensor.metadata.rev3_metadata_validation_error === "rev3_promotion_gate", "canonical SENSOR metadata should preserve validation error key");
+assert(metadataInvalid.sensor.reason === "metadata-invalid:promotion_gate", "canonical SENSOR reason should expose Canonical metadata validation errors");
+assert(metadataInvalid.sensor.metadata.doom_reason === "metadata-invalid:promotion_gate", "canonical SENSOR metadata should expose metadata validation fallback reason");
+assert(metadataInvalid.sensor.metadata.metadata_validation_error === "promotion_gate", "canonical SENSOR metadata should preserve validation error key");
 
 console.log("DOOM_GPU_PATH_STATUS_VM_TEST_OK", {
   version: gpuPath.version,

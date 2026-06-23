@@ -2,6 +2,18 @@ namespace AIKernel.Doom.Provider.Autoplay;
 
 internal static class AutoplayPipelineDefaultStages
 {
+    /// <summary>
+    /// [EN] Executes the <c>Create</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>Create</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static List<AutoplayPipelineStageDefinition> Create()
         =>
         [
@@ -52,7 +64,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.0f),
             Stage(
                 "combat-auditory",
-                "soundEvent && ammoLikelyEmpty == false",
+                "soundEvent && trustedCombatEvidence && ammoLikelyEmpty == false",
                 AutoplayPipelineActionTemplates.Combat(),
                 80,
                 "avoid-enemy",
@@ -60,7 +72,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.35f),
             Stage(
                 "combat-visual",
-                "absFaceSig >= $combatFaceThreshold && ammoLikelyEmpty == false",
+                "visualEnemyVisible && trustedCombatEvidence && ammoLikelyEmpty == false",
                 AutoplayPipelineActionTemplates.Combat(),
                 79,
                 "avoid-enemy",
@@ -76,7 +88,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.1f),
             Stage(
                 "combat-visual-center-fire",
-                "doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false",
+                "doorOpenedCount > 0 && visualEnemyVisible && trustedCombatEvidence && ammoLikelyEmpty == false",
                 AutoplayPipelineActionTemplates.VisualCombat(),
                 87.4f,
                 "engage-front-enemy",
@@ -84,7 +96,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.18f),
             Stage(
                 "computer-room-audio-enemy-orient",
-                "doorOpenedCount > 0 && centralHallEntered == false && audioEnemyStrong && computerRoomCombatContext && ammoLikelyEmpty == false",
+                "doorOpenedCount > 0 && centralHallEntered == false && audioEnemyStrong && trustedCombatEvidence && computerRoomCombatContext && ammoLikelyEmpty == false",
                 AutoplayPipelineActionTemplates.AuditoryCombat(),
                 86.8f,
                 "engage-front-enemy",

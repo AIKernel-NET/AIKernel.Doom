@@ -148,12 +148,12 @@ Because `ref/env.txt` does not define a Bonsai transformer inference API, tokeni
 
 NuGet references use exact ranges:
 
-- `AIKernel.Core` `[0.1.1]`
-- `AIKernel.Providers.Standard` `[0.1.1]`
-- `AIKernel.Wasm.Runtime` `[0.1.1]`
-- `AIKernel.Wasm.WebGpuComputeProvider` `[0.1.1]`
+- `AIKernel.Core` `[0.1.3]`
+- `AIKernel.Providers.Standard` `[0.1.3]`
+- `AIKernel.Wasm.Runtime` `[0.1.3]`
+- `AIKernel.Wasm.WebGpuComputeProvider` `[0.1.3]`
 
-The prompt named `AIKernel.Providers` and `AIKernel.Tools` as package IDs, but those meta package IDs are not published on nuget.org. `AIKernel.Tools` `[0.1.0-dev9]` is therefore not referenced; the CLI surface is implemented locally against the public capability contracts.
+The prompt named `AIKernel.Providers` and `AIKernel.Tools` as package IDs, but those meta package IDs are not published on nuget.org. `AIKernel.Tools` is therefore not referenced; the CLI surface is implemented locally against the public capability contracts.
 
 ## Known Constraints
 

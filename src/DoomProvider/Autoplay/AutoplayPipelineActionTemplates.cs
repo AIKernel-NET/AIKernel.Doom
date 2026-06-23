@@ -2,6 +2,18 @@ namespace AIKernel.Doom.Provider.Autoplay;
 
 internal static class AutoplayPipelineActionTemplates
 {
+    /// <summary>
+    /// [EN] Executes the <c>DoorProbe</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>DoorProbe</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> DoorProbe()
         => new(StringComparer.Ordinal)
         {
@@ -10,6 +22,18 @@ internal static class AutoplayPipelineActionTemplates
             ["useKey"] = "absQDelta <= $doorAimToleranceDegrees && depthSig <= $doorUseDepth"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>EmergencyEscape</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>EmergencyEscape</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> EmergencyEscape()
         => new(StringComparer.Ordinal)
         {
@@ -21,6 +45,18 @@ internal static class AutoplayPipelineActionTemplates
             ["useKey"] = "context == wall && depthSig <= $doorUseDepth"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>Combat</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>Combat</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> Combat()
         => new(StringComparer.Ordinal)
         {
@@ -31,6 +67,18 @@ internal static class AutoplayPipelineActionTemplates
             ["attackKey"] = "ammoLikelyEmpty == false && depthSig < 0.82 || ammoLikelyEmpty == false && soundEvent"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>VisualCombat</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>VisualCombat</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> VisualCombat()
         => new(StringComparer.Ordinal)
         {
@@ -42,6 +90,18 @@ internal static class AutoplayPipelineActionTemplates
             ["attackKey"] = "ammoLikelyEmpty == false && visualEnemyFireReady"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>AuditoryCombat</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>AuditoryCombat</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> AuditoryCombat()
         => new(StringComparer.Ordinal)
         {
@@ -50,9 +110,21 @@ internal static class AutoplayPipelineActionTemplates
             ["strafeLeft"] = "false",
             ["strafeRight"] = "false",
             ["turnYaw"] = "enemyCombatYaw",
-            ["attackKey"] = "ammoLikelyEmpty == false && audioEnemyFront || ammoLikelyEmpty == false && visualEnemyFireReady || ammoLikelyEmpty == false && visualEnemyConfidence >= 0.35 || ammoLikelyEmpty == false && absFaceSig >= $combatFaceThreshold"
+            ["attackKey"] = "ammoLikelyEmpty == false && audioEnemyFront && trustedCombatEvidence || ammoLikelyEmpty == false && visualEnemyFireReady || ammoLikelyEmpty == false && visualEnemyConfidence >= 0.35 && trustedCombatEvidence"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>StraightAdvance</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>StraightAdvance</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> StraightAdvance()
         => new(StringComparer.Ordinal)
         {
@@ -65,6 +137,18 @@ internal static class AutoplayPipelineActionTemplates
             ["attackKey"] = "false"
         };
 
+    /// <summary>
+    /// [EN] Executes the <c>OpenCruise</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>OpenCruise</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static Dictionary<string, string> OpenCruise()
         => new(StringComparer.Ordinal)
         {

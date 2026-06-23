@@ -417,6 +417,108 @@ assert(postDoorCloseWallAction.stage === "post-door-close-wall-forward-release",
 assert(postDoorCloseWallAction.move === "forward", "Post-door close-wall release should keep forward movement");
 assert(postDoorCloseWallAction.use === false, "Post-door close-wall release must not press Use again");
 
+const postDoorLowGapIngressLockRuntime = runtimeFactory.create(publicProfile);
+postDoorLowGapIngressLockRuntime.predictions = 888;
+const postDoorLowGapIngressLockAction = postDoorLowGapIngressLockRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  routeAbortHint: "turn-stall",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.23,
+  computerRoomConfidence: 0.07,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.07,
+  computerDarkPanelScore: 0.00,
+  postDoorTerminalSurface: 0.25,
+  bridgeConfidence: 0.12,
+  bridgeDoorScore: 0,
+  wallVector: 0.34,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 0,
+  actionRepeatFrames: 1,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.3332,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.37,
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.30,
+      corridor: 0.34,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.12,
+      "computer-room": 0.25
+    }
+  }
+});
+assert(postDoorLowGapIngressLockAction.stage === "post-door-low-gap-ingress-forward-lock", `Open FirstDoor low-gap ingress should lock straight forward instead of routeFallback yaw (actual=${postDoorLowGapIngressLockAction.stage})`);
+assert(postDoorLowGapIngressLockAction.move === "forward", "Open FirstDoor low-gap ingress lock should keep forward pressure into the room");
+assert(postDoorLowGapIngressLockAction.turn === "none", "Open FirstDoor low-gap ingress lock should not turn away from the doorway");
+
+const postDoorWeakAudioBeforeIngressRuntime = runtimeFactory.create(publicProfile);
+postDoorWeakAudioBeforeIngressRuntime.predictions = 1392;
+const postDoorWeakAudioBeforeIngressAction = postDoorWeakAudioBeforeIngressRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  audioEnemyStrong: true,
+  computerRoomCombatContext: true,
+  audioEnemyConfidence: 0.29,
+  audioEnemyDirection: "right",
+  enemyCombatYaw: 18,
+  computerRoomConfidence: 0.17,
+  computerRoomScore: 0.17,
+  computerPanelScore: 0.41,
+  computerDarkPanelScore: 0.00,
+  postDoorTerminalSurface: 0.41,
+  bridgeConfidence: 0.31,
+  bridgeDoorScore: 0.33,
+  wallVector: 0.49,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 0,
+  actionRepeatFrames: 19,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  spawnCorridorGapScore: 0.37,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.49,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.37,
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.34,
+      enemy: 0.10,
+      "safe-zone": 0.2,
+      bridge: 0.31,
+      "computer-room": 0.41
+    }
+  }
+});
+assert(postDoorWeakAudioBeforeIngressAction.stage === "post-door-terminal-ingress-straight-lock", `Weak post-door audio without trusted combat evidence should preserve straight room ingress instead of audio orient or bridge yaw (actual=${postDoorWeakAudioBeforeIngressAction.stage})`);
+assert(postDoorWeakAudioBeforeIngressAction.move === "forward", "Weak post-door audio before ingress should keep forward movement");
+assert(postDoorWeakAudioBeforeIngressAction.turn === "none", "Weak post-door audio before ingress should not yaw away from the doorway");
+
 const postDoorTerminalAdvanceRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalAdvanceRuntime.predictions = 2502;
 const postDoorTerminalAdvanceAction = postDoorTerminalAdvanceRuntime.predict({
@@ -3792,6 +3894,8 @@ const computerRoomAudioOrientAction = computerRoomAudioOrientRuntime.predict({
   audioEnemyConfidence: 0.45,
   audioEnemyDirection: "right",
   audioEnemyStrong: true,
+  trustedEnemyThreat: 0.45,
+  trustedCombatEvidence: true,
   audioCombatYaw: 18,
   enemyCombatYaw: 18,
   enemyConfidence: 0.05,
@@ -3824,6 +3928,8 @@ const combatVisualCenterAction = combatVisualCenterRuntime.predict({
   computerRoomConfidence: 0.42,
   enemyConfidence: 0.58,
   visualEnemyConfidence: 0.58,
+  trustedEnemyThreat: 0.58,
+  trustedCombatEvidence: true,
   faceSig: -0.6,
   visualEnemyVisible: true,
   visualEnemyCentered: false,
@@ -3857,6 +3963,8 @@ const combatVisualFireAction = combatVisualFireRuntime.predict({
   computerRoomConfidence: 0.42,
   enemyConfidence: 0.90,
   visualEnemyConfidence: 0.90,
+  trustedEnemyThreat: 0.90,
+  trustedCombatEvidence: true,
   faceSig: 0.03,
   visualEnemyVisible: true,
   visualEnemyCentered: true,
@@ -3890,6 +3998,9 @@ const combatVisualWeakFalsePositiveAction = combatVisualWeakFalsePositiveRuntime
   computerRoomConfidence: 0.42,
   enemyConfidence: 0.44,
   visualEnemyConfidence: 0.44,
+  enemyStructuralDecoy: true,
+  trustedEnemyThreat: 0,
+  trustedCombatEvidence: false,
   audioEnemyConfidence: 0.10,
   audioEnemyStrong: false,
   faceSig: 0.0,
@@ -3924,6 +4035,9 @@ const combatVisualMediumFalsePositiveAction = combatVisualMediumFalsePositiveRun
   computerRoomConfidence: 0.24,
   enemyConfidence: 0.72,
   visualEnemyConfidence: 0.72,
+  enemyStructuralDecoy: true,
+  trustedEnemyThreat: 0,
+  trustedCombatEvidence: false,
   audioEnemyConfidence: 0.01,
   audioEnemyStrong: false,
   faceSig: 0.0,
@@ -7931,6 +8045,177 @@ const doorApproachObservedWeakDoorState = {
 const doorApproachObservedWeakDoorUseAction = doorApproachObservedWeakDoorUseRuntime.predict(doorApproachObservedWeakDoorState);
 assert(doorApproachObservedWeakDoorUseAction.stage === "door-approach-weak-bridge-panel-probe-use", `Observed weak door panel should spend Use even when the right gap is only 0.19 (actual=${doorApproachObservedWeakDoorUseAction.stage})`);
 assert(doorApproachObservedWeakDoorUseAction.use === true, "Observed weak door panel should emit Use");
+
+const doorApproachCpuRightCornerBackoffRuntime = runtimeFactory.create(publicProfile);
+doorApproachCpuRightCornerBackoffRuntime.predictions = 1011;
+const doorApproachCpuRightCornerBackoffState = {
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.49,
+  motionForwardProgress: 0.00,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 5,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 82,
+  routeBackoffUsed: 0,
+  routeLoopBudgetExceeded: true,
+  routeAbortHint: "turn-stall",
+  doorOpenedCount: 0,
+  predictions: 1011,
+  blueFloorScore: 0,
+  courtyardScore: 0.23,
+  courtyardTurn: "left",
+  bridgeLaneTurn: "none",
+  spawnCorridorGapScore: 0.20,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.33,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.04,
+  bridgeDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.68,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.85,
+      bridge: 0.5,
+      "computer-room": 0.69
+    }
+  }
+};
+const doorApproachCpuRightCornerBackoffAction = doorApproachCpuRightCornerBackoffRuntime.predict(doorApproachCpuRightCornerBackoffState);
+assert(doorApproachCpuRightCornerBackoffAction.stage === "door-approach-right-corner-backoff", `CPU weak-door right corner should back off before continuing the turn loop (actual=${doorApproachCpuRightCornerBackoffAction.stage})`);
+assert(doorApproachCpuRightCornerBackoffAction.move === "back", "CPU weak-door right corner should reverse before yawing");
+assert(doorApproachCpuRightCornerBackoffAction.turn === "right", "CPU weak-door right corner should keep the right door-ingress yaw");
+
+const doorApproachCpuWeakDoorMemoryUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachCpuWeakDoorMemoryUseRuntime.predictions = 1011;
+const doorApproachCpuWeakDoorMemoryUseAction = doorApproachCpuWeakDoorMemoryUseRuntime.predict(Object.assign({}, doorApproachCpuRightCornerBackoffState, {
+  actionRepeatFrames: 6
+}));
+assert(doorApproachCpuWeakDoorMemoryUseAction.stage === "door-approach-cpu-weak-door-memory-use", `After CPU right-corner backoff, weak door memory should spend a stopped Use pulse (actual=${doorApproachCpuWeakDoorMemoryUseAction.stage})`);
+assert(doorApproachCpuWeakDoorMemoryUseAction.move === "none", "CPU weak-door memory Use should stop movement before pressing Use");
+assert(doorApproachCpuWeakDoorMemoryUseAction.use === true, "CPU weak-door memory should emit Use after the backoff window");
+
+const doorApproachCloseAmbiguousPanelUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachCloseAmbiguousPanelUseRuntime.predictions = 935;
+const doorApproachCloseAmbiguousPanelUseAction = doorApproachCloseAmbiguousPanelUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.10,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 1,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  routeLoopBudgetExceeded: false,
+  routeDeadEndRisk: false,
+  routeDeadEndTrimRequired: false,
+  doorOpenedCount: 0,
+  predictions: 935,
+  blueFloorScore: 0,
+  courtyardScore: 0.18,
+  courtyardTurn: "none",
+  bridgeLaneTurn: "none",
+  spawnCorridorGapScore: 0.20,
+  spawnCorridorGapTurn: "right",
+  spawnCorridorGapLockFrames: 180,
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.04,
+  bridgeDoorScore: 0,
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.68,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.85,
+      bridge: 0.26,
+      "computer-room": 0.39
+    }
+  }
+});
+assert(doorApproachCloseAmbiguousPanelUseAction.stage === "door-approach-close-ambiguous-panel-use", `Close ambiguous CPU door face should spend stopped Use instead of continuing forward/right (actual=${doorApproachCloseAmbiguousPanelUseAction.stage})`);
+assert(doorApproachCloseAmbiguousPanelUseAction.move === "none", "Close ambiguous CPU door Use should stop movement before pressing Use");
+assert(doorApproachCloseAmbiguousPanelUseAction.use === true, "Close ambiguous CPU door face should emit one bounded Use pulse");
+
+const doorApproachRedPanelDeadEndUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachRedPanelDeadEndUseRuntime.predictions = 1033;
+const doorApproachRedPanelDeadEndUseAction = doorApproachRedPanelDeadEndUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.10,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 2,
+  moveRepeatFrames: 2,
+  turnRepeatFrames: 24,
+  routeLoopBudgetExceeded: false,
+  routeDeadEndRisk: true,
+  routeDeadEndTrimRequired: true,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.32,
+  doorOpenedCount: 0,
+  predictions: 1033,
+  blueFloorScore: 0,
+  courtyardScore: 0.25,
+  courtyardTurn: "none",
+  bridgeLaneTurn: "left",
+  spawnCorridorGapScore: 0.28,
+  spawnCorridorGapTurn: "right",
+  spawnCorridorGapLockFrames: 180,
+  spawnLandmarkRouteEvidence: 0.40,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.04,
+  bridgeDoorScore: 0.10,
+  firstDoorVision9x9Score: 0.52,
+  firstDoorVision9x9RedScore: 0.28,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.61,
+      corridor: 0.45,
+      enemy: 0,
+      "safe-zone": 0.20,
+      bridge: 0.10,
+      "computer-room": 0.06
+    }
+  }
+});
+assert(doorApproachRedPanelDeadEndUseAction.stage === "door-approach-red-panel-dead-end-use", `Near red-panel dead-end should spend stopped Use before barrel trim keeps circling (actual=${doorApproachRedPanelDeadEndUseAction.stage})`);
+assert(doorApproachRedPanelDeadEndUseAction.move === "none", "Near red-panel dead-end Use should stop movement before pressing Use");
+assert(doorApproachRedPanelDeadEndUseAction.use === true, "Near red-panel dead-end should emit a Use pulse");
 
 const doorApproachObservedWeakDoorCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachObservedWeakDoorCooldownRuntime.predictions = 1186;

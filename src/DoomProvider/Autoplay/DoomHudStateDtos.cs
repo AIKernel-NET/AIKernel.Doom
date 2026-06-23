@@ -19,11 +19,35 @@ internal static class DoomGpuContracts
     public const string AisthesisMaskUsage = "analysis-mask";
     public const string SpatialReasoningOutputTarget = "doom.gpu.spatial.reasoning";
     public const int HudGridSize = 9;
+    /// <summary>
+    /// [EN] Executes the <c>HudGridSize</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>HudGridSize</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public const int HudCellCount = HudGridSize * HudGridSize;
     public const int HudPanelValueCount = 16;
     public const int HudRectCount = 16;
     public const int HudLabelCount = 16;
     public const int HudRectStride = 8;
+    /// <summary>
+    /// [EN] Executes the <c>HudRectStride</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>HudRectStride</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public const int HudRectFloatCount = HudRectCount * HudRectStride;
     public const int AisthesisMatrixFloatCount = 512;
     public const int AisthesisFeatureFloatCount = 32;
@@ -3439,20 +3463,20 @@ public sealed record DoomGpuPathStatusDto
     {
         var metadata = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
-            [GpuDiagnosticsMetadataKeys.Rev3PassId] = passId,
-            [GpuDiagnosticsMetadataKeys.Rev3PathRole] = passId,
-            [GpuDiagnosticsMetadataKeys.Rev3PilotState] = row is null ? GpuRev3PilotStates.Unavailable : GpuRev3PilotStates.DtoProjected,
-            [GpuDiagnosticsMetadataKeys.Rev3PromotionGate] = row is null ? GpuRev3PromotionGates.Unavailable : GpuRev3PromotionGates.RuntimeStampRequired,
-            [GpuDiagnosticsMetadataKeys.Rev3CandidateStreak] = "0",
-            [GpuDiagnosticsMetadataKeys.Rev3DiagnosticStreak] = "0",
-            [GpuDiagnosticsMetadataKeys.Rev3RequiredStreak] = "0",
-            [GpuDiagnosticsMetadataKeys.Rev3AuthoritativeReady] = "false",
-            [GpuDiagnosticsMetadataKeys.Rev3DiagnosticReady] = "false",
-            [GpuDiagnosticsMetadataKeys.Rev3ExecutionMode] = row is null ? GpuRev3ExecutionModes.DeterministicFallback : GpuRev3ExecutionModes.BrowserWebGpuCompute,
-            [GpuDiagnosticsMetadataKeys.Rev3FeatureMaskStorageTexture] = row is not null && string.Equals(passId, "sensor", StringComparison.Ordinal) && row.ZeroCopy ? "true" : "false",
-            [GpuDiagnosticsMetadataKeys.Rev3FrameIndex] = "0",
-            [GpuDiagnosticsMetadataKeys.Rev3PassReadiness] = CreateDtoPassReadiness(),
-            [GpuDiagnosticsMetadataKeys.Rev3SampleTicks] = "0",
+            [GpuDiagnosticsMetadataKeys.CanonicalPassId] = passId,
+            [GpuDiagnosticsMetadataKeys.CanonicalPathRole] = passId,
+            [GpuDiagnosticsMetadataKeys.CanonicalPilotState] = row is null ? GpuCanonicalPilotStates.Unavailable : GpuCanonicalPilotStates.DtoProjected,
+            [GpuDiagnosticsMetadataKeys.CanonicalPromotionGate] = row is null ? GpuPromotionGates.Unavailable : GpuPromotionGates.RuntimeStampRequired,
+            [GpuDiagnosticsMetadataKeys.CanonicalCandidateStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.CanonicalDiagnosticStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.CanonicalRequiredStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.CanonicalAuthoritativeReady] = "false",
+            [GpuDiagnosticsMetadataKeys.CanonicalDiagnosticReady] = "false",
+            [GpuDiagnosticsMetadataKeys.CanonicalExecutionMode] = row is null ? GpuExecutionModes.DeterministicFallback : GpuExecutionModes.BrowserWebGpuCompute,
+            [GpuDiagnosticsMetadataKeys.CanonicalFeatureMaskStorageTexture] = row is not null && string.Equals(passId, "sensor", StringComparison.Ordinal) && row.ZeroCopy ? "true" : "false",
+            [GpuDiagnosticsMetadataKeys.CanonicalFrameIndex] = "0",
+            [GpuDiagnosticsMetadataKeys.CanonicalPassReadiness] = CreateDtoPassReadiness(),
+            [GpuDiagnosticsMetadataKeys.CanonicalSampleTicks] = "0",
             ["doom_runtime_stamped"] = runtimeStamped ? "true" : "false",
             ["doom_missing_row"] = row is null ? "true" : "false"
         };
@@ -3488,11 +3512,11 @@ public sealed record DoomGpuPathStatusDto
 
     private static void AddPromotionReadinessMetadata(SortedDictionary<string, string> metadata)
     {
-        var readiness = GpuCanonicalValidation.EvaluateRev3PromotionReadiness(metadata);
-        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked] = readiness.IsBlocked ? "true" : "false";
-        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady] = readiness.IsPromotionCandidate ? "true" : "false";
-        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable] = readiness.IsDiagnosticStable ? "true" : "false";
-        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason] = NormalizeMetadataValue(readiness.Reason, "unknown");
+        var readiness = GpuCanonicalValidation.EvaluatePromotionReadiness(metadata);
+        metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionBlocked] = readiness.IsBlocked ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionCandidateReady] = readiness.IsPromotionCandidate ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionDiagnosticStable] = readiness.IsDiagnosticStable ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.CanonicalPromotionReason] = NormalizeMetadataValue(readiness.Reason, "unknown");
     }
 
     private static string CreateDtoPassReadiness()

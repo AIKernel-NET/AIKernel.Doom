@@ -7,16 +7,20 @@ using AIKernel.Doom.Wasm;
 using AIKernel.Dtos.Core;
 using AIKernel.Wasm.Runtime;
 using AIKernel.Wasm.Runtime.Abstractions;
-/// <summary>
-/// EN: Represents DoomProvider.
-/// EN: Documentation for public API. JA: DoomProvider を表します。
-/// </summary>
 
+/// <summary>
+/// [EN] Defines the <c>DoomProvider</c> public integration contract used by the Doom runtime, HUD projection, autoplay planner, and test fixtures.
+/// [JA] Doom runtime、HUD 投影、autoplay planner、および test fixture が共有する public integration contract として <c>DoomProvider</c> を定義します。
+/// </summary>
+/// <remarks>
+/// [EN] Keep this shape stable: consumers may bind it from C#, JavaScript DTO projection, profile fixtures, or generated reference documentation.
+/// [JA] この形状は安定させてください。C#、JavaScript DTO 投影、profile fixture、生成 reference documentation から参照される可能性があります。
+/// </remarks>
 public sealed class DoomProvider : IProvider, IWasmProcessProvider
 {
     /// <summary>
     /// EN: Gets the DoomProcessName constant.
-    /// EN: Documentation for public API. JA: DoomProcessName 定数を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] DoomProcessName 定数を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
     public const string DoomProcessName = "doom";
 
@@ -36,7 +40,7 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     private string _lastFailure = string.Empty;
     /// <summary>
     /// EN: Executes DoomProvider.
-    /// EN: Documentation for public API. JA: DoomProvider を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] DoomProvider を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
     public DoomProvider(DoomProviderOptions? options = null, IDoomWasmAssetResolver? assetResolver = null)
@@ -54,48 +58,128 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Gets ProviderId.
-    /// EN: Documentation for public API. JA: ProviderId を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ProviderId を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>ProviderId</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>ProviderId</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public string ProviderId => "aikernel.doom.provider";
     /// <summary>
     /// EN: Gets Name.
-    /// EN: Documentation for public API. JA: Name を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Name を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>Name</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>Name</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public string Name => "AIKernel DOOM WASM Provider";
     /// <summary>
     /// EN: Gets Version.
-    /// EN: Documentation for public API. JA: Version を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] Version を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>ThisAssemblyVersion</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>ThisAssemblyVersion</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public string Version => ThisAssemblyVersion;
 
     private const string ThisAssemblyVersion = "0.1.3-dev0";
     /// <summary>
     /// EN: Gets State.
-    /// EN: Documentation for public API. JA: State を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] State を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public DoomProviderState State { get; private set; } = DoomProviderState.NotInitialized;
     /// <summary>
     /// EN: Executes GetCapabilities.
-    /// EN: Documentation for public API. JA: GetCapabilities を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetCapabilities を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>_capabilities</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>_capabilities</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public IProviderCapabilities GetCapabilities() => _capabilities;
     /// <summary>
     /// EN: Executes IsAvailableAsync.
-    /// EN: Documentation for public API. JA: IsAvailableAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] IsAvailableAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>IsAvailableAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>IsAvailableAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public Task<bool> IsAvailableAsync()
         => Task.FromResult(_initialized && State is DoomProviderState.Ready or DoomProviderState.Running or DoomProviderState.Stopped);
     /// <summary>
     /// EN: Executes InitializeAsync.
-    /// EN: Documentation for public API. JA: InitializeAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] InitializeAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>InitializeAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>InitializeAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task InitializeAsync()
     {
         _initialized = true;
@@ -105,9 +189,21 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes ShutdownAsync.
-    /// EN: Documentation for public API. JA: ShutdownAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ShutdownAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>ShutdownAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>ShutdownAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task ShutdownAsync()
     {
         await TryStopDoomAsync().ConfigureAwait(false);
@@ -119,9 +215,21 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes GetHealthAsync.
-    /// EN: Documentation for public API. JA: GetHealthAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] GetHealthAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>GetHealthAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>GetHealthAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public Task<ProviderHealthStatus> GetHealthAsync()
         => Task.FromResult(CheckRuntimeHealth().Map(ok => new ProviderHealthStatus(
                 ok,
@@ -133,9 +241,29 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
                 health => health));
     /// <summary>
     /// EN: Executes CreateProcessAsync.
-    /// EN: Documentation for public API. JA: CreateProcessAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] CreateProcessAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>CreateProcessAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>CreateProcessAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="name">
+    /// [EN] Supplies the <c>name</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>name</c> value です。
+    /// </param>
+    /// <param name="args">
+    /// [EN] Supplies the <c>args</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>args</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<IProcess> CreateProcessAsync(string name, object? args = null)
     {
         var result = await TryCreateProcessAsync(name, args).ConfigureAwait(false);
@@ -145,9 +273,29 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes TryCreateProcessAsync.
-    /// EN: Documentation for public API. JA: TryCreateProcessAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryCreateProcessAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryCreateProcessAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryCreateProcessAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="name">
+    /// [EN] Supplies the <c>name</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>name</c> value です。
+    /// </param>
+    /// <param name="args">
+    /// [EN] Supplies the <c>args</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>args</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<Result<IProcess>> TryCreateProcessAsync(string name, object? args = null)
         => await ValidateProcessName(name)
             .Bind(_ => TryEnsureWasmLoadedAsync())
@@ -170,9 +318,29 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes TryStartAsync.
-    /// EN: Documentation for public API. JA: TryStartAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryStartAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryStartAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryStartAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="processName">
+    /// [EN] Supplies the <c>processName</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>processName</c> value です。
+    /// </param>
+    /// <param name="cancellationToken">
+    /// [EN] Supplies the <c>cancellationToken</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>cancellationToken</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<Result<bool>> TryStartAsync(string processName, CancellationToken cancellationToken = default)
     {
         if (!string.Equals(processName, DoomProcessName, StringComparison.Ordinal))
@@ -184,15 +352,47 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes ListProcesses.
-    /// EN: Documentation for public API. JA: ListProcesses を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] ListProcesses を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>ListProcesses</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>ListProcesses</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public IReadOnlyList<WasmProcess> ListProcesses() => _processProvider.ListProcesses();
     /// <summary>
     /// EN: Gets TryPrepareAsync.
-    /// EN: Documentation for public API. JA: TryPrepareAsync を取得します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryPrepareAsync を取得します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryPrepareAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryPrepareAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="consent">
+    /// [EN] Supplies the <c>consent</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>consent</c> value です。
+    /// </param>
+    /// <param name="cancellationToken">
+    /// [EN] Supplies the <c>cancellationToken</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>cancellationToken</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<Result<DoomProviderStatus>> TryPrepareAsync(
         DoomConsentGrant consent,
         CancellationToken cancellationToken = default)
@@ -217,9 +417,25 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes TryStartDoomAsync.
-    /// EN: Documentation for public API. JA: TryStartDoomAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryStartDoomAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryStartDoomAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryStartDoomAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="cancellationToken">
+    /// [EN] Supplies the <c>cancellationToken</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>cancellationToken</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<Result<bool>> TryStartDoomAsync(CancellationToken cancellationToken = default)
     {
         if (State == DoomProviderState.Running)
@@ -239,9 +455,25 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes TryStopDoomAsync.
-    /// EN: Documentation for public API. JA: TryStopDoomAsync を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryStopDoomAsync を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryStopDoomAsync</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryStopDoomAsync</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="cancellationToken">
+    /// [EN] Supplies the <c>cancellationToken</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>cancellationToken</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public async Task<Result<bool>> TryStopDoomAsync(CancellationToken cancellationToken = default)
     {
         if (cancellationToken.IsCancellationRequested)
@@ -264,9 +496,25 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
     }
     /// <summary>
     /// EN: Executes TryStatus.
-    /// EN: Documentation for public API. JA: TryStatus を実行します。
+    /// [EN] Public package member; keep behavior and contract shape stable for automation, documentation, and integration tests. [JA] TryStatus を実行します。automation、documentation、integration test が参照するため、挙動と contract shape を安定させてください。
     /// </summary>
 
+    /// <summary>
+    /// [EN] Executes the <c>TryStatus</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>TryStatus</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="verbose">
+    /// [EN] Supplies the <c>verbose</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>verbose</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public Result<DoomProviderStatus> TryStatus(bool verbose = false)
     {
         var status = GetStatusSnapshot();

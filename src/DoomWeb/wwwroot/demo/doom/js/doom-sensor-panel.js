@@ -27,6 +27,7 @@
   });
 
   const signalChip = (label, signal) => Object.freeze({ type: "signal", label, signal });
+  const kairosRadarChip = () => Object.freeze({ type: "kairos-radar" });
   const sensorChip = key => Object.freeze({ type: "sensor", key });
   const detectionChip = key => Object.freeze({ type: "detection", key });
 
@@ -107,6 +108,7 @@
           key: "kairos",
           title: "Kairos",
           items: Object.freeze([
+            kairosRadarChip(),
             signalChip("Pathos-priority", "danger first"),
             signalChip("Ethos-priority", "fail closed"),
             signalChip("Logos-priority", "route proof")

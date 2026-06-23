@@ -2,6 +2,26 @@ namespace AIKernel.Doom.Provider.Autoplay;
 
 internal static class AutoplayCtgGateDecisionResolver
 {
+    /// <summary>
+    /// [EN] Executes the <c>Disabled</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>Disabled</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="proposal">
+    /// [EN] The proposal packet whose action should pass through the disabled gate unchanged.
+    /// [JA] disabled gate を変更なしで通過させる proposal packet です。
+    /// </param>
+    /// <param name="options">
+    /// [EN] The CTG gate options used to keep trace values coherent while the gate is disabled.
+    /// [JA] gate が disabled の間も trace value を一貫させるための CTG gate options です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static (CtgGateDecisionTrace Gate, ActionCommand AppliedAction) Disabled(
         CtgProposalPacket proposal,
         CtgGateOptions options)
@@ -18,6 +38,30 @@ internal static class AutoplayCtgGateDecisionResolver
                 false),
             proposal.CandidateAction);
 
+    /// <summary>
+    /// [EN] Executes the <c>Resolve</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>Resolve</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="proposal">
+    /// [EN] The proposal packet that carries the candidate action and semantic scores.
+    /// [JA] candidate action と semantic score を保持する proposal packet です。
+    /// </param>
+    /// <param name="votes">
+    /// [EN] The council votes collected for the proposal.
+    /// [JA] proposal に対して収集された council vote です。
+    /// </param>
+    /// <param name="options">
+    /// [EN] The gate options that determine quorum, enforcement, and trace-only behavior.
+    /// [JA] quorum、enforcement、trace-only behavior を決める gate options です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public static (CtgGateDecisionTrace Gate, ActionCommand AppliedAction) Resolve(
         CtgProposalPacket proposal,
         IReadOnlyList<CouncilDecisionTrace> votes,

@@ -1,5 +1,13 @@
 namespace AIKernel.Doom.Provider.Autoplay;
 
+/// <summary>
+/// [EN] Defines the <c>CompiledAutoplayPipeline</c> public integration contract used by the Doom runtime, HUD projection, autoplay planner, and test fixtures.
+/// [JA] Doom runtime、HUD 投影、autoplay planner、および test fixture が共有する public integration contract として <c>CompiledAutoplayPipeline</c> を定義します。
+/// </summary>
+/// <remarks>
+/// [EN] Keep this shape stable: consumers may bind it from C#, JavaScript DTO projection, profile fixtures, or generated reference documentation.
+/// [JA] この形状は安定させてください。C#、JavaScript DTO 投影、profile fixture、生成 reference documentation から参照される可能性があります。
+/// </remarks>
 public sealed class CompiledAutoplayPipeline
 {
     private readonly IReadOnlyList<CompiledAutoplayPipelineStage> _stages;
@@ -25,13 +33,69 @@ public sealed class CompiledAutoplayPipeline
         _profile = profile;
     }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public string StrategyName { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>get</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
     public DynamicPipelineGraph Graph { get; }
 
+    /// <summary>
+    /// [EN] Executes the <c>ExecuteTick</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>ExecuteTick</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="sensor">
+    /// [EN] Supplies the <c>sensor</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>sensor</c> value です。
+    /// </param>
+    /// <param name="recoveryFrames">
+    /// [EN] Supplies the <c>recoveryFrames</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>recoveryFrames</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public ActionCommand ExecuteTick(SensorFusion sensor, int recoveryFrames)
         => EvaluateTick(sensor, recoveryFrames).Action;
 
+    /// <summary>
+    /// [EN] Executes the <c>EvaluateTick</c> operation used by the Doom runtime or autoplay pipeline.
+    /// [JA] Doom runtime または autoplay pipeline で使用される <c>EvaluateTick</c> operation を実行します。
+    /// </summary>
+    /// <remarks>
+    /// [EN] Keep this public shape stable: generated references, demo tooling, DTO projection, or profile fixtures may depend on it.
+    /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
+    /// </remarks>
+    /// <param name="sensor">
+    /// [EN] Supplies the <c>sensor</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>sensor</c> value です。
+    /// </param>
+    /// <param name="recoveryFrames">
+    /// [EN] Supplies the <c>recoveryFrames</c> value for the Doom integration operation.
+    /// [JA] Doom integration operation に渡す <c>recoveryFrames</c> value です。
+    /// </param>
+    /// <returns>
+    /// [EN] The deterministic result produced by the Doom integration member.
+    /// [JA] Doom integration member が生成する決定論的な result です。
+    /// </returns>
     public AutoplayPipelineDecision EvaluateTick(SensorFusion sensor, int recoveryFrames)
     {
         var context = new AutoplayPipelineContext(sensor, recoveryFrames, _profile);

@@ -373,6 +373,45 @@ assert(terminalSurfaceOnlyEnemyContext.values.postDoorTerminalSurface === 0.45, 
 assert(terminalSurfaceOnlyEnemyContext.values.visualEnemySuppressed === true, "Weak terminal-surface-only brown blobs should be suppressed without requiring an audio cue");
 assert(terminalSurfaceOnlyEnemyContext.values.visualEnemyVisible === false, "Suppressed terminal-surface-only visual evidence should not block route stages");
 
+const postDoorEnemyMemoryContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  enemyConfidence: 0.11,
+  enemyConfidencePeak: 0.77,
+  visualEnemyConfidence: 0.11,
+  faceSig: 0.01,
+  audioEnemyConfidence: 0,
+  audioEnemyDirection: "none",
+  postDoorTerminalSurface: 0.53,
+  computerRoomScore: 0.16,
+  computerPanelScore: 0.53,
+  computerDarkPanelScore: 0.11
+});
+assert(postDoorEnemyMemoryContext.values.visualEnemySuppressed === true, "Post-door enemy memory keeps terminal-masked visual evidence suppressed");
+assert(postDoorEnemyMemoryContext.values.visualEnemyVisible === false, "Post-door enemy memory should not manufacture a current visible enemy");
+assert(postDoorEnemyMemoryContext.values.postDoorEnemyMemoryEvidence === true, "Control context should expose recent post-door enemy peak as memory evidence");
+assert(postDoorEnemyMemoryContext.values.trustedCombatEvidence === true, "Control context should carry post-door memory into trusted combat evidence");
+assert(postDoorEnemyMemoryContext.values.trustedEnemyThreat >= 0.26, "Control context should provide a bounded trusted threat for post-door memory");
+
+const structuralDecoyEnemyContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  enemyConfidence: 0.62,
+  visualEnemyConfidence: 0.62,
+  faceSig: 0.02,
+  audioEnemyConfidence: 0.02,
+  audioEnemyDirection: "none",
+  enemyStructuralDecoy: true,
+  computerRoomScore: 0.42,
+  computerPanelScore: 0.52,
+  computerDarkPanelScore: 0.36,
+  postDoorTerminalSurface: 0.48
+});
+assert(structuralDecoyEnemyContext.values.enemyStructuralDecoy === true, "Structural enemy decoys should be visible as a context token");
+assert(structuralDecoyEnemyContext.values.visualEnemySuppressed === true, "Structural enemy decoys should suppress visual combat evidence");
+assert(structuralDecoyEnemyContext.values.visualEnemyVisible === false, "Structural enemy decoys must not become visible enemies");
+assert(structuralDecoyEnemyContext.values.trustedEnemyThreat === 0, "Structural enemy decoys should zero trusted enemy threat without real audio");
+assert(structuralDecoyEnemyContext.values.trustedCombatEvidence === false, "Structural enemy decoys should not enter trusted combat without audio or damage evidence");
+assert(structuralDecoyEnemyContext.values.postDoorEnemyMemoryEvidence === false, "Structural enemy decoys should not use post-door enemy memory evidence");
+
 const strongRearSecretContext = adapter.createContext({}, {
   previousRouteMode: "door-approach",
   firstDoorVision9x9Score: 0.05,

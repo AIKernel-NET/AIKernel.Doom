@@ -1,9 +1,9 @@
 {
-  "version": "0.1.1-dev1",
+  "version": "0.1.3-dev0",
   "strategyName": "SeparatedDoorProbeStrafeRunnerV4",
   "source": "AIKernel.Doom optimizer profile",
   "observerRom": {
-    "targetVersion": "0.1.1-dev1",
+    "targetVersion": "0.1.3-dev0",
     "previousStrategyName": "SensorFusionStrafeProbeV3",
     "diagnosis": "Gate-front tuning separates door probing into aim, approach, settle, and Use-hold phases. Use is held across multiple DOOM tics and the door depth thresholds are widened so the agent stays within interaction range instead of oscillating away from the gate.",
     "fitnessScore": 7365,

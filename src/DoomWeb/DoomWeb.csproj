@@ -6,6 +6,40 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AIKernel.Wasm.WebGpuComputeProvider"
+                      Version="[$(AIKernelWasmWebGpuComputeProviderPackageVersion)]"
+                      GeneratePathProperty="true"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PkgAIKernel_Wasm_WebGpuComputeProvider)' != ''">
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\runtime\browser\webgpu-rev3-envelope-bridge.js"
+             Link="wwwroot\js\aikernel\webgpu-rev3-envelope-bridge.js"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\runtime\browser\webgpu-rev3-envelope-bridge.js"
+             Link="wwwroot\demo\doom\js\aikernel\webgpu-rev3-envelope-bridge.js"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\hud\hud-composite.rev3.wgsl"
+             Link="wwwroot\js\aikernel\shaders\hud-composite.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\hud\hud-composite.rev3.wgsl"
+             Link="wwwroot\demo\doom\js\aikernel\shaders\hud-composite.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\aisthesis\aisthesis.rev3.wgsl"
+             Link="wwwroot\js\aikernel\shaders\aisthesis.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\aisthesis\aisthesis.rev3.wgsl"
+             Link="wwwroot\demo\doom\js\aikernel\shaders\aisthesis.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\spatial\spatial-reasoning.rev3.wgsl"
+             Link="wwwroot\js\aikernel\shaders\spatial-reasoning.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(PkgAIKernel_Wasm_WebGpuComputeProvider)\shaders\spatial\spatial-reasoning.rev3.wgsl"
+             Link="wwwroot\demo\doom\js\aikernel\shaders\spatial-reasoning.rev3.wgsl"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="wwwroot\**\*"
              CopyToOutputDirectory="PreserveNewest" />
     <None Include="README.md" />

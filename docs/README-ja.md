@@ -15,17 +15,17 @@ fail-closed な実行時ゲート、Observer ROM による証拠駆動の開発�
 このドキュメントは、実装技術を理解し、他の AIKernel デモや Web/WASM
 ランタイムへ応用したい開発者向けです。このリポジトリはデモサンプルであり、
 DOOM の配布パッケージではありません。`DOOM1.WAD` や Bonsai GGUF モデルは
-コミットしません。公開 0.1.2 Web demo では、生成済み `doom.wasm` artifact を、
+コミットしません。公開 0.1.3 Web demo では、生成済み `doom.wasm` artifact を、
 対応 source recipe、patch、build script、manifest、license notice とともに
 意図的にコミットします。
 
 ## リポジトリ横断整合
 
-共有の repository boundary、v0.1.2 canonical NuGet reference、package family の
+共有の repository boundary、v0.1.3 canonical NuGet reference、package family の
 version alignment は
-[Package Release Alignment v0.1.2](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/package-release-alignment-v0.1.2-ja.md)
+[AIKernel GPU rev3 Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-rev3-migration.md)
 で定義します。
-複数 repository をまたぐ変更では、v0.1.2 package family に揃え、AIKernel.Doom が
+複数 repository をまたぐ変更では、v0.1.3 package family に揃え、AIKernel.Doom が
 既定で local package path を参照しないようにしてください。
 
 Doom はこの sample の scenario-specific な visual、audio、HUD、input mapping を

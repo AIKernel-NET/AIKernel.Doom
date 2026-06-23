@@ -71,7 +71,7 @@ public sealed class DoomProvider : IProvider, IWasmProcessProvider
 
     public string Version => ThisAssemblyVersion;
 
-    private const string ThisAssemblyVersion = "0.1.1-dev1";
+    private const string ThisAssemblyVersion = "0.1.3-dev0";
     /// <summary>
     /// EN: Gets State.
     /// EN: Documentation for public API. JA: State を取得します。

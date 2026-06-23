@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-`DoomWeb` は AIKernel.Doom ブラウザデモの公開 Web runtime layer です。runtime source assets と、公開 0.1.2 用の `doom.wasm` demo artifact をリポジトリ内で管理します。
+`DoomWeb` は AIKernel.Doom ブラウザデモの公開 Web runtime layer です。runtime source assets と、公開 0.1.3 用の `doom.wasm` demo artifact をリポジトリ内で管理します。
 
 - `doom.wasm` 用 JavaScript runtime bridge
 - Bonsai AutoPlay supervisor logic
@@ -14,7 +14,7 @@
 
 - `DOOM1.WAD` はこのリポジトリに保存しません。
 - Bonsai GGUF model files はこのリポジトリに保存しません。
-- 公開 0.1.2 の生成済み `demo/doom/doom.wasm` artifact は、manifest と source notice とともに保存します。
+- 公開 0.1.3 の生成済み `demo/doom/doom.wasm` artifact は、manifest と source notice とともに保存します。
 
 デプロイ運用者は、WAD と model artifact をこの source package の外でホストし、明示的な runtime consent 後にのみロードしてください。同梱する `doom.wasm` artifact は、このリポジトリ内の対応 source recipe、patch、build script、manifest、license notice によって説明されます。
 

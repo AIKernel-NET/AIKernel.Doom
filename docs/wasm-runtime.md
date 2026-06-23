@@ -16,7 +16,7 @@ Resolution order:
 4. runtime cache
 5. optional simulated module in demo mode
 
-When simulation is disabled, a missing `doom.wasm` returns `DOOM_WASM_NOT_FOUND`. The CLI enables simulation so the command-line demo can boot even when a local native artifact is not configured. The public 0.1.2 Web demo includes `src/DoomWeb/wwwroot/demo/doom/doom.wasm`.
+When simulation is disabled, a missing `doom.wasm` returns `DOOM_WASM_NOT_FOUND`. The CLI enables simulation so the command-line demo can boot even when a local native artifact is not configured. The public 0.1.3 Web demo includes `src/DoomWeb/wwwroot/demo/doom/doom.wasm`.
 
 WebGPU is selected only when requested and `AIKERNEL_DOOM_WEBGPU=1`; otherwise the provider reports CPU fallback.
 

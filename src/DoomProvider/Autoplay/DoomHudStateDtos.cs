@@ -1,3 +1,6 @@
+using AIKernel.Dtos.Gpu;
+using AIKernel.Enums;
+
 namespace AIKernel.Doom.Provider.Autoplay;
 
 internal static class DoomGpuContracts
@@ -1356,6 +1359,39 @@ public sealed record DoomGpuFrameTargetDto
             Usage = usage,
             HudExcluded = false
         };
+
+    /// <summary>
+    /// EN: Projects this Doom-local target descriptor into the canonical v0.1.3 GPU target DTO.
+    /// JA: Doom-local target descriptor を canonical v0.1.3 GPU target DTO へ射影します。
+    /// </summary>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Target width. JA: target width です。</param>
+    /// <param name="height">EN: Target height. JA: target height です。</param>
+    /// <param name="pixelFormat">EN: Target pixel format. JA: target pixel format です。</param>
+    public GpuFrameTarget ToCanonical(
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200,
+        FramePixelFormat pixelFormat = FramePixelFormat.Indexed8)
+        => new()
+        {
+            TargetId = string.IsNullOrWhiteSpace(Target) ? DoomGpuContracts.RawFramebufferTarget : Target,
+            Kind = ToCanonicalKind(Kind),
+            Backend = backend,
+            Width = Math.Max(1, width),
+            Height = Math.Max(1, height),
+            PixelFormat = pixelFormat,
+            ZeroCopy = HudExcluded || ToCanonicalKind(Kind) is GpuFrameTargetKind.HudCompositeOffscreen
+        };
+
+    private static GpuFrameTargetKind ToCanonicalKind(string kind)
+        => kind switch
+        {
+            "RawFramebuffer" => GpuFrameTargetKind.RawFramebuffer,
+            "HudCompositeOffscreen" => GpuFrameTargetKind.HudCompositeOffscreen,
+            "DisplayCanvasFallback" => GpuFrameTargetKind.DisplaySurface,
+            _ => GpuFrameTargetKind.Unknown
+        };
 }
 
 /// <summary>
@@ -1434,6 +1470,23 @@ public sealed record DoomGpuTextureTargetDto
             Usage = DoomGpuContracts.AisthesisMaskUsage,
             HudExcluded = true
         };
+
+    /// <summary>
+    /// EN: Projects this Doom-local texture descriptor into a canonical GPU frame target.
+    /// JA: Doom-local texture descriptor を canonical GPU frame target へ射影します。
+    /// </summary>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    public GpuFrameTarget ToCanonical(GpuBackend backend = GpuBackend.WebGpu)
+        => new()
+        {
+            TargetId = string.IsNullOrWhiteSpace(Target) ? DoomGpuContracts.AisthesisMaskTarget : Target,
+            Kind = Kind == "AisthesisMask" ? GpuFrameTargetKind.FeatureMask : GpuFrameTargetKind.Unknown,
+            Backend = backend,
+            Width = Math.Max(1, Width),
+            Height = Math.Max(1, Height),
+            PixelFormat = FramePixelFormat.Rgba32,
+            ZeroCopy = HudExcluded
+        };
 }
 
 /// <summary>
@@ -1511,6 +1564,19 @@ public sealed record DoomGpuReadbackPolicyDto
         WireName = "runtime-summary",
         AllowsSummary = true
     };
+
+    /// <summary>
+    /// EN: Projects this Doom-local readback descriptor into the canonical readback enum.
+    /// JA: Doom-local readback descriptor を canonical readback enum へ射影します。
+    /// </summary>
+    public GpuReadbackPolicy ToCanonical()
+        => Kind switch
+        {
+            "DebugOnly" => GpuReadbackPolicy.DebugOnly,
+            "RuntimeSummary" => GpuReadbackPolicy.RuntimeSummary,
+            "RequiredFallback" => GpuReadbackPolicy.RequiredFallback,
+            _ => GpuReadbackPolicy.None
+        };
 }
 
 /// <summary>
@@ -1569,6 +1635,35 @@ public sealed record DoomGpuFrameTokenDto
             HudTarget = hudTarget,
             Phase = string.IsNullOrWhiteSpace(phase) ? "dto-pending" : phase
         };
+
+    /// <summary>
+    /// EN: Projects this Doom-local token into the canonical deterministic GPU frame token.
+    /// JA: Doom-local token を canonical deterministic GPU frame token へ射影します。
+    /// </summary>
+    /// <param name="rawTarget">EN: Raw frame target descriptor. JA: raw frame target descriptor です。</param>
+    /// <param name="hudTarget">EN: HUD frame target descriptor. JA: HUD frame target descriptor です。</param>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Frame width. JA: frame width です。</param>
+    /// <param name="height">EN: Frame height. JA: frame height です。</param>
+    public GpuFrameToken ToCanonical(
+        DoomGpuFrameTargetDto? rawTarget = null,
+        DoomGpuFrameTargetDto? hudTarget = null,
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200)
+    {
+        rawTarget ??= DoomGpuFrameTargetDto.RawFramebuffer(RawTarget);
+        hudTarget ??= DoomGpuFrameTargetDto.HudCompositeOffscreen(HudTarget);
+        var phase = string.IsNullOrWhiteSpace(Phase) ? "dto" : Phase;
+        var frameId = FrameId > 0 ? $"{RawTarget}:{FrameId}" : $"{RawTarget}:{phase}";
+        return new GpuFrameToken
+        {
+            FrameId = frameId,
+            FrameIndex = Math.Max(0, FrameId),
+            RawTarget = rawTarget.ToCanonical(backend, width, height),
+            HudTarget = hudTarget.ToCanonical(backend, width, height, FramePixelFormat.Rgba32)
+        };
+    }
 }
 
 /// <summary>
@@ -1882,6 +1977,107 @@ public sealed record DoomGpuHudOverlayDto
             LabelCount = labels.Count,
             PanelValueCount = panelValues.Count
         };
+    }
+
+    /// <summary>
+    /// EN: Projects the Doom-local GPU HUD contract into the canonical v0.1.3 HUD input.
+    /// JA: Doom-local GPU HUD contract を canonical v0.1.3 HUD input へ射影します。
+    /// </summary>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Frame width. JA: frame width です。</param>
+    /// <param name="height">EN: Frame height. JA: frame height です。</param>
+    public GpuHudInput ToCanonicalGpuHudInput(
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200)
+        => new()
+        {
+            Frame = FrameToken.ToCanonical(RawFrameTarget, HudFrameTarget, backend, width, height),
+            HudPanelRects = ToCanonicalPanelRects(),
+            HudPanelStateVectors = ToCanonicalPanelStateVectors(),
+            EgoRadar = new GpuHudEgoRadarInput
+            {
+                Summary = Summary
+            },
+            Labels = ToCanonicalLabels()
+        };
+
+    private IReadOnlyList<float> ToCanonicalPanelRects()
+    {
+        var source = RectangleValues.Count > 0
+            ? RectangleValues
+            : CreateRectangleValues(Rectangles);
+        if (source.Count <= 0)
+        {
+            return [];
+        }
+
+        var maxFloatCount = GpuCanonicalLayouts.HudPanelRect.MaxItems * GpuCanonicalLayouts.HudPanelRect.Stride;
+        var output = new List<float>(Math.Min(maxFloatCount, (source.Count / DoomGpuContracts.HudRectStride) * GpuCanonicalLayouts.HudPanelRect.Stride));
+        for (var index = 0; index + DoomGpuContracts.HudRectStride <= source.Count && output.Count < maxFloatCount; index += DoomGpuContracts.HudRectStride)
+        {
+            var left = Clamp01(source[index]);
+            var top = Clamp01(source[index + 1]);
+            var right = Clamp01(source[index + 2]);
+            var bottom = Clamp01(source[index + 3]);
+            var width = Clamp01(right - left);
+            var height = Clamp01(bottom - top);
+            if (width <= 0 || height <= 0)
+            {
+                continue;
+            }
+
+            output.Add(left);
+            output.Add(top);
+            output.Add(width);
+            output.Add(height);
+            output.Add(Clamp01(source[index + 4]));
+            output.Add(Clamp01(source[index + 5]));
+            output.Add(Clamp01(source[index + 6]));
+            output.Add(Clamp01(source[index + 7]));
+            output.Add(1);
+            output.Add(0);
+            output.Add(Math.Clamp(output.Count / (float)GpuCanonicalLayouts.HudPanelRect.Stride, 0, GpuCanonicalLayouts.HudPanelRect.MaxItems));
+            output.Add(1);
+        }
+
+        return output;
+    }
+
+    private IReadOnlyList<float> ToCanonicalPanelStateVectors()
+    {
+        if (PanelValues.Count <= 0)
+        {
+            return [];
+        }
+
+        var output = new float[GpuCanonicalLayouts.HudPanelStateVector.Stride];
+        var count = Math.Min(output.Length, PanelValues.Count);
+        for (var index = 0; index < count; index++)
+        {
+            output[index] = Clamp01(PanelValues[index]);
+        }
+
+        return output;
+    }
+
+    private IReadOnlyList<GpuHudLabel> ToCanonicalLabels()
+    {
+        if (Labels.Count <= 0)
+        {
+            return [];
+        }
+
+        return Labels
+            .Take(DoomGpuContracts.HudLabelCount)
+            .Select((label, index) => new GpuHudLabel
+            {
+                Id = string.IsNullOrWhiteSpace(label.ClassName) ? $"doom-label-{index}" : $"{label.ClassName}-{index}",
+                Text = string.IsNullOrWhiteSpace(label.Value) ? label.Label : $"{label.Label} {label.Value}",
+                X = 0.02f,
+                Y = Math.Clamp(0.05f + (index * 0.045f), 0.05f, 0.94f)
+            })
+            .ToArray();
     }
 
     private static string CreateSummary(int cellCount, int rectangleCount, int labelCount, int panelValueCount, int rectangleFloatCount, string mode)
@@ -2500,6 +2696,108 @@ public sealed record DoomGpuAisthesisDto
         };
     }
 
+    /// <summary>
+    /// EN: Projects the Doom-local GPU Aisthesis contract into the canonical v0.1.3 Aisthesis input.
+    /// JA: Doom-local GPU Aisthesis contract を canonical v0.1.3 Aisthesis input へ射影します。
+    /// </summary>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Raw frame width. JA: raw frame width です。</param>
+    /// <param name="height">EN: Raw frame height. JA: raw frame height です。</param>
+    public GpuAisthesisInput ToCanonicalGpuAisthesisInput(
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200)
+        => new()
+        {
+            Frame = FrameToken.ToCanonical(InputFrameTarget, HudFrameTarget, backend, width, height),
+            RawFramebuffer = CaptureFrameTarget.ToCanonical(backend, width, height),
+            Features = ToCanonicalFeatureMap()
+        };
+
+    /// <summary>
+    /// EN: Projects the Doom-local spatial matrices into the canonical Topos, Route, Threat, Zoe matrix input.
+    /// JA: Doom-local spatial matrix を canonical Topos、Route、Threat、Zoe matrix input へ射影します。
+    /// </summary>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Raw frame width. JA: raw frame width です。</param>
+    /// <param name="height">EN: Raw frame height. JA: raw frame height です。</param>
+    public GpuSpatialReasoningInput ToCanonicalGpuSpatialReasoningInput(
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200)
+        => new()
+        {
+            Frame = FrameToken.ToCanonical(InputFrameTarget, HudFrameTarget, backend, width, height),
+            AisMatrices = ToCanonicalAisMatrices(),
+            StateVector = ToCanonicalStateVector()
+        };
+
+    private IReadOnlyDictionary<string, bool> ToCanonicalFeatureMap()
+    {
+        var features = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["vision-heatmap"] = VisionHeatmap,
+            ["edge-detect"] = EdgeDetect,
+            ["corner-detect"] = CornerDetect,
+            ["red-panel-detect"] = RedPanelDetect,
+            ["enemy-direction"] = EnemyDirection,
+            ["projectile-flow"] = ProjectileFlow,
+            ["mask9x9-texture"] = MaskTextureEnabled
+        };
+
+        foreach (var feature in Features)
+        {
+            if (!string.IsNullOrWhiteSpace(feature))
+            {
+                features[feature] = true;
+            }
+        }
+
+        return features;
+    }
+
+    private IReadOnlyList<IReadOnlyList<float>> ToCanonicalAisMatrices()
+        =>
+        [
+            SelectCanonicalMatrix("topos"),
+            SelectCanonicalMatrix("route"),
+            SelectCanonicalMatrix("threat"),
+            SelectCanonicalMatrix("zoe")
+        ];
+
+    private IReadOnlyList<float> SelectCanonicalMatrix(string kindContains)
+    {
+        var matrix = Matrices.FirstOrDefault(matrix =>
+            matrix.Rows == DoomGpuContracts.HudGridSize
+            && matrix.Columns == DoomGpuContracts.HudGridSize
+            && matrix.Kind.Contains(kindContains, StringComparison.OrdinalIgnoreCase));
+        if (matrix is null)
+        {
+            return new float[GpuCanonicalLayouts.AisMatrix.Stride];
+        }
+
+        var output = new float[GpuCanonicalLayouts.AisMatrix.Stride];
+        var count = Math.Min(output.Length, matrix.Values.Count);
+        for (var index = 0; index < count; index++)
+        {
+            output[index] = Clamp01(matrix.Values[index]);
+        }
+
+        return output;
+    }
+
+    private IReadOnlyList<float> ToCanonicalStateVector()
+    {
+        var output = new float[GpuCanonicalLayouts.StateVector.Stride];
+        var count = Math.Min(output.Length, StateVector.Count);
+        for (var index = 0; index < count; index++)
+        {
+            output[index] = Clamp01(StateVector[index]);
+        }
+
+        return output;
+    }
+
     private static string CreateSummary(IReadOnlyList<string> features, int matrixCount, int matrixFloatCount)
     {
         var featureText = features.Count > 0
@@ -2944,6 +3242,28 @@ public sealed record DoomGpuSpatialReasoningDto
             Summary = $"spatial=dto m{gpuAisthesis.MatrixCount} f{gpuAisthesis.MatrixFloatCount} feat{gpuAisthesis.FeatureCount} mask9x9 {DoomGpuContracts.SpatialReasoningVectorLayoutName}"
         };
     }
+
+    /// <summary>
+    /// EN: Projects this spatial reasoning DTO plus its Aisthesis matrix source into the canonical v0.1.3 spatial input.
+    /// JA: この spatial reasoning DTO と Aisthesis matrix source を canonical v0.1.3 spatial input へ射影します。
+    /// </summary>
+    /// <param name="gpuAisthesis">EN: Matrix and state-vector source. JA: matrix と state-vector の source です。</param>
+    /// <param name="backend">EN: Owning backend. JA: 所有 backend です。</param>
+    /// <param name="width">EN: Raw frame width. JA: raw frame width です。</param>
+    /// <param name="height">EN: Raw frame height. JA: raw frame height です。</param>
+    public GpuSpatialReasoningInput ToCanonicalGpuSpatialReasoningInput(
+        DoomGpuAisthesisDto gpuAisthesis,
+        GpuBackend backend = GpuBackend.WebGpu,
+        int width = 320,
+        int height = 200)
+    {
+        gpuAisthesis ??= DoomGpuAisthesisDto.Empty;
+        var input = gpuAisthesis.ToCanonicalGpuSpatialReasoningInput(backend, width, height);
+        return input with
+        {
+            Frame = FrameToken.ToCanonical(InputFrameTarget, HudFrameTarget, backend, width, height)
+        };
+    }
 }
 
 /// <summary>
@@ -3065,6 +3385,121 @@ public sealed record DoomGpuPathStatusDto
             Summary = $"gpu-path=dto rows{rows.Length} raw={gpuHud.AnalysisCaptureSource} hud={gpuHud.DisplaySource} sensor={gpuAisthesis.MaskTextureTarget}"
         };
     }
+
+    /// <summary>
+    /// EN: Projects the Doom-local four-lane GPU path table into canonical frame diagnostics.
+    /// JA: Doom-local 4 lane GPU path table を canonical frame diagnostics へ射影します。
+    /// </summary>
+    public GpuFrameDiagnostics ToCanonicalFrameDiagnostics()
+    {
+        var rows = Rows.ToDictionary(row => row.Label, StringComparer.OrdinalIgnoreCase);
+        return new GpuFrameDiagnostics
+        {
+            GamePath = ToCanonicalPath(rows.GetValueOrDefault("GAME"), "game", RuntimeStamped),
+            BonsaiPath = ToCanonicalPath(rows.GetValueOrDefault("BONSAI"), "bonsai", RuntimeStamped),
+            HudPath = ToCanonicalPath(rows.GetValueOrDefault("HUD"), "hud", RuntimeStamped),
+            SensorPath = ToCanonicalPath(rows.GetValueOrDefault("SENSOR"), "sensor", RuntimeStamped)
+        };
+    }
+
+    private static GpuDiagnosticsPathInfo ToCanonicalPath(
+        DoomGpuPathStatusRowDto? row,
+        string passId,
+        bool runtimeStamped)
+    {
+        if (row is null)
+        {
+            return new GpuDiagnosticsPathInfo
+            {
+                Backend = "unknown",
+                ZeroCopy = false,
+                Readback = GpuReadbackPolicy.RequiredFallback,
+                FallbackReason = "missing-doom-gpu-path-row",
+                PassId = passId,
+                Metadata = ToCanonicalPathMetadata(row, passId, runtimeStamped)
+            };
+        }
+
+        return new GpuDiagnosticsPathInfo
+        {
+            Backend = row.CpuFallback ? "cpu" : row.Tone,
+            ZeroCopy = row.ZeroCopy,
+            Readback = row.CpuFallback ? GpuReadbackPolicy.RequiredFallback : GpuReadbackPolicy.RuntimeSummary,
+            FallbackReason = row.CpuFallback || !row.ZeroCopy ? (string.IsNullOrWhiteSpace(row.Reason) ? row.Mode : row.Reason) : null,
+            PassId = passId,
+            MemoryEstimate = row.MemoryMb > 0 ? (long)(row.MemoryMb * 1024 * 1024) : null,
+            Metadata = ToCanonicalPathMetadata(row, passId, runtimeStamped)
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string> ToCanonicalPathMetadata(
+        DoomGpuPathStatusRowDto? row,
+        string passId,
+        bool runtimeStamped)
+    {
+        var metadata = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GpuDiagnosticsMetadataKeys.Rev3PassId] = passId,
+            [GpuDiagnosticsMetadataKeys.Rev3PathRole] = passId,
+            [GpuDiagnosticsMetadataKeys.Rev3PilotState] = row is null ? GpuRev3PilotStates.Unavailable : GpuRev3PilotStates.DtoProjected,
+            [GpuDiagnosticsMetadataKeys.Rev3PromotionGate] = row is null ? GpuRev3PromotionGates.Unavailable : GpuRev3PromotionGates.RuntimeStampRequired,
+            [GpuDiagnosticsMetadataKeys.Rev3CandidateStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.Rev3DiagnosticStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.Rev3RequiredStreak] = "0",
+            [GpuDiagnosticsMetadataKeys.Rev3AuthoritativeReady] = "false",
+            [GpuDiagnosticsMetadataKeys.Rev3DiagnosticReady] = "false",
+            [GpuDiagnosticsMetadataKeys.Rev3ExecutionMode] = row is null ? GpuRev3ExecutionModes.DeterministicFallback : GpuRev3ExecutionModes.BrowserWebGpuCompute,
+            [GpuDiagnosticsMetadataKeys.Rev3FeatureMaskStorageTexture] = row is not null && string.Equals(passId, "sensor", StringComparison.Ordinal) && row.ZeroCopy ? "true" : "false",
+            [GpuDiagnosticsMetadataKeys.Rev3FrameIndex] = "0",
+            [GpuDiagnosticsMetadataKeys.Rev3PassReadiness] = CreateDtoPassReadiness(),
+            [GpuDiagnosticsMetadataKeys.Rev3SampleTicks] = "0",
+            ["doom_runtime_stamped"] = runtimeStamped ? "true" : "false",
+            ["doom_missing_row"] = row is null ? "true" : "false"
+        };
+
+        if (row is null)
+        {
+            metadata["doom_label"] = passId.ToUpperInvariant();
+            metadata["doom_mode"] = "missing";
+            metadata["doom_reason"] = "missing-doom-gpu-path-row";
+            metadata["doom_tone"] = "unknown";
+            metadata["doom_value"] = "missing";
+            metadata["doom_zero_copy"] = "false";
+            metadata["doom_cpu_fallback"] = "true";
+            metadata["doom_memory_mb"] = "0";
+            AddPromotionReadinessMetadata(metadata);
+            return metadata;
+        }
+
+        metadata["doom_label"] = NormalizeMetadataValue(row.Label, passId.ToUpperInvariant());
+        metadata["doom_mode"] = NormalizeMetadataValue(row.Mode, "unknown");
+        metadata["doom_reason"] = NormalizeMetadataValue(row.Reason, "none");
+        metadata["doom_tone"] = NormalizeMetadataValue(row.Tone, "unknown");
+        metadata["doom_value"] = NormalizeMetadataValue(row.Value, "none");
+        metadata["doom_zero_copy"] = row.ZeroCopy ? "true" : "false";
+        metadata["doom_cpu_fallback"] = row.CpuFallback ? "true" : "false";
+        metadata["doom_memory_mb"] = row.MemoryMb > 0
+            ? row.MemoryMb.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+            : "0";
+
+        AddPromotionReadinessMetadata(metadata);
+        return metadata;
+    }
+
+    private static void AddPromotionReadinessMetadata(SortedDictionary<string, string> metadata)
+    {
+        var readiness = GpuCanonicalValidation.EvaluateRev3PromotionReadiness(metadata);
+        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked] = readiness.IsBlocked ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady] = readiness.IsPromotionCandidate ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable] = readiness.IsDiagnosticStable ? "true" : "false";
+        metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason] = NormalizeMetadataValue(readiness.Reason, "unknown");
+    }
+
+    private static string CreateDtoPassReadiness()
+        => "Passes.{Aisthesis,SpatialReasoning,HudComposite}:ShaderBound=false,PipelineCached=false,BuiltInExecutor=false,InjectedExecutor=false,ReadyForBuiltIn=false";
+
+    private static string NormalizeMetadataValue(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value;
 }
 
 /// <summary>

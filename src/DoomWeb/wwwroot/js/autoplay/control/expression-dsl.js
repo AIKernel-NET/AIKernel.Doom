@@ -71,6 +71,14 @@
 
   function evaluateAtom(context, atom) {
     const text = String(atom || "").trim();
+    if (text.toLowerCase() === "true") {
+      return true;
+    }
+
+    if (text.toLowerCase() === "false") {
+      return false;
+    }
+
     for (const op of [">=", "<=", "==", "!=", ">", "<"]) {
       const index = text.indexOf(op);
       if (index > 0) {
@@ -79,6 +87,50 @@
     }
 
     return Boolean(valueOf(context, text));
+  }
+
+  function tokenizeExpression(expression) {
+    const source = String(expression || "false");
+    const tokens = [];
+    let current = "";
+
+    function flush() {
+      const text = current.trim();
+      if (text) {
+        tokens.push(text);
+      }
+
+      current = "";
+    }
+
+    for (let index = 0; index < source.length; index += 1) {
+      const char = source[index];
+      const next = source[index + 1];
+      if (char === "(" || char === ")") {
+        flush();
+        tokens.push(char);
+        continue;
+      }
+
+      if (char === "&" && next === "&") {
+        flush();
+        tokens.push("&&");
+        index += 1;
+        continue;
+      }
+
+      if (char === "|" && next === "|") {
+        flush();
+        tokens.push("||");
+        index += 1;
+        continue;
+      }
+
+      current += char;
+    }
+
+    flush();
+    return tokens;
   }
 
   function evaluateWhen(context, expression) {
@@ -91,11 +143,59 @@
       return false;
     }
 
-    return text
-      .split("||")
-      .some(orTerm => orTerm
-        .split("&&")
-        .every(andTerm => evaluateAtom(context, andTerm)));
+    const tokens = tokenizeExpression(text);
+    let index = 0;
+
+    function peek() {
+      return tokens[index];
+    }
+
+    function consume(expected) {
+      if (peek() === expected) {
+        index += 1;
+        return true;
+      }
+
+      return false;
+    }
+
+    function parsePrimary() {
+      if (consume("(")) {
+        const value = parseOr();
+        return consume(")") ? value : false;
+      }
+
+      const token = peek();
+      if (token === undefined || token === ")" || token === "&&" || token === "||") {
+        return false;
+      }
+
+      index += 1;
+      return evaluateAtom(context, token);
+    }
+
+    function parseAnd() {
+      let value = parsePrimary();
+      while (consume("&&")) {
+        const right = parsePrimary();
+        value = Boolean(value) && Boolean(right);
+      }
+
+      return value;
+    }
+
+    function parseOr() {
+      let value = parseAnd();
+      while (consume("||")) {
+        const right = parseAnd();
+        value = Boolean(value) || Boolean(right);
+      }
+
+      return value;
+    }
+
+    const result = Boolean(parseOr());
+    return index >= tokens.length ? result : false;
   }
 
   self.AIKernelDoomExpressionDsl = Object.freeze({
@@ -105,6 +205,7 @@
     valueOf,
     compare,
     evaluateAtom,
+    tokenizeExpression,
     evaluateWhen
   });
 })();

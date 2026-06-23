@@ -24,7 +24,7 @@ CLI は `hintWord=yes` で suspended 状態から始まり、approval 前でも
 利用できます。
 
 `DoomWeb` は `DOOM1.WAD` や Bonsai model weights などの WAD/model
-バイナリを含みません。公開 0.1.2 Web demo では、生成済み `doom.wasm`
+バイナリを含みません。公開 0.1.3 Web demo では、生成済み `doom.wasm`
 artifact を repository に含め、deployment manifest、checksum、対応 source
 recipe、patch、build script、consent text、license notice と一緒に管理します。
 

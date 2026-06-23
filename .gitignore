@@ -83,3 +83,8 @@ src/DoomWasm.Native/third_party/doomgeneric/
 TestResult.xml
 nunit-*.xml
 /.vs
+
+# Codex live verification captures
+.codex-*.png
+.codex-*.json
+.codex-live-observe-*/

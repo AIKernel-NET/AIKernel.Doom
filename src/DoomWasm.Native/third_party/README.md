@@ -18,4 +18,4 @@ Default upstream:
 https://github.com/ozkl/doomgeneric.git
 ```
 
-Keep upstream license files with the fetched source. Do not commit commercial WAD files or model binaries. The only generated WASM artifact intentionally tracked for the public 0.1.2 demo is `src/DoomWeb/wwwroot/demo/doom/doom.wasm`, together with its source recipe and license notices.
+Keep upstream license files with the fetched source. Do not commit commercial WAD files or model binaries. The only generated WASM artifact intentionally tracked for the public 0.1.3 demo is `src/DoomWeb/wwwroot/demo/doom/doom.wasm`, together with its source recipe and license notices.

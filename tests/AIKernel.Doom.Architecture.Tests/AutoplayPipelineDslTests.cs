@@ -2,6 +2,8 @@ namespace AIKernel.Doom.Architecture.Tests;
 
 using System.Text.Json;
 using AIKernel.Doom.Provider.Autoplay;
+using AIKernel.Dtos.Gpu;
+using AIKernel.Enums;
 
 public sealed class AutoplayPipelineDslTests
 {
@@ -1189,6 +1191,50 @@ public sealed class AutoplayPipelineDslTests
         Assert.Contains("feat", state.DebugOverlay.GpuSpatialReasoning.Summary, StringComparison.Ordinal);
         Assert.Contains("mask9x9", state.DebugOverlay.GpuSpatialReasoning.Summary, StringComparison.Ordinal);
         Assert.Contains("spatial=dto", state.DebugOverlay.GpuSpatialReasoning.Summary, StringComparison.Ordinal);
+
+        var canonicalHud = state.DebugOverlay.GpuHud.ToCanonicalGpuHudInput();
+        Assert.True(GpuCanonicalValidation.ValidateHudInput(canonicalHud).IsValid);
+        Assert.Equal(GpuFrameTargetKind.RawFramebuffer, canonicalHud.Frame.RawTarget.Kind);
+        Assert.Equal(GpuFrameTargetKind.HudCompositeOffscreen, canonicalHud.Frame.HudTarget?.Kind);
+        Assert.Equal(GpuCanonicalLayouts.HudPanelRect.Stride, canonicalHud.HudPanelRects.Count / state.DebugOverlay.GpuHud.RectangleCount);
+        Assert.Equal(16, canonicalHud.HudPanelStateVectors.Count);
+        Assert.NotEmpty(canonicalHud.Labels);
+
+        var canonicalAisthesis = state.DebugOverlay.GpuAisthesis.ToCanonicalGpuAisthesisInput();
+        Assert.True(GpuCanonicalValidation.ValidateAisthesisInput(canonicalAisthesis).IsValid);
+        Assert.Equal(GpuFrameTargetKind.RawFramebuffer, canonicalAisthesis.RawFramebuffer.Kind);
+        Assert.True(canonicalAisthesis.RawFramebuffer.ZeroCopy);
+        Assert.True(canonicalAisthesis.Features["red-panel-detect"]);
+        Assert.True(canonicalAisthesis.Features["mask9x9-texture"]);
+
+        var canonicalSpatial = state.DebugOverlay.GpuAisthesis.ToCanonicalGpuSpatialReasoningInput();
+        Assert.True(GpuCanonicalValidation.ValidateSpatialReasoningInput(canonicalSpatial).IsValid);
+        Assert.Equal(4, canonicalSpatial.AisMatrices.Count);
+        Assert.All(canonicalSpatial.AisMatrices, matrix => Assert.Equal(81, matrix.Count));
+        Assert.Equal(16, canonicalSpatial.StateVector.Count);
+
+        var canonicalSpatialFromSpatialDto = state.DebugOverlay.GpuSpatialReasoning.ToCanonicalGpuSpatialReasoningInput(state.DebugOverlay.GpuAisthesis);
+        Assert.True(GpuCanonicalValidation.ValidateSpatialReasoningInput(canonicalSpatialFromSpatialDto).IsValid);
+        Assert.Equal("doom:gpu-spatial-dto", canonicalSpatialFromSpatialDto.Frame.FrameId);
+
+        var canonicalDiagnostics = state.DebugOverlay.GpuPathStatus.ToCanonicalFrameDiagnostics();
+        Assert.True(GpuCanonicalValidation.ValidateFrameDiagnostics(canonicalDiagnostics).IsValid);
+        Assert.True(canonicalDiagnostics.SensorPath.ZeroCopy);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.PassId);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PassId]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
+        Assert.Equal("dto-projected", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PilotState]);
+        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionGate]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable]);
+        Assert.Equal("runtime-stamp-required", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason]);
+        Assert.Equal("GPU matrix", canonicalDiagnostics.SensorPath.Metadata["doom_mode"]);
+        Assert.Equal("gpu", canonicalDiagnostics.SensorPath.Metadata["doom_tone"]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata["doom_zero_copy"]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata["doom_runtime_stamped"]);
+        Assert.Equal("hud", canonicalDiagnostics.HudPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
+        Assert.Equal("GPU composite", canonicalDiagnostics.HudPath.Metadata["doom_mode"]);
         Assert.Equal(1, state.DebugOverlay.GpuPathStatus.ContractVersion);
         Assert.Equal("DoomGpuPathStatus", state.DebugOverlay.GpuPathStatus.ContractName);
         Assert.False(state.DebugOverlay.GpuPathStatus.RuntimeStamped);
@@ -1204,6 +1250,25 @@ public sealed class AutoplayPipelineDslTests
         Assert.Equal(0.68f, state.DebugOverlay.UseProbe.Confidence, precision: 2);
         Assert.Equal("forward", state.SuggestedAction.Move);
         Assert.False(state.PipelineState.Kinesis.Zoe.Vetoed);
+    }
+
+    [Fact]
+    public void DoomGpuPathStatus_EmptyProjection_KeepsCanonicalDiagnosticsMetadata()
+    {
+        var canonicalDiagnostics = DoomGpuPathStatusDto.Empty.ToCanonicalFrameDiagnostics();
+
+        Assert.True(GpuCanonicalValidation.ValidateFrameDiagnostics(canonicalDiagnostics).IsValid);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PassId]);
+        Assert.Equal("sensor", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PathRole]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PilotState]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionGate]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionBlocked]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionCandidateReady]);
+        Assert.Equal("false", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionDiagnosticStable]);
+        Assert.Equal("unavailable", canonicalDiagnostics.SensorPath.Metadata[GpuDiagnosticsMetadataKeys.Rev3PromotionReason]);
+        Assert.Equal("true", canonicalDiagnostics.SensorPath.Metadata["doom_missing_row"]);
+        Assert.Equal("SENSOR", canonicalDiagnostics.SensorPath.Metadata["doom_label"]);
+        Assert.Equal("missing-doom-gpu-path-row", canonicalDiagnostics.SensorPath.Metadata["doom_reason"]);
     }
 
     [Fact]

@@ -33,6 +33,28 @@
     return `${workerScriptBase}${relativePath}?v=${encodeURIComponent(workerCacheKey)}`;
   };
 
+  function installRev3Bridge(module) {
+    if (!module) {
+      return false;
+    }
+
+    self.AIKernelWebGpuRev3 = Object.assign({}, self.AIKernelWebGpuRev3 || {}, {
+      createWebGpuRev3EnvelopeBridge: module.createWebGpuRev3EnvelopeBridge,
+      createWebGpuRev3BrowserExecutor: module.createWebGpuRev3BrowserExecutor,
+      createNullWebGpuRev3Executor: module.createNullWebGpuRev3Executor
+    });
+    return true;
+  }
+
+  self.AIKernelDoomRev3AssetBase = `${workerScriptBase}aikernel/`;
+  self.AIKernelWebGpuRev3Ready = import(scriptUrl("/js/aikernel/webgpu-rev3-envelope-bridge.js"))
+    .then(module => installRev3Bridge(module))
+    .catch(error => {
+      self.AIKernelWebGpuRev3Error = error?.message || String(error);
+      console.warn("[AIKernel.Doom] rev3 WebGPU bridge unavailable in worker", error);
+      return false;
+    });
+
   importScripts(
     scriptUrl("/js/autoplay-profile.js"),
     scriptUrl("/js/autoplay/gpu-contracts.js"),

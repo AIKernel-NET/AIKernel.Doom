@@ -6,7 +6,7 @@ namespace AIKernel.Doom.Provider.Autoplay;
 /// </summary>
 public sealed record AutoplayOptimizationProfile
 {
-    public string Version { get; init; } = "0.1.1-dev1";
+    public string Version { get; init; } = "0.1.3-dev0";
 
     public string StrategyName { get; init; } = "SeparatedDoorProbeStrafeRunnerV4";
 

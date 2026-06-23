@@ -107,7 +107,35 @@
     });
   }
 
-  scripts.reduce((chain, relativePath) => chain.then(() => loadScript(relativePath)), Promise.resolve())
+  function installRev3Bridge(module) {
+    if (!module) {
+      return false;
+    }
+
+    window.AIKernelWebGpuRev3 = Object.assign({}, window.AIKernelWebGpuRev3 || {}, {
+      createWebGpuRev3EnvelopeBridge: module.createWebGpuRev3EnvelopeBridge,
+      createWebGpuRev3BrowserExecutor: module.createWebGpuRev3BrowserExecutor,
+      createNullWebGpuRev3Executor: module.createNullWebGpuRev3Executor
+    });
+    return true;
+  }
+
+  function loadRev3Bridge() {
+    const assetBase = `${base}aikernel/`;
+    window.AIKernelDoomRev3AssetBase = assetBase;
+    const moduleUrl = `${assetBase}webgpu-rev3-envelope-bridge.js?v=${encodeURIComponent(version)}`;
+    window.AIKernelWebGpuRev3Ready = import(moduleUrl)
+      .then(module => installRev3Bridge(module))
+      .catch(error => {
+        window.AIKernelWebGpuRev3Error = error?.message || String(error);
+        console.warn("[AIKernel.Doom] rev3 WebGPU bridge unavailable", error);
+        return false;
+      });
+    return window.AIKernelWebGpuRev3Ready;
+  }
+
+  loadRev3Bridge()
+    .then(() => scripts.reduce((chain, relativePath) => chain.then(() => loadScript(relativePath)), Promise.resolve()))
     .then(() => {
       document.documentElement.dataset.doomPublicBundle = version;
     })

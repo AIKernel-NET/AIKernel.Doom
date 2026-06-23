@@ -4,12 +4,12 @@
 
 AIKernel.Doom はソース中心のサンプルとして公開します。WAD/model runtime
 file は、デプロイ運用者が別途ホストし、リポジトリには取り込みません。公開
-0.1.2 Web demo では、GPL 由来の runtime binary である生成済み `doom.wasm`
+0.1.3 Web demo では、GPL 由来の runtime binary である生成済み `doom.wasm`
 artifact だけを、対応 source materials とともに同梱します。
 
 ## バージョン
 
-このデモの公開準備バージョンは `0.1.2` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。AIKernel 関連ライブラリは、公式 NuGet の canonical package line v0.1.2 を参照します。
+このデモの公開準備バージョンは `0.1.3` です。DOOM はパッケージ化せず、AIKernel.NET 正典シリーズのサンプルプログラムとして GitHub で公開します。AIKernel 関連ライブラリは、公式 NuGet の canonical package line v0.1.3 を参照します。
 
 ## コミットするもの
 
@@ -27,7 +27,7 @@ artifact だけを、対応 source materials とともに同梱します。
 - Bonsai GGUF model files
 - ブラウザキャッシュや運用ミラー済みバイナリ
 - ライセンス上またはサイズ上、ソースリポジトリに含めるべきでない成果物
-  （ただし、公開 0.1.2 Web demo 用の `doom.wasm` は manifest と GPL 対応
+  （ただし、公開 0.1.3 Web demo 用の `doom.wasm` は manifest と GPL 対応
   source materials とともに含めます）
 
 ## 外部ランタイムアセット
@@ -45,7 +45,7 @@ artifact だけを、対応 source materials とともに同梱します。
 /models/bonsai1.7b/manifest.json
 ```
 
-このうち `doom.wasm` と `module.json` は公開 0.1.2 demo artifact として
+このうち `doom.wasm` と `module.json` は公開 0.1.3 demo artifact として
 リポジトリに含めます。WAD/model file は運用環境ミラー側で管理します。
 ライセンス、NOTICE、checksum、manifest の整合性はデプロイ運用者が検証してください。
 
@@ -91,4 +91,4 @@ source location、patch file、overlay files、生成済み wasm の size/checks
    asset が含まれていない。
 4. `docs/README.md` と `docs/README-ja.md` から開発者向け文書へ到達できる。
 5. Web runtime の consent、license、checksum 表示が最新である。
-6. AIKernel 関連 package reference が公式 NuGet の canonical v0.1.2 から解決される。
+6. AIKernel 関連 package reference が公式 NuGet の canonical v0.1.3 から解決される。

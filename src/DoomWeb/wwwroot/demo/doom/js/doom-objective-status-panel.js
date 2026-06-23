@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const version = "20260621-objectivestatus-gpu1";
+  const version = "20260622-objectivestatus-gpu2";
 
   const displayLabels = Object.freeze({
     "find-corridor-to-first-door": "Find Door Corridor",
@@ -95,6 +95,41 @@
     ];
   }
 
+  function applyRowMetadataDataset(rowNode, metadata = {}) {
+    if (!rowNode?.dataset || !metadata || typeof metadata !== "object") {
+      return;
+    }
+
+    const mappings = [
+      ["rev3PassId", "rev3_pass_id"],
+      ["rev3PathRole", "rev3_path_role"],
+      ["rev3PilotState", "rev3_pilot_state"],
+      ["rev3PromotionGate", "rev3_promotion_gate"],
+      ["rev3PromotionBlocked", "rev3_promotion_blocked"],
+      ["rev3PromotionCandidateReady", "rev3_promotion_candidate_ready"],
+      ["rev3PromotionDiagnosticStable", "rev3_promotion_diagnostic_stable"],
+      ["rev3PromotionReason", "rev3_promotion_reason"],
+      ["rev3CandidateStreak", "rev3_candidate_streak"],
+      ["rev3DiagnosticStreak", "rev3_diagnostic_streak"],
+      ["rev3RequiredStreak", "rev3_required_streak"],
+      ["rev3AuthoritativeReady", "rev3_authoritative_ready"],
+      ["rev3DiagnosticReady", "rev3_diagnostic_ready"],
+      ["rev3FeatureMaskStorageTexture", "rev3_feature_mask_storage_texture"],
+      ["rev3PassReadiness", "rev3_pass_readiness"],
+      ["doomRuntimeStamped", "doom_runtime_stamped"],
+      ["doomZeroCopy", "doom_zero_copy"],
+      ["doomCpuFallback", "doom_cpu_fallback"],
+      ["doomMemoryMb", "doom_memory_mb"]
+    ];
+
+    for (const [datasetKey, metadataKey] of mappings) {
+      const value = metadata[metadataKey];
+      if (value !== undefined && value !== null && value !== "") {
+        rowNode.dataset[datasetKey] = String(value);
+      }
+    }
+  }
+
   function resolveRows(status = {}, options = {}) {
     const autoplay = status?.autoplay || {};
     const milestones = autoplay.milestones || {};
@@ -160,6 +195,7 @@
       label.textContent = row.label;
       const value = documentRef.createElement("span");
       value.textContent = row.value;
+      applyRowMetadataDataset(rowNode, row.metadata);
       rowNode.append(label, value);
       grid.appendChild(rowNode);
     }
@@ -176,6 +212,7 @@
     version,
     labelize,
     resolveRows,
+    applyRowMetadataDataset,
     renderObjectiveStatusPanel
   });
 })();

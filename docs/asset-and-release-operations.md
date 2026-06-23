@@ -3,7 +3,7 @@
 [日本語](asset-and-release-operations-ja.md)
 
 AIKernel.Doom is published as a source demo. It is not a package and it does
-not vendor WAD or model runtime assets. The public 0.1.2 Web demo does include
+not vendor WAD or model runtime assets. The public 0.1.3 Web demo does include
 the generated `doom.wasm` artifact because the hosted demo redistributes that
 GPL-derived runtime binary with corresponding source materials.
 
@@ -16,11 +16,11 @@ must remain auditable without embedding large or third-party binary payloads.
 Current demo version:
 
 ```text
-0.1.2
+0.1.3
 ```
 
 The demo remains non-packaged, and its AIKernel package references are aligned
-with the official NuGet canonical package line v0.1.2. Local development
+with the official NuGet canonical package line v0.1.3. Local development
 package paths should not be used by default in this repository.
 
 ## Source Assets
@@ -33,7 +33,7 @@ Committed source assets include:
 - HTML terms and license notice source,
 - ROM metadata sample,
 - autoplay profile source JSON,
-- public 0.1.2 `doom.wasm` artifact plus `/demo/doom/module.json`,
+- public 0.1.3 `doom.wasm` artifact plus `/demo/doom/module.json`,
 - documentation.
 
 ## External Runtime Assets
@@ -64,7 +64,7 @@ The public Web runtime expects these paths when deployed:
 /models/bonsai1.7b/NOTICE.txt
 ```
 
-The repository contains the public 0.1.2 `doom.wasm` artifact and
+The repository contains the public 0.1.3 `doom.wasm` artifact and
 `module.json`. WAD and model files remain external hosted assets.
 
 ## Consent Requirements

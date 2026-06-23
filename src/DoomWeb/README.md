@@ -3,7 +3,7 @@
 [日本語](README-ja.md)
 
 `DoomWeb` contains the public Web runtime layer for the AIKernel.Doom browser demo.
-It keeps runtime source assets and the public 0.1.2 `doom.wasm` demo artifact:
+It keeps runtime source assets and the public 0.1.3 `doom.wasm` demo artifact:
 
 - JavaScript runtime bridge for `doom.wasm`
 - Bonsai AutoPlay supervisor logic
@@ -15,7 +15,7 @@ The project does **not** include third-party binary artifacts:
 
 - `DOOM1.WAD` is not stored in this repository.
 - Bonsai GGUF model files are not stored in this repository.
-- The generated public 0.1.2 `demo/doom/doom.wasm` artifact is stored here with its manifest and source notices.
+- The generated public 0.1.3 `demo/doom/doom.wasm` artifact is stored here with its manifest and source notices.
 
 Deployment operators must host WAD and model artifacts outside this source package
 and only load them after explicit runtime consent. The included `doom.wasm`

@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  const version = "20260621-gpupathstatus8";
+  const version = "20260622-gpupathstatus19";
+  const rev3PassReadinessShape = "Passes.{Aisthesis,SpatialReasoning,HudComposite}:ShaderBound=false,PipelineCached=false,BuiltInExecutor=false,InjectedExecutor=false,ReadyForBuiltIn=false";
 
   function readObjectCaseInsensitive(source, names) {
     if (!source || typeof source !== "object") {
@@ -30,6 +31,15 @@
   function boolValue(...values) {
     for (const value of values) {
       if (value !== undefined && value !== null) {
+        if (typeof value === "string") {
+          const normalized = value.trim().toLowerCase();
+          if (!normalized || normalized === "false" || normalized === "0" || normalized === "off" || normalized === "no") {
+            return false;
+          }
+
+          return true;
+        }
+
         return Boolean(value);
       }
     }
@@ -91,6 +101,108 @@
     return reason ? ` · reason=${reason}` : "";
   }
 
+  function rev3PilotMode(pilot) {
+    const summary = readObjectCaseInsensitive(pilot, ["summary", "Summary"]) || {};
+    const mode = textValue(summary.mode, summary.Mode, "");
+    if (mode) {
+      return mode.replace(/^fallback-/, "fb-").replace(/-vector$/, "").replace(/-metadata$/, "");
+    }
+
+    return textValue(pilot?.source, pilot?.Source, "pilot").replace(/^gpu\./, "");
+  }
+
+  function rev3PilotDelta(pilot) {
+    const comparison = readObjectCaseInsensitive(pilot, ["comparison", "Comparison"]) || {};
+    if (comparison.available === false || comparison.Available === false) {
+      return rev3PilotMode(pilot);
+    }
+
+    const delta = numberValue(comparison.meanAbsDelta, comparison.MeanAbsDelta);
+    const state = lowerText(textValue(comparison.thresholdState, comparison.ThresholdState, ""));
+    const label = state === "within"
+      ? "ok"
+      : (state === "observe" ? "obs" : (state === "drift" ? "drift" : ""));
+    const history = readObjectCaseInsensitive(pilot, ["history", "History", "rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"]) || {};
+    const required = numberValue(history.requiredStreak, history.RequiredStreak);
+    const streak = label === "ok"
+      ? numberValue(history.candidateStreak, history.CandidateStreak, history.withinStreak, history.WithinStreak)
+      : (label === "obs"
+        ? numberValue(history.observeStreak, history.ObserveStreak)
+        : (label === "drift" ? numberValue(history.driftStreak, history.DriftStreak) : NaN));
+    const streakText = label && Number.isFinite(streak) && Number.isFinite(required) && required > 0
+      ? `${Math.max(0, Math.floor(streak))}/${Math.floor(required)}`
+      : "";
+    if (Number.isFinite(delta) && delta > 0) {
+      return label ? `${label}${streakText}:d${delta.toFixed(3)}` : `d${delta.toFixed(3)}`;
+    }
+
+    return label ? `${label}${streakText}` : rev3PilotMode(pilot);
+  }
+
+  function rev3PilotText(aisthesis, spatial) {
+    const ais = readObjectCaseInsensitive(aisthesis, ["rev3Pilot", "Rev3Pilot"]);
+    const sp = readObjectCaseInsensitive(spatial, ["rev3Pilot", "Rev3Pilot"]);
+    const parts = [];
+    if (ais) {
+      parts.push(`ais:${rev3PilotDelta(ais)}`);
+    }
+    if (sp) {
+      parts.push(`sp:${rev3PilotDelta(sp)}`);
+    }
+
+    return parts.length > 0 ? ` · rev3=${parts.join("/")}` : "";
+  }
+
+  function rev3FeatureMaskStorageTexture(aisthesis) {
+    const pilot = readObjectCaseInsensitive(aisthesis, ["rev3Pilot", "Rev3Pilot"]) || {};
+    return boolValue(pilot.featureMaskStorageTexture, pilot.FeatureMaskStorageTexture);
+  }
+
+  function rev3PassReadinessValue(status, gpuHud, passNames) {
+    const bridge = readObjectCaseInsensitive(gpuHud, ["rev3Bridge", "Rev3Bridge"])
+      || readObjectCaseInsensitive(status, ["rev3Bridge", "Rev3Bridge"])
+      || {};
+    const diagnostics = readObjectCaseInsensitive(bridge, ["diagnostics", "Diagnostics"]) || bridge;
+    const passes = readObjectCaseInsensitive(diagnostics, ["passes", "Passes"]) || {};
+    const aliases = {
+      Aisthesis: ["Aisthesis", "aisthesis", "gpu.aisthesis.raw-frame"],
+      SpatialReasoning: ["SpatialReasoning", "spatialReasoning", "spatial", "gpu.spatial-reasoning"],
+      HudComposite: ["HudComposite", "hudComposite", "hud", "gpu.hud.composite"]
+    };
+    const labels = {
+      Aisthesis: "ais",
+      SpatialReasoning: "sp",
+      HudComposite: "hud"
+    };
+    const parts = [];
+
+    for (const name of passNames) {
+      const pass = readObjectCaseInsensitive(passes, aliases[name] || [name]) || null;
+      if (!pass) {
+        continue;
+      }
+
+      const ready = boolValue(pass.readyForBuiltIn, pass.ReadyForBuiltIn);
+      const shader = boolValue(pass.shaderBound, pass.ShaderBound);
+      const pipeline = boolValue(pass.pipelineCached, pass.PipelineCached);
+      const builtIn = boolValue(pass.builtInExecutor, pass.BuiltInExecutor);
+      const injected = boolValue(pass.injectedExecutor, pass.InjectedExecutor);
+      const state = ready
+        ? "on"
+        : (injected
+          ? "inj"
+          : (shader && builtIn ? (pipeline ? "warm" : "pipe?") : (shader ? "shader" : "off")));
+      parts.push(`${labels[name] || name}:${state}`);
+    }
+
+    return parts.join("/");
+  }
+
+  function rev3PassReadinessText(status, gpuHud, passNames) {
+    const value = rev3PassReadinessValue(status, gpuHud, passNames);
+    return value ? ` · pass=${value}` : "";
+  }
+
   function lowerText(value) {
     return String(value || "").toLowerCase();
   }
@@ -142,6 +254,278 @@
     return Array.isArray(rows) ? rows : [];
   }
 
+  function readMetadataCaseInsensitive(source) {
+    const metadata = source?.metadata || source?.Metadata;
+    if (!metadata || typeof metadata !== "object") {
+      return {};
+    }
+
+    const normalized = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      const metadataKey = String(key || "").trim();
+      if (metadataKey) {
+        normalized[metadataKey] = value === undefined || value === null ? "" : String(value);
+      }
+    }
+
+    return normalized;
+  }
+
+  function canonicalPathRole(label) {
+    return lowerText(label || "path");
+  }
+
+  function createCanonicalRowMetadata(row) {
+    const supplied = readMetadataCaseInsensitive(row);
+    const role = canonicalPathRole(textValue(row.label, row.Label, ""));
+    const zeroCopy = boolValue(row.zeroCopy, row.ZeroCopy);
+    const cpuFallback = boolValue(row.cpuFallback, row.CpuFallback);
+    const memoryMB = numberValue(row.memoryMB, row.MemoryMB, row.memoryMb, row.MemoryMb);
+    const metadata = {
+      rev3_pass_id: role,
+      rev3_path_role: role,
+      rev3_pilot_state: "dto-projected",
+      rev3_promotion_gate: "runtime-stamp-required",
+      rev3_candidate_streak: "0",
+      rev3_diagnostic_streak: "0",
+      rev3_required_streak: "0",
+      rev3_authoritative_ready: "false",
+      rev3_diagnostic_ready: "false",
+      rev3_execution_mode: cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
+      rev3_feature_mask_storage_texture: role === "sensor" && zeroCopy ? "true" : "false",
+      rev3_frame_index: "0",
+      rev3_pass_readiness: rev3PassReadinessShape,
+      rev3_sample_ticks: "0",
+      doom_runtime_stamped: boolValue(row.runtimeStamped, row.RuntimeStamped) ? "true" : "false",
+      doom_missing_row: "false",
+      doom_label: textValue(row.label, row.Label, role.toUpperCase()),
+      doom_mode: textValue(row.mode, row.Mode, "unknown"),
+      doom_reason: textValue(canonicalRowReason(row, supplied), "none"),
+      doom_tone: textValue(row.tone, row.Tone, "unknown"),
+      doom_value: textValue(row.value, row.Value, "none"),
+      doom_zero_copy: zeroCopy ? "true" : "false",
+      doom_cpu_fallback: cpuFallback ? "true" : "false",
+      doom_memory_mb: memoryMB > 0 ? String(memoryMB) : "0"
+    };
+
+    return Object.freeze(withPromotionReadinessMetadata(Object.assign(metadata, supplied)));
+  }
+
+  function canonicalRowReason(row, suppliedMetadata = null) {
+    const supplied = suppliedMetadata || readMetadataCaseInsensitive(row);
+    const metadataError = textValue(supplied.rev3_metadata_validation_error, supplied.rev3MetadataValidationError, "");
+    return textValue(
+      row?.reason,
+      row?.Reason,
+      metadataError ? `metadata-invalid:${metadataError}` : "");
+  }
+
+  function metadataBoolText(value) {
+    return value ? "true" : "false";
+  }
+
+  function metadataStreakText(value) {
+    return String(Math.max(0, Math.floor(numberValue(value))));
+  }
+
+  function readMetadataBool(metadata, key) {
+    return lowerText(metadata?.[key] || "") === "true";
+  }
+
+  function hasMetadataValue(metadata, key) {
+    return metadata?.[key] !== undefined
+      && metadata?.[key] !== null
+      && String(metadata[key]).trim() !== "";
+  }
+
+  function readMetadataInt(metadata, key) {
+    return Math.max(0, Math.floor(numberValue(metadata?.[key])));
+  }
+
+  function splitPromotionGate(gate) {
+    const text = lowerText(gate);
+    if (!text) {
+      return [];
+    }
+
+    return text
+      .split(";")
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        const separator = part.indexOf(":");
+        if (separator < 0) {
+          return { label: "", gate: part, raw: part };
+        }
+
+        const label = part.slice(0, separator).trim();
+        const value = part.slice(separator + 1).trim();
+        return { label, gate: value, raw: part };
+      });
+  }
+
+  function resolvePromotionReason(metadata) {
+    const gate = lowerText(metadata?.rev3_promotion_gate || "");
+    if (!gate) {
+      return "metadata-missing";
+    }
+
+    const gates = splitPromotionGate(gate);
+    const blockingComposite = gates.find(item =>
+      item.gate
+      && item.gate !== "trace-candidate"
+      && item.gate !== "not-applicable");
+    if (blockingComposite) {
+      return blockingComposite.raw || blockingComposite.gate;
+    }
+
+    if (gate !== "trace-candidate" && gate !== "not-applicable") {
+      return gate;
+    }
+
+    if (gate === "not-applicable") {
+      return "not-applicable";
+    }
+
+    const storageReady = readMetadataBool(metadata, "rev3_feature_mask_storage_texture");
+    const diagnosticReady = readMetadataBool(metadata, "rev3_diagnostic_ready");
+    const authoritativeReady = readMetadataBool(metadata, "rev3_authoritative_ready");
+    const candidateStreak = readMetadataInt(metadata, "rev3_candidate_streak");
+    const diagnosticStreak = readMetadataInt(metadata, "rev3_diagnostic_streak");
+    const requiredStreak = readMetadataInt(metadata, "rev3_required_streak");
+    const diagnosticStable = diagnosticReady && requiredStreak > 0 && diagnosticStreak >= requiredStreak;
+    const candidateStable = requiredStreak > 0 && candidateStreak >= requiredStreak;
+
+    if (!storageReady) {
+      return "storage-texture-not-ready";
+    }
+
+    if (!diagnosticReady) {
+      return "diagnostic-not-ready";
+    }
+
+    if (!diagnosticStable) {
+      return "diagnostic-streak-not-ready";
+    }
+
+    if (!candidateStable) {
+      return "candidate-streak-not-ready";
+    }
+
+    if (!authoritativeReady) {
+      return "authoritative-not-ready";
+    }
+
+    return "authoritative-ready";
+  }
+
+  function withPromotionReadinessMetadata(metadata) {
+    const reason = textValue(metadata.rev3_promotion_reason, resolvePromotionReason(metadata));
+    const storageReady = readMetadataBool(metadata, "rev3_feature_mask_storage_texture");
+    const diagnosticReady = readMetadataBool(metadata, "rev3_diagnostic_ready");
+    const candidateStreak = readMetadataInt(metadata, "rev3_candidate_streak");
+    const diagnosticStreak = readMetadataInt(metadata, "rev3_diagnostic_streak");
+    const requiredStreak = readMetadataInt(metadata, "rev3_required_streak");
+    const diagnosticStable = diagnosticReady && requiredStreak > 0 && diagnosticStreak >= requiredStreak;
+    const candidateStable = requiredStreak > 0 && candidateStreak >= requiredStreak;
+    const candidateReady = storageReady && diagnosticStable && candidateStable;
+    if (!hasMetadataValue(metadata, "rev3_promotion_reason")) {
+      metadata.rev3_promotion_reason = reason;
+    }
+    if (!hasMetadataValue(metadata, "rev3_promotion_blocked")) {
+      metadata.rev3_promotion_blocked = reason === "not-applicable" || reason === "authoritative-ready" ? "false" : "true";
+    }
+    if (!hasMetadataValue(metadata, "rev3_promotion_candidate_ready")) {
+      metadata.rev3_promotion_candidate_ready = candidateReady ? "true" : "false";
+    }
+    if (!hasMetadataValue(metadata, "rev3_promotion_diagnostic_stable")) {
+      metadata.rev3_promotion_diagnostic_stable = diagnosticStable ? "true" : "false";
+    }
+    return metadata;
+  }
+
+  function readPilotFrom(source) {
+    return readObjectCaseInsensitive(source, ["rev3Pilot", "Rev3Pilot"]) || {};
+  }
+
+  function readPilotHistory(source, pilot) {
+    return readObjectCaseInsensitive(pilot, ["history", "History", "rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"])
+      || readObjectCaseInsensitive(source, ["rev3ParityHistory", "Rev3ParityHistory", "parityHistory", "ParityHistory"])
+      || {};
+  }
+
+  function resolveRuntimePilotMetadata(source, fallbackState = "runtime-observed") {
+    const pilot = readPilotFrom(source);
+    const comparison = readObjectCaseInsensitive(pilot, ["comparison", "Comparison"]) || {};
+    const history = readPilotHistory(source, pilot);
+    const available = comparison.available ?? comparison.Available;
+    const thresholdState = available === false
+      ? "unavailable"
+      : lowerText(textValue(comparison.thresholdState, comparison.ThresholdState, history.lastThresholdState, history.LastThresholdState, fallbackState));
+    const promotionGate = available === false
+      ? "unavailable"
+      : lowerText(textValue(comparison.promotionGate, comparison.PromotionGate, history.lastPromotionGate, history.LastPromotionGate, "not-applicable"));
+
+    return Object.freeze({
+      state: thresholdState || fallbackState,
+      gate: promotionGate || "not-applicable",
+      candidateStreak: numberValue(history.candidateStreak, history.CandidateStreak),
+      diagnosticStreak: numberValue(history.withinStreak, history.WithinStreak, history.diagnosticStreak, history.DiagnosticStreak),
+      requiredStreak: numberValue(history.requiredStreak, history.RequiredStreak),
+      authoritativeReady: boolValue(history.ready, history.Ready),
+      diagnosticReady: boolValue(history.diagnosticReady, history.DiagnosticReady)
+    });
+  }
+
+  function mergeSensorPilotMetadata(aisthesis, spatial) {
+    const ais = resolveRuntimePilotMetadata(aisthesis, "aisthesis-pending");
+    const sp = resolveRuntimePilotMetadata(spatial, "spatial-pending");
+    return Object.freeze({
+      state: `ais:${ais.state};sp:${sp.state}`,
+      gate: `ais:${ais.gate};sp:${sp.gate}`,
+      candidateStreak: ais.candidateStreak,
+      diagnosticStreak: Math.max(ais.diagnosticStreak, sp.diagnosticStreak),
+      requiredStreak: Math.max(ais.requiredStreak, sp.requiredStreak),
+      authoritativeReady: ais.authoritativeReady,
+      diagnosticReady: ais.diagnosticReady || sp.diagnosticReady,
+      featureMaskStorageTexture: rev3FeatureMaskStorageTexture(aisthesis)
+    });
+  }
+
+  function createRuntimeRowMetadata(row, pilotMetadata = null) {
+    const role = canonicalPathRole(row?.label || "path");
+    const pilot = pilotMetadata || resolveRuntimePilotMetadata(null);
+    const memoryMB = numberValue(row?.memoryMB, row?.memoryMb);
+    const metadata = {
+      rev3_pass_id: role,
+      rev3_path_role: role,
+      rev3_pilot_state: textValue(pilot.state, "runtime-observed"),
+      rev3_promotion_gate: textValue(pilot.gate, "not-applicable"),
+      rev3_candidate_streak: metadataStreakText(pilot.candidateStreak),
+      rev3_diagnostic_streak: metadataStreakText(pilot.diagnosticStreak),
+      rev3_required_streak: metadataStreakText(pilot.requiredStreak),
+      rev3_authoritative_ready: metadataBoolText(Boolean(pilot.authoritativeReady)),
+      rev3_diagnostic_ready: metadataBoolText(Boolean(pilot.diagnosticReady)),
+      rev3_execution_mode: row?.cpuFallback ? "deterministic-fallback" : "browser-webgpu-compute",
+      rev3_feature_mask_storage_texture: metadataBoolText(Boolean(pilot.featureMaskStorageTexture)),
+      rev3_frame_index: metadataStreakText(row?.frameIndex),
+      rev3_pass_readiness: textValue(row?.passReadiness, rev3PassReadinessShape),
+      rev3_sample_ticks: metadataStreakText(row?.sampleTicks),
+      doom_runtime_stamped: "true",
+      doom_missing_row: "false",
+      doom_label: textValue(row?.label, role.toUpperCase()),
+      doom_mode: textValue(row?.mode, "runtime"),
+      doom_reason: textValue(row?.reason, "none"),
+      doom_tone: textValue(row?.tone, "unknown"),
+      doom_value: textValue(row?.value, "none"),
+      doom_zero_copy: metadataBoolText(Boolean(row?.zeroCopy)),
+      doom_cpu_fallback: metadataBoolText(Boolean(row?.cpuFallback)),
+      doom_memory_mb: memoryMB > 0 ? String(memoryMB) : "0"
+    };
+
+    return Object.freeze(withPromotionReadinessMetadata(metadata));
+  }
+
   function normalizeCanonicalGpuPathStatus(source) {
     if (!source || typeof source !== "object") {
       return null;
@@ -156,7 +540,8 @@
         zeroCopy: boolValue(row.zeroCopy, row.ZeroCopy),
         cpuFallback: boolValue(row.cpuFallback, row.CpuFallback),
         memoryMB: numberValue(row.memoryMB, row.MemoryMB, row.memoryMb, row.MemoryMb),
-        reason: shortReason(textValue(row.reason, row.Reason, ""))
+        reason: shortReason(canonicalRowReason(row)),
+        metadata: createCanonicalRowMetadata(row)
       }))
       .filter(row => row.label && row.value);
 
@@ -190,13 +575,16 @@
         providerBackend: "contract",
         providerSupported: true,
         providerInitialized: false,
-        providerRendererInitialized: false
+        providerRendererInitialized: false,
+        metadata: game.metadata || {}
       }),
       bonsai: Object.freeze({
         mode: textValue(bonsai.mode, "contract"),
         value: bonsai.value || "",
         tone: bonsai.tone || "gpu",
-        zeroCopy: Boolean(bonsai.zeroCopy)
+        zeroCopy: Boolean(bonsai.zeroCopy),
+        reason: bonsai.reason || "",
+        metadata: bonsai.metadata || {}
       }),
       hud: Object.freeze({
         mode: textValue(hud.mode, "contract"),
@@ -205,7 +593,9 @@
         compositeActive: false,
         compositeReady: true,
         panelReady: true,
-        panelDoubleBuffered: false
+        panelDoubleBuffered: false,
+        reason: hud.reason || "",
+        metadata: hud.metadata || {}
       }),
       sensor: Object.freeze({
         mode: textValue(sensor.mode, "contract"),
@@ -214,7 +604,9 @@
         tone: sensor.tone || "gpu",
         zeroCopy: Boolean(sensor.zeroCopy),
         featureReady: true,
-        maskReady: true
+        maskReady: true,
+        reason: sensor.reason || "",
+        metadata: sensor.metadata || {}
       }),
       canonical: true
     });
@@ -332,22 +724,32 @@
     const sensorMode = aisthesisComputeActive ? "gpu" : (sensorZero ? "zero" : (aisthesisReady ? "gpu-ready" : "dto"));
     const spatialMode = spatialComputeActive ? "gpu" : (spatialReady ? "gpu-ready" : "dto");
     const sensorMask = boolValue(gpuAisthesis.maskTextureReady, gpuAisthesis.MaskTextureReady);
+    const sensorMaskRev3 = rev3FeatureMaskStorageTexture(gpuAisthesis);
     const sensorTone = aisthesisComputeActive || spatialComputeActive || sensorZero || aisthesisReady || spatialReady ? "gpu" : (sensorFeature ? "warn" : "");
     const gameReason = cpuFallback
       ? (providerLastError || adapterRequestError || (providerSupported ? "cpu-fallback" : "webgpu-unsupported"))
       : (gameTextureReady ? "" : (!deviceReady ? "webgpu-device-pending" : (!providerInitialized ? "provider-pending" : (!providerRendererInitialized ? "renderer-pending" : (!rawTextureReady ? "raw-gpu-texture-missing" : "")))));
     const gameValue = `${gameMode} · ${gpuDelegate} · render=${renderer} · provider=${providerBackend}${adapterText(adapterSummary, adapterPowerPreference, adapterFallbackUsed)} · wait=${waitMs}ms/${waitTimeouts}${memoryText(memoryMb, cpuFallback)}${reasonText(gameReason)}`;
     const bonsaiValue = `${bonsaiMode} · raw=${rawTextureReady ? "zcp" : "copy"} · vision=${vision} · backend=${visionBackend}`;
-    const hudValue = `${hudMode} · panel=${hudPanelReady ? "gpu" : "dto"}${hudPanelDoubleBuffered ? "x2" : ""} · source=${hudSource} · mode=${textValue(gpuHud.cssOverlayMode, gpuHud.CssOverlayMode, "unknown")} · buffers=${gpuBufferReady ? "gpu" : "pending"}`;
+    const hudPassReadiness = rev3PassReadinessValue(status, gpuHud, ["HudComposite"]);
+    const hudPassText = hudPassReadiness ? ` · pass=${hudPassReadiness}` : "";
+    const hudValue = `${hudMode} · panel=${hudPanelReady ? "gpu" : "dto"}${hudPanelDoubleBuffered ? "x2" : ""}${hudPassText} · source=${hudSource} · mode=${textValue(gpuHud.cssOverlayMode, gpuHud.CssOverlayMode, "unknown")} · buffers=${gpuBufferReady ? "gpu" : "pending"}`;
     const matrixText = matrixSource ? ` · matrix=${matrixSource}` : "";
     const packText = cpuPackingFallback ? " · pack=cpu" : "";
-    const sensorValue = `ais=${sensorMode} · spatial=${spatialMode}${matrixText}${packText} · compute=${gpuComputeActive ? "active" : (gpuComputeReady ? "ready" : "pending")} · feature=${sensorFeature ? "ready" : "pending"} · mask=${sensorMask ? "gpu" : "dto"}`;
+    const rev3Text = rev3PilotText(gpuAisthesis, gpuSpatial);
+    const sensorPassReadiness = rev3PassReadinessValue(status, gpuHud, ["Aisthesis", "SpatialReasoning"]);
+    const sensorPassText = sensorPassReadiness ? ` · pass=${sensorPassReadiness}` : "";
+    const sensorValue = `ais=${sensorMode} · spatial=${spatialMode}${matrixText}${packText}${rev3Text}${sensorPassText} · compute=${gpuComputeActive ? "active" : (gpuComputeReady ? "ready" : "pending")} · feature=${sensorFeature ? "ready" : "pending"} · mask=${sensorMaskRev3 ? "rev3" : (sensorMask ? "gpu" : "dto")}`;
+    const sensorPilotMetadata = mergeSensorPilotMetadata(gpuAisthesis, gpuSpatial);
     const rows = [
-      { label: "GAME", value: gameValue, tone: gameTone },
-      { label: "BONSAI", value: bonsaiValue, tone: bonsaiTone },
-      { label: "HUD", value: hudValue, tone: hudTone },
-      { label: "SENSOR", value: sensorValue, tone: sensorTone }
+      { label: "GAME", mode: gameMode, value: gameValue, tone: gameTone, zeroCopy: gameTextureReady, cpuFallback, memoryMB: memoryMb, reason: gameReason },
+      { label: "BONSAI", mode: bonsaiMode, value: bonsaiValue, tone: bonsaiTone, zeroCopy: bonsaiZero, cpuFallback: !bonsaiZero, memoryMB: 0, reason: bonsaiZero ? "" : "readback-copy" },
+      { label: "HUD", mode: hudMode, value: hudValue, tone: hudTone, zeroCopy: hudComposite, cpuFallback: false, memoryMB: 0, reason: hudComposite ? "" : hudMode, passReadiness: hudPassReadiness },
+      { label: "SENSOR", mode: `${sensorMode}/${spatialMode}`, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, cpuFallback: !(aisthesisComputeActive || spatialComputeActive || sensorZero), memoryMB: 0, reason: sensorFeature ? "" : "sensor-feature-pending", passReadiness: sensorPassReadiness }
     ];
+    for (const row of rows) {
+      row.metadata = createRuntimeRowMetadata(row, row.label === "SENSOR" ? sensorPilotMetadata : null);
+    }
     const sensorSummary = aisthesisComputeActive || spatialComputeActive ? "gpu" : (sensorZero ? "zcp" : (aisthesisReady || spatialReady ? "gpu-ready" : "dto"));
     const text = `game=${gameMode}; bonsai=${bonsaiZero ? "zcp" : "copy"}; hud=${hudComposite ? "gpu" : (hudCompositeReady ? "ready" : "dto")}; sensor=${sensorSummary}`;
     const shortText = `${gameMode} | B:${bonsaiZero ? "zcp" : "copy"} H:${hudComposite ? "gpu" : (hudCompositeReady ? "ready" : "dto")} S:${sensorSummary}`;
@@ -357,10 +759,10 @@
       rows,
       text,
       shortText,
-      game: Object.freeze({ mode: gameMode, value: gameValue, tone: gameTone, cpuFallback, gpuAvailable: gameTextureReady, providerGpuAvailable, rawZeroCopy: rawTextureReady, memoryMB: memoryMb, memoryBytes, reason: shortReason(gameReason), providerBackend, providerSupported, providerInitialized, providerRendererInitialized, deviceReady, adapterPowerPreference, adapterSummary, adapterFallbackUsed }),
-      bonsai: Object.freeze({ mode: bonsaiMode, value: bonsaiValue, tone: bonsaiTone, zeroCopy: bonsaiZero }),
-      hud: Object.freeze({ mode: hudMode, value: hudValue, tone: hudTone, compositeActive: hudComposite, compositeReady: hudCompositeReady, panelReady: hudPanelReady, panelDoubleBuffered: hudPanelDoubleBuffered }),
-      sensor: Object.freeze({ mode: sensorMode, spatialMode, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, featureReady: sensorFeature, maskReady: sensorMask, gpuComputeReady, gpuComputeActive, gpuBufferReady })
+      game: Object.freeze({ mode: gameMode, value: gameValue, tone: gameTone, cpuFallback, gpuAvailable: gameTextureReady, providerGpuAvailable, rawZeroCopy: rawTextureReady, memoryMB: memoryMb, memoryBytes, reason: shortReason(gameReason), providerBackend, providerSupported, providerInitialized, providerRendererInitialized, deviceReady, adapterPowerPreference, adapterSummary, adapterFallbackUsed, metadata: rows[0].metadata }),
+      bonsai: Object.freeze({ mode: bonsaiMode, value: bonsaiValue, tone: bonsaiTone, zeroCopy: bonsaiZero, metadata: rows[1].metadata }),
+      hud: Object.freeze({ mode: hudMode, value: hudValue, tone: hudTone, compositeActive: hudComposite, compositeReady: hudCompositeReady, panelReady: hudPanelReady, panelDoubleBuffered: hudPanelDoubleBuffered, metadata: rows[2].metadata }),
+      sensor: Object.freeze({ mode: sensorMode, spatialMode, value: sensorValue, tone: sensorTone, zeroCopy: sensorZero, featureReady: sensorFeature, maskReady: sensorMask, gpuComputeReady, gpuComputeActive, gpuBufferReady, rev3Aisthesis: readObjectCaseInsensitive(gpuAisthesis, ["rev3Pilot", "Rev3Pilot"]), rev3Spatial: readObjectCaseInsensitive(gpuSpatial, ["rev3Pilot", "Rev3Pilot"]), metadata: rows[3].metadata })
     });
   }
 

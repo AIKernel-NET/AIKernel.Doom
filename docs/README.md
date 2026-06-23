@@ -15,16 +15,16 @@ and evidence-driven Observer ROM development to a real interactive workload.
 This documentation is written for developers who want to understand or reuse
 the implementation techniques. The repository is a demo sample, not a packaged
 DOOM distribution. It does not commit WAD or model runtime artifacts such as
-`DOOM1.WAD` or Bonsai GGUF model files. The public 0.1.2 Web demo intentionally
+`DOOM1.WAD` or Bonsai GGUF model files. The public 0.1.3 Web demo intentionally
 commits the generated `doom.wasm` artifact together with its manifest,
 corresponding source recipe, patches, build scripts, and license notices.
 
 ## Cross-Repository Alignment
 
-Shared repository boundaries, v0.1.2 canonical NuGet references, and
+Shared repository boundaries, v0.1.3 canonical NuGet references, and
 cross-package version alignment are defined by
-[Package Release Alignment v0.1.2](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/development/package-release-alignment-v0.1.2.md).
-When a change crosses repositories, use the matching v0.1.2 package family
+[AIKernel GPU rev3 Migration v0.1.3](https://github.com/AIKernel-NET/AIKernel.NET/blob/main/docs/migration/v0.1.3-gpu-rev3-migration.md).
+When a change crosses repositories, use the matching v0.1.3 package family
 and avoid defaulting AIKernel.Doom to local package paths.
 
 Doom owns scenario-specific visual, audio, HUD, and input mappings for this

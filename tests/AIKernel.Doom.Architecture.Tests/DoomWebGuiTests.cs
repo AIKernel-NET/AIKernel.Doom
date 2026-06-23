@@ -26,7 +26,9 @@ public sealed class DoomWebGuiTests
         Assert.Contains("doom-approval-accept", script, StringComparison.Ordinal);
         Assert.Contains("doom-approval-decline", script, StringComparison.Ordinal);
         Assert.Contains("runApprovalUiCommand(\"yes\")", script, StringComparison.Ordinal);
-        Assert.Contains("runApprovalUiCommand(\"no\")", script, StringComparison.Ordinal);
+        Assert.Contains("Start in GPU Mode / GPUで開始", script, StringComparison.Ordinal);
+        Assert.Contains("Start in CPU Mode / CPUで開始", script, StringComparison.Ordinal);
+        Assert.Contains("setStartupGpuMode(false, \"startup-cpu\")", script, StringComparison.Ordinal);
         Assert.Contains("runWasmCommand(command, { echo: false, source: \"approval-ui\" })", script, StringComparison.Ordinal);
         Assert.Contains("Type yes in the aik console or use the approval button", script, StringComparison.Ordinal);
         Assert.DoesNotContain("hintWord=yes", script, StringComparison.Ordinal);
@@ -71,6 +73,28 @@ public sealed class DoomWebGuiTests
     }
 
     [Fact]
+    public void DoomWeb_StagesCanonicalRev3BrowserBridgeAssets()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var publicLoader = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-public-loader.js"));
+        var worker = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker.js"));
+        var project = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "DoomWeb.csproj"));
+
+        Assert.Contains("AIKernel.Wasm.WebGpuComputeProvider", project, StringComparison.Ordinal);
+        Assert.Contains("GeneratePathProperty=\"true\"", project, StringComparison.Ordinal);
+        Assert.Contains("runtime\\browser\\webgpu-rev3-envelope-bridge.js", project, StringComparison.Ordinal);
+        Assert.Contains("shaders\\hud\\hud-composite.rev3.wgsl", project, StringComparison.Ordinal);
+        Assert.Contains("wwwroot\\js\\aikernel\\webgpu-rev3-envelope-bridge.js", project, StringComparison.Ordinal);
+        Assert.Contains("wwwroot\\demo\\doom\\js\\aikernel\\webgpu-rev3-envelope-bridge.js", project, StringComparison.Ordinal);
+        Assert.Contains("window.AIKernelDoomRev3AssetBase", publicLoader, StringComparison.Ordinal);
+        Assert.Contains("window.AIKernelWebGpuRev3Ready = import(moduleUrl)", publicLoader, StringComparison.Ordinal);
+        Assert.Contains("createWebGpuRev3EnvelopeBridge: module.createWebGpuRev3EnvelopeBridge", publicLoader, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomRev3AssetBase = `${workerScriptBase}aikernel/`", worker, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelWebGpuRev3Ready = import(scriptUrl(\"/js/aikernel/webgpu-rev3-envelope-bridge.js\"))", worker, StringComparison.Ordinal);
+        Assert.Contains("createWebGpuRev3BrowserExecutor: module.createWebGpuRev3BrowserExecutor", worker, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DoomWebGpuProvider_SeparatesRawFramebufferAndHudCompositeTargets()
     {
         var script = ReadDoomWebGpuProviderScript();
@@ -97,10 +121,13 @@ public sealed class DoomWebGuiTests
         Assert.Contains("const HUD_COMPOSITE_TARGET = GPU_CONTRACTS.hudCompositeTarget", script, StringComparison.Ordinal);
         Assert.Contains("const HUD_COMPOSITE_MAX_FPS = 30", script, StringComparison.Ordinal);
         Assert.Contains("const HUD_COMPOSITE_MIN_INTERVAL_MS", script, StringComparison.Ordinal);
+        Assert.Contains("const REV3_HUD_COMPOSITE_PILOT_TARGET = `${HUD_COMPOSITE_TARGET}:rev3-pilot`", script, StringComparison.Ordinal);
         Assert.Contains("doom.frame.rgba8unorm", script, StringComparison.Ordinal);
         Assert.Contains("doom.hud.composite.${index}", script, StringComparison.Ordinal);
-        Assert.Contains("GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC", script, StringComparison.Ordinal);
+        Assert.Contains("doom.hud.composite.rev3-pilot", script, StringComparison.Ordinal);
+        Assert.Contains("GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC", script, StringComparison.Ordinal);
         Assert.Contains("hudCompositeTextures", script, StringComparison.Ordinal);
+        Assert.Contains("rev3HudCompositePilotTexture", script, StringComparison.Ordinal);
         Assert.Contains("hudCompositePresentBindGroups", script, StringComparison.Ordinal);
         Assert.Contains("doom.hud.composite.pass", script, StringComparison.Ordinal);
         Assert.Contains("doom.hud.composite.present.pass", script, StringComparison.Ordinal);
@@ -130,6 +157,49 @@ public sealed class DoomWebGuiTests
         Assert.Contains("const GPU_SPATIAL_REASONING_SHADER", script, StringComparison.Ordinal);
         Assert.Contains("const GPU_SPATIAL_INFO_TARGET = GPU_CONTRACTS.spatialInfoTarget", script, StringComparison.Ordinal);
         Assert.Contains("const GPU_SPATIAL_OUTPUT_TARGET = GPU_CONTRACTS.spatialOutputTarget", script, StringComparison.Ordinal);
+        Assert.Contains("const REV3_SHADER_PATHS = Object.freeze", script, StringComparison.Ordinal);
+        Assert.Contains("\"gpu.hud.composite\": \"shaders/hud-composite.rev3.wgsl\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"gpu.aisthesis.raw-frame\": \"shaders/aisthesis.rev3.wgsl\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"gpu.spatial-reasoning\": \"shaders/spatial-reasoning.rev3.wgsl\"", script, StringComparison.Ordinal);
+        Assert.Contains("async initializeRev3Bridge()", script, StringComparison.Ordinal);
+        Assert.Contains("createWebGpuRev3EnvelopeBridge", script, StringComparison.Ordinal);
+        Assert.Contains("createWebGpuRev3BrowserExecutor", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3TextureRegistry()", script, StringComparison.Ordinal);
+        Assert.Contains("resolveRev3Texture(targetId)", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3HudCompositeEnvelope(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3AisthesisEnvelope(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3SpatialEnvelope(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3MatrixBuffers()", script, StringComparison.Ordinal);
+        Assert.Contains("scheduleRev3HudCompositePilot(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("scheduleRev3AisthesisPilot(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("scheduleRev3SpatialPilot(renderer)", script, StringComparison.Ordinal);
+        Assert.Contains("this.rev3Bridge.dispatchAisthesisEnvelope(envelope)", script, StringComparison.Ordinal);
+        Assert.Contains("this.rev3Bridge.dispatchSpatialReasoningEnvelope(envelope)", script, StringComparison.Ordinal);
+        Assert.Contains("this.rev3Bridge.dispatchHudCompositeEnvelope(envelope)", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3AisthesisPilotSummary(", script, StringComparison.Ordinal);
+        Assert.Contains("function rev3DiagnosticsMetadata", script, StringComparison.Ordinal);
+        Assert.Contains("featureMaskStorageTexture", script, StringComparison.Ordinal);
+        Assert.Contains("rev3_feature_mask_storage_texture", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3SpatialPilotSummary(", script, StringComparison.Ordinal);
+        Assert.Contains("compareGpuPilotSummary(", script, StringComparison.Ordinal);
+        Assert.Contains("applyGpuPilotParityGate(", script, StringComparison.Ordinal);
+        Assert.Contains("createRev3PilotParityHistory(", script, StringComparison.Ordinal);
+        Assert.Contains("updateRev3PilotParityHistory(", script, StringComparison.Ordinal);
+        Assert.Contains("REV3_AISTHESIS_PARITY_THRESHOLDS", script, StringComparison.Ordinal);
+        Assert.Contains("REV3_SPATIAL_PARITY_THRESHOLDS", script, StringComparison.Ordinal);
+        Assert.Contains("REV3_AISTHESIS_PROMOTION_STREAK_REQUIRED", script, StringComparison.Ordinal);
+        Assert.Contains("REV3_SPATIAL_DIAGNOSTIC_STREAK_REQUIRED", script, StringComparison.Ordinal);
+        Assert.Contains("rev3BridgeReady: Boolean(rev3Bridge.bridgeAvailable && rev3Bridge.executorAvailable)", script, StringComparison.Ordinal);
+        Assert.Contains("rev3ShaderSourcesReady: Boolean(rev3Bridge.shaderSourcesReady)", script, StringComparison.Ordinal);
+        Assert.Contains("rev3TextureRegistryReady: Boolean(rev3Bridge.textureRegistryReady)", script, StringComparison.Ordinal);
+        Assert.Contains("rev3AisthesisPilotSucceeded", script, StringComparison.Ordinal);
+        Assert.Contains("rev3AisthesisPilotSummary", script, StringComparison.Ordinal);
+        Assert.Contains("rev3AisthesisParityHistory", script, StringComparison.Ordinal);
+        Assert.Contains("rev3SpatialPilotSucceeded", script, StringComparison.Ordinal);
+        Assert.Contains("rev3SpatialPilotSummary", script, StringComparison.Ordinal);
+        Assert.Contains("rev3SpatialParityHistory", script, StringComparison.Ordinal);
+        Assert.Contains("rev3HudCompositePilotTextureReady", script, StringComparison.Ordinal);
+        Assert.Contains("rev3HudCompositePilotSucceeded", script, StringComparison.Ordinal);
         Assert.Contains("doom.gpu.spatial.reasoning.compute", script, StringComparison.Ordinal);
         Assert.Contains("doom.gpu.spatial.reasoning.compute.pass", script, StringComparison.Ordinal);
         Assert.Contains("const GPU_CONTRACTS = requireGpuContracts()", script, StringComparison.Ordinal);
@@ -210,7 +280,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("fn pixelSize(width: f32) -> vec2<f32>", script, StringComparison.Ordinal);
         Assert.Contains("width / max(1.0, f32(info.width))", script, StringComparison.Ordinal);
         Assert.Contains("color = addLayerCard(color, uv, 0u, panel[0], ${wgslPanelMin(\"aisthesis\")}", script, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 20", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", contracts, StringComparison.Ordinal);
         Assert.Contains("enemyCircleActive: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleX: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleY: f32", script, StringComparison.Ordinal);
@@ -514,20 +584,48 @@ public sealed class DoomWebGuiTests
         Assert.Contains("resolvePriorityAction", goalPanel, StringComparison.Ordinal);
         Assert.Contains("DOOM_GOAL_PANEL_VM_TEST_OK", goalPanelVmTest, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
-        Assert.Contains("20260621-gpupathstatus8", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("20260622-gpupathstatus19", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("function adapterText", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function rev3PilotText", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function rev3FeatureMaskStorageTexture", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function rev3PassReadinessValue", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function rev3PassReadinessText", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("pass=${value}", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function createRuntimeRowMetadata", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("function mergeSensorPilotMetadata", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("thresholdState", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("candidateStreak", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("requiredStreak", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("rev3_pass_id", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("rev3_pass_readiness", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("rev3_feature_mask_storage_texture", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("doom_runtime_stamped", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("adapterPowerPreference", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("gpuComputeActive", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("rev3Aisthesis", gpuPathStatus, StringComparison.Ordinal);
+        Assert.Contains("rev3Spatial", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("function resolveGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("function normalizeCanonicalGpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("gpuPathStatus", gpuPathStatus, StringComparison.Ordinal);
         Assert.Contains("canonical C# GPU path DTO should be used", gpuPathStatusVmTest, StringComparison.Ordinal);
         Assert.Contains("DOOM_GPU_PATH_STATUS_VM_TEST_OK", gpuPathStatusVmTest, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomObjectiveStatusPanel", objectiveStatusPanel, StringComparison.Ordinal);
-        Assert.Contains("20260621-objectivestatus-gpu1", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("20260622-objectivestatus-gpu2", objectiveStatusPanel, StringComparison.Ordinal);
         Assert.Contains("AIKernelDoomGpuPathStatus", objectiveStatusPanel, StringComparison.Ordinal);
         Assert.Contains("function resolveRows", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("function applyRowMetadataDataset", objectiveStatusPanel, StringComparison.Ordinal);
         Assert.Contains("function renderObjectiveStatusPanel", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("rev3_pilot_state", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("rev3_pass_readiness", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("rev3_feature_mask_storage_texture", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("doom_runtime_stamped", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("rowNode.dataset[datasetKey] = String(value)", objectiveStatusPanel, StringComparison.Ordinal);
+        Assert.Contains("rev3PilotState", objectiveStatusPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("rev3PassReadiness", objectiveStatusPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("rev3FeatureMaskStorageTexture", objectiveStatusPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("ais:within;sp:unavailable", objectiveStatusPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("Canonical and live GPU path labels should match", objectiveStatusPanelVmTest, StringComparison.Ordinal);
+        Assert.Contains("Rendered canonical SENSOR row should preserve DTO-projected pilot state", objectiveStatusPanelVmTest, StringComparison.Ordinal);
         Assert.Contains("DOOM_OBJECTIVE_STATUS_PANEL_VM_TEST_OK", objectiveStatusPanelVmTest, StringComparison.Ordinal);
         Assert.Contains("self.AIKernelDoomDebugOverlay", debugOverlay, StringComparison.Ordinal);
         Assert.Contains("20260621-debugoverlay-gpu1", debugOverlay, StringComparison.Ordinal);
@@ -594,13 +692,16 @@ public sealed class DoomWebGuiTests
         Assert.Contains("[G] ${gpuPathSummary.shortText}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("hud=${source}${compositeActive ? \" cmp\" : \"\"}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("matrixSource === \"dto-flat\" ? \" flat\"", pipelinePanel, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 20", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", gpuContracts, StringComparison.Ordinal);
         Assert.Contains("compassHeading: f32", webGpuProvider, StringComparison.Ordinal);
-        Assert.Contains("fn addCompassHud", webGpuProvider, StringComparison.Ordinal);
-        Assert.Contains("color = addCompassHud(color, uv)", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("fn addEgoRadarHud", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("fn addRadarNorthMarker", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("fn addRadarEnemyDirectionMarkers", webGpuProvider, StringComparison.Ordinal);
+        Assert.Contains("color = addEgoRadarHud(color, uv)", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("renderer.hudInfoUpload[8]", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("resolveGpuHudCompassState", doomRuntime, StringComparison.Ordinal);
-        Assert.Contains("compassHeading: compassHud.heading", doomRuntime, StringComparison.Ordinal);
+        Assert.Contains("resolveEgoRadarHudState", doomRuntime, StringComparison.Ordinal);
+        Assert.Contains("compassHeading: radarHud.northAngleDeg", doomRuntime, StringComparison.Ordinal);
         Assert.Contains("renderPipelineDetailGrid", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("rear-landmark-avoidance", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("[CTG OBSERVED]", pipelinePanel, StringComparison.Ordinal);

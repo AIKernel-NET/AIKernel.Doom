@@ -3,18 +3,21 @@ namespace AIKernel.Doom.Architecture.Tests;
 public sealed class DoomPackageReferenceTests
 {
     [Fact]
-    public void DoomReferencesOfficialAIKernelCanon012Packages()
+    public void DoomReferencesOfficialAIKernelCanon013Packages()
     {
         var root = FindRepoRoot(AppContext.BaseDirectory);
         var props = File.ReadAllText(Path.Combine(root, "Directory.Build.props"));
         var nugetConfig = File.ReadAllText(Path.Combine(root, "NuGet.config"));
 
-        Assert.Contains("<StablePackageVersion>0.1.2</StablePackageVersion>", props, StringComparison.Ordinal);
-        Assert.Contains("<AIKernelPackageVersion>[0.1.2]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
-        Assert.Contains("<AIKernelCorePackageVersion>0.1.2</AIKernelCorePackageVersion>", props, StringComparison.Ordinal);
-        Assert.Contains("<AIKernelProvidersPackageVersion>0.1.2</AIKernelProvidersPackageVersion>", props, StringComparison.Ordinal);
-        Assert.Contains("<AIKernelWasmRuntimePackageVersion>0.1.2</AIKernelWasmRuntimePackageVersion>", props, StringComparison.Ordinal);
-        Assert.Contains("<AIKernelWasmWebGpuComputeProviderPackageVersion>0.1.2</AIKernelWasmWebGpuComputeProviderPackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<StablePackageVersion>0.1.3</StablePackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<LocalPackageVersionPrefix>0.1.3</LocalPackageVersionPrefix>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelPackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">[$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelPackageVersion Condition=\"'$(UseLocalPackageVersion)' != 'true'\">[$(StablePackageVersion)]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelCorePackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelCorePackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelProvidersPackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelProvidersPackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelWasmRuntimePackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelWasmRuntimePackageVersion>", props, StringComparison.Ordinal);
+        Assert.Contains("<AIKernelWasmWebGpuComputeProviderPackageVersion Condition=\"'$(UseLocalPackageVersion)' == 'true'\">$(LocalPackageVersionPrefix)-dev$(LocalPackageBuildNumber)</AIKernelWasmWebGpuComputeProviderPackageVersion>", props, StringComparison.Ordinal);
+        Assert.DoesNotContain("0.1.2", props, StringComparison.Ordinal);
         Assert.DoesNotContain("0.1.1.1-dev", props, StringComparison.Ordinal);
         Assert.DoesNotContain("<AIKernelPackageVersion>[0.1.1.1]</AIKernelPackageVersion>", props, StringComparison.Ordinal);
         Assert.Contains("https://api.nuget.org/v3/index.json", nugetConfig, StringComparison.Ordinal);

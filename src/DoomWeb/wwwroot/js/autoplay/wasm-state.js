@@ -403,6 +403,8 @@
         ?? frame.healthEstimatedPercent
         ?? state?.player?.health
         ?? 100);
+    const lowHealth = health > 0 && health < 50;
+    const damagedHealthPressure = health > 0 && health < 65;
     const faceSig = number(frame.enemyLateralBias, number(runtime?.autoplayEnemyLateralBias, 0));
     const predictions = number(supervisorStatus.predictions ?? runtime?.autoplayPredictions ?? 0, 0);
     const lastUsePulsePrediction = number(
@@ -485,11 +487,17 @@
       && audioEnemyConfidence < 0.18
       && firstDoorVision.redScore <= 0.08;
     const structuralVisualEnemy = Boolean(frame.enemyStructuralDecoy);
+    const darkDamageCombatEvidence = doorOpened
+      && damagedHealthPressure
+      && !structuralVisualEnemy
+      && terminalSurface >= 0.20
+      && rawVisualEnemyConfidence >= (lowHealth ? 0.24 : 0.30);
     const visualEnemySuppressed = terminalSurface >= 0.24
       && rawVisualEnemyConfidence <= 0.46
+      && !darkDamageCombatEvidence
       && (weakTerminalSurfaceEnemy
         || (audioEnemyConfidence >= 0.24 && audioEnemyDirection !== "front"))
-      || terminalOnlyVisualEnemy
+      || (terminalOnlyVisualEnemy && !darkDamageCombatEvidence)
       || structuralVisualEnemy;
     const visualEnemyConfidence = visualEnemySuppressed
       ? Math.min(rawVisualEnemyConfidence, 0.10)
@@ -497,22 +505,27 @@
     const enemyConfidence = maxScore(
       visualEnemyConfidence,
       audioEnemyConfidence);
+    const sideAudioBias = audioEnemyConfidence >= 0.24 && (audioEnemyDirection === "left" || audioEnemyDirection === "right");
     const visualEnemyVisible = visualEnemyConfidence >= 0.28
       || (!visualEnemySuppressed && visualEnemyConfidence >= 0.18 && Math.abs(faceSig) >= 0.20);
-    const visualEnemyCentered = visualEnemyConfidence >= 0.28 && Math.abs(faceSig) <= 0.12;
+    const visualEnemyCentered = visualEnemyConfidence >= 0.28 && !sideAudioBias && Math.abs(faceSig) <= 0.12;
     const visualEnemyYaw = visualEnemyCentered
       ? 0
-      : Math.max(-18, Math.min(18, faceSig * 24));
+      : (sideAudioBias && Math.abs(faceSig) <= 0.12
+        ? (audioEnemyDirection === "right" ? 18 : -18)
+        : Math.max(-18, Math.min(18, faceSig * 24)));
     const visualEnemyFireReady = visualEnemyCentered && visualEnemyConfidence >= 0.36;
     const audioEnemyYaw = audioEnemyDirection === "right"
       ? 18
       : (audioEnemyDirection === "left" ? -18 : 0);
     let trustedEnemyThreat = maxScore(
       structuralVisualEnemy ? 0 : (visualEnemyConfidence >= 0.52 ? visualEnemyConfidence : 0),
-      audioEnemyConfidence >= 0.34 ? audioEnemyConfidence : 0);
+      audioEnemyConfidence >= 0.34 ? audioEnemyConfidence : 0,
+      darkDamageCombatEvidence ? Math.min(0.46, rawVisualEnemyConfidence * 0.82) : 0);
     let trustedCombatEvidence = trustedEnemyThreat >= 0.26
       || (!structuralVisualEnemy && visualEnemyFireReady)
-      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none");
+      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none")
+      || darkDamageCombatEvidence;
     const enemyCombatYaw = visualEnemyVisible && !visualEnemyCentered
       ? visualEnemyYaw
       : (audioEnemyConfidence >= 0.24 ? audioEnemyYaw : visualEnemyYaw);
@@ -634,6 +647,7 @@
       enemyConfidencePeak,
       trustedEnemyThreat,
       trustedCombatEvidence,
+      darkDamageCombatEvidence,
       postDoorEnemyMemoryEvidence,
       visualEnemyConfidence,
       visualEnemySuppressed,
@@ -761,6 +775,7 @@
       enemyConfidencePeak,
       trustedEnemyThreat,
       trustedCombatEvidence,
+      darkDamageCombatEvidence,
       postDoorEnemyMemoryEvidence,
       visualEnemyConfidence,
       visualEnemySuppressed,

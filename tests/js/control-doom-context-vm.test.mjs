@@ -412,6 +412,25 @@ assert(structuralDecoyEnemyContext.values.trustedEnemyThreat === 0, "Structural 
 assert(structuralDecoyEnemyContext.values.trustedCombatEvidence === false, "Structural enemy decoys should not enter trusted combat without audio or damage evidence");
 assert(structuralDecoyEnemyContext.values.postDoorEnemyMemoryEvidence === false, "Structural enemy decoys should not use post-door enemy memory evidence");
 
+const darkDamageEnemyContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  healthSensor: { value: 58, health: 58, lowHealth: false },
+  enemyConfidence: 0.34,
+  visualEnemyConfidence: 0.34,
+  faceSig: 0.12,
+  audioEnemyConfidence: 0.01,
+  audioEnemyDirection: "none",
+  enemyStructuralDecoy: false,
+  computerRoomScore: 0.34,
+  computerPanelScore: 0.50,
+  computerDarkPanelScore: 0.42,
+  postDoorTerminalSurface: 0.50
+});
+assert(darkDamageEnemyContext.values.darkDamageCombatEvidence === true, "Dark computer-room damage pressure should expose combat evidence");
+assert(darkDamageEnemyContext.values.visualEnemySuppressed === false, "Dark damage evidence should release terminal visual suppression");
+assert(darkDamageEnemyContext.values.visualEnemyVisible === true, "Dark damage evidence should make the weak enemy vector actionable");
+assert(darkDamageEnemyContext.values.trustedCombatEvidence === true, "Dark damage evidence should enter trusted combat");
+
 const strongRearSecretContext = adapter.createContext({}, {
   previousRouteMode: "door-approach",
   firstDoorVision9x9Score: 0.05,

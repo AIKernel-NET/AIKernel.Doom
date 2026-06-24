@@ -220,6 +220,10 @@
       this.watchdogRestarting = false;
       this.watchdogRestarts = 0;
       this.watchdogLastStallMs = 0;
+      this.selfHealCount = 0;
+      this.lastSelfHealKind = "none";
+      this.lastSelfHealReason = "";
+      this.lastSelfHealAt = 0;
       this.loopToken = 0;
       this.loopActive = false;
       this.frameCount = 0;
@@ -278,6 +282,7 @@
       this.frame32 = null;
       this.webGpuFrameRenderer = false;
       this.gpuFallbackHandled = false;
+      this.gpuFallbackRestarting = false;
       this.framebufferPtr = 0;
       this.framebufferView = null;
       this.framebufferMemory = null;
@@ -434,6 +439,12 @@
 
     status() {
       const gpuHudStatus = this.createGpuHudStatus();
+      const supervisorStatus = this.bonsaiSupervisor?.status?.() || {};
+      const healthSensorStatus = Object.assign(
+        {},
+        this.autoplayHealthSensor || {},
+        supervisorStatus.healthSensor || {}
+      );
       return {
         state: this.state,
         renderer: this.renderer,
@@ -456,6 +467,12 @@
         watchdogRestarting: this.watchdogRestarting,
         watchdogRestarts: this.watchdogRestarts,
         watchdogLastStallMs: this.watchdogLastStallMs,
+        selfHeal: {
+          count: this.selfHealCount,
+          kind: this.lastSelfHealKind,
+          reason: this.lastSelfHealReason,
+          recoveredAt: this.lastSelfHealAt
+        },
         inputReady: typeof this.exports?.doom_input === "function",
         actionInputReady: typeof this.exports?.doom_input_action === "function",
         autoplay: {
@@ -578,15 +595,15 @@
           visualEnemyYaw: this.autoplayVisualEnemyYaw,
           visualEnemyFireReady: this.autoplayVisualEnemyFireReady,
           enemyCombatYaw: this.autoplayEnemyCombatYaw,
-          ammoSignature: this.autoplayAmmoSignature || this.bonsaiSupervisor?.status?.().ammoSignature || "",
-          ammoLikelyEmpty: Boolean(this.autoplayAmmoLikelyEmpty || this.bonsaiSupervisor?.status?.().ammoLikelyEmpty),
-          healthSignature: this.autoplayHealthSignature || this.bonsaiSupervisor?.status?.().healthSignature || "",
-          healthLikelyDead: Boolean(this.autoplayHealthLikelyDead || this.bonsaiSupervisor?.status?.().healthLikelyDead),
-          healthZeroScore: this.autoplayHealthZeroScore || this.bonsaiSupervisor?.status?.().healthZeroScore || 0,
-          healthActiveColumns: this.autoplayHealthActiveColumns || this.bonsaiSupervisor?.status?.().healthActiveColumns || 0,
-          healthActiveCells: this.autoplayHealthActiveCells || this.bonsaiSupervisor?.status?.().healthActiveCells || 0,
-          healthSensor: this.autoplayHealthSensor || this.bonsaiSupervisor?.status?.().healthSensor || null,
-          milestones: this.autoplayMilestones || this.bonsaiSupervisor?.status?.().milestones || {
+          ammoSignature: this.autoplayAmmoSignature || supervisorStatus.ammoSignature || "",
+          ammoLikelyEmpty: Boolean(this.autoplayAmmoLikelyEmpty || supervisorStatus.ammoLikelyEmpty),
+          healthSignature: this.autoplayHealthSignature || supervisorStatus.healthSignature || "",
+          healthLikelyDead: Boolean(this.autoplayHealthLikelyDead || supervisorStatus.healthLikelyDead),
+          healthZeroScore: this.autoplayHealthZeroScore || supervisorStatus.healthZeroScore || 0,
+          healthActiveColumns: this.autoplayHealthActiveColumns || supervisorStatus.healthActiveColumns || 0,
+          healthActiveCells: this.autoplayHealthActiveCells || supervisorStatus.healthActiveCells || 0,
+          healthSensor: healthSensorStatus,
+          milestones: this.autoplayMilestones || supervisorStatus.milestones || {
             doorOpened: 0,
             enemyDefeated: 0,
             combatFireFrames: 0,
@@ -637,7 +654,7 @@
           dominantBand: this.autoplayAuditorySnapshot?.dominantBand || "none"
         },
         sensors: this.createSensorStatusMap(),
-        health: this.autoplayHealthSensor || this.bonsaiSupervisor?.status?.().healthSensor || {
+        health: Object.keys(healthSensorStatus).length > 0 ? healthSensorStatus : {
           active: false,
           likelyDead: false,
           retryRequested: false,
@@ -1085,8 +1102,69 @@
       }
 
       this.log("[ GPU ]", "log-warn", `GPU rendering disabled. Falling back to CPU mode (${mode.reason || reason}).`);
+      this.log("[ SELF-HEAL ]", "log-warn", `GPU fault contained; scheduling one-way CPU fallback WDT reboot (${reason}).`);
       this.emitStatus("gpu-fallback");
+      this.restartAfterGpuFallback(reason);
       return this.status();
+    }
+
+    recordSelfHeal(kind, reason) {
+      this.selfHealCount += 1;
+      this.lastSelfHealKind = kind || "runtime";
+      this.lastSelfHealReason = reason || "";
+      this.lastSelfHealAt = Date.now();
+    }
+
+    async restartAfterGpuFallback(reason = "gpu-fallback") {
+      if (this.gpuFallbackRestarting || this.watchdogRestarting) {
+        return;
+      }
+
+      this.gpuFallbackRestarting = true;
+      this.watchdogRestarts += 1;
+      const resumeAutoplay = this.autoplayEnabled;
+      try {
+        this.releaseAutoplayInputs();
+        this.stopLoop();
+        this.state = "stopped";
+        this.emitStatus("gpu-fallback-stop");
+        this.log("[ WDT ]", "log-warn", `display surface lost; rebuilding CPU render surface via GPU fallback watchdog (${reason}).`);
+        await delay(WATCHDOG_RESTART_DELAY_MS);
+        this.ensureCpuCanvasContext("gpu-fallback-restart");
+        this.log("[ WDT ]", "log-info", "CPU canvas surface rebuilt; restarting DOOM render loop without WebGPU.");
+
+        if (!this.instance || !this.exports || !this.initialized) {
+          const status = await this.start();
+          this.recordSelfHeal("gpu-fallback", reason);
+          this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU path disabled, CPU renderer rebuilt, control loop resumed; recoveries=${this.selfHealCount}.`);
+          this.emitStatus("gpu-fallback-restart");
+          return status;
+        }
+
+        if (resumeAutoplay && this.modelLoaded) {
+          this.autoplayEnabled = true;
+          this.autoplayMode = "idle";
+          this.bonsaiSupervisor?.setEnabled(true);
+          this.log("[AUTOPLAY]", "log-info", "autoplay restored after GPU fallback WDT reboot.");
+        }
+
+        this.state = "running";
+        this.nextFrameDueAt = 0;
+        this.lastFrameAt = window.performance?.now?.() || Date.now();
+        this.startLoop();
+        this.recordSelfHeal("gpu-fallback", reason);
+        this.log("[ WDT ]", "log-ok", `GPU fallback watchdog reboot complete: CPU render loop active (${reason}).`);
+        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU fault contained, CPU renderer active, Autoplay ${resumeAutoplay ? "restored" : "left off"}; recoveries=${this.selfHealCount}.`);
+        this.emitStatus("gpu-fallback-restart");
+      } catch (error) {
+        this.state = "failed";
+        this.lastError = error instanceof Error ? error.message : String(error);
+        this.stopLoop();
+        this.log("[ FAIL ]", "log-fail", `GPU fallback restart failed: ${this.lastError}`);
+        this.emitStatus("failed");
+      } finally {
+        this.gpuFallbackRestarting = false;
+      }
     }
 
     async ensureCanvas() {
@@ -1710,8 +1788,16 @@
             this.emitStatus("stable");
           }
         } catch (error) {
-          this.state = "failed";
+          const provider = resolveWebGpuProvider();
+          const providerFallback = Boolean(provider?.status?.().usingCpuFallback);
+          const gpuFallbackActive = providerFallback || !isDoomGpuRenderingEnabled() || this.gpuFallbackHandled;
           this.lastError = error instanceof Error ? error.message : String(error);
+          if (gpuFallbackActive) {
+            this.handleGpuLost("frame-loop", error, { fromProvider: true });
+            return;
+          }
+
+          this.state = "failed";
           this.stopLoop();
           this.log("[ FAIL ]", "log-fail", this.lastError);
           this.emitStatus("failed");
@@ -1780,7 +1866,9 @@
         this.nextFrameDueAt = 0;
         this.lastFrameAt = window.performance?.now?.() || Date.now();
         this.startLoop();
+        this.recordSelfHeal("frame-watchdog", `stall:${stallMs}ms`);
         this.log("[ WATCH]", "log-ok", `runtime restarted after watchdog stall; restarts=${this.watchdogRestarts}.`);
+        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: frame watchdog rebooted the render loop after ${stallMs}ms stall; recoveries=${this.selfHealCount}.`);
         this.emitStatus("watchdog-restart");
       } catch (error) {
         this.state = "failed";
@@ -2634,6 +2722,7 @@
         };
       }
 
+      // World-fixed bearings must drift opposite the ego turn on the radar.
       const rawRelativeYaw = this.signedCompassDelta(northAngleDeg, candidate.heading);
       const snappedRelativeYaw = this.normalizeRadarRelativeYaw(Math.round(rawRelativeYaw / 45) * 45);
       const yawDelta = this.normalizeRadarRelativeYaw(snappedRelativeYaw - previousYaw);
@@ -4828,10 +4917,17 @@
 
       const startedAt = window.performance?.now?.() || Date.now();
       const timedOut = Symbol("gpu-timeout");
-      const result = await Promise.race([
-        queue.onSubmittedWorkDone(),
-        delay(48).then(() => timedOut)
-      ]);
+      let result = null;
+      try {
+        result = await Promise.race([
+          queue.onSubmittedWorkDone(),
+          delay(48).then(() => timedOut)
+        ]);
+      } catch (error) {
+        this.handleGpuLost("queue", error);
+        this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
+        return;
+      }
       if (result === timedOut) {
         this.gpuWaitTimeouts += 1;
       }

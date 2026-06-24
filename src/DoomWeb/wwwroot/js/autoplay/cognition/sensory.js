@@ -28,6 +28,24 @@
     return active.size;
   }
 
+  function hasMeaningfulFaceSignature(signature) {
+    return /[1-9a-f]/i.test(String(signature || ""));
+  }
+
+  function normalizeFaceLifePattern(value, fallback = "unknown") {
+    const text = String(value || fallback || "unknown").toLowerCase();
+    if (text === "alive-cycle"
+      || text === "alive-damaged"
+      || text === "single"
+      || text === "fixed"
+      || text === "dead-fixed"
+      || text === "unknown") {
+      return text;
+    }
+
+    return fallback;
+  }
+
   function normalizeAuditoryEventType(value) {
     const text = String(value || "spatial-event").toLowerCase();
     if (text === "motion"
@@ -184,22 +202,90 @@
   }
 
   function createHealthSensorSnapshot(overrides = {}) {
+    const hudReady = Boolean(overrides.hudReady ?? overrides.healthHudReady ?? true);
     const zeroScore = clamp01(Number(overrides.zeroScore ?? 0));
     const faceDeathScore = clamp01(Number(overrides.faceDeathScore ?? 0));
     const deathTintScore = clamp01(Number(overrides.deathTintScore ?? overrides.healthDeathTintScore ?? 0));
     const statusDeathTintScore = clamp01(Number(overrides.statusDeathTintScore ?? overrides.healthStatusDeathTintScore ?? 0));
     const faceDeathTintScore = clamp01(Number(overrides.faceDeathTintScore ?? overrides.healthFaceDeathTintScore ?? 0));
+    const faceBloodScore = clamp01(Number(overrides.faceBloodScore ?? overrides.healthFaceBloodScore ?? 0));
+    const faceBloodRatio = clamp01(Number(overrides.faceBloodRatio ?? overrides.healthFaceBloodRatio ?? 0));
     const freezeScore = clamp01(Number(overrides.freezeScore ?? 0));
+    const faceSignature = String(overrides.faceSignature ?? overrides.healthFaceSignature ?? "0000000000000000");
+    const faceSignatureValid = hasMeaningfulFaceSignature(faceSignature);
+    const faceQuantizedFrameChange = Number(overrides.faceQuantizedFrameChange ?? 255);
+    const facePoseDiversity = Math.max(0, Math.min(3, Math.floor(Number(overrides.facePoseDiversity ?? overrides.healthFacePoseDiversity ?? 0))));
+    const faceFixedFrames = Math.max(0, Math.floor(Number(overrides.faceFixedFrames ?? overrides.healthFaceFixedFrames ?? overrides.faceNoHeartbeatFrames ?? overrides.healthFaceNoHeartbeatFrames ?? overrides.noHeartbeatFrames ?? 0)));
+    const explicitFaceHeartbeatScore = overrides.faceHeartbeatScore ?? overrides.healthFaceHeartbeatScore;
+    const faceHeartbeatScore = clamp01(Number(explicitFaceHeartbeatScore
+      ?? (faceSignatureValid && Number.isFinite(faceQuantizedFrameChange) ? faceQuantizedFrameChange / 8 : 0)));
+    const faceHeartbeatAlive = faceSignatureValid
+      && (explicitFaceHeartbeatScore != null || faceQuantizedFrameChange <= 24 || facePoseDiversity >= 2)
+      && faceHeartbeatScore >= 0.08;
+    const faceNoHeartbeatFrames = Math.max(0, Math.floor(Number(overrides.faceNoHeartbeatFrames ?? overrides.healthFaceNoHeartbeatFrames ?? overrides.noHeartbeatFrames ?? faceFixedFrames)));
+    const noHeartbeatDeathFrames = Math.max(1, Math.floor(Number(overrides.noHeartbeatDeathFrames ?? overrides.healthNoHeartbeatDeathFrames ?? 90)));
+    const faceBloodDeathFrames = Math.min(noHeartbeatDeathFrames, Math.max(8, Math.floor(Number(overrides.faceBloodDeathFrames ?? overrides.healthFaceBloodDeathFrames ?? 18))));
     const activeCells = Number(overrides.activeCells || 0);
     const activeColumns = Number(overrides.activeColumns || 0);
+    const sampleColumns = Math.max(1, Number(overrides.sampleColumns || 8));
+    const sampleCells = Math.max(1, Number(overrides.sampleCells || 24));
     const estimatedPercent = Math.max(0, Math.min(100, Math.round(Number(
       overrides.estimatedPercent
         ?? overrides.value
         ?? overrides.health
         ?? (Boolean(overrides.likelyDead) ? 0 : 100)))));
     const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(Number(overrides.lowHealthThreshold ?? 50))));
-    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
-    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
+    if (!hudReady) {
+      return {
+        active: Boolean(overrides.active),
+        hudReady: false,
+        signature: overrides.signature || "000000000000000000000000",
+        faceSignature,
+        faceSignatureValid,
+        faceQuantizedFrameChange: round2(faceQuantizedFrameChange),
+        facePoseDiversity,
+        faceLifePattern: "unknown",
+        faceFixedFrames,
+        faceHeartbeatScore: round2(faceHeartbeatScore),
+        faceHeartbeatAlive,
+        faceNoHeartbeatFrames,
+        noHeartbeatDeath: false,
+        noHeartbeatDeathFrames,
+        faceDeathScore: 0,
+        deathTintScore: round2(deathTintScore),
+        statusDeathTintScore: round2(statusDeathTintScore),
+        faceDeathTintScore: round2(faceDeathTintScore),
+        faceBloodScore: round2(faceBloodScore),
+        faceBloodRatio: round2(faceBloodRatio),
+        freezeScore: 0,
+        zeroScore: 0,
+        activeColumns,
+        activeCells,
+        sampleColumns,
+        sampleCells,
+        estimatedPercent: 100,
+        value: 100,
+        health: 100,
+        lowHealth: false,
+        lowHealthThreshold,
+        likelyDead: false,
+        criticalBloodAlive: false,
+        bloodDangerScore: 0,
+        healthDangerReason: "none",
+        confidence: 0,
+        retryRequested: false,
+        retryReason: "hud-not-ready",
+        retryPipeline: "none",
+        retryPriority: 0,
+        source: overrides.source || "status-hud-not-ready",
+        timestamp: overrides.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
+      };
+    }
+
+    const sparseHealthDigits = activeCells > 0
+      && activeCells <= Math.ceil(sampleCells * 0.32)
+      && activeColumns <= Math.ceil(sampleColumns * 0.48);
+    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= Math.ceil(sampleCells * 0.38);
     const noHealthDigits = activeCells <= 1 && zeroScore <= 0.36;
     const tintDeath = noHealthDigits
       && deathTintScore >= 0.5
@@ -207,34 +293,89 @@
         || faceDeathTintScore >= 0.18
         || faceDeathScore >= 0.12
         || freezeScore >= 0.5);
-    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, deathTintScore * 0.78, freezeScore * 0.55)));
+    const faceBloodDeath = faceBloodScore >= 0.72
+      && faceBloodRatio >= 0.28
+      && !faceHeartbeatAlive
+      && faceNoHeartbeatFrames >= faceBloodDeathFrames
+      && freezeScore >= 0.5
+      && (statusDeathTintScore >= 0.42
+        || deathTintScore >= 0.48
+        || faceDeathTintScore >= 0.44
+        || faceDeathScore >= 0.24);
+    const noHeartbeatDeath = !faceHeartbeatAlive
+      && faceNoHeartbeatFrames >= noHeartbeatDeathFrames
+      && freezeScore >= 0.5
+      && (faceDeathScore >= 0.16
+        || deathTintScore >= 0.42
+        || statusDeathTintScore >= 0.36
+        || faceDeathTintScore >= 0.22
+        || zeroScore >= 0.52
+        || faceBloodScore >= 0.30);
+    const confidence = clamp01(Number(overrides.confidence ?? Math.max(zeroScore, faceDeathScore, faceBloodScore, deathTintScore * 0.78, freezeScore * 0.55)));
     const likelyDead = Boolean(overrides.likelyDead)
       || (sparseHealthDigits && zeroScore >= 0.44 && faceDeathScore >= 0.24)
       || (severeHealthDigits && faceDeathScore >= 0.22)
       || (sparseHealthDigits && zeroScore >= 0.52 && faceDeathScore >= 0.14 && freezeScore >= 0.75)
+      || faceBloodDeath
+      || noHeartbeatDeath
       || tintDeath;
-    const retryReason = overrides.retryReason || (likelyDead ? (tintDeath ? "health-red-tint-death" : "health-death") : "none");
-    const retryRequested = Boolean(overrides.retryRequested ?? (Boolean(overrides.active) && (likelyDead || zeroScore >= 0.78)));
-    const stablePercent = tintDeath ? 0 : estimatedPercent;
+    const faceLifePattern = normalizeFaceLifePattern(overrides.faceLifePattern ?? overrides.healthFaceLifePattern,
+      likelyDead
+        ? "dead-fixed"
+        : (faceHeartbeatAlive && faceBloodScore >= 0.58
+          ? "alive-damaged"
+          : (faceHeartbeatAlive || facePoseDiversity >= 2
+            ? "alive-cycle"
+            : (faceSignatureValid ? (faceFixedFrames > 0 ? "fixed" : "single") : "unknown"))));
+    const retryReason = overrides.retryReason || (likelyDead ? (tintDeath ? "health-red-tint-death" : (faceBloodDeath ? "health-face-blood-death" : (noHeartbeatDeath ? "health-no-heartbeat-death" : "health-death"))) : "none");
+    const stablePercent = (tintDeath || faceBloodDeath || noHeartbeatDeath) ? 0 : estimatedPercent;
+    const bloodDangerScore = clamp01(Math.max(faceBloodScore * 0.75, faceBloodRatio * 1.1, faceDeathTintScore * 0.5));
+    const criticalBloodAlive = !likelyDead
+      && stablePercent > 0
+      && faceHeartbeatAlive
+      && faceBloodScore >= 0.68
+      && faceBloodRatio >= 0.24;
+    const healthDangerReason = criticalBloodAlive
+      ? "face-heartbeat-blood"
+      : (stablePercent > 0 && stablePercent < lowHealthThreshold ? "low-health" : "none");
+    const retryRequested = Boolean(overrides.retryRequested ?? (Boolean(overrides.active) && (likelyDead || (zeroScore >= 0.78 && !faceHeartbeatAlive))));
     return {
       active: Boolean(overrides.active),
+      hudReady: true,
       signature: overrides.signature || "000000000000000000000000",
-      faceSignature: overrides.faceSignature || "0000000000000000",
-      faceQuantizedFrameChange: round2(Number(overrides.faceQuantizedFrameChange ?? 255)),
+      faceSignature,
+      faceSignatureValid,
+      faceQuantizedFrameChange: round2(faceQuantizedFrameChange),
+      facePoseDiversity,
+      faceLifePattern,
+      faceFixedFrames,
+      faceHeartbeatScore: round2(faceHeartbeatScore),
+      faceHeartbeatAlive,
+      faceNoHeartbeatFrames,
+      noHeartbeatDeath,
+      noHeartbeatDeathFrames,
+      faceBloodDeathFrames,
       faceDeathScore: round2(faceDeathScore),
       deathTintScore: round2(deathTintScore),
       statusDeathTintScore: round2(statusDeathTintScore),
       faceDeathTintScore: round2(faceDeathTintScore),
+      faceBloodScore: round2(faceBloodScore),
+      faceBloodRatio: round2(faceBloodRatio),
       freezeScore: round2(freezeScore),
       zeroScore: round2(zeroScore),
       activeColumns,
       activeCells,
+      sampleColumns,
+      sampleCells,
       estimatedPercent: stablePercent,
       value: stablePercent,
       health: stablePercent,
       lowHealth: stablePercent > 0 && stablePercent < lowHealthThreshold,
       lowHealthThreshold,
       likelyDead,
+      criticalBloodAlive,
+      bloodDangerScore: round2(bloodDangerScore),
+      healthDangerReason,
       confidence: round2(confidence),
       retryRequested,
       retryReason,
@@ -255,9 +396,23 @@
       estimatedPercent: 100,
       value: 100,
       health: 100,
+      hudReady: false,
       lowHealth: false,
       lowHealthThreshold: 50,
       faceDeathScore: 0,
+      faceBloodScore: 0,
+      faceBloodRatio: 0,
+      facePoseDiversity: 0,
+      faceLifePattern: "unknown",
+      faceFixedFrames: 0,
+      faceHeartbeatScore: 0,
+      faceHeartbeatAlive: false,
+      faceNoHeartbeatFrames: 0,
+      noHeartbeatDeath: false,
+      noHeartbeatDeathFrames: 90,
+      criticalBloodAlive: false,
+      bloodDangerScore: 0,
+      healthDangerReason: "none",
       freezeScore: 0,
       retryReason: "sensor-cutoff"
     };
@@ -286,18 +441,50 @@
   }
 
   function refineHealthState(healthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta) {
+    if (healthState?.hudReady === false || healthState?.healthHudReady === false) {
+      return Object.assign({}, healthState || {}, {
+        hudReady: false,
+        likelyDead: false,
+        retryRequested: false,
+        retryReason: "hud-not-ready",
+        estimatedPercent: 100,
+        value: 100,
+        health: 100,
+        lowHealth: false
+      });
+    }
+
     const zeroScore = clamp01(Number(healthState?.zeroScore || 0));
     const faceScore = clamp01(Number(faceDeathScore || 0));
     const deathTintScore = clamp01(Number(healthState?.deathTintScore ?? healthState?.healthDeathTintScore ?? 0));
     const statusDeathTintScore = clamp01(Number(healthState?.statusDeathTintScore ?? healthState?.healthStatusDeathTintScore ?? 0));
     const faceDeathTintScore = clamp01(Number(healthState?.faceDeathTintScore ?? healthState?.healthFaceDeathTintScore ?? 0));
+    const faceBloodScore = clamp01(Number(healthState?.faceBloodScore ?? healthState?.healthFaceBloodScore ?? 0));
+    const faceBloodRatio = clamp01(Number(healthState?.faceBloodRatio ?? healthState?.healthFaceBloodRatio ?? 0));
     const activeCells = Number(healthState?.activeCells || 0);
     const activeColumns = Number(healthState?.activeColumns || 0);
-    const faceStable = Number(faceQuantizedFrameChange ?? 255) <= 0.08;
+    const sampleColumns = Math.max(1, Number(healthState?.sampleColumns || 8));
+    const sampleCells = Math.max(1, Number(healthState?.sampleCells || 24));
+    const faceSignature = String(healthState?.faceSignature ?? healthState?.healthFaceSignature ?? "0000000000000000");
+    const faceSignatureValid = hasMeaningfulFaceSignature(faceSignature);
+    const faceChange = Number(faceQuantizedFrameChange ?? healthState?.faceQuantizedFrameChange ?? 255);
+    const facePoseDiversity = Math.max(0, Math.min(3, Math.floor(Number(healthState?.facePoseDiversity ?? healthState?.healthFacePoseDiversity ?? 0))));
+    const faceFixedFrames = Math.max(0, Math.floor(Number(healthState?.faceFixedFrames ?? healthState?.healthFaceFixedFrames ?? healthState?.faceNoHeartbeatFrames ?? healthState?.healthFaceNoHeartbeatFrames ?? healthState?.noHeartbeatFrames ?? 0)));
+    const explicitFaceHeartbeatScore = healthState?.faceHeartbeatScore ?? healthState?.healthFaceHeartbeatScore;
+    const faceHeartbeatScore = clamp01(Number(explicitFaceHeartbeatScore ?? (faceSignatureValid && Number.isFinite(faceChange) ? faceChange / 8 : 0)));
+    const faceHeartbeatAlive = faceSignatureValid
+      && (explicitFaceHeartbeatScore != null || faceChange <= 24 || facePoseDiversity >= 2)
+      && faceHeartbeatScore >= 0.08;
+    const faceNoHeartbeatFrames = Math.max(0, Math.floor(Number(healthState?.faceNoHeartbeatFrames ?? healthState?.healthFaceNoHeartbeatFrames ?? healthState?.noHeartbeatFrames ?? faceFixedFrames)));
+    const noHeartbeatDeathFrames = Math.max(1, Math.floor(Number(healthState?.noHeartbeatDeathFrames ?? healthState?.healthNoHeartbeatDeathFrames ?? 90)));
+    const faceBloodDeathFrames = Math.min(noHeartbeatDeathFrames, Math.max(8, Math.floor(Number(healthState?.faceBloodDeathFrames ?? healthState?.healthFaceBloodDeathFrames ?? 18))));
+    const faceStable = !faceHeartbeatAlive && (!faceSignatureValid || faceChange <= 0.32);
     const visualStable = Number(visualStallDelta ?? 255) <= 0.08;
     const freezeScore = clamp01((faceStable ? 0.5 : 0) + (visualStable ? 0.5 : 0));
-    const sparseHealthDigits = activeCells > 0 && activeCells <= 16 && activeColumns <= 6;
-    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= 18;
+    const sparseHealthDigits = activeCells > 0
+      && activeCells <= Math.ceil(sampleCells * 0.32)
+      && activeColumns <= Math.ceil(sampleColumns * 0.48);
+    const severeHealthDigits = zeroScore >= 0.62 && activeCells <= Math.ceil(sampleCells * 0.38);
     const faceDeath = (sparseHealthDigits && zeroScore >= 0.44 && faceScore >= 0.24)
       || (severeHealthDigits && faceScore >= 0.22);
     const frozenDeath = sparseHealthDigits && zeroScore >= 0.52 && faceScore >= 0.14 && freezeScore >= 0.75;
@@ -308,19 +495,72 @@
         || faceDeathTintScore >= 0.18
         || faceScore >= 0.12
         || freezeScore >= 0.5);
-    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath || tintDeath;
+    const faceBloodDeath = faceBloodScore >= 0.72
+      && faceBloodRatio >= 0.28
+      && !faceHeartbeatAlive
+      && faceNoHeartbeatFrames >= faceBloodDeathFrames
+      && freezeScore >= 0.5
+      && (statusDeathTintScore >= 0.42
+        || deathTintScore >= 0.48
+        || faceDeathTintScore >= 0.44
+        || faceScore >= 0.24);
+    const noHeartbeatDeath = !faceHeartbeatAlive
+      && faceNoHeartbeatFrames >= noHeartbeatDeathFrames
+      && freezeScore >= 0.5
+      && (faceScore >= 0.16
+        || deathTintScore >= 0.42
+        || statusDeathTintScore >= 0.36
+        || faceDeathTintScore >= 0.22
+        || zeroScore >= 0.52
+        || faceBloodScore >= 0.30);
+    const likelyDead = Boolean(healthState?.likelyDead) || faceDeath || frozenDeath || tintDeath || faceBloodDeath || noHeartbeatDeath;
+    const faceLifePattern = normalizeFaceLifePattern(healthState?.faceLifePattern ?? healthState?.healthFaceLifePattern,
+      likelyDead
+        ? "dead-fixed"
+        : (faceHeartbeatAlive && faceBloodScore >= 0.58
+          ? "alive-damaged"
+          : (faceHeartbeatAlive || facePoseDiversity >= 2
+            ? "alive-cycle"
+            : (faceSignatureValid ? (faceFixedFrames > 0 ? "fixed" : "single") : "unknown"))));
+    const collapseToZero = tintDeath || faceBloodDeath || noHeartbeatDeath;
+    const nextHealth = collapseToZero ? 0 : Number(healthState?.health ?? healthState?.value ?? healthState?.estimatedPercent ?? 100);
+    const bloodDangerScore = clamp01(Math.max(faceBloodScore * 0.75, faceBloodRatio * 1.1, faceDeathTintScore * 0.5));
+    const criticalBloodAlive = !likelyDead
+      && nextHealth > 0
+      && faceHeartbeatAlive
+      && faceBloodScore >= 0.68
+      && faceBloodRatio >= 0.24;
+    const healthDangerReason = criticalBloodAlive
+      ? "face-heartbeat-blood"
+      : (healthState?.lowHealth ? "low-health" : "none");
     return Object.assign({}, healthState || {}, {
       likelyDead,
       faceDeathScore: faceScore,
       deathTintScore: round2(deathTintScore),
       statusDeathTintScore: round2(statusDeathTintScore),
       faceDeathTintScore: round2(faceDeathTintScore),
+      faceBloodScore: round2(faceBloodScore),
+      faceBloodRatio: round2(faceBloodRatio),
+      faceSignature,
+      faceSignatureValid,
+      facePoseDiversity,
+      faceLifePattern,
+      faceFixedFrames,
+      faceHeartbeatScore: round2(faceHeartbeatScore),
+      faceHeartbeatAlive,
+      faceNoHeartbeatFrames,
+      noHeartbeatDeath,
+      noHeartbeatDeathFrames,
+      faceBloodDeathFrames,
+      criticalBloodAlive,
+      bloodDangerScore: round2(bloodDangerScore),
+      healthDangerReason,
       freezeScore,
-      estimatedPercent: tintDeath ? 0 : healthState?.estimatedPercent,
-      value: tintDeath ? 0 : healthState?.value,
-      health: tintDeath ? 0 : healthState?.health,
+      estimatedPercent: collapseToZero ? 0 : healthState?.estimatedPercent,
+      value: collapseToZero ? 0 : healthState?.value,
+      health: collapseToZero ? 0 : healthState?.health,
       retryReason: likelyDead
-        ? (tintDeath ? "health-red-tint-death" : (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score")))
+        ? (tintDeath ? "health-red-tint-death" : (faceBloodDeath ? "health-face-blood-death" : (noHeartbeatDeath ? "health-no-heartbeat-death" : (faceDeath ? "health-face-death" : (frozenDeath ? "health-freeze-death" : healthState?.retryReason || "health-zero-score")))))
         : "none"
     });
   }

@@ -307,7 +307,19 @@
       ? Math.max(-24, Math.min(24, qDelta))
       : wall > 0 ? doorAimYawDegrees : -doorAimYawDegrees;
 
-    const health = number(state?.healthSensor?.value ?? state?.healthSensor?.health ?? state?.health, 100);
+    const healthSensor = state?.healthSensor && typeof state.healthSensor === "object" ? state.healthSensor : {};
+    const health = number(healthSensor.value ?? healthSensor.health ?? state?.health, 100);
+    const criticalBloodAlive = Boolean(healthSensor.criticalBloodAlive ?? state?.criticalBloodAlive ?? state?.healthCriticalBloodAlive);
+    const bloodDangerScore = Math.max(0, Math.min(1, number(
+      healthSensor.bloodDangerScore ?? state?.bloodDangerScore ?? state?.healthBloodDangerScore,
+      criticalBloodAlive ? 0.58 : 0)));
+    const healthDangerReason = String(healthSensor.healthDangerReason || state?.healthDangerReason || (criticalBloodAlive ? "face-heartbeat-blood" : "none"));
+    const facePoseDiversity = number(healthSensor.facePoseDiversity ?? state?.facePoseDiversity ?? state?.healthFacePoseDiversity, 0);
+    const faceFixedFrames = number(healthSensor.faceFixedFrames ?? state?.faceFixedFrames ?? state?.healthFaceFixedFrames, 0);
+    const faceHeartbeatAlive = Boolean(healthSensor.faceHeartbeatAlive ?? state?.faceHeartbeatAlive ?? state?.healthFaceHeartbeatAlive);
+    const faceLifePattern = String(healthSensor.faceLifePattern || state?.faceLifePattern || state?.healthFaceLifePattern || "unknown");
+    const lowHealthPressure = health > 0 && health < 50;
+    const damagedHealthPressure = health > 0 && health < 65;
     const faceSig = number(state?.faceSig, 0);
     const absFaceSig = Math.abs(faceSig);
     const audioEnemyConfidence = number(state?.audioEnemyConfidence, 0);
@@ -348,50 +360,81 @@
       && rawVisualEnemyConfidence >= 0.46
       && audioEnemyConfidence < 0.18
       && firstDoorVisionRedScore <= 0.08;
+    const terminalVisualCombatDecoy = terminalSurface >= 0.24
+      && rawVisualEnemyConfidence <= 0.46
+      && audioEnemyConfidence < 0.34
+      && firstDoorVisionRedScore <= 0.08;
     const enemyStructuralDecoy = Boolean(state?.enemyStructuralDecoy);
-    const visualEnemySuppressed = Boolean(state?.visualEnemySuppressed)
+    const darkDamageCombatEvidence = postDoorDoorOpenedCount > 0
+      && damagedHealthPressure
+      && !enemyStructuralDecoy
+      && terminalSurface >= 0.20
+      && rawVisualEnemyConfidence >= (lowHealthPressure ? 0.24 : 0.30);
+    const visualEnemySuppressed = (Boolean(state?.visualEnemySuppressed) && !darkDamageCombatEvidence)
       || enemyStructuralDecoy
       || (terminalSurface >= 0.24
         && rawVisualEnemyConfidence <= 0.46
+        && !darkDamageCombatEvidence
         && (weakTerminalSurfaceEnemy
           || (audioEnemyConfidence >= 0.24 && audioEnemyDirection !== "front")))
-      || terminalOnlyVisualEnemy;
+      || (terminalOnlyVisualEnemy && !darkDamageCombatEvidence);
     const visualEnemyConfidence = visualEnemySuppressed
       ? Math.min(rawVisualEnemyConfidence, 0.10)
       : rawVisualEnemyConfidence;
     const enemyConfidence = Math.max(visualEnemyConfidence, audioEnemyConfidence);
     const combatYawDegrees = Math.abs(number(readParameter(parameters, "combatYawDegrees"), 12));
-    const audioCombatYawDegrees = Math.max(12, combatYawDegrees * 1.5);
+    const audioCombatYawDegrees = Math.max(8, combatYawDegrees * 0.75);
     const audioCombatYaw = audioEnemyDirection === "left"
       ? -audioCombatYawDegrees
       : (audioEnemyDirection === "right" ? audioCombatYawDegrees : 0);
+    const sideAudioBias = audioEnemyConfidence >= 0.24 && (audioEnemyDirection === "left" || audioEnemyDirection === "right");
     const visualEnemyVisible = visualEnemyConfidence >= 0.28
       || (!visualEnemySuppressed && visualEnemyConfidence >= 0.18 && absFaceSig >= combatFaceThreshold);
-    const visualEnemyCentered = visualEnemyConfidence >= 0.28 && absFaceSig <= Math.max(0.10, combatFaceThreshold * 0.5);
+    const visualCenterFaceWindow = Math.max(0.10, combatFaceThreshold * 0.5);
+    const visualEnemyCentered = visualEnemyConfidence >= 0.28
+      && !sideAudioBias
+      && absFaceSig <= visualCenterFaceWindow;
     const visualEnemyYaw = visualEnemyCentered
       ? 0
-      : Math.max(-18, Math.min(18, faceSig * Math.max(24, combatYawDegrees * 2)));
+      : (sideAudioBias && absFaceSig <= visualCenterFaceWindow
+        ? audioCombatYaw
+        : Math.max(-18, Math.min(18, faceSig * Math.max(24, combatYawDegrees * 2))));
     const visualEnemyFireReady = visualEnemyCentered && visualEnemyConfidence >= 0.36;
     const postDoorEnemyMemoryEvidence = postDoorDoorOpenedCount > 0
       && !enemyStructuralDecoy
       && enemyConfidencePeak >= 0.62
       && rawVisualEnemyConfidence >= 0.08
       && terminalSurface >= 0.28;
+    const stateTrustedEnemyThreat = terminalVisualCombatDecoy ? 0 : number(state?.trustedEnemyThreat, 0);
     const trustedEnemyThreat = Math.max(
-      number(state?.trustedEnemyThreat, 0),
+      stateTrustedEnemyThreat,
       enemyStructuralDecoy ? 0 : (visualEnemyConfidence >= 0.52 && rawVisualEnemyConfidence >= 0.52 ? visualEnemyConfidence : 0),
       audioEnemyConfidence >= 0.34 ? audioEnemyConfidence : 0,
-      postDoorEnemyMemoryEvidence ? Math.min(0.34, enemyConfidencePeak * 0.42) : 0);
-    const trustedCombatEvidence = Boolean(state?.trustedCombatEvidence)
+      postDoorEnemyMemoryEvidence ? Math.min(0.34, enemyConfidencePeak * 0.42) : 0,
+      darkDamageCombatEvidence ? Math.min(0.46, rawVisualEnemyConfidence * 0.82) : 0);
+    const trustedCombatEvidence = (!terminalVisualCombatDecoy && Boolean(state?.trustedCombatEvidence))
       || trustedEnemyThreat >= 0.26
       || postDoorEnemyMemoryEvidence
-      || (!enemyStructuralDecoy && visualEnemyFireReady)
-      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none");
+      || (!enemyStructuralDecoy && !terminalVisualCombatDecoy && visualEnemyFireReady)
+      || (audioEnemyConfidence >= 0.34 && audioEnemyDirection !== "none")
+      || darkDamageCombatEvidence;
     const lowHealthThreshold = Math.max(1, Math.min(100, Math.round(number(readParameter(parameters, "lowHealthThreshold"), 50))));
     const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, Math.round(number(readParameter(parameters, "criticalHealthThreshold"), 18))));
-    const lowHealthGoalFirst = health > 0 && health < lowHealthThreshold;
+    const survivalBloodDangerThreshold = Math.max(0.10, Math.min(1, number(readParameter(parameters, "survivalBloodDangerThreshold"), 0.52)));
+    const aliveFacePattern = faceHeartbeatAlive
+      || faceLifePattern === "alive-cycle"
+      || faceLifePattern === "alive-damaged"
+      || facePoseDiversity >= 2;
+    const lowHealthGoalFirst = (health > 0 && health < lowHealthThreshold) || criticalBloodAlive;
     const criticalHealth = health > 0 && health < criticalHealthThreshold;
-    const lethalRisk = number(state?.lethalRisk, health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold)));
+    const lethalRisk = Math.max(
+      bloodDangerScore,
+      number(state?.lethalRisk, health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold))));
+    const survivalGoalFirst = lowHealthGoalFirst
+      || (!Boolean(healthSensor.retryRequested ?? state?.healthRetryRequested)
+        && !Boolean(healthSensor.likelyDead ?? state?.healthLikelyDead)
+        && aliveFacePattern
+        && bloodDangerScore >= survivalBloodDangerThreshold);
     const secretEscapeYawDegrees = Math.abs(number(readParameter(parameters, "spawnSecretDoorEscapeYawDegrees"), 34));
     const spawnSecretDoorEscapeYaw = spawnSecretDoorTurn === "right"
       ? -secretEscapeYawDegrees
@@ -424,6 +467,9 @@
     const centralHallFrames = number(state?.centralHallFrames, 0);
     const stairsEntered = Boolean(state?.stairsEntered);
     const enemyDefeatedCount = number(state?.enemyDefeatedCount, 0);
+    const combatFireFrames = number(state?.combatFireFrames, 0);
+    const combatBurstFrames = number(state?.combatBurstFrames, 0);
+    const combatBurstShots = number(state?.combatBurstShots, 0);
     const ammoLikelyEmpty = Boolean(state?.ammoLikelyEmpty);
     const finalRoomEntered = Boolean(state?.finalRoomEntered);
     const finalRoomCandidateFrames = number(state?.finalRoomCandidateFrames, 0);
@@ -431,7 +477,7 @@
     const exitSwitchPressed = Boolean(state?.exitSwitchPressed);
     const centralHallConfidence = number(state?.centralHallConfidence, 0);
     const finalRoomConfidence = number(state?.finalRoomConfidence, 0);
-    const centralHallBypassAllowed = centralHallEntered && (lowHealthGoalFirst || ammoLikelyEmpty || enemyDefeatedCount > 0);
+    const centralHallBypassAllowed = centralHallEntered && (survivalGoalFirst || ammoLikelyEmpty || enemyDefeatedCount > 0);
     const finalRoomRouteCandidate = stairsEntered || doorOpenedCount > 1 || finalRoomConfidence >= 0.45;
     const computerRoomConfidence = number(state?.computerRoomConfidence, 0);
     const useProbeScore = number(state?.firstDoorUse3x3Score, 0);
@@ -659,9 +705,20 @@
         hp: health,
         lowHealth: lowHealthGoalFirst,
         criticalHealth,
+        criticalBloodAlive,
+        healthCriticalBloodAlive: criticalBloodAlive,
+        bloodDangerScore,
+        healthBloodDangerScore: bloodDangerScore,
+        healthDangerReason,
         lowHealthGoalFirst,
+        survivalGoalFirst,
         lowHealthThreshold,
         criticalHealthThreshold,
+        survivalBloodDangerThreshold,
+        facePoseDiversity,
+        faceFixedFrames,
+        faceHeartbeatAlive,
+        faceLifePattern,
         lethalRisk,
         depthSig,
         depthEstimate,
@@ -674,6 +731,9 @@
         centralHallFrames,
         stairsEntered,
         enemyDefeatedCount,
+        combatFireFrames,
+        combatBurstFrames,
+        combatBurstShots,
         ammoLikelyEmpty,
         finalRoomEntered,
         finalRoomCandidateFrames,
@@ -687,7 +747,9 @@
         enemyConfidencePeak,
         trustedEnemyThreat,
         trustedCombatEvidence,
+        darkDamageCombatEvidence,
         postDoorEnemyMemoryEvidence,
+        terminalVisualCombatDecoy,
         enemyStructuralDecoy,
         visualEnemyConfidence,
         visualEnemySuppressed,

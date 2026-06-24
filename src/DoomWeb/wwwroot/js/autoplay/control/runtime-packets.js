@@ -350,6 +350,7 @@
       enemyStructuralDecoy: structuralDecoy ? 1 : 0,
       trustedEnemyThreat: trustedThreat,
       trustedCombatEvidence: Boolean(values.trustedCombatEvidence) ? 1 : 0,
+      darkDamageCombatEvidence: Boolean(values.darkDamageCombatEvidence) ? 1 : 0,
       damageLocalization: clamp01(number(values.lethalRisk, 0)),
       projectileFlow: clamp01(number(values.projectileScore, 0)),
       threatField: threat,
@@ -387,6 +388,8 @@
       values.routeAbortHint,
       number(values.audioEnemyConfidence, 0) >= 0.24 ? `audio-enemy-${values.audioEnemyDirection || "front"}` : "",
       values.enemyStructuralDecoy ? "enemy-structural-decoy" : "",
+      values.terminalVisualCombatDecoy ? "terminal-visual-combat-decoy" : "",
+      values.darkDamageCombatEvidence ? "dark-damage-combat" : "",
       values.trustedCombatEvidence ? "trusted-combat" : "",
       values.visualEnemyVisible ? "visual-combat" : "",
       values.routeCorridorBridgeLock ? "corridor-bridge-lock" : "",
@@ -602,25 +605,32 @@
     const health = Math.max(0, Math.min(100, number(values.health, number(values.hp, 100))));
     const lowHealthThreshold = Math.max(1, Math.min(100, number(values.lowHealthThreshold, 50)));
     const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, number(values.criticalHealthThreshold, 18)));
+    const criticalBloodAlive = Boolean(values.criticalBloodAlive || values.healthCriticalBloodAlive);
+    const bloodDangerScore = clamp01(number(values.bloodDangerScore ?? values.healthBloodDangerScore, criticalBloodAlive ? 0.58 : 0));
     const lethalRisk = clamp01(number(
       values.lethalRisk,
       health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold))));
-    const lowHealth = Boolean(values.lowHealth) || (health > 0 && health < lowHealthThreshold);
+    const adjustedLethalRisk = clamp01(Math.max(lethalRisk, bloodDangerScore));
+    const lowHealth = Boolean(values.lowHealth) || criticalBloodAlive || (health > 0 && health < lowHealthThreshold);
     const criticalHealth = Boolean(values.criticalHealth) || (health > 0 && health < criticalHealthThreshold);
     const vetoed = Boolean(action?.zoeVetoed);
-    const warning = vetoed || lowHealth || criticalHealth || lethalRisk >= 0.50;
+    const warning = vetoed || lowHealth || criticalHealth || adjustedLethalRisk >= 0.50;
     const lastReason = vetoed
       ? (action?.svcEvent || "zoe-veto")
       : (criticalHealth
         ? "critical-health"
-        : (lowHealth ? "low-health-goal-first" : "none"));
+        : (criticalBloodAlive
+          ? (values.healthDangerReason || "face-heartbeat-blood")
+          : (lowHealth ? "low-health-goal-first" : "none")));
     return {
       vetoed,
       warning,
       lowHealth,
       criticalHealth,
+      criticalBloodAlive,
+      bloodDangerScore,
       health,
-      lethalRisk,
+      lethalRisk: adjustedLethalRisk,
       healthThreshold: lowHealthThreshold,
       criticalHealthThreshold,
       lastReason,
@@ -737,10 +747,20 @@
       return null;
     }
 
-    const left = number(candidate.left ?? candidate.Left, NaN);
-    const top = number(candidate.top ?? candidate.Top, NaN);
-    const width = number(candidate.width ?? candidate.Width, NaN);
-    const height = number(candidate.height ?? candidate.Height, NaN);
+    let left = number(candidate.left ?? candidate.Left, NaN);
+    let top = number(candidate.top ?? candidate.Top, NaN);
+    let width = number(candidate.width ?? candidate.Width, NaN);
+    let height = number(candidate.height ?? candidate.Height, NaN);
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height)) {
+      const row = Math.max(0, Math.min(HUD_GRID_SIZE - 1, Math.floor(number(candidate.row ?? candidate.Row, 0))));
+      const column = Math.max(0, Math.min(HUD_GRID_SIZE - 1, Math.floor(number(candidate.column ?? candidate.Column, 0))));
+      const rows = Math.max(1, Math.min(HUD_GRID_SIZE - row, Math.floor(number(candidate.rows ?? candidate.Rows, 1))));
+      const columns = Math.max(1, Math.min(HUD_GRID_SIZE - column, Math.floor(number(candidate.columns ?? candidate.Columns, 1))));
+      left = (column / HUD_GRID_SIZE) * 100;
+      top = (row / HUD_GRID_SIZE) * 100;
+      width = (columns / HUD_GRID_SIZE) * 100;
+      height = (rows / HUD_GRID_SIZE) * 100;
+    }
     if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       return null;
     }
@@ -1948,6 +1968,8 @@
         centralHallEntered: Boolean(context?.values?.centralHallEntered),
         enemyConfidencePeak: number(context?.values?.enemyConfidencePeak, 0),
         enemyStructuralDecoy: Boolean(context?.values?.enemyStructuralDecoy),
+        terminalVisualCombatDecoy: Boolean(context?.values?.terminalVisualCombatDecoy),
+        darkDamageCombatEvidence: Boolean(context?.values?.darkDamageCombatEvidence),
         trustedEnemyThreat: number(context?.values?.trustedEnemyThreat, 0),
         trustedCombatEvidence: Boolean(context?.values?.trustedCombatEvidence),
         postDoorEnemyMemoryEvidence: Boolean(context?.values?.postDoorEnemyMemoryEvidence),

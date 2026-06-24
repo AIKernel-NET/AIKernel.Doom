@@ -21,11 +21,42 @@
     return value === "left" || value === "right" || value === "none" ? value : fallback;
   }
 
+  function finiteNumber(value) {
+    const next = Number(value);
+    return Number.isFinite(next) ? next : null;
+  }
+
+  function resolveAimYaw(input = {}) {
+    return finiteNumber(input.enemyCombatYaw)
+      ?? finiteNumber(input.visualEnemyYaw)
+      ?? finiteNumber(input.enemyYaw);
+  }
+
+  function turnFromYaw(yaw) {
+    if (!Number.isFinite(yaw) || Math.abs(yaw) < 8) {
+      return "none";
+    }
+
+    return yaw < 0 ? "left" : "right";
+  }
+
   function planCentralHallEnemySweep(input = {}) {
     const targetTurn = normalizeTurn(input.targetTurn, "none");
+    const frameIndex = Math.max(0, Math.round(number(input.frameIndex)));
+    const centralHallFrames = Math.max(0, Math.round(number(input.centralHallFrames)));
+    const combatFireFrames = Math.max(0, Math.round(number(input.combatFireFrames)));
+    const openingBurstFrames = Math.max(24, Math.round(number(input.openingBurstFrames, 72)));
+    const openingBurstShots = Math.max(3, Math.round(number(input.openingBurstShots, 5)));
+    const aimYaw = resolveAimYaw(input);
+    const aimYawAbs = aimYaw === null ? Number.POSITIVE_INFINITY : Math.abs(aimYaw);
+    const yawCentered = aimYaw !== null && aimYawAbs <= 8;
+    const yawNearCenter = aimYaw !== null && aimYawAbs <= 18;
+    const yawTurn = turnFromYaw(aimYaw);
     let sweepTurn = normalizeTurn(input.sweepTurn, "right");
     let sweepFrames = Math.max(0, number(input.sweepFrames));
-    if (targetTurn === "left" || targetTurn === "right") {
+    if (yawTurn === "left" || yawTurn === "right") {
+      sweepTurn = yawTurn;
+    } else if (targetTurn === "left" || targetTurn === "right") {
       sweepTurn = targetTurn;
     } else if (sweepFrames <= 0) {
       sweepFrames = Math.max(36, Math.round(number(input.defaultSweepFrames, 72)));
@@ -47,34 +78,51 @@
     const frontConfidence = structuralDecoy && !trustedEvidence
       ? Math.min(rawFrontConfidence, 0.10)
       : rawFrontConfidence;
-    const centered = targetTurn === "none"
+    const centered = yawCentered
+      || targetTurn === "none"
       || number(input.enemyCenterCellConfidence) >= 0.12
       || Math.abs(number(input.left) - number(input.right)) <= 22;
+    const fineAimHold = yawNearCenter && !yawCentered && (frameIndex % 5) !== 0;
+    const openingBurstActive = !input.ammoLikelyEmpty
+      && !structuralDecoy
+      && centralHallFrames > 0
+      && centralHallFrames <= openingBurstFrames
+      && combatFireFrames < openingBurstShots;
+    const openingBurstFire = openingBurstActive
+      && number(input.fireCooldown) <= 0
+      && (frameIndex % 5) === 0;
     const probeFire = !input.ammoLikelyEmpty
       && (!structuralDecoy || trustedEvidence)
       && centered
       && frontConfidence >= 0.18
       && number(input.fireCooldown) <= 0
-      && (number(input.frameIndex) % 6) === 0;
+      && (frameIndex % 6) === 0;
+    const fire = openingBurstFire || probeFire;
+    const actionTurn = openingBurstActive || fire || yawCentered || fineAimHold ? "none" : sweepTurn;
+    const aimHold = actionTurn === "none" && (openingBurstActive || (centered || yawNearCenter) && frontConfidence >= 0.16);
 
     return {
       action: normalizeAction({
-        move: probeFire ? "none" : (openAdvance && (nextSweepFrames % 18) < 6 ? "forward" : "none"),
-        turn: probeFire ? "none" : sweepTurn,
-        fire: probeFire,
+        move: fire || aimHold ? "none" : (openAdvance && (nextSweepFrames % 18) < 6 ? "forward" : "none"),
+        turn: actionTurn,
+        fire,
         strafe: false,
         use: false,
         run: false
       }),
       frontConfidence,
-      probeFire,
+      probeFire: fire,
       sweepFrames: nextSweepFrames,
       sweepTurn,
       strategyPriority: 3,
       strategyContext: "central-hall-combat",
       controlPipeline: "ComputerRoom",
       safetyReason: "central-hall-front-enemy-sweep",
-      mobilityMode: probeFire ? "central-hall-enemy-probe-fire" : `central-hall-enemy-sweep-${sweepTurn}`
+      mobilityMode: probeFire
+        ? "central-hall-enemy-probe-fire"
+        : (openingBurstFire
+          ? "central-hall-opening-burst-fire"
+          : (aimHold ? "central-hall-enemy-aim-hold" : `central-hall-enemy-sweep-${sweepTurn}`))
     };
   }
 

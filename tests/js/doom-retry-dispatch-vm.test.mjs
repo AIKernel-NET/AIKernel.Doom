@@ -104,6 +104,34 @@ assert(retry.process(state, host) === true, "final settle frame should be proces
 assert(settledReasons[0] === "health-death", "settle completion should preserve reason");
 assert(retry.snapshot(state).active === false, "retry should become inactive after settle");
 
+const repeatState = retry.createState();
+retry.schedule(repeatState, retryStatus, host);
+retry.schedule(repeatState, retryStatus, host);
+assert(retry.schedule(repeatState, retryStatus, host).scheduled === true, "repeat fixture should schedule a retry");
+guard = 100;
+while (completedReasons.length < 2 && retry.process(repeatState, host) && guard > 0) {
+  guard -= 1;
+}
+
+assert(guard > 0, "repeat fixture should complete retry dispatch");
+assert(retry.snapshot(repeatState).awaitingRecovery === true, "completed retry should wait for health evidence to clear");
+assert(retry.process(repeatState, host) === true, "repeat fixture first settle frame should be processed");
+assert(retry.process(repeatState, host) === true, "repeat fixture second settle frame should be processed");
+assert(retry.process(repeatState, host) === true, "repeat fixture final settle frame should be processed");
+const blockedRepeat = retry.schedule(repeatState, retryStatus, host);
+assert(blockedRepeat.scheduled === false && blockedRepeat.reason === "awaiting-recovery", "same death evidence should not schedule another retry after settling");
+let timeoutRepeat = blockedRepeat;
+guard = 20;
+while (!timeoutRepeat.scheduled && guard > 0) {
+  timeoutRepeat = retry.schedule(repeatState, retryStatus, host);
+  guard -= 1;
+}
+
+assert(timeoutRepeat.scheduled === true, "persistent death evidence should retry after the recovery cooldown expires");
+const recovered = retry.schedule(repeatState, { healthSensor: { retryRequested: false } }, host);
+assert(recovered.reason === "not-requested", "cleared health evidence should release the retry recovery latch");
+assert(retry.snapshot(repeatState).awaitingRecovery === false, "recovery latch should clear when health retry evidence clears");
+
 retry.clear(state, host);
 assert(retry.snapshot(state).reason === "none", "clear should reset reason");
 assert(queued.some(item => item.name === "enter" && item.pressed === false), "clear should release enter key");

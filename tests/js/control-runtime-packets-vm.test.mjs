@@ -172,6 +172,9 @@ const status = packets.statusFromAction(action, [{ id: "door-route" }], {
     usePulseCooldown: 45,
     usePulseSuppressedFrames: 3,
     lastUsePulsePrediction: 1201,
+    criticalBloodAlive: true,
+    bloodDangerScore: 0.66,
+    healthDangerReason: "face-heartbeat-blood",
     lethalRisk: 0.8
   }
 }, 3, {
@@ -219,7 +222,8 @@ assert(status.debugOverlay?.gpuHud?.contractVersion === 1, "GPU HUD fallback sho
 assert(status.debugOverlay?.gpuHud?.analysisCaptureSource === "raw-framebuffer", "GPU HUD fallback should keep analysis capture on the raw framebuffer");
 assert(status.debugOverlay?.gpuHud?.rawFrameTarget?.kind === "RawFramebuffer", "GPU HUD fallback should expose structured raw frame target");
 assert(status.debugOverlay?.gpuHud?.rawFrameTarget?.hudExcluded === true, "GPU HUD raw frame target should exclude HUD overlays");
-assert(status.debugOverlay?.gpuHud?.displayFrameTarget?.kind === "HudCompositeOffscreen", "GPU HUD fallback should expose structured HUD display target");
+assert(status.debugOverlay?.gpuHud?.hudFrameTarget?.kind === "HudCompositeOffscreen", "GPU HUD fallback should expose structured HUD composition target");
+assert(status.debugOverlay?.gpuHud?.displayFrameTarget?.kind === "RawFramebuffer", "GPU HUD fallback should keep the display target on the stable raw framebuffer path");
 assert(status.debugOverlay?.gpuHud?.readback?.wireName === "none", "GPU HUD fallback should expose structured no-readback policy");
 assert(status.debugOverlay?.gpuHud?.frameToken?.phase === "hud-fallback", "GPU HUD fallback should expose a pending frame token");
 assert(Array.isArray(status.debugOverlay?.gpuHud?.panelValues) && status.debugOverlay.gpuHud.panelValues.length === 16, "DebugOverlay should expose GPU HUD panel values for thin JS forwarding");
@@ -235,7 +239,7 @@ assert(status.debugOverlay?.gpuHud?.rectangleBufferLayout?.stride === 8, "GPU HU
 assert(status.debugOverlay?.gpuHud?.rectangleBufferLayout?.fields?.includes("alpha"), "GPU HUD fallback rectangle buffer layout should expose alpha field");
 assert(status.debugOverlay?.gpuHud?.panelBufferLayout?.name === "panel16", "GPU HUD fallback should expose structured panel buffer layout");
 assert(status.debugOverlay?.gpuHud?.labels?.some(label => label.label === "DOOR"), "DebugOverlay should expose GPU HUD text labels so JS does not re-infer diagnostics");
-assert(status.debugOverlay?.gpuHud?.cssOverlayMode === "reduced", "DebugOverlay should request reduced CSS overlay when GPU HUD projection is available");
+assert(status.debugOverlay?.gpuHud?.cssOverlayMode === "full", "DebugOverlay should keep DOM labels available while GPU HUD renders geometry");
 assert(status.debugOverlay?.gpuAisthesis?.inputTarget === "doom", "DebugOverlay should expose the raw framebuffer target for GPU Aisthesis");
 assert(status.debugOverlay?.gpuAisthesis?.contractVersion === 1, "GPU Aisthesis fallback should expose a contract version for future canon adapters");
 assert(status.debugOverlay?.gpuAisthesis?.captureSource === "raw-framebuffer", "GPU Aisthesis fallback should exclude HUD overlays from analysis capture");
@@ -290,6 +294,8 @@ assert(status.autoplayState?.suggestedAction?.yaw === -3, "aggregate AutoplaySta
 assert(status.debugOverlay?.useProbe?.confidence === 0.68, "DebugOverlay should expose UseProbe confidence");
 assert(status.pipelineState?.kinesis?.zoe?.vetoed === false, "PipelineState should reserve Zoe veto for actual action suppression");
 assert(status.pipelineState?.kinesis?.zoe?.warning === true, "PipelineState should expose high-risk Zoe warning state");
+assert(status.pipelineState?.kinesis?.zoe?.criticalBloodAlive === true, "PipelineState Zoe should expose living blood-heartbeat danger");
+assert(status.pipelineState?.kinesis?.zoe?.lastReason === "face-heartbeat-blood", "PipelineState Zoe should prefer the living blood-heartbeat danger reason");
 assert(status.debugOverlay?.regions?.some(region => region.kind === "zoe"), "DebugOverlay should expose Zoe warning regions");
 assert(status.debugRouteValues?.routeLoopKind === "slide-stall", "debug route values should expose route loop kind");
 assert(status.debugRouteValues?.routeLoopBudgetSource === "csharp-route-loop-budget", "debug route values should expose route loop budget source");

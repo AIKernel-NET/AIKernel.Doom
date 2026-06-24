@@ -34,8 +34,8 @@
   const HEALTH_Y = 168;
   const HEALTH_WIDTH = 64;
   const HEALTH_HEIGHT = 24;
-  const HEALTH_SAMPLE_COLUMNS = 8;
-  const HEALTH_SAMPLE_ROWS = 3;
+  const HEALTH_SAMPLE_COLUMNS = 16;
+  const HEALTH_SAMPLE_ROWS = 5;
   const FIRE_COOLDOWN_FRAMES = 10;
   const STUCK_CHANGE_THRESHOLD = 2.5;
   const STUCK_WALL_THRESHOLD = 16;
@@ -422,6 +422,11 @@
       this.depthEstimate = 1;
       this.faceSignature = "0000000000000000";
       this.faceQuantizedFrameChange = 255;
+      this.facePoseSignatureHistory = [];
+      this.facePoseDiversity = 0;
+      this.faceFixedFrames = 0;
+      this.faceLifePattern = "unknown";
+      this.healthNoHeartbeatFrames = 0;
       this.cornerSignal = 0;
       this.wallSignatureMemory = [];
       this.cornerSignatureMemory = [];
@@ -667,6 +672,11 @@
         this.depthEstimate = 1;
         this.faceSignature = "0000000000000000";
         this.faceQuantizedFrameChange = 255;
+        this.facePoseSignatureHistory = [];
+        this.facePoseDiversity = 0;
+        this.faceFixedFrames = 0;
+        this.faceLifePattern = "unknown";
+        this.healthNoHeartbeatFrames = 0;
         this.cornerSignal = 0;
         this.wallSignatureMemory = [];
         this.cornerSignatureMemory = [];
@@ -1193,7 +1203,8 @@
 
       const routeState = updateAutoplaySemanticRouteState(this, features, state, frame, enemy, effectiveTargetConfidence, auditorySnapshot);
       const combatContextActive = routeState.combatContextActive;
-      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
+      const lowHealthGoalFirst = this.isLowHealthGoalFirst();
+      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty && !lowHealthGoalFirst) {
         this.stairsEntered = false;
         this.stairsCandidateFrames = 0;
         this.finalRoomEntered = false;
@@ -1510,6 +1521,7 @@
       } else if (this.centralHallEntered
         && this.objective === "engage-front-enemy"
         && !this.ammoLikelyEmpty
+        && !lowHealthGoalFirst
         && Math.max(Number(this.targetConfidence || 0), Number(enemy.confidence || 0)) >= 0.24
         && enemy.cluster !== "green"
         && enemy.cluster !== "gate"
@@ -1519,6 +1531,7 @@
       } else if (this.centralHallEntered
         && this.mapEnemyZoneMatch
         && !this.ammoLikelyEmpty
+        && !lowHealthGoalFirst
         && enemy.confidence >= Math.max(0.46, COMBAT_CONFIDENCE_THRESHOLD)
         && enemy.distance <= 1.05
         && enemy.cluster !== "none"
@@ -1530,7 +1543,8 @@
       } else if (this.centralHallEntered
         && this.objective === "engage-front-enemy"
         && Number(this.enemyDefeatedCount || 0) <= 0
-        && !this.ammoLikelyEmpty) {
+        && !this.ammoLikelyEmpty
+        && !lowHealthGoalFirst) {
         safe = this.centralHallEnemySweepAction(safe, frame, state);
         this.safetyReason = "central-hall-front-enemy-sweep";
       } else if (enemy.confidence >= COMBAT_CONFIDENCE_THRESHOLD
@@ -1573,7 +1587,8 @@
             && this.centralHallEntered
             && this.objective === "engage-front-enemy"
             && Number(this.enemyDefeatedCount || 0) <= 0
-            && Math.max(Number(this.targetConfidence || 0), Number(enemy.confidence || 0), Number(this.enemyCenterCellConfidence || 0)) >= 0.18))
+            && (this.mobilityMode === "central-hall-opening-burst-fire"
+              || Math.max(Number(this.targetConfidence || 0), Number(enemy.confidence || 0), Number(this.enemyCenterCellConfidence || 0)) >= 0.18)))
         && safe.move !== "back"
         && !safe.use;
       if (safe.fire && mayFire) {
@@ -2787,7 +2802,10 @@
       const firstDoorUseThreshold = profileNumber(this.profile, "firstDoorUseSignatureThreshold", FIRST_DOOR_USE_SIGNATURE_THRESHOLD);
       const firstDoorRetryTolerance = profileNumber(this.profile, "firstDoorRetrySignatureTolerance", FIRST_DOOR_RETRY_SIGNATURE_TOLERANCE);
 
-      if (this.centralHallEntered && Number(this.enemyDefeatedCount || 0) <= 0 && !this.ammoLikelyEmpty) {
+      if (this.centralHallEntered
+        && Number(this.enemyDefeatedCount || 0) <= 0
+        && !this.ammoLikelyEmpty
+        && !this.isLowHealthGoalFirst()) {
         this.exitSwitchPressed = false;
         this.exitSwitchUseFrames = 0;
         this.finalRoomEntered = false;
@@ -4935,7 +4953,16 @@
       const closeDepth = profileNumber(this.profile, "combatCloseDepth", COMBAT_CLOSE_DEPTH_THRESHOLD);
       const ammoState = estimateAmmoState(frame.ammoSample, quantizeFrameSample(frame.ammoSample));
       const centerCellLocked = Number(enemy.centerCellConfidence || 0) >= fireConfidence;
-      const centered = enemy.centered || enemy.turn === "none" || centerCellLocked;
+      const enemyCombatYaw = Number(enemy.combatYaw);
+      const hasCombatYaw = Number.isFinite(enemyCombatYaw);
+      const enemyYawAbs = hasCombatYaw ? Math.abs(enemyCombatYaw) : Number.POSITIVE_INFINITY;
+      const yawCentered = hasCombatYaw && enemyYawAbs <= 8;
+      const yawNearCenter = hasCombatYaw && enemyYawAbs <= 18;
+      const yawTurn = hasCombatYaw && enemyYawAbs >= 8
+        ? (enemyCombatYaw < 0 ? "left" : "right")
+        : enemy.turn;
+      const fineAimHold = yawNearCenter && !yawCentered && ((state?.frame || 0) % 5) !== 0;
+      const centered = enemy.centered || enemy.turn === "none" || centerCellLocked || yawCentered;
       const closeEnough = enemy.distance <= closeDepth;
       const stableEnough = faceDelta <= COMBAT_FACE_DANGER_DELTA || enemy.confidence >= fireConfidence + 0.12;
       const burstWindow = Math.max(12, Math.round(profileNumber(this.profile, "combatBurstFrames", COMBAT_BURST_FRAMES)));
@@ -4966,15 +4993,16 @@
         this.combatBurstFrames -= 1;
       }
       this.mobilityMode = fire ? "combat-fire" : "combat-aim";
-      const strafeSide = enemy.turn === "right" ? "left" : "right";
+      const combatTurn = centerCellLocked || yawCentered || fineAimHold ? "none" : yawTurn;
+      const strafeSide = combatTurn === "right" ? "left" : "right";
       return normalizeAction(Object.assign({}, action, {
-        move: ammoState.likelyEmpty ? "forward" : (closeEnough ? "none" : "forward"),
-        turn: centerCellLocked ? "none" : enemy.turn,
+        move: ammoState.likelyEmpty ? "forward" : (closeEnough || yawNearCenter ? "none" : "forward"),
+        turn: combatTurn,
         fire,
-        strafe: true,
+        strafe: combatTurn !== "none" && !yawNearCenter,
         strafeSide,
         use: false,
-        run: ammoState.likelyEmpty || !centered
+        run: ammoState.likelyEmpty || (combatTurn !== "none" && !yawNearCenter && !centered)
       }));
     }
 
@@ -5020,8 +5048,11 @@
         ammoLikelyEmpty: this.ammoLikelyEmpty,
         defaultSweepFrames: profileNumber(this.profile, "centralHallEnemySweepFrames", 72),
         depth: this.depthEstimate,
+        centralHallFrames: this.centralHallFrames,
+        combatFireFrames: this.combatFireFrames,
         enemyCenterCellConfidence: this.enemyCenterCellConfidence,
         enemyConfidence: this.enemyConfidence,
+        enemyCombatYaw: frame?.enemyCombatYaw,
         enemyStructuralDecoy: this.enemyStructuralDecoy,
         trustedCombatEvidence: hasTrustedCombatEvidence(this),
         trustedEnemyThreat: getTrustedEnemyThreat(this),
@@ -5030,11 +5061,14 @@
         inputStallFrames: this.inputStallFrames,
         left: frame?.left,
         motionStallScore: this.motionStallScore,
+        openingBurstFrames: profileNumber(this.profile, "centralHallOpeningBurstFrames", 72),
+        openingBurstShots: profileNumber(this.profile, "centralHallOpeningBurstShots", 5),
         right: frame?.right,
         sweepFrames: this.centralHallEnemySweepFrames,
         sweepTurn: this.centralHallEnemySweepTurn,
         targetConfidence: this.targetConfidence,
-        targetTurn: targetTurnDirection(frame)
+        targetTurn: targetTurnDirection(frame),
+        visualEnemyYaw: frame?.visualEnemyYaw
       });
 
       this.centralHallEnemySweepFrames = plan.sweepFrames;
@@ -5051,6 +5085,25 @@
       this.controlPipeline = plan.controlPipeline;
       this.mobilityMode = plan.mobilityMode;
       return normalizeAction(Object.assign({}, action, plan.action));
+    }
+
+    isLowHealthGoalFirst() {
+      const threshold = Math.max(1, Math.min(100, Math.round(profileNumber(this.profile, "lowHealthThreshold", 50))));
+      const rawHealth = Number(this.healthEstimatedPercent ?? this.healthSensorSnapshot?.health ?? this.healthSensorSnapshot?.value ?? 100);
+      const health = Number.isFinite(rawHealth) ? rawHealth : 100;
+      const bloodDangerThreshold = Math.max(0.10, Math.min(1, Number(profileNumber(this.profile, "survivalBloodDangerThreshold", 0.52))));
+      const bloodDanger = Math.max(Number(this.healthBloodDangerScore || 0), Number(this.healthSensorSnapshot?.bloodDangerScore || 0));
+      const faceHeartbeatAlive = Boolean(this.healthSensorSnapshot?.faceHeartbeatAlive)
+        || this.faceLifePattern === "alive-cycle"
+        || this.faceLifePattern === "alive-damaged"
+        || Number(this.facePoseDiversity || this.healthSensorSnapshot?.facePoseDiversity || 0) >= 2;
+      const aliveBloodDanger = !this.healthLikelyDead
+        && !this.healthSensorSnapshot?.retryRequested
+        && faceHeartbeatAlive
+        && bloodDanger >= bloodDangerThreshold;
+      return (health > 0 && health < threshold)
+        || Boolean(this.healthCriticalBloodAlive || this.healthSensorSnapshot?.criticalBloodAlive)
+        || aliveBloodDanger;
     }
 
     wallFollowAction(action, frame, state) {
@@ -5212,12 +5265,18 @@
     const ammoState = estimateAmmoState(frame.ammoSample, quantizedAmmo);
     const quantizedHealth = quantizeFrameSample(frame.healthSample);
     const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
+    const healthHudReady = frame.healthHudReady !== false;
     const rawHealthState = Object.assign(
-      estimateHealthState(frame.healthSample, quantizedHealth),
+      healthHudReady
+        ? estimateHealthState(frame.healthSample, quantizedHealth)
+        : Object.assign(createDisabledHealthState(regionSignature(quantizedHealth || [])), { hudReady: false, retryReason: "hud-not-ready" }),
       {
+        hudReady: healthHudReady,
         deathTintScore: clamp01(Number(frame.healthDeathTintScore ?? frame.deathTintScore ?? 0)),
         statusDeathTintScore: clamp01(Number(frame.healthStatusDeathTintScore ?? 0)),
-        faceDeathTintScore: clamp01(Number(frame.healthFaceDeathTintScore ?? 0))
+        faceDeathTintScore: clamp01(Number(frame.healthFaceDeathTintScore ?? 0)),
+        faceBloodScore: clamp01(Number(frame.healthFaceBloodScore ?? 0)),
+        faceBloodRatio: clamp01(Number(frame.healthFaceBloodRatio ?? 0))
       });
     const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
     const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
@@ -5228,6 +5287,38 @@
     const healthState = healthSensorEnabled
       ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
       : createDisabledHealthState(rawHealthState.signature);
+    const healthDeathTintEvidence = Math.max(
+      Number(healthState.faceDeathScore || faceDeathScore || 0) / 0.16,
+      Number(healthState.deathTintScore || 0) / 0.42,
+      Number(healthState.statusDeathTintScore || 0) / 0.36,
+      Number(healthState.faceDeathTintScore || 0) / 0.22,
+      Number(healthState.zeroScore || 0) / 0.52,
+      Number(healthState.faceBloodScore || 0) / 0.30
+    ) >= 1;
+    const healthNoHeartbeatCandidate = healthSensorEnabled
+      && healthState.hudReady !== false
+      && !healthState.faceHeartbeatAlive
+      && (faceQuantizedFrameChange <= 0.32
+        || healthState.faceSignatureValid === false
+        || (healthDeathTintEvidence && Number(healthState.freezeScore || 0) >= 0.5));
+    controller.healthNoHeartbeatFrames = healthNoHeartbeatCandidate
+      ? Math.min(MAX_STUCK_COUNTER, Number(controller.healthNoHeartbeatFrames || 0) + 1)
+      : 0;
+    const healthNoHeartbeatDeathFrames = Math.max(1, Math.floor(profileNumber(controller.profile, "healthNoHeartbeatDeathFrames", 90)));
+    healthState.faceNoHeartbeatFrames = controller.healthNoHeartbeatFrames;
+    healthState.noHeartbeatDeathFrames = healthNoHeartbeatDeathFrames;
+    const healthNoHeartbeatDeath = controller.healthNoHeartbeatFrames >= healthNoHeartbeatDeathFrames
+      && healthDeathTintEvidence;
+    if (healthNoHeartbeatDeath && !healthState.likelyDead) {
+      healthState.likelyDead = true;
+      healthState.noHeartbeatDeath = true;
+      healthState.retryRequested = true;
+      healthState.retryReason = "health-no-heartbeat-death";
+      healthState.estimatedPercent = 0;
+      healthState.value = 0;
+      healthState.health = 0;
+      healthState.lowHealth = false;
+    }
     const wallPressure = Math.abs((frame.left || 0) - (frame.right || 0)) + Math.max(0, (frame.lowerCenter || 0) - (frame.topCenter || 0));
     const preDoorPhase = controller.doorOpenedCount <= 0;
     const targetConfidence = preDoorPhase ? 0 : estimateTargetConfidence(frame);
@@ -5438,6 +5529,7 @@
     controller.depthEstimate = depthEstimate;
     controller.faceSignature = regionSignature(quantizedFace);
     controller.faceQuantizedFrameChange = faceQuantizedFrameChange;
+    const faceLife = updateFaceLifePattern(controller, controller.faceSignature, healthState, faceQuantizedFrameChange);
     controller.cornerSignal = cornerSignal;
     controller.signatureMatchKind = signatureMatch.kind;
     controller.signatureMatchDistance = signatureMatch.distance;
@@ -5489,6 +5581,10 @@
     controller.ammoLikelyEmpty = ammoState.likelyEmpty;
     controller.healthSignature = healthState.signature;
     controller.healthLikelyDead = healthState.likelyDead;
+    controller.healthCriticalBloodAlive = Boolean(healthState.criticalBloodAlive);
+    controller.healthBloodDangerScore = clamp01(Number(healthState.bloodDangerScore || 0));
+    controller.healthDangerReason = healthState.healthDangerReason || "none";
+    controller.healthNoHeartbeatFrames = Number(healthState.faceNoHeartbeatFrames || controller.healthNoHeartbeatFrames || 0);
     controller.healthZeroScore = healthState.zeroScore || 0;
     controller.healthActiveColumns = healthState.activeColumns || 0;
     controller.healthActiveCells = healthState.activeCells || 0;
@@ -5505,6 +5601,20 @@
       deathTintScore: controller.healthDeathTintScore,
       statusDeathTintScore: controller.healthStatusDeathTintScore,
       faceDeathTintScore: controller.healthFaceDeathTintScore,
+      faceBloodScore: healthState.faceBloodScore,
+      faceBloodRatio: healthState.faceBloodRatio,
+      facePoseDiversity: faceLife.poseDiversity,
+      faceLifePattern: faceLife.pattern,
+      faceFixedFrames: faceLife.fixedFrames,
+      faceHeartbeatScore: healthState.faceHeartbeatScore,
+      faceHeartbeatAlive: healthState.faceHeartbeatAlive,
+      faceNoHeartbeatFrames: healthState.faceNoHeartbeatFrames,
+      noHeartbeatDeath: healthState.noHeartbeatDeath,
+      noHeartbeatDeathFrames: healthState.noHeartbeatDeathFrames,
+      criticalBloodAlive: healthState.criticalBloodAlive,
+      bloodDangerScore: healthState.bloodDangerScore,
+      healthDangerReason: healthState.healthDangerReason,
+      hudReady: healthState.hudReady,
       activeColumns: controller.healthActiveColumns,
       activeCells: controller.healthActiveCells,
       estimatedPercent: controller.healthEstimatedPercent,
@@ -5515,10 +5625,21 @@
       faceSignature: controller.faceSignature,
       faceDeathScore,
       faceQuantizedFrameChange,
+      facePoseDiversity: faceLife.poseDiversity,
+      faceLifePattern: faceLife.pattern,
+      faceFixedFrames: faceLife.fixedFrames,
       freezeScore: healthState.freezeScore,
       retryReason: healthState.retryReason,
       timestamp: state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
     });
+    controller.healthLikelyDead = Boolean(controller.healthSensorSnapshot.likelyDead);
+    controller.healthCriticalBloodAlive = Boolean(controller.healthSensorSnapshot.criticalBloodAlive);
+    controller.healthBloodDangerScore = clamp01(Number(controller.healthSensorSnapshot.bloodDangerScore || 0));
+    controller.healthDangerReason = controller.healthSensorSnapshot.healthDangerReason || "none";
+    controller.healthNoHeartbeatFrames = Number(controller.healthSensorSnapshot.faceNoHeartbeatFrames || controller.healthNoHeartbeatFrames || 0);
+    controller.healthEstimatedPercent = Number.isFinite(Number(controller.healthSensorSnapshot.estimatedPercent))
+      ? Math.max(0, Math.min(100, Math.round(Number(controller.healthSensorSnapshot.estimatedPercent))))
+      : controller.healthEstimatedPercent;
     controller.auditorySnapshot = auditorySnapshot;
     controller.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
     refreshSensorCognition(controller, state, frame, {
@@ -5527,6 +5648,54 @@
       auditorySnapshot,
       action
     });
+  }
+
+  function updateFaceLifePattern(controller, faceSignature, healthState, faceQuantizedFrameChange) {
+    const signature = String(faceSignature || "0000000000000000");
+    const valid = /[1-9a-f]/i.test(signature) && healthState?.hudReady !== false;
+    if (!Array.isArray(controller.facePoseSignatureHistory)) {
+      controller.facePoseSignatureHistory = [];
+    }
+
+    if (valid) {
+      const historyLimit = Math.max(12, Math.round(profileNumber(controller.profile, "healthFacePoseHistoryFrames", 36)));
+      controller.facePoseSignatureHistory.push(signature);
+      while (controller.facePoseSignatureHistory.length > historyLimit) {
+        controller.facePoseSignatureHistory.shift();
+      }
+    } else {
+      controller.facePoseSignatureHistory.length = 0;
+    }
+
+    const unique = new Set(controller.facePoseSignatureHistory).size;
+    const delta = Number(faceQuantizedFrameChange ?? 255);
+    const heartbeatAlive = Boolean(healthState?.faceHeartbeatAlive)
+      || (valid && unique >= 2 && Number(healthState?.faceNoHeartbeatFrames || 0) < profileNumber(controller.profile, "healthNoHeartbeatDeathFrames", 90));
+    const bloodDanger = clamp01(Math.max(
+      Number(healthState?.bloodDangerScore || 0),
+      Number(healthState?.faceBloodScore || 0) * 0.75,
+      Number(healthState?.faceBloodRatio || 0) * 1.1));
+    if (heartbeatAlive) {
+      controller.faceFixedFrames = 0;
+    } else if (valid && (delta <= 0.32 || Number(healthState?.faceNoHeartbeatFrames || 0) > 0)) {
+      controller.faceFixedFrames = Math.min(MAX_STUCK_COUNTER, Number(controller.faceFixedFrames || 0) + 1);
+    } else {
+      controller.faceFixedFrames = Math.max(0, Number(controller.faceFixedFrames || 0) - 1);
+    }
+
+    controller.facePoseDiversity = Math.min(3, unique);
+    controller.faceLifePattern = healthState?.likelyDead
+      ? "dead-fixed"
+      : (heartbeatAlive && bloodDanger >= 0.50
+        ? "alive-damaged"
+        : (heartbeatAlive || unique >= 2
+          ? "alive-cycle"
+          : (valid ? (controller.faceFixedFrames > 0 ? "fixed" : "single") : "unknown")));
+    return {
+      poseDiversity: controller.facePoseDiversity,
+      fixedFrames: controller.faceFixedFrames,
+      pattern: controller.faceLifePattern
+    };
   }
 
   function updateEnemyAlertState(controller, frame, enemy, effectiveTargetConfidence, ammoState, faceQuantizedFrameChange) {
@@ -6192,6 +6361,9 @@
         healthActiveColumns: 0,
         healthActiveCells: 0,
         healthRetryReason: "none",
+        healthHudReady: false,
+        healthHudReadyScore: 0,
+        healthHudPanelRatio: 0,
         healthDeathTintScore: 0,
         healthStatusDeathTintScore: 0,
         healthFaceDeathTintScore: 0,
@@ -6286,9 +6458,17 @@
     let statusDeathTintTotal = 0;
     let statusDeathTintMax = 0;
     let statusDeathTintCount = 0;
+    let statusHudPanelTotal = 0;
+    let statusHudPanelMax = 0;
+    let statusHudPanelHits = 0;
+    let statusHudPanelCount = 0;
     let faceDeathTintTotal = 0;
     let faceDeathTintMax = 0;
     let faceDeathTintCount = 0;
+    let faceBloodTintTotal = 0;
+    let faceBloodTintMax = 0;
+    let faceBloodPixelCount = 0;
+    const faceBloodRows = new Array(FACE_HEIGHT).fill(0);
     let darkAreaTotal = 0;
     let blueFloorTotal = 0;
     let blueFloorLowerTotal = 0;
@@ -6568,6 +6748,20 @@
       statusDeathTintCount += 1;
     }
 
+    for (let y = GAMEPLAY_HEIGHT; y < HEIGHT; y += 2) {
+      for (let x = 0; x < WIDTH; x += 2) {
+        const value = indices[Math.min(HEIGHT - 1, y) * WIDTH + Math.min(WIDTH - 1, x)] || 0;
+        const panelScore = scoreStatusHudPanelPaletteIndex(value, rgbaBytes);
+        statusHudPanelTotal += panelScore;
+        statusHudPanelMax = Math.max(statusHudPanelMax, panelScore);
+        if (panelScore >= 0.28) {
+          statusHudPanelHits += 1;
+        }
+
+        statusHudPanelCount += 1;
+      }
+    }
+
     for (let row = 0; row < AMMO_SAMPLE_ROWS; row += 1) {
       const y = Math.min(HEIGHT - 1, AMMO_Y + Math.floor((row + 0.5) * AMMO_HEIGHT / AMMO_SAMPLE_ROWS));
       for (let column = 0; column < AMMO_SAMPLE_COLUMNS; column += 1) {
@@ -6581,6 +6775,19 @@
       for (let column = 0; column < HEALTH_SAMPLE_COLUMNS; column += 1) {
         const x = Math.min(WIDTH - 1, HEALTH_X + Math.floor((column + 0.5) * HEALTH_WIDTH / HEALTH_SAMPLE_COLUMNS));
         healthSample.push(indices[y * WIDTH + x] || 0);
+      }
+    }
+
+    for (let y = FACE_Y; y < FACE_Y + FACE_HEIGHT; y += 1) {
+      for (let x = FACE_X; x < FACE_X + FACE_WIDTH; x += 1) {
+        const value = indices[Math.min(HEIGHT - 1, y) * WIDTH + Math.min(WIDTH - 1, x)] || 0;
+        const deathTintScore = scoreDeathTintPaletteIndex(value, rgbaBytes);
+        faceBloodTintTotal += deathTintScore;
+        faceBloodTintMax = Math.max(faceBloodTintMax, deathTintScore);
+        if (deathTintScore >= 0.16) {
+          faceBloodPixelCount += 1;
+          faceBloodRows[y - FACE_Y] += 1;
+        }
       }
     }
 
@@ -6639,16 +6846,40 @@
     const gameplayDeathTintScore = round2(clamp01(Math.max(gameplayDeathTintAverage * 1.16, gameplayDeathTintMax * 0.72)));
     const statusDeathTintScore = round2(clamp01(Math.max(statusDeathTintAverage * 1.08, statusDeathTintMax * 0.68)));
     const faceDeathTintScore = round2(clamp01(Math.max(faceDeathTintAverage * 1.12, faceDeathTintMax * 0.78)));
+    const statusHudPanelAverage = statusHudPanelCount ? statusHudPanelTotal / statusHudPanelCount : 0;
+    const statusHudPanelRatio = statusHudPanelCount ? statusHudPanelHits / statusHudPanelCount : 0;
+    const healthHudReadyScore = round2(clamp01(Math.max(
+      statusHudPanelAverage * 1.34,
+      statusHudPanelRatio * 0.82,
+      statusHudPanelMax * 0.42)));
+    const healthHudReady = healthHudReadyScore >= 0.18 && statusHudPanelRatio >= 0.16 && statusHudPanelMax >= 0.36;
+    const faceBloodAverage = (FACE_WIDTH * FACE_HEIGHT) ? faceBloodTintTotal / (FACE_WIDTH * FACE_HEIGHT) : 0;
+    const faceBloodRatio = (FACE_WIDTH * FACE_HEIGHT) ? faceBloodPixelCount / (FACE_WIDTH * FACE_HEIGHT) : 0;
+    const faceBloodRowCoverage = FACE_WIDTH ? Math.max(...faceBloodRows) / FACE_WIDTH : 0;
+    const faceBloodScore = round2(clamp01(Math.max(
+      faceDeathTintScore,
+      faceBloodAverage * 1.45,
+      faceBloodTintMax * 0.66,
+      faceBloodRatio * 1.42,
+      faceBloodRowCoverage * 0.76)));
     const deathTintScore = round2(clamp01(Math.max(
       (gameplayDeathTintScore * 0.54) + (statusDeathTintScore * 0.28) + (faceDeathTintScore * 0.18),
       faceDeathTintScore * 0.82,
       statusDeathTintScore * 0.72)));
     const rawHealthState = Object.assign(
-      estimateHealthState(healthSample, quantizeFrameSample(healthSample)),
+      healthHudReady
+        ? estimateHealthState(healthSample, quantizeFrameSample(healthSample))
+        : Object.assign(createDisabledHealthState(regionSignature(quantizeFrameSample(healthSample) || [])), {
+          hudReady: false,
+          retryReason: "hud-not-ready"
+        }),
       {
+        hudReady: healthHudReady,
         deathTintScore,
         statusDeathTintScore,
-        faceDeathTintScore
+        faceDeathTintScore,
+        faceBloodScore,
+        faceBloodRatio
       });
     const summaryFaceDeathScore = Math.max(estimateFaceDeathScore(quantizeFrameSample(faceSample)), faceDeathTintScore * 0.75);
     const healthState = refineHealthState(rawHealthState, summaryFaceDeathScore, 255, 255);
@@ -6751,9 +6982,14 @@
       healthActiveColumns: healthState.activeColumns || 0,
       healthActiveCells: healthState.activeCells || 0,
       healthRetryReason: healthState.retryReason || "none",
+      healthHudReady: healthState.hudReady !== false,
+      healthHudReadyScore,
+      healthHudPanelRatio: round2(statusHudPanelRatio),
       healthDeathTintScore: healthState.deathTintScore || 0,
       healthStatusDeathTintScore: healthState.statusDeathTintScore || 0,
       healthFaceDeathTintScore: healthState.faceDeathTintScore || 0,
+      healthFaceBloodScore: healthState.faceBloodScore || 0,
+      healthFaceBloodRatio: healthState.faceBloodRatio || 0,
       faceSample,
       faceAverage: faceSample.length ? Math.round(faceTotal / faceSample.length) : 0,
       statusBarAverage: statusSample.length ? Math.round(statusTotal / statusSample.length) : 0,
@@ -6895,6 +7131,42 @@
 
   function scoreDeathTintPaletteIndex(index, rgbaBytes) {
     return requireVisionPalette("scoreDeathTintPaletteIndex")(index, rgbaBytes);
+  }
+
+  function scoreStatusHudPanelPaletteIndex(index, rgbaBytes) {
+    const paletteIndex = Number(index || 0);
+    if (!rgbaBytes || paletteIndex < 0 || paletteIndex > 255) {
+      return 0;
+    }
+
+    const offset = paletteIndex * 4;
+    const red = Number(rgbaBytes[offset] || 0);
+    const green = Number(rgbaBytes[offset + 1] || 0);
+    const blue = Number(rgbaBytes[offset + 2] || 0);
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const saturation = max - min;
+    const luma = (red * 0.299) + (green * 0.587) + (blue * 0.114);
+    const grayPanel = luma >= 24 && luma <= 188 && saturation <= 54;
+    const brownPanel = luma >= 20 && luma <= 158
+      && red >= green * 0.78
+      && green >= blue * 0.58
+      && saturation <= 98;
+    const darkTrim = luma >= 12 && luma <= 82 && saturation <= 46;
+
+    if (grayPanel) {
+      return clamp01(0.4 + ((54 - saturation) / 54) * 0.44 + (luma >= 48 && luma <= 150 ? 0.16 : 0));
+    }
+
+    if (brownPanel) {
+      return clamp01(0.34 + ((98 - saturation) / 98) * 0.32 + (red >= green ? 0.2 : 0));
+    }
+
+    if (darkTrim) {
+      return 0.28;
+    }
+
+    return 0;
   }
 
   function scoreBlueFloorPaletteIndex(index, rgbaBytes) {
@@ -7281,6 +7553,7 @@
       distance,
       cluster: frame.enemyCluster || summarized.cluster || "none",
       centerCellConfidence,
+      combatYaw: Number(frame.enemyCombatYaw ?? frame.visualEnemyYaw ?? 0) || 0,
       structuralDecoy: Boolean(frame.enemyStructuralDecoy ?? summarized.structuralDecoy),
       allRegionPeak: clamp01(Number(frame.enemyAllRegionPeak ?? summarized.allRegionPeak) || 0),
       lateralBias: Number(frame.enemyLateralBias ?? summarized.lateralBias) || 0,
@@ -7350,8 +7623,9 @@
     }
 
     const horizontalSpread = countActiveColumns(quantizedHealth || [], HEALTH_SAMPLE_COLUMNS);
-    const sparseDigits = activeCells > 0 && activeCells <= 11;
-    const compactColumns = horizontalSpread > 0 && horizontalSpread <= 4;
+    const sampleLength = Math.max(1, healthSample.length);
+    const sparseDigits = activeCells > 0 && activeCells <= Math.ceil(sampleLength * 0.28);
+    const compactColumns = horizontalSpread > 0 && horizontalSpread <= Math.ceil(HEALTH_SAMPLE_COLUMNS * 0.38);
     const limitedBuckets = buckets.size <= 5;
     const hasRedDigitSignal = maxBucket >= 3;
     const noHudSignal = activeCells === 0 && maxBucket === 0;
@@ -7362,19 +7636,19 @@
       + (limitedBuckets ? 0.18 : 0)
       + (hasRedDigitSignal ? 0.2 : 0));
     const likelyDead = zeroScore >= 0.78;
-    const density = activeCells / Math.max(1, healthSample.length);
+    const density = activeCells / sampleLength;
     const spread = horizontalSpread / Math.max(1, HEALTH_SAMPLE_COLUMNS);
     const estimatedPercent = likelyDead
       ? 0
-      : Math.round(clamp01(Math.max(
-        (density * 0.76) + (spread * 0.24),
-        noHudSignal ? 0 : (1 - zeroScore) * 0.82)) * 100);
+      : (noHudSignal ? 100 : Math.round(clamp01((spread * 0.84) + (density * 0.16)) * 100));
     return {
       signature,
       likelyDead,
       zeroScore,
       activeColumns: horizontalSpread,
       activeCells,
+      sampleColumns: HEALTH_SAMPLE_COLUMNS,
+      sampleCells: healthSample.length,
       estimatedPercent,
       faceDeathScore: 0,
       freezeScore: 0,
@@ -9072,7 +9346,10 @@
       dynamicObjectRaw,
       projectileContext,
       dynamicThreatContext,
-      healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
+      healthThreat: controller.healthLikelyDead
+        || controller.healthCriticalBloodAlive
+        || controller.healthSensorSnapshot?.retryRequested
+        || controller.healthSensorSnapshot?.criticalBloodAlive,
       terminalUseFocus,
       doorTransitionGraceActive,
       stuckRaw,
@@ -9181,7 +9458,10 @@
       dynamicThreatContext: enemy > 0.35
         || Boolean(controller.phainomenon?.looming?.active)
         || Boolean(controller.phainomenon?.damageLocalization?.active),
-      healthThreat: controller.healthLikelyDead || controller.healthSensorSnapshot?.retryRequested,
+      healthThreat: controller.healthLikelyDead
+        || controller.healthCriticalBloodAlive
+        || controller.healthSensorSnapshot?.retryRequested
+        || controller.healthSensorSnapshot?.criticalBloodAlive,
       enemyLateralBias: controller.enemyLateralBias,
       depthEstimate: controller.depthEstimate,
       preDoorDemoRouteGraceActive,
@@ -9253,7 +9533,10 @@
       retryRequested: Boolean(controller.healthSensorSnapshot?.retryRequested),
       zeroScore: Number(controller.healthZeroScore || controller.healthSensorSnapshot?.zeroScore || 0),
       activeCells: Number(controller.healthActiveCells || controller.healthSensorSnapshot?.activeCells || 0),
-      retryReason: controller.healthSensorSnapshot?.retryReason || "none"
+      retryReason: controller.healthSensorSnapshot?.retryReason || "none",
+      criticalBloodAlive: Boolean(controller.healthCriticalBloodAlive || controller.healthSensorSnapshot?.criticalBloodAlive),
+      bloodDangerScore: Number(controller.healthBloodDangerScore || controller.healthSensorSnapshot?.bloodDangerScore || 0),
+      healthDangerReason: controller.healthDangerReason || controller.healthSensorSnapshot?.healthDangerReason || "none"
     });
     const safeFeedback = audited.vetoed
       ? Object.assign({}, feedback, {

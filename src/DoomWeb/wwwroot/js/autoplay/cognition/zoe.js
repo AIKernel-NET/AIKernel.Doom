@@ -28,6 +28,9 @@
     return {
       likelyDead: Boolean(health.likelyDead),
       retryRequested: Boolean(health.retryRequested),
+      criticalBloodAlive: Boolean(health.criticalBloodAlive || health.healthCriticalBloodAlive),
+      bloodDangerScore: Number(health.bloodDangerScore || health.healthBloodDangerScore || 0),
+      healthDangerReason: health.healthDangerReason || "none",
       zeroScore: Number(health.zeroScore || 0),
       activeCells: Number(health.activeCells || 0),
       retryReason: health.retryReason || "none"
@@ -49,7 +52,7 @@
     return {
       action,
       vetoed: false,
-      reason: "clear",
+      reason: health.criticalBloodAlive ? (health.healthDangerReason || "face-heartbeat-blood") : "clear",
       health
     };
   }

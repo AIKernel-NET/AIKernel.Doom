@@ -8,7 +8,9 @@
       settleFrames: 0,
       cooldownFrames: 0,
       reason: "none",
-      healthRetryFrames: 0
+      healthRetryFrames: 0,
+      awaitingRecovery: false,
+      completedReason: "none"
     };
   }
 
@@ -21,7 +23,9 @@
       active: active(state),
       cooldownFrames: state?.cooldownFrames || 0,
       settleFrames: state?.settleFrames || 0,
-      reason: state?.reason || "none"
+      reason: state?.reason || "none",
+      awaitingRecovery: Boolean(state?.awaitingRecovery),
+      completedReason: state?.completedReason || "none"
     };
   }
 
@@ -36,6 +40,9 @@
     state.settleFrames = 0;
     state.cooldownFrames = 0;
     state.reason = "none";
+    state.healthRetryFrames = 0;
+    state.awaitingRecovery = false;
+    state.completedReason = "none";
     if (typeof host.queueInput === "function") {
       if (host.keys?.use) {
         host.queueInput(host.keys.use, false, "use");
@@ -88,6 +95,8 @@
       : 0;
 
     if (!healthRetryRequested) {
+      state.awaitingRecovery = false;
+      state.completedReason = "none";
       if (state.settleFrames > 0) {
         return { scheduled: false, reason: "settling" };
       }
@@ -97,6 +106,15 @@
       }
 
       return { scheduled: false, reason: "not-requested" };
+    }
+
+    if (state.awaitingRecovery) {
+      if (state.cooldownFrames <= 0 && state.healthRetryFrames >= 12) {
+        state.awaitingRecovery = false;
+        state.completedReason = "none";
+      } else {
+        return { scheduled: false, reason: "awaiting-recovery" };
+      }
     }
 
     if (state.healthRetryFrames < 3) {
@@ -128,6 +146,8 @@
 
     state.cooldownFrames = host.cooldownFrames || 180;
     state.settleFrames = host.settleFrames || 60;
+    state.awaitingRecovery = true;
+    state.completedReason = state.reason || "none";
     host.resetSensors?.("post-retry-reset", state.reason || "none");
     host.logCompleted?.(state.reason || "none");
     return true;

@@ -343,6 +343,176 @@ assert(vetoRuntime.status().safetyReason === "zoe-veto", "Zoe veto should be vis
 
 const publicProfile = JSON.parse(readFileSync(path.join(repoRoot, "src/DoomWeb/wwwroot/demo/doom/autoplay-profile.json"), "utf8"));
 
+const centralHallOpeningBurstRuntime = runtimeFactory.create(publicProfile);
+centralHallOpeningBurstRuntime.predictions = 5200;
+const centralHallOpeningBurstAction = centralHallOpeningBurstRuntime.predict({
+  health: 100,
+  depthSig: 0.82,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 18,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 0,
+  combatYaw: 34,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.12,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      enemy: 0.15,
+      "central-hall": 0.50,
+      "final-room": 0.10
+    }
+  }
+});
+assert(centralHallOpeningBurstAction.stage === "central-hall-opening-burst-fire", `Central hall opening should fire a fixed forward burst before yaw chasing (actual=${centralHallOpeningBurstAction.stage})`);
+assert(centralHallOpeningBurstAction.fire === true, "Central hall opening burst should fire even when the dark enemy vector is weak");
+assert(centralHallOpeningBurstAction.turn === "none", "Central hall opening burst should not rotate on noisy yaw");
+assert(centralHallOpeningBurstAction.move === "none", "Central hall opening burst should hold position while firing");
+
+const centralHallLowHealthRushRuntime = runtimeFactory.create(publicProfile);
+centralHallLowHealthRushRuntime.predictions = 5240;
+const centralHallLowHealthRushAction = centralHallLowHealthRushRuntime.predict({
+  health: 35,
+  depthSig: 0.88,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 44,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 0,
+  combatYaw: -28,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.52,
+  trustedCombatEvidence: true,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      enemy: 0.40,
+      "central-hall": 0.55,
+      "final-room": 0.32
+    }
+  }
+});
+assert(centralHallLowHealthRushAction.stage === "central-hall-low-health-exit-rush", `Low health central hall should rush the exit route instead of fighting (actual=${centralHallLowHealthRushAction.stage})`);
+assert(centralHallLowHealthRushAction.fire === false, "Low health exit rush should not spend time firing");
+assert(centralHallLowHealthRushAction.turn === "none", "Low health exit rush should not yaw away from the straight exit door");
+assert(centralHallLowHealthRushAction.move === "forward", "Low health exit rush should run straight toward the exit door");
+
+const centralHallLowHealthChargeUseRuntime = runtimeFactory.create(publicProfile);
+centralHallLowHealthChargeUseRuntime.predictions = 5250;
+const centralHallLowHealthChargeUseAction = centralHallLowHealthChargeUseRuntime.predict({
+  health: 35,
+  depthSig: 0.80,
+  contextDict: "corridor",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 48,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 0,
+  combatYaw: -24,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.50,
+  trustedCombatEvidence: true,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.40,
+      enemy: 0.38,
+      "central-hall": 0.55,
+      "final-room": 0.38
+    }
+  }
+});
+assert(centralHallLowHealthChargeUseAction.stage === "central-hall-low-health-exit-door-use", `Low health central hall should start Use while still charging the exit door (actual=${centralHallLowHealthChargeUseAction.stage})`);
+assert(centralHallLowHealthChargeUseAction.use === true, "Low health exit charge should pulse Use before full contact depth");
+assert(centralHallLowHealthChargeUseAction.fire === false, "Low health exit charge should not fire");
+assert(centralHallLowHealthChargeUseAction.move === "none", "Low health exit charge should let the Use pulse gate stop briefly while pressing Use");
+
+const centralHallAliveDamagedFaceUseRuntime = runtimeFactory.create(publicProfile);
+centralHallAliveDamagedFaceUseRuntime.predictions = 5255;
+const centralHallAliveDamagedFaceUseAction = centralHallAliveDamagedFaceUseRuntime.predict({
+  health: 100,
+  healthSensor: {
+    value: 100,
+    health: 100,
+    likelyDead: false,
+    retryRequested: false,
+    criticalBloodAlive: false,
+    bloodDangerScore: 0.68,
+    faceHeartbeatAlive: true,
+    facePoseDiversity: 3,
+    faceLifePattern: "alive-damaged",
+    healthDangerReason: "face-heartbeat-blood"
+  },
+  depthSig: 0.80,
+  contextDict: "corridor",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 50,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 2,
+  combatYaw: 20,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.54,
+  trustedCombatEvidence: true,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.40,
+      enemy: 0.40,
+      "central-hall": 0.55,
+      "final-room": 0.38
+    }
+  }
+});
+assert(centralHallAliveDamagedFaceUseAction.stage === "central-hall-low-health-exit-door-use", `Alive-damaged face evidence should bypass combat and start the exit door use (actual=${centralHallAliveDamagedFaceUseAction.stage})`);
+assert(centralHallAliveDamagedFaceUseAction.use === true, "Alive-damaged face survival route should pulse Use");
+assert(centralHallAliveDamagedFaceUseAction.fire === false, "Alive-damaged face survival route should not fight");
+assert(centralHallAliveDamagedFaceUseAction.move === "none", "Alive-damaged face survival route should let the Use pulse gate stop briefly while pressing Use");
+
+const centralHallLowHealthUseRuntime = runtimeFactory.create(publicProfile);
+centralHallLowHealthUseRuntime.predictions = 5260;
+const centralHallLowHealthUseAction = centralHallLowHealthUseRuntime.predict({
+  health: 35,
+  depthSig: 0.54,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 52,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 0,
+  combatYaw: 26,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.48,
+  trustedCombatEvidence: true,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.34,
+      enemy: 0.36,
+      "central-hall": 0.55,
+      "final-room": 0.42
+    }
+  }
+});
+assert(centralHallLowHealthUseAction.stage === "central-hall-low-health-exit-door-use", `Low health central hall should stop and Use the exit door at contact depth (actual=${centralHallLowHealthUseAction.stage})`);
+assert(centralHallLowHealthUseAction.use === true, "Low health exit door contact should pulse Use");
+assert(centralHallLowHealthUseAction.fire === false, "Low health exit door use should not fire");
+assert(centralHallLowHealthUseAction.move === "none", "Low health exit door use should stop before pressing Use");
+
 const postDoorAudioTransitionRuntime = runtimeFactory.create(publicProfile);
 postDoorAudioTransitionRuntime.predictions = 3800;
 const postDoorAudioTransitionAction = postDoorAudioTransitionRuntime.predict({
@@ -535,7 +705,7 @@ const postDoorTerminalAdvanceAction = postDoorTerminalAdvanceRuntime.predict({
   audioEnemyConfidence: 0,
   soundEvent: false,
   computerRoomConfidence: 0.64,
-  bridgeConfidence: 0.35,
+  bridgeConfidence: 0.28,
   motionForwardProgress: 0.32,
   footObstacleScore: 0.58,
   motionObstacleScore: 0.58,
@@ -618,6 +788,417 @@ assert(postDoorObservedWeakTerminalAction.stage === "post-door-terminal-surface-
 assert(postDoorObservedWeakTerminalAction.move === "forward", "Observed post-door terminal surface should keep forward movement into the room");
 assert(postDoorObservedWeakTerminalAction.turn === "none", "Observed post-door terminal surface should not turn away from the visible console");
 
+const postDoorMonitorRouteResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorRouteResumeRuntime.predictions = 2803;
+const postDoorMonitorRouteResumeAction = postDoorMonitorRouteResumeRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.69,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.27,
+  computerDarkPanelScore: 0.09,
+  postDoorTerminalSurface: 0.27,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: -0.07,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.34,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0.16,
+  firstDoorUse3x3Score: 0,
+  moveRepeatFrames: 8,
+  recommendedYaw: -5,
+  semanticMemory: {
+    symbols: {
+      door: 0.78,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.52,
+      "computer-room": 0.69
+    }
+  }
+});
+assert(postDoorMonitorRouteResumeAction.stage === "post-door-monitor-route-resume", `Strong semantic computer-room/bridge evidence should resume route instead of idling at monitor face (actual=${postDoorMonitorRouteResumeAction.stage})`);
+assert(postDoorMonitorRouteResumeAction.move === "forward", "Post-door monitor route resume should restore forward movement");
+assert(postDoorMonitorRouteResumeAction.use === false, "Post-door monitor route resume must not pulse Use");
+
+const postDoorComputerRoomForwardCommitRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomForwardCommitRuntime.predictions = 3225;
+const postDoorComputerRoomForwardCommitAction = postDoorComputerRoomForwardCommitRuntime.predict({
+  health: 100,
+  depthSig: 0.81,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.74,
+  computerRoomScore: 0.12,
+  computerPanelScore: 0.28,
+  computerDarkPanelScore: 0.12,
+  postDoorTerminalSurface: 0.45,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.47,
+  routeTopologyCenterCorridorAlignment: 0.06,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.31,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.43,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  firstDoorVision9x9Score: 0.20,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 4,
+  moveRepeatFrames: 20,
+  turnRepeatFrames: 4,
+  recommendedYaw: 6,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.43,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.54,
+      "computer-room": 0.74
+    }
+  }
+});
+assert(postDoorComputerRoomForwardCommitAction.stage === "post-door-computer-room-forward-commit", `Post-door repeated right route should commit forward through ComputerRoom instead of building a U-turn (actual=${postDoorComputerRoomForwardCommitAction.stage})`);
+assert(postDoorComputerRoomForwardCommitAction.move === "forward", "Post-door ComputerRoom forward commit should move forward");
+assert(postDoorComputerRoomForwardCommitAction.turn === "none", "Post-door ComputerRoom forward commit should neutralize repeated yaw");
+
+const postDoorMonitorIdleForwardResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorIdleForwardResumeRuntime.predictions = 8300;
+const postDoorMonitorIdleForwardResumeAction = postDoorMonitorIdleForwardResumeRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.07,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.86,
+  computerRoomScore: 0.11,
+  computerPanelScore: 0,
+  computerDarkPanelScore: 0.11,
+  postDoorTerminalSurface: 0.11,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.68,
+  routeTopologyCenterCorridorAlignment: -0.10,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.14,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  firstDoorVision9x9Score: 0.31,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  recommendedYaw: 6,
+  semanticMemory: {
+    symbols: {
+      door: 0.31,
+      corridor: 0.42,
+      enemy: 0.07,
+      "safe-zone": 0.85,
+      bridge: 0.60,
+      "computer-room": 0.86
+    }
+  }
+});
+assert(postDoorMonitorIdleForwardResumeAction.stage === "post-door-monitor-idle-forward-resume", `Monitor idle with strong computer/bridge semantics should resume forward instead of falling to none (actual=${postDoorMonitorIdleForwardResumeAction.stage})`);
+assert(postDoorMonitorIdleForwardResumeAction.move === "forward", "Post-door monitor idle resume should restore forward movement");
+assert(postDoorMonitorIdleForwardResumeAction.turn === "none", "Post-door monitor idle resume should not re-enter a right turn loop");
+
+const postDoorGrayWallRouteReacquireRuntime = runtimeFactory.create(publicProfile);
+postDoorGrayWallRouteReacquireRuntime.predictions = 8350;
+const postDoorGrayWallRouteReacquireAction = postDoorGrayWallRouteReacquireRuntime.predict({
+  health: 52,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.07,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.86,
+  computerRoomScore: 0.11,
+  computerPanelScore: 0,
+  computerDarkPanelScore: 0.11,
+  postDoorTerminalSurface: 0.11,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0,
+  bridgeLaneVisible: false,
+  routeTopologyBarrelZoneEvidence: 0.68,
+  routeTopologyCenterCorridorAlignment: -0.10,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.14,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  firstDoorVision9x9Score: 0.31,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 28,
+  moveRepeatFrames: 48,
+  turnRepeatFrames: 0,
+  recommendedYaw: 6,
+  semanticMemory: {
+    symbols: {
+      door: 0.31,
+      corridor: 0.42,
+      enemy: 0.07,
+      "safe-zone": 0.85,
+      bridge: 0.60,
+      "computer-room": 0.86
+    }
+  }
+});
+assert(postDoorGrayWallRouteReacquireAction.stage === "post-door-gray-wall-route-reacquire-right", `Post-door gray wall should stop forward pressure and reacquire the bridge route to the right (actual=${postDoorGrayWallRouteReacquireAction.stage})`);
+assert(postDoorGrayWallRouteReacquireAction.move === "none", "Post-door gray wall reacquire should stop forward movement");
+assert(postDoorGrayWallRouteReacquireAction.turn === "right", "Post-door gray wall reacquire should turn right toward the cross-bridge route");
+
+const postDoorMonitorWeakBridgeIdleResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorWeakBridgeIdleResumeRuntime.predictions = 2442;
+const postDoorMonitorWeakBridgeIdleResumeAction = postDoorMonitorWeakBridgeIdleResumeRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.68,
+  computerRoomScore: 0.09,
+  computerPanelScore: 0,
+  computerDarkPanelScore: 0.09,
+  postDoorTerminalSurface: 0.12,
+  bridgeConfidence: 0.48,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.64,
+  routeTopologyCenterCorridorAlignment: -0.10,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "left",
+  spawnLandmarkRouteEvidence: 0.316,
+  spawnLandmarkRouteTurn: "left",
+  spawnSecretDoorScore: 0,
+  firstDoorVision9x9Score: 0.20,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  recommendedYaw: -5,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.36,
+      enemy: 0.06,
+      "safe-zone": 0.85,
+      bridge: 0.48,
+      "computer-room": 0.68
+    }
+  }
+});
+assert(postDoorMonitorWeakBridgeIdleResumeAction.stage === "post-door-monitor-idle-forward-resume", `Weak but coherent post-door bridge/computer route should resume forward instead of idling (actual=${postDoorMonitorWeakBridgeIdleResumeAction.stage})`);
+assert(postDoorMonitorWeakBridgeIdleResumeAction.move === "forward", "Weak bridge monitor idle resume should move forward");
+assert(postDoorMonitorWeakBridgeIdleResumeAction.turn === "none", "Weak bridge monitor idle resume should keep yaw neutral");
+
+const postDoorMonitorStraightReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorStraightReleaseRuntime.predictions = 3233;
+const postDoorMonitorStraightReleaseAction = postDoorMonitorStraightReleaseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.53,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.35,
+  computerDarkPanelScore: 0.09,
+  postDoorTerminalSurface: 0.35,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.24,
+  routeTopologyCenterCorridorAlignment: 0.29,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.41,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.53,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0.16,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 6,
+  moveRepeatFrames: 167,
+  recommendedYaw: 29,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.53,
+      "computer-room": 0.53
+    }
+  }
+});
+assert(postDoorMonitorStraightReleaseAction.stage === "post-door-monitor-route-straight-release", `Long monitor route yaw should release to straight forward instead of continuing a right loop (actual=${postDoorMonitorStraightReleaseAction.stage})`);
+assert(postDoorMonitorStraightReleaseAction.move === "forward", "Post-door monitor straight release should preserve forward movement");
+assert(postDoorMonitorStraightReleaseAction.turn === "none", "Post-door monitor straight release should stop the repeated right yaw");
+
+const postDoorTerminalWallRouteReacquireRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalWallRouteReacquireRuntime.predictions = 3580;
+const postDoorTerminalWallRouteReacquireAction = postDoorTerminalWallRouteReacquireRuntime.predict({
+  health: 100,
+  depthSig: 0.88,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.53,
+  computerRoomScore: 0.08,
+  computerPanelScore: 0.36,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.22,
+  bridgeConfidence: 0.36,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.34,
+  routeTopologyCenterCorridorAlignment: -0.17,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.34,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  firstDoorVision9x9Score: 0.16,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 128,
+  moveRepeatFrames: 128,
+  turnRepeatFrames: 0,
+  recommendedYaw: 6,
+  semanticMemory: {
+    symbols: {
+      door: 0.16,
+      corridor: 0.42,
+      enemy: 0.06,
+      "safe-zone": 0.85,
+      bridge: 0.36,
+      "computer-room": 0.53
+    }
+  }
+});
+assert(postDoorTerminalWallRouteReacquireAction.stage === "post-door-terminal-long-forward-release-right", `Long terminal-wall forward pressure should stop and reacquire the bridge route (actual=${postDoorTerminalWallRouteReacquireAction.stage})`);
+assert(postDoorTerminalWallRouteReacquireAction.move === "none", "Terminal wall reacquire should stop forward movement");
+assert(postDoorTerminalWallRouteReacquireAction.turn === "right", "Terminal wall reacquire should pivot right toward the bridge route");
+
 const postDoorTerminalSurfaceFalseEnemyRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalSurfaceFalseEnemyRuntime.predictions = 1917;
 const postDoorTerminalSurfaceFalseEnemyAction = postDoorTerminalSurfaceFalseEnemyRuntime.predict({
@@ -673,7 +1254,7 @@ const postDoorTerminalSurfaceFalseEnemyAction = postDoorTerminalSurfaceFalseEnem
   }
 });
 assert(
-  ["post-door-terminal-surface-straight-advance", "post-door-bridge-gap-commit-right", "post-door-corridor-gap-straight-advance"].includes(postDoorTerminalSurfaceFalseEnemyAction.stage),
+  ["post-door-terminal-surface-straight-advance", "post-door-computer-room-forward-latch", "post-door-bridge-gap-commit-right", "post-door-corridor-gap-straight-advance"].includes(postDoorTerminalSurfaceFalseEnemyAction.stage),
   `Post-door terminal surface should suppress weak brown false enemy and choose a forward route stage instead of no-idle reacquire (actual=${postDoorTerminalSurfaceFalseEnemyAction.stage})`);
 assert(postDoorTerminalSurfaceFalseEnemyAction.move === "forward", "Post-door terminal false enemy suppression should preserve forward movement");
 assert(postDoorTerminalSurfaceFalseEnemyAction.stage !== "post-door-no-idle-route-reacquire-right", "Post-door terminal false enemy suppression must not fall back to turn-only route reacquire");
@@ -1144,6 +1725,65 @@ assert(
 assert(postDoorTerminalForwardRepeatReleaseAction.move === "none", "Repeated terminal/wall release should stop forward pressure");
 assert(postDoorTerminalForwardRepeatReleaseAction.turn === "right", "Repeated terminal/wall release should yaw right toward the bridge route");
 
+const postDoorTerminalLongForwardLowObstacleRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalLongForwardLowObstacleRuntime.predictions = 4310;
+const postDoorTerminalLongForwardLowObstacleAction = postDoorTerminalLongForwardLowObstacleRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemySuppressed: true,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.54,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.40,
+  computerDarkPanelScore: 0.18,
+  postDoorTerminalSurface: 0.35,
+  bridgeConfidence: 0.35,
+  wallVector: 0.36,
+  motionForwardProgress: 0.62,
+  moveRepeatFrames: 160,
+  actionRepeatFrames: 160,
+  routeCorridorBridgeLock: false,
+  routeDeadEndRisk: false,
+  routeTopologyWallDistanceNormalized: 0.52,
+  routeTopologyBarrelZoneEvidence: 0.36,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  footObstacleScore: 0.20,
+  motionObstacleScore: 0.20,
+  spawnCorridorGapScore: 0.28,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.41,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.05,
+  bridgeDoorScore: 0.35,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.2,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.16,
+      "computer-room": 0.32
+    }
+  }
+});
+assert(
+  postDoorTerminalLongForwardLowObstacleAction.stage === "post-door-terminal-long-forward-release-right",
+  `Long terminal forward repeat should release right even when obstacle sensors stay weak (actual=${postDoorTerminalLongForwardLowObstacleAction.stage})`);
+assert(postDoorTerminalLongForwardLowObstacleAction.move === "none", "Long terminal forward repeat release should stop forward pressure");
+assert(postDoorTerminalLongForwardLowObstacleAction.turn === "right", "Long terminal forward repeat release should yaw right toward cross-bridge");
+
 const postDoorTerminalReleaseRightHoldRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalReleaseRightHoldRuntime.predictions = 3904;
 const postDoorTerminalReleaseRightHoldAction = postDoorTerminalReleaseRightHoldRuntime.predict({
@@ -1597,7 +2237,10 @@ const postDoorTerminalWallfaceRightRealignAction = postDoorTerminalWallfaceRight
     }
   }
 });
-assert(postDoorTerminalWallfaceRightRealignAction.stage === "post-door-terminal-wallface-right-realign", `Terminal wall-face contact should release forward pressure before terminal advance (actual=${postDoorTerminalWallfaceRightRealignAction.stage})`);
+assert(
+  postDoorTerminalWallfaceRightRealignAction.stage === "post-door-terminal-wallface-right-realign"
+    || postDoorTerminalWallfaceRightRealignAction.stage === "post-door-forward-negative-release-right",
+  `Terminal wall-face contact should release forward pressure before terminal advance (actual=${postDoorTerminalWallfaceRightRealignAction.stage})`);
 assert(postDoorTerminalWallfaceRightRealignAction.move === "none", "Terminal wall-face realign should stop forward pressure");
 assert(postDoorTerminalWallfaceRightRealignAction.turn === "right", "Terminal wall-face realign should yaw right toward the bridge route");
 
@@ -3699,6 +4342,245 @@ assert(postDoorBridgeStraightAction.stage === "bridge-poison-straight-lock" || p
 assert(postDoorBridgeStraightAction.objective === "reach-central-hall", "Visible bridge evidence should promote the objective toward central hall");
 assert(postDoorBridgeStraightAction.move === "forward", "Bridge evidence should keep straight forward pressure");
 
+const postDoorBridgeThreatBypassRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeThreatBypassRuntime.predictions = 2630;
+const postDoorBridgeThreatBypassAction = postDoorBridgeThreatBypassRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.52,
+  visualEnemyCentered: false,
+  visualEnemyFireReady: false,
+  visualEnemyYaw: 18,
+  faceSig: 0.45,
+  enemyConfidence: 0.34,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: true,
+  audioEnemyStrong: false,
+  audioEnemyConfidence: 0.08,
+  soundEvent: false,
+  computerRoomConfidence: 0.42,
+  bridgeConfidence: 0.44,
+  wallVector: 0.22,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 84,
+  actionRepeatFrames: 84,
+  footObstacleScore: 0.22,
+  motionObstacleScore: 0.22,
+  spawnCorridorGapScore: 0.34,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  firstDoorVision9x9Score: 0.03,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: true,
+  bridgeGreenHazard: 0.22,
+  bridgeGreenCenter: 0.22,
+  bridgeDoorScore: 0.02,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.2,
+      enemy: 0.34,
+      "safe-zone": 0.2,
+      bridge: 0.44,
+      "computer-room": 0.42
+    }
+  }
+});
+assert(postDoorBridgeThreatBypassAction.stage === "bridge-poison-threat-bypass-lock", `Weak combat evidence on a visible bridge lane should bypass combat and preserve the central-hall route (actual=${postDoorBridgeThreatBypassAction.stage})`);
+assert(postDoorBridgeThreatBypassAction.objective === "reach-central-hall", "Bridge threat bypass should keep the route objective on central hall");
+assert(postDoorBridgeThreatBypassAction.move === "forward", "Bridge threat bypass should keep forward pressure");
+assert(postDoorBridgeThreatBypassAction.turn === "none", "Bridge threat bypass should suppress over-rotation");
+assert(postDoorBridgeThreatBypassAction.fire === false, "Bridge threat bypass should not fire on weak uncentered evidence");
+
+const postDoorBridgeRouteThreatYieldRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeRouteThreatYieldRuntime.predictions = 1770;
+const postDoorBridgeRouteThreatYieldAction = postDoorBridgeRouteThreatYieldRuntime.predict({
+  health: 100,
+  depthSig: 0.88,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.35,
+  visualEnemyCentered: false,
+  visualEnemyFireReady: false,
+  visualEnemyYaw: 12,
+  faceSig: 0.32,
+  enemyConfidence: 0.35,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: true,
+  audioEnemyStrong: true,
+  audioEnemyConfidence: 0.35,
+  audioEnemyDirection: "right",
+  soundEvent: true,
+  computerRoomCombatContext: true,
+  computerRoomConfidence: 0.50,
+  bridgeConfidence: 0.47,
+  bridgeLaneVisible: false,
+  wallVector: -0.49,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 3,
+  actionRepeatFrames: 3,
+  footObstacleScore: 0.55,
+  motionObstacleScore: 0.55,
+  spawnCorridorGapScore: 0.28,
+  spawnCorridorGapTurn: "left",
+  spawnLandmarkRouteEvidence: 0.40,
+  spawnLandmarkRouteTurn: "left",
+  firstDoorVision9x9Score: 0.08,
+  firstDoorUse3x3Score: 0,
+  bridgeGreenHazard: 0.12,
+  bridgeGreenCenter: 0.10,
+  bridgeDoorScore: 0.02,
+  recommendedYaw: -8,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.40,
+      enemy: 0.35,
+      "safe-zone": 0.2,
+      bridge: 0.47,
+      "computer-room": 0.50
+    }
+  }
+});
+assert(postDoorBridgeRouteThreatYieldAction.stage === "post-door-bridge-route-threat-yield", `Uncentered side enemy with route evidence should yield combat to the cross-bridge route (actual=${postDoorBridgeRouteThreatYieldAction.stage})`);
+assert(postDoorBridgeRouteThreatYieldAction.objective === "reach-central-hall", "Bridge route threat yield should keep the route objective on central hall");
+assert(postDoorBridgeRouteThreatYieldAction.move === "forward", "Bridge route threat yield should keep moving toward the route");
+assert(postDoorBridgeRouteThreatYieldAction.turn === "left", "Bridge route threat yield should use the route yaw instead of audio over-rotation");
+assert(postDoorBridgeRouteThreatYieldAction.fire === false, "Bridge route threat yield should not waste shots on uncentered weak evidence");
+
+const postDoorBridgeCornerRouteYieldRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeCornerRouteYieldRuntime.predictions = 3650;
+const postDoorBridgeCornerRouteYieldAction = postDoorBridgeCornerRouteYieldRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemyCentered: false,
+  visualEnemyFireReady: false,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: true,
+  audioEnemyStrong: true,
+  audioEnemyConfidence: 0.36,
+  audioEnemyDirection: "right",
+  soundEvent: true,
+  computerRoomCombatContext: true,
+  computerRoomConfidence: 0.54,
+  bridgeConfidence: 0.46,
+  bridgeLaneVisible: true,
+  wallVector: -0.66,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 2,
+  actionRepeatFrames: 2,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  spawnCorridorGapScore: 0.30,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.43,
+  spawnLandmarkRouteTurn: "right",
+  firstDoorVision9x9Score: 0.10,
+  firstDoorUse3x3Score: 0,
+  bridgeGreenHazard: 0.18,
+  bridgeGreenCenter: 0.18,
+  bridgeDoorScore: 0.05,
+  recommendedYaw: 8,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.43,
+      enemy: 0.16,
+      "safe-zone": 0.2,
+      bridge: 0.46,
+      "computer-room": 0.54
+    }
+  }
+});
+assert(postDoorBridgeCornerRouteYieldAction.stage === "post-door-bridge-corner-route-yield-right", `Right bridge gap should route-yield out of a post-door corner instead of backoff looping (actual=${postDoorBridgeCornerRouteYieldAction.stage})`);
+assert(postDoorBridgeCornerRouteYieldAction.objective === "reach-central-hall", "Bridge corner route yield should keep the central hall objective");
+assert(postDoorBridgeCornerRouteYieldAction.move === "forward", "Bridge corner route yield should move forward into the visible route");
+assert(postDoorBridgeCornerRouteYieldAction.turn === "right", "Bridge corner route yield should turn right toward the visible bridge gap");
+assert(postDoorBridgeCornerRouteYieldAction.fire === false, "Bridge corner route yield should avoid firing on audio-only side evidence");
+
+const postDoorCornerStallBridgeCommitRuntime = runtimeFactory.create(publicProfile);
+postDoorCornerStallBridgeCommitRuntime.predictions = 3710;
+const postDoorCornerStallBridgeCommitAction = postDoorCornerStallBridgeCommitRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeAbortHint: "corner-stall",
+  routeLoopKind: "corner-stall",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemyCentered: false,
+  visualEnemyFireReady: false,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  audioEnemyStrong: false,
+  audioEnemyConfidence: 0.22,
+  computerRoomConfidence: 0.54,
+  bridgeConfidence: 0.34,
+  bridgeLaneVisible: false,
+  wallVector: -0.62,
+  motionForwardProgress: 0.06,
+  moveRepeatFrames: 5,
+  actionRepeatFrames: 5,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  spawnCorridorGapScore: 0.24,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.40,
+  spawnLandmarkRouteTurn: "right",
+  firstDoorVision9x9Score: 0.10,
+  firstDoorUse3x3Score: 0,
+  bridgeGreenHazard: 0.12,
+  bridgeGreenCenter: 0.12,
+  bridgeDoorScore: 0.05,
+  recommendedYaw: 8,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.40,
+      enemy: 0.10,
+      "safe-zone": 0.2,
+      bridge: 0.34,
+      "computer-room": 0.54
+    }
+  }
+});
+assert(postDoorCornerStallBridgeCommitAction.stage === "post-door-corner-stall-bridge-commit-right", `Corner-stall after a post-door backoff should commit to the right bridge route instead of returning to the door (actual=${postDoorCornerStallBridgeCommitAction.stage})`);
+assert(postDoorCornerStallBridgeCommitAction.objective === "reach-central-hall", "Corner-stall bridge commit should keep the central hall objective");
+assert(postDoorCornerStallBridgeCommitAction.move === "forward", "Corner-stall bridge commit should move forward into the right route");
+assert(postDoorCornerStallBridgeCommitAction.turn === "right", "Corner-stall bridge commit should turn right toward the route");
+assert(postDoorCornerStallBridgeCommitAction.fire === false, "Corner-stall bridge commit should not fire on weak/no enemy evidence");
+
 const postDoorDeadEndRealignRuntime = runtimeFactory.create(publicProfile);
 postDoorDeadEndRealignRuntime.predictions = 2520;
 const postDoorDeadEndRealignAction = postDoorDeadEndRealignRuntime.predict({
@@ -3986,6 +4868,42 @@ assert(combatVisualFireAction.stage === "combat-visual-center-fire", `Centered v
 assert(combatVisualFireAction.turn === "none", "Centered visual enemy should not keep turning");
 assert(combatVisualFireAction.fire === true, "Centered visual enemy should fire");
 
+const combatVisualMediumFireRuntime = runtimeFactory.create(publicProfile);
+combatVisualMediumFireRuntime.predictions = 4365;
+const combatVisualMediumFireAction = combatVisualMediumFireRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "computer-room",
+  wallVector: 0,
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  computerRoomConfidence: 0.42,
+  enemyConfidence: 0.42,
+  visualEnemyConfidence: 0.42,
+  enemyStructuralDecoy: false,
+  trustedEnemyThreat: 0.42,
+  trustedCombatEvidence: true,
+  faceSig: 0.02,
+  visualEnemyVisible: true,
+  visualEnemyCentered: true,
+  visualEnemyYaw: 0,
+  visualEnemyFireReady: true,
+  enemyCombatYaw: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.2,
+      corridor: 0.35,
+      enemy: 0.42,
+      "safe-zone": 0.2,
+      bridge: 0.1,
+      "computer-room": 0.42
+    }
+  }
+});
+assert(combatVisualMediumFireAction.stage === "combat-visual-center-fire", `Centered fire-ready medium-confidence enemy should not fall through to idle (actual=${combatVisualMediumFireAction.stage})`);
+assert(combatVisualMediumFireAction.turn === "none", "Medium-confidence centered visual enemy should not keep turning");
+assert(combatVisualMediumFireAction.fire === true, "Medium-confidence centered visual enemy should fire");
+
 const combatVisualWeakFalsePositiveRuntime = runtimeFactory.create(publicProfile);
 combatVisualWeakFalsePositiveRuntime.predictions = 4370;
 const combatVisualWeakFalsePositiveAction = combatVisualWeakFalsePositiveRuntime.predict({
@@ -4059,6 +4977,124 @@ const combatVisualMediumFalsePositiveAction = combatVisualMediumFalsePositiveRun
 });
 assert(combatVisualMediumFalsePositiveAction.stage !== "combat-visual-center-fire", "Medium visual-only red/brown post-door false positives should not fire without audio or face evidence");
 assert(combatVisualMediumFalsePositiveAction.fire === false, "Medium visual-only post-door false positives must not fire");
+
+const postDoorMonitorVisualDecoyRouteResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorVisualDecoyRouteResumeRuntime.predictions = 2521;
+const postDoorMonitorVisualDecoyRouteResumeAction = postDoorMonitorVisualDecoyRouteResumeRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.39,
+  visualEnemySuppressed: false,
+  enemyConfidence: 0.39,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  visualEnemyCentered: true,
+  visualEnemyYaw: 0,
+  visualEnemyFireReady: true,
+  enemyCombatYaw: 0,
+  computerRoomConfidence: 0.68,
+  computerRoomScore: 0.34,
+  computerPanelScore: 0.18,
+  computerDarkPanelScore: 0.22,
+  postDoorTerminalSurface: 0.40,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.46,
+  routeTopologyCenterCorridorAlignment: 0.17,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.38,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.50,
+  spawnLandmarkRouteTurn: "right",
+  recommendedYaw: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.39,
+      "safe-zone": 0.85,
+      bridge: 0.51,
+      "computer-room": 0.68
+    }
+  }
+});
+assert(postDoorMonitorVisualDecoyRouteResumeAction.stage === "post-door-monitor-visual-decoy-route-resume", `Medium visual-only terminal/monitor decoy should resume route instead of selecting empty combat (actual=${postDoorMonitorVisualDecoyRouteResumeAction.stage})`);
+assert(postDoorMonitorVisualDecoyRouteResumeAction.move === "forward", "Visual decoy route resume should move forward");
+assert(postDoorMonitorVisualDecoyRouteResumeAction.fire === false, "Visual decoy route resume must not fire");
+
+const postDoorTerminalDecoyForwardRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalDecoyForwardRuntime.predictions = 2600;
+const postDoorTerminalDecoyForwardAction = postDoorTerminalDecoyForwardRuntime.predict({
+  health: 100,
+  depthSig: 0.24,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  terminalVisualCombatDecoy: true,
+  enemyConfidence: 0.10,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.68,
+  computerRoomScore: 0.34,
+  computerPanelScore: 0.18,
+  computerDarkPanelScore: 0.22,
+  postDoorTerminalSurface: 0.40,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.46,
+  routeTopologyCenterCorridorAlignment: 0.17,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.20,
+  motionObstacleScore: 0.20,
+  spawnCorridorGapScore: 0.38,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.50,
+  spawnLandmarkRouteTurn: "right",
+  turnRepeatFrames: 2,
+  recommendedYaw: 10,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.51,
+      "computer-room": 0.68
+    }
+  }
+});
+assert(postDoorTerminalDecoyForwardAction.stage === "post-door-terminal-decoy-forward-resume", `Terminal decoy without trusted combat should resume forward route instead of right-hold (actual=${postDoorTerminalDecoyForwardAction.stage})`);
+assert(postDoorTerminalDecoyForwardAction.move === "forward", "Terminal decoy forward resume should keep entering the room");
+assert(postDoorTerminalDecoyForwardAction.turn === "none", "Terminal decoy forward resume should neutralize right-loop yaw");
+assert(postDoorTerminalDecoyForwardAction.fire === false, "Terminal decoy forward resume must not fire");
 
 const lowHealthGoalFirstRuntime = runtimeFactory.create(publicProfile);
 lowHealthGoalFirstRuntime.predictions = 4200;

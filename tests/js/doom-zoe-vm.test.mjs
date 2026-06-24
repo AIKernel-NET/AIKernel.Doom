@@ -58,6 +58,22 @@ const clear = zoe.auditAction({
 assert(clear.vetoed === false, "Zoe should pass through healthy actions");
 assert(clear.action.move === generated.action.move, "Zoe should preserve healthy action movement");
 
+const bloodWarning = zoe.auditAction({
+  action: generated.action,
+  health: {
+    likelyDead: false,
+    retryRequested: false,
+    criticalBloodAlive: true,
+    bloodDangerScore: 0.66,
+    healthDangerReason: "face-heartbeat-blood",
+    zeroScore: 0.2,
+    activeCells: 28
+  }
+});
+assert(bloodWarning.vetoed === false, "Zoe should not stop living blood-heartbeat danger");
+assert(bloodWarning.reason === "face-heartbeat-blood", "Zoe should expose living blood-heartbeat danger as a warning reason");
+assert(bloodWarning.health.criticalBloodAlive === true, "Zoe should carry critical blood evidence");
+
 const vetoed = zoe.auditAction({
   action: generated.action,
   health: { likelyDead: true, retryRequested: true, retryReason: "health-death", zeroScore: 0.9, activeCells: 0 }
@@ -69,6 +85,7 @@ assert(vetoed.reason === "health-death", "Zoe should preserve retry reason");
 
 console.log("DOOM_ZOE_VM_TEST_OK", {
   generated: generated.action.move,
+  bloodWarning: bloodWarning.reason,
   vetoed: vetoed.vetoed,
   reason: vetoed.reason
 });

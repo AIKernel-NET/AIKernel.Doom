@@ -362,6 +362,9 @@
   class AIKernelDoomWorkerProxy {
     constructor(options) {
       this.canvas = options.canvas;
+      this.moduleUrl = options.moduleUrl;
+      this.modelManifestUrl = options.modelManifestUrl;
+      this.autoplayProfileUrl = options.autoplayProfileUrl;
       this.onLog = options.log || function () {};
       this.onStatusChange = options.onStatusChange || function () {};
       this.statusCache = {
@@ -382,15 +385,38 @@
       this.requests = new Map();
       this.nextId = 1;
       this.gpuModeState = normalizeGpuModeState();
-      const cacheKey = (() => {
+      this.cacheKey = (() => {
         try {
           return new URL(globalThis.location.href).searchParams.get("doomdev") || "dev";
         } catch {
           return "dev";
         }
       })();
-      const scriptBase = resolveDoomScriptBase();
-      this.worker = new Worker(`${scriptBase}doom-worker.js?v=${encodeURIComponent(cacheKey)}`, { name: "AIKernel.Doom" });
+      this.scriptBase = resolveDoomScriptBase();
+      this.worker = null;
+      this.rebuildingCpuSurface = false;
+      this.cpuFallbackSurfaceRecovered = false;
+      this.cpuFallbackRecoveredReason = "";
+      this.cpuFallbackSuppressLoggedReason = "";
+      this.selfHealCount = 0;
+      this.lastSelfHeal = {
+        kind: "none",
+        reason: "",
+        recoveredAt: 0
+      };
+      this.startWorker(this.canvas, this.gpuModeState);
+      this.gpuModeListener = event => {
+        this.postGpuMode(event?.detail || window.AIKernelDoomGpuMode);
+      };
+      this.pageReleaseListener = () => this.disposeWorkerGpuResources("page-transition");
+      window.addEventListener("aikernel-doom-gpu-mode-changed", this.gpuModeListener);
+      window.addEventListener("pagehide", this.pageReleaseListener, { capture: true });
+      window.addEventListener("beforeunload", this.pageReleaseListener, { capture: true });
+    }
+
+    startWorker(canvas, gpuMode) {
+      this.gpuResourcesReleasePosted = false;
+      this.worker = new Worker(`${this.scriptBase}doom-worker.js?v=${encodeURIComponent(this.cacheKey)}`, { name: "AIKernel.Doom" });
       this.ready = new Promise((resolve, reject) => {
         this.resolveReady = resolve;
         this.rejectReady = reject;
@@ -407,27 +433,25 @@
         this.rejectAll(message);
         this.onStatusChange(this.statusCache, "worker-error");
       };
-      this.gpuModeListener = event => {
-        this.postGpuMode(event?.detail || window.AIKernelDoomGpuMode);
-      };
-      this.pageReleaseListener = () => this.disposeWorkerGpuResources("page-transition");
-      window.addEventListener("aikernel-doom-gpu-mode-changed", this.gpuModeListener);
-      window.addEventListener("pagehide", this.pageReleaseListener, { capture: true });
-      window.addEventListener("beforeunload", this.pageReleaseListener, { capture: true });
 
-      const offscreen = this.canvas.transferControlToOffscreen();
+      const offscreen = canvas.transferControlToOffscreen();
       this.worker.postMessage({
         type: "init",
         canvas: offscreen,
-        moduleUrl: options.moduleUrl,
-        modelManifestUrl: options.modelManifestUrl,
-        autoplayProfileUrl: options.autoplayProfileUrl,
-        gpuMode: this.gpuModeState
+        moduleUrl: this.moduleUrl,
+        modelManifestUrl: this.modelManifestUrl,
+        autoplayProfileUrl: this.autoplayProfileUrl,
+        gpuMode
       }, [offscreen]);
     }
 
     postGpuMode(mode) {
       this.gpuModeState = normalizeGpuModeState(mode);
+      if (this.gpuModeState.useGpuRendering) {
+        this.cpuFallbackSurfaceRecovered = false;
+        this.cpuFallbackRecoveredReason = "";
+        this.cpuFallbackSuppressLoggedReason = "";
+      }
       if (this.worker) {
         this.worker.postMessage({
           type: "gpu-mode",
@@ -479,6 +503,9 @@
         this.rejectAll(error);
         this.onLog("[WORKER]", "log-fail", error);
         this.onStatusChange(this.statusCache, "worker-fatal");
+        if (/gpu|webgpu|context|surface/i.test(error)) {
+          this.rebuildCpuWorkerAfterGpuFallback("worker-fatal-gpu-surface", this.statusCache);
+        }
         return;
       }
 
@@ -490,6 +517,9 @@
       if (message.type === "status") {
         this.statusCache = this.normalizeStatus(message.status || {});
         this.onStatusChange(this.statusCache, message.reason);
+        if (this.shouldRebuildCpuWorkerAfterGpuFallback(this.statusCache, message.reason)) {
+          this.rebuildCpuWorkerAfterGpuFallback(message.reason || "gpu-fallback-status", this.statusCache);
+        }
         return;
       }
 
@@ -524,16 +554,194 @@
         } else {
           this.statusCache = this.normalizeStatus(message.result || {});
           request.resolve(this.statusCache);
+          if (this.shouldRebuildCpuWorkerAfterGpuFallback(this.statusCache, "response")) {
+            this.rebuildCpuWorkerAfterGpuFallback("gpu-fallback-response", this.statusCache);
+          }
         }
+      }
+    }
+
+    shouldRebuildCpuWorkerAfterGpuFallback(status, reason = "") {
+      if (this.rebuildingCpuSurface) {
+        return false;
+      }
+
+      const reasonText = String(reason || "");
+      const fallbackReason = String(
+        status?.gpuHud?.providerFallbackReason
+        || status?.gpuHud?.fallbackReason
+        || status?.lastError
+        || ""
+      );
+      const state = String(status?.state || "");
+      const renderer = String(status?.renderer || "");
+      const usingCpuFallback = Boolean(
+        status?.usingCpuFallback
+        || status?.gpuHud?.providerUsingCpuFallback
+        || status?.gpuHud?.providerBackend === "cpu-fallback"
+        || /canvas-fallback|cpu/i.test(renderer)
+      );
+      const gpuFallbackReason = /gpu-lost|gpu-fallback|webgpu|context lost|surface/i.test(`${reasonText} ${fallbackReason}`);
+      const fatalAfterRecovery = /failed|fatal/i.test(state) || /worker-fatal|init-error|rebuild-failed/i.test(reasonText);
+      const recoveredCpuFallback = this.cpuFallbackSurfaceRecovered
+        && usingCpuFallback
+        && gpuFallbackReason
+        && !fatalAfterRecovery;
+      if (recoveredCpuFallback) {
+        const suppressReason = fallbackReason || reasonText || "cpu-fallback";
+        if (this.cpuFallbackSuppressLoggedReason !== suppressReason) {
+          this.cpuFallbackSuppressLoggedReason = suppressReason;
+          this.onLog("[ SELF-HEAL ]", "log-info", `CPU fallback surface is stable; duplicate GPU fallback WDT suppressed (${suppressReason}).`);
+        }
+        return false;
+      }
+
+      const stoppedDuringFallback = /gpu-fallback/.test(reasonText) && status?.state !== "running";
+      const failedAfterFallback = status?.state === "failed" && (status?.usingCpuFallback || gpuFallbackReason);
+      const providerGpuLost = !this.cpuFallbackSurfaceRecovered && Boolean(status?.gpuHud?.providerGpuPermanentlyDisabled) && gpuFallbackReason;
+      return Boolean(stoppedDuringFallback || failedAfterFallback || providerGpuLost);
+    }
+
+    setCpuFallbackMode(reason) {
+      const mode = {
+        useGpuRendering: false,
+        gpuPermanentlyDisabled: true,
+        reason: String(reason || "gpu-fallback-worker-rebuild"),
+        updatedAt: Date.now()
+      };
+      window.AIKernelDoomGpuMode = mode;
+      window.useGpuRendering = false;
+      window.gpuPermanentlyDisabled = true;
+      this.gpuModeState = normalizeGpuModeState(mode);
+      try {
+        if (typeof window.AIKernelDoomSetGpuRenderingMode === "function") {
+          window.AIKernelDoomSetGpuRenderingMode(false, mode.reason);
+        }
+      } catch {
+      }
+      return this.gpuModeState;
+    }
+
+    replaceCanvasForCpuFallback(reason) {
+      const previous = this.canvas || document.getElementById("doom-screen");
+      if (!previous?.parentNode) {
+        throw new Error("DOOM canvas is unavailable for CPU fallback rebuild.");
+      }
+
+      const replacement = document.createElement("canvas");
+      Array.from(previous.attributes || []).forEach(attribute => {
+        replacement.setAttribute(attribute.name, attribute.value);
+      });
+      replacement.id = previous.id || "doom-screen";
+      replacement.className = previous.className || "";
+      replacement.width = previous.width || 320;
+      replacement.height = previous.height || 200;
+      replacement.hidden = false;
+      replacement.tabIndex = previous.tabIndex >= 0 ? previous.tabIndex : 0;
+      previous.replaceWith(replacement);
+      this.canvas = replacement;
+      window.dispatchEvent(new CustomEvent("aikernel-doom-canvas-replaced", {
+        detail: { canvas: replacement, reason }
+      }));
+      return replacement;
+    }
+
+    async rebuildCpuWorkerAfterGpuFallback(reason = "gpu-fallback", status = this.statusCache) {
+      if (this.rebuildingCpuSurface) {
+        return;
+      }
+
+      this.rebuildingCpuSurface = true;
+      this.cpuFallbackSurfaceRecovered = false;
+      this.cpuFallbackRecoveredReason = "";
+      this.cpuFallbackSuppressLoggedReason = "";
+      const startAfterRebuild = Boolean(status?.wasmLoaded || status?.wadLoaded || status?.modelLoaded || status?.state === "running" || status?.state === "failed");
+      const resumeAutoplay = Boolean(status?.autoplay?.enabled);
+      const rebuildReason = `gpu-surface-rebuild:${reason}`;
+      this.onLog("[ SELF-HEAL ]", "log-warn", `GPU/browser display surface fault contained; rebuilding Doom worker in CPU mode (${reason}).`);
+      this.onLog("[ WDT ]", "log-warn", `CPU fallback display-surface reboot started (${rebuildReason}).`);
+      this.setCpuFallbackMode(rebuildReason);
+
+      try {
+        this.rejectAll("GPU fallback worker rebuild");
+        try {
+          this.worker?.terminate?.();
+        } catch {
+        }
+
+        const replacement = this.replaceCanvasForCpuFallback(rebuildReason);
+        this.statusCache = Object.assign({}, this.statusCache, {
+          state: "recovering",
+          loopActive: false,
+          renderer: "canvas-fallback(cpu-rebuild) worker",
+          usingCpuFallback: true,
+          lastError: ""
+        });
+        this.onStatusChange(this.statusCache, "gpu-fallback-worker-rebuild");
+        this.startWorker(replacement, this.gpuModeState);
+        await this.ready;
+        this.onLog("[ WDT ]", "log-info", "CPU fallback worker ready; restarting DOOM after display-surface rebuild.");
+
+        if (startAfterRebuild) {
+          const running = await this.start();
+          this.onStatusChange(running, "gpu-fallback-worker-started");
+        }
+
+        if (resumeAutoplay) {
+          const autoplay = await this.setAutoplay(true);
+          this.onStatusChange(autoplay, "gpu-fallback-autoplay-restored");
+          this.onLog("[AUTOPLAY]", "log-info", "autoplay restored after GPU display-surface rebuild.");
+        }
+
+        this.cpuFallbackSurfaceRecovered = true;
+        this.cpuFallbackRecoveredReason = rebuildReason;
+        this.selfHealCount += 1;
+        this.lastSelfHeal = {
+          kind: "gpu-display-surface",
+          reason: rebuildReason,
+          recoveredAt: Date.now()
+        };
+        this.statusCache = Object.assign({}, this.statusCache, {
+          selfHeal: Object.assign({}, this.statusCache.selfHeal || {}, {
+            count: this.selfHealCount,
+            kind: this.lastSelfHeal.kind,
+            reason: this.lastSelfHeal.reason,
+            recoveredAt: this.lastSelfHeal.recoveredAt,
+            cpuFallbackSurfaceRecovered: this.cpuFallbackSurfaceRecovered,
+            cpuFallbackRecoveredReason: this.cpuFallbackRecoveredReason
+          })
+        });
+        this.onLog("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU path disabled, CPU renderer rebuilt, control loop resumed; recoveries=${this.selfHealCount}.`);
+        this.onStatusChange(this.statusCache, "gpu-fallback-worker-self-healed");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.statusCache = Object.assign({}, this.statusCache, {
+          state: "failed",
+          loopActive: false,
+          lastError: message
+        });
+        this.onLog("[ FAIL ]", "log-fail", `CPU fallback worker rebuild failed: ${message}`);
+        this.onStatusChange(this.statusCache, "gpu-fallback-worker-rebuild-failed");
+      } finally {
+        this.rebuildingCpuSurface = false;
       }
     }
 
     normalizeStatus(status) {
       const renderer = status.renderer || this.statusCache.renderer || "canvas";
       const workerRenderer = renderer.includes("worker") ? renderer : `${renderer} worker`;
+      const workerSelfHeal = status.selfHeal || {};
       return Object.assign({}, this.statusCache, status, {
         renderer: workerRenderer,
-        executionThread: "worker"
+        executionThread: "worker",
+        selfHeal: {
+          count: Math.max(Number(workerSelfHeal.count || 0), this.selfHealCount),
+          kind: workerSelfHeal.kind || this.lastSelfHeal.kind || "none",
+          reason: workerSelfHeal.reason || this.lastSelfHeal.reason || "",
+          recoveredAt: Number(workerSelfHeal.recoveredAt || this.lastSelfHeal.recoveredAt || 0),
+          cpuFallbackSurfaceRecovered: this.cpuFallbackSurfaceRecovered,
+          cpuFallbackRecoveredReason: this.cpuFallbackRecoveredReason
+        }
       });
     }
 

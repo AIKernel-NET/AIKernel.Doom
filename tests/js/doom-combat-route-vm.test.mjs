@@ -77,6 +77,68 @@ const structuralDecoySweep = combatRoute.planCentralHallEnemySweep({
 assert(structuralDecoySweep.probeFire === false, "Structural decoys should suppress probe fire");
 assert(structuralDecoySweep.action.fire === false, "Structural decoys must not fire even with high raw visual confidence");
 
+const yawCenteredHold = combatRoute.planCentralHallEnemySweep({
+  targetTurn: "right",
+  sweepFrames: 18,
+  sweepTurn: "right",
+  depth: 0.82,
+  motionStallScore: 0.1,
+  inputStallFrames: 0,
+  targetConfidence: 0.24,
+  enemyConfidence: 0.24,
+  enemyCenterCellConfidence: 0.04,
+  enemyCombatYaw: 4,
+  frameIndex: 13,
+  fireCooldown: 0,
+  left: 42,
+  right: 96,
+  ammoLikelyEmpty: false
+});
+
+assert(yawCenteredHold.action.turn === "none", "Enemy yaw inside the deadband should suppress stale turn hints");
+assert(yawCenteredHold.action.move === "none", "Centered aim hold should not drift forward while acquiring the shot");
+assert(yawCenteredHold.mobilityMode === "central-hall-enemy-aim-hold", "Yaw-centered hold should expose a stable aim mode");
+
+const fineAimHold = combatRoute.planCentralHallEnemySweep({
+  targetTurn: "right",
+  sweepFrames: 18,
+  sweepTurn: "right",
+  depth: 0.82,
+  motionStallScore: 0.1,
+  inputStallFrames: 0,
+  targetConfidence: 0.22,
+  enemyConfidence: 0.22,
+  enemyCenterCellConfidence: 0.04,
+  enemyCombatYaw: 12,
+  frameIndex: 13,
+  fireCooldown: 0,
+  left: 42,
+  right: 96,
+  ammoLikelyEmpty: false
+});
+
+assert(fineAimHold.action.turn === "none", "Near-center aim should pulse rather than turn every frame");
+
+const fineAimPulse = combatRoute.planCentralHallEnemySweep({
+  targetTurn: "right",
+  sweepFrames: 18,
+  sweepTurn: "right",
+  depth: 0.82,
+  motionStallScore: 0.1,
+  inputStallFrames: 0,
+  targetConfidence: 0.22,
+  enemyConfidence: 0.22,
+  enemyCenterCellConfidence: 0.04,
+  enemyCombatYaw: 12,
+  frameIndex: 15,
+  fireCooldown: 0,
+  left: 42,
+  right: 96,
+  ammoLikelyEmpty: false
+});
+
+assert(fineAimPulse.action.turn === "right", "Near-center aim should still emit periodic corrective turn pulses");
+
 const route = combatRoute.inferPostEnemyObjective({
   centralHallEntered: true,
   enemyDefeatedCount: 1,

@@ -1440,7 +1440,19 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return configured.endsWith("/") ? configured : `${configured}/`;
       }
 
-      return "/js/aikernel/";
+      try {
+        const locationHref = root.location?.href || "";
+        const currentScript = typeof document !== "undefined" ? document.currentScript?.src : "";
+        const baseUrl = new URL(currentScript || locationHref);
+        const basePath = baseUrl.pathname.slice(0, baseUrl.pathname.lastIndexOf("/") + 1);
+        if (basePath) {
+          return `${basePath}aikernel/`;
+        }
+      } catch {
+        // Keep the provider directory-relative when the host does not expose a URL.
+      }
+
+      return "aikernel/";
     }
 
     async loadCanonicalShaderSources() {

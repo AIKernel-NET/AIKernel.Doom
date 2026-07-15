@@ -1410,6 +1410,20 @@
   #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
     min-height: 36px;
   }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-sensor-node.is-krisis .doom-sensor-stages {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-kairos-radar {
+    grid-template-columns: 74px minmax(0, 1fr);
+    min-height: 64px;
+  }
+
+  #doom-demo .console-body.is-doom-running #doom-debug-bar .doom-kairos-radar svg {
+    width: 74px;
+    height: 64px;
+  }
 }
 
 @media (min-width: 2400px) and (min-height: 1180px) {

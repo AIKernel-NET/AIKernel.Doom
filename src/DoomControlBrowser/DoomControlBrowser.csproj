@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <WasmMainJSPath>main.js</WasmMainJSPath>
+    <AssemblyName>AIKernel.Doom.ControlBrowser</AssemblyName>
+    <RootNamespace>AIKernel.Doom.ControlBrowser</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DoomProvider\Autoplay\FirstDoorControlStateMachine.cs"
+             Link="Shared\FirstDoorControlStateMachine.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\FirstDoorBrowserControlSession.cs"
+             Link="Shared\FirstDoorBrowserControlSession.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\FirstDoorNativeProximityObserver.cs"
+             Link="Shared\FirstDoorNativeProximityObserver.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\FirstDoorOpeningNavigator.cs"
+             Link="Shared\FirstDoorOpeningNavigator.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\FirstDoorRawPaletteObserver.cs"
+             Link="Shared\FirstDoorRawPaletteObserver.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\PostComputerRoomBrowserControlSession.cs"
+             Link="Shared\PostComputerRoomBrowserControlSession.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\PostComputerRoomRouteNavigator.cs"
+             Link="Shared\PostComputerRoomRouteNavigator.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\AutoplayActionContracts.cs"
+             Link="Shared\AutoplayActionContracts.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\AutoplaySensorFusion.cs"
+             Link="Shared\AutoplaySensorFusion.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\AutoplaySensorTensor.cs"
+             Link="Shared\AutoplaySensorTensor.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\AutoplaySensorTensorIcd.cs"
+             Link="Shared\AutoplaySensorTensorIcd.cs" />
+  </ItemGroup>
+
+</Project>

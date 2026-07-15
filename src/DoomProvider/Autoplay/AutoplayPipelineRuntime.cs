@@ -11,14 +11,20 @@ namespace AIKernel.Doom.Provider.Autoplay;
 public sealed class CompiledAutoplayPipeline
 {
     private readonly IReadOnlyList<CompiledAutoplayPipelineStage> _stages;
+    private readonly IReadOnlyList<CompiledAutoplayPhasePipelineSet> _phasePipelines;
     private readonly IReadOnlyList<string> _semanticSymbols;
     private readonly IReadOnlyList<ZoeVetoRule> _zoeVetoRules;
     private readonly DynamicPipelineEvaluator _evaluator;
     private readonly AutoplayOptimizationProfile _profile;
+    private string _activeSequencePhaseId = "none";
+    private string _activeActionSequenceId = "none";
+    private int _activeActionSequenceFrame;
+    private int _predictionFrames;
 
     internal CompiledAutoplayPipeline(
         string strategyName,
         IReadOnlyList<CompiledAutoplayPipelineStage> stages,
+        IReadOnlyList<CompiledAutoplayPhasePipelineSet> phasePipelines,
         IReadOnlyList<string> semanticSymbols,
         DynamicPipelineGraph graph,
         IReadOnlyList<ZoeVetoRule> zoeVetoRules,
@@ -26,6 +32,7 @@ public sealed class CompiledAutoplayPipeline
     {
         StrategyName = strategyName;
         _stages = stages;
+        _phasePipelines = phasePipelines;
         _semanticSymbols = semanticSymbols;
         Graph = graph;
         _zoeVetoRules = zoeVetoRules;
@@ -98,13 +105,18 @@ public sealed class CompiledAutoplayPipeline
     /// </returns>
     public AutoplayPipelineDecision EvaluateTick(SensorFusion sensor, int recoveryFrames)
     {
-        var context = new AutoplayPipelineContext(sensor, recoveryFrames, _profile);
-        var evaluations = new List<AutoplayPipelineStageEvaluation>(_stages.Count);
+        var context = new AutoplayPipelineContext(sensor, recoveryFrames, _profile, ++_predictionFrames);
+        var semanticScores = context.SemanticScores(_semanticSymbols);
+        var routePlan = CreateRoutePlan(context);
+        context.AttachRoutePlan(routePlan);
+        var phasePipeline = SelectPhasePipeline(context);
+        var activeStages = FilterStagesForPhase(phasePipeline);
+        var evaluations = new List<AutoplayPipelineStageEvaluation>(activeStages.Count);
         CompiledAutoplayPipelineStage? selectedStage = null;
         AutoplayPipelineStageEvaluation? selectedEvaluation = null;
         ActionCommand? selectedAction = null;
 
-        foreach (var stage in _stages)
+        foreach (var stage in activeStages)
         {
             var evaluation = stage.Evaluate(context);
             if (selectedStage is null && evaluation.ConditionMatched && evaluation.EvidenceMatched)
@@ -121,8 +133,12 @@ public sealed class CompiledAutoplayPipeline
 
         var proposedAction = selectedAction ?? new ActionCommand(false, false, false, false, 0, false, false);
         var selected = selectedEvaluation ?? new AutoplayPipelineStageEvaluation("none", "idle", 0, 0, 0, false, false, true);
-        var semanticScores = context.SemanticScores(_semanticSymbols);
-        var routePlan = CreateRoutePlan(context);
+        var sequenceProjection = ResolveActionSequence(phasePipeline, selected.StageId, context);
+        if (sequenceProjection.Action is not null)
+        {
+            proposedAction = sequenceProjection.Action;
+        }
+
         var dynamicContext = CreateDynamicContext(context, recoveryFrames, semanticScores, routePlan);
         var evaluated = _evaluator.Evaluate(dynamicContext, proposedAction, _zoeVetoRules);
         var pipelineState = PipelineStateDto.From(
@@ -154,8 +170,103 @@ public sealed class CompiledAutoplayPipeline
             PipelineState = pipelineState,
             GoalState = autoplayState.GoalState,
             DebugOverlay = autoplayState.DebugOverlay,
-            AutoplayState = autoplayState
+            AutoplayState = autoplayState,
+            PhasePipelineId = phasePipeline.Id,
+            PhasePipelineExclusive = phasePipeline.Exclusive,
+            ActiveStageCount = activeStages.Count,
+            ActionSequenceId = sequenceProjection.SequenceId,
+            ActionSequenceStepId = sequenceProjection.StepId,
+            ActionSequenceFrame = sequenceProjection.Frame
         };
+    }
+
+    private ActionSequenceProjection ResolveActionSequence(
+        CompiledAutoplayPhasePipelineSet phasePipeline,
+        string selectedStageId,
+        AutoplayPipelineContext context)
+    {
+        if (!string.Equals(_activeSequencePhaseId, phasePipeline.Id, StringComparison.Ordinal))
+        {
+            ResetActionSequence();
+        }
+
+        var active = phasePipeline.ActionSequences.FirstOrDefault(sequence =>
+            string.Equals(sequence.Id, _activeActionSequenceId, StringComparison.Ordinal));
+        if (active is not null && _activeActionSequenceFrame >= active.BudgetFrames)
+        {
+            ResetActionSequence();
+            active = null;
+        }
+
+        active ??= phasePipeline.FindTriggeredSequence(selectedStageId);
+        if (active is null || active.Steps.Count == 0)
+        {
+            ResetActionSequence();
+            return ActionSequenceProjection.None;
+        }
+
+        if (!string.Equals(_activeActionSequenceId, active.Id, StringComparison.Ordinal))
+        {
+            _activeSequencePhaseId = phasePipeline.Id;
+            _activeActionSequenceId = active.Id;
+            _activeActionSequenceFrame = 0;
+        }
+
+        var nextFrame = Math.Max(1, _activeActionSequenceFrame + 1);
+        if (nextFrame > active.BudgetFrames)
+        {
+            ResetActionSequence();
+            return ActionSequenceProjection.None;
+        }
+
+        var step = active.StepForFrame(nextFrame);
+        if (step is null)
+        {
+            ResetActionSequence();
+            return ActionSequenceProjection.None;
+        }
+
+        _activeActionSequenceFrame = nextFrame;
+        return new ActionSequenceProjection(
+            active.Id,
+            step.Id,
+            nextFrame,
+            step.Action(context),
+            active.Exclusive);
+    }
+
+    private void ResetActionSequence()
+    {
+        _activeSequencePhaseId = "none";
+        _activeActionSequenceId = "none";
+        _activeActionSequenceFrame = 0;
+    }
+
+    private CompiledAutoplayPhasePipelineSet SelectPhasePipeline(AutoplayPipelineContext context)
+        => _phasePipelines.FirstOrDefault(phase => phase.Matches(context))
+            ?? new CompiledAutoplayPhasePipelineSet(
+                "fallback-all",
+                0,
+                false,
+                new HashSet<string>(StringComparer.Ordinal),
+                [],
+                [],
+                _ => true);
+
+    private IReadOnlyList<CompiledAutoplayPipelineStage> FilterStagesForPhase(CompiledAutoplayPhasePipelineSet phasePipeline)
+        => phasePipeline.AllowedStageIds.Count == 0 && phasePipeline.AllowedStagePrefixes.Count == 0
+            ? _stages
+            : _stages.Where(phasePipeline.Allows).ToArray();
+
+    private sealed record ActionSequenceProjection(
+        string SequenceId,
+        string StepId,
+        int Frame,
+        ActionCommand? Action,
+        bool Exclusive)
+    {
+        public static ActionSequenceProjection None { get; } =
+            new("none", "none", 0, null, false);
     }
 
     private DynamicPipelineContext CreateDynamicContext(
@@ -238,7 +349,8 @@ public sealed class CompiledAutoplayPipeline
             CorridorVector = Signed(context.QDelta / 55f),
             WallFlowVector = context.WallVector,
             UseProbeScore = useProbeScore,
-            UseProbeAlignment = Clamp01(1 - (Math.Abs(context.QDelta) / Math.Max(1f, _profile.DoorSoftAimToleranceDegrees)))
+            UseProbeAlignment = Clamp01(1 - (Math.Abs(context.QDelta) / Math.Max(1f, _profile.DoorSoftAimToleranceDegrees))),
+            Predictions = context.Predictions
         });
         var routeMode = ResolveRouteMode(context, routePlan);
         var postDoorBridgeLockSignal = string.Equals(routeMode, "post-door", StringComparison.OrdinalIgnoreCase)
@@ -258,16 +370,22 @@ public sealed class CompiledAutoplayPipeline
             FootObstacleScore = footObstacleScore,
             SpawnCorridorGapScore = spawnCorridorGapScore,
             SpawnLandmarkRouteEvidence = spawnLandmarkRouteEvidence,
+            Predictions = context.Predictions,
             FirstDoorVisionScore = firstDoorVisionScore,
             UseProbeScore = useProbeScore,
             RouteDeadEndRisk = routePlan.RouteDeadEndRisk,
             EastWindowRouteEvidenceReady = routePlan.EastWindowRouteEvidenceReady
         });
 
+        var phaseCurrentRoute = ResolvePhaseCurrentRoute(context, routeMode, routePlan.CurrentRoute);
+        var phaseRouteHint = ResolvePhaseRouteHint(context, routeMode, phaseCurrentRoute, routePlan);
+
         return routePlan with
         {
             RouteMode = routeMode,
-            CurrentRoute = ResolvePhaseCurrentRoute(context, routeMode, routePlan.CurrentRoute),
+            CurrentRoute = phaseCurrentRoute,
+            CurrentLandmark = phaseRouteHint.CurrentLandmark,
+            RouteActionHint = phaseRouteHint.RouteActionHint,
             RouteCorridorBridgeEvidence = Math.Max(
                 routePlan.RouteCorridorBridgeEvidence,
                 postDoorBridgeLockSignal ? Math.Max(bridgeDoorScore, spawnCorridorGapScore) : routePlan.RouteCorridorBridgeEvidence),
@@ -309,16 +427,27 @@ public sealed class CompiledAutoplayPipeline
 
     private static string ResolveRouteMode(AutoplayPipelineContext context, DoomRoutePlannerResult routePlan)
     {
-        if (context.DoorOpenedCount > 0
-            || context.Context is "computer-room" or "bridge" or "central-hall" or "final-room")
+        if (context.DoorOpenedCount > 0)
         {
             return "post-door";
+        }
+
+        if (!IsFirstDoorPhaseReady(context, routePlan))
+        {
+            return "spawn-approach";
         }
 
         return routePlan.FirstDoorRouteEvidenceReady || routePlan.UseProbeConfidence >= 0.22f
             ? "door-approach"
             : "spawn-approach";
     }
+
+    private static bool IsFirstDoorPhaseReady(AutoplayPipelineContext context, DoomRoutePlannerResult routePlan)
+        => routePlan.UseProbeConfidence >= 0.22f
+            || (routePlan.FirstDoorRouteEvidenceReady && routePlan.RouteConfidence >= 0.58f)
+            || (string.Equals(context.Context, "corridor", StringComparison.OrdinalIgnoreCase)
+                && routePlan.FirstDoorRouteEvidenceReady
+                && routePlan.RouteConfidence >= 0.44f);
 
     private static string ResolvePhaseCurrentRoute(
         AutoplayPipelineContext context,
@@ -348,6 +477,45 @@ public sealed class CompiledAutoplayPipeline
         }
 
         return "post-door-corridor-route";
+    }
+
+    private static (string CurrentLandmark, string RouteActionHint) ResolvePhaseRouteHint(
+        AutoplayPipelineContext context,
+        string routeMode,
+        string currentRoute,
+        DoomRoutePlannerResult routePlan)
+    {
+        if (!string.Equals(routeMode, "post-door", StringComparison.OrdinalIgnoreCase))
+        {
+            return (
+                string.IsNullOrWhiteSpace(routePlan.CurrentLandmark) ? "none" : routePlan.CurrentLandmark,
+                string.IsNullOrWhiteSpace(routePlan.RouteActionHint) ? "cruise" : routePlan.RouteActionHint);
+        }
+
+        if (string.Equals(currentRoute, "central-hall-route", StringComparison.OrdinalIgnoreCase)
+            || context.CentralHallEntered
+            || context.CentralHallConfidence >= 0.18f
+            || context.BridgeDoorScore >= 0.24f)
+        {
+            return ("central-hall-door", "advance-central-hall");
+        }
+
+        if (string.Equals(currentRoute, "cross-bridge-route", StringComparison.OrdinalIgnoreCase)
+            || context.BridgeLaneVisible
+            || context.BridgeConfidence >= 0.18f)
+        {
+            return ("cross-bridge-lane", "advance-cross-bridge");
+        }
+
+        if (string.Equals(currentRoute, "computer-room-route", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(context.Context, "computer-room", StringComparison.OrdinalIgnoreCase)
+            || context.ComputerRoomConfidence >= 0.18f
+            || context.PostDoorTerminalSurface >= 0.24f)
+        {
+            return ("computer-room-egress", "advance-computer-room");
+        }
+
+        return ("post-door-corridor", "post-door-cruise");
     }
 
     private static float Tensor(AutoplaySensorTensor tensor, string channel)

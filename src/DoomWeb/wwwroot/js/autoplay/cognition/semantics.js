@@ -125,9 +125,31 @@
     };
   }
 
+  function coerceSymbol(name, source) {
+    if (source && typeof source === "object") {
+      return createSymbol(name, source);
+    }
+
+    return createSymbol(name, { confidence: source });
+  }
+
+  function normalizeSymbolTable(symbols = {}) {
+    return {
+      door: coerceSymbol("door", symbols.door),
+      corridor: coerceSymbol("corridor", symbols.corridor),
+      enemy: coerceSymbol("enemy", symbols.enemy),
+      safeZone: coerceSymbol("safe-zone", symbols.safeZone ?? symbols["safe-zone"]),
+      bridge: coerceSymbol("bridge", symbols.bridge),
+      computerRoom: coerceSymbol("computer-room", symbols.computerRoom ?? symbols["computer-room"]),
+      centralHall: coerceSymbol("central-hall", symbols.centralHall ?? symbols["central-hall"]),
+      finalRoom: coerceSymbol("final-room", symbols.finalRoom ?? symbols["final-room"]),
+      exitSwitch: coerceSymbol("exit-switch", symbols.exitSwitch ?? symbols["exit-switch"])
+    };
+  }
+
   function ensureSemanticMemory(memory) {
     const next = memory || createE1M1SemanticMemory();
-    next.symbols ||= createSymbolTable();
+    next.symbols = normalizeSymbolTable(next.symbols || {});
     next.spawn ||= {};
     next.firstDoor ||= {};
     next.enemy ||= {};

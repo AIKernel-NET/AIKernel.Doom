@@ -47,6 +47,8 @@
     "combatBurstShots": 2,
     "centralHallOpeningBurstFrames": 72,
     "centralHallOpeningBurstShots": 5,
+    "centralHallCombatFireBudget": 14,
+    "centralHallCombatStaleConfidence": 0.54,
     "darkZoneScoreThreshold": 0.3,
     "darkZoneLumaThreshold": 78,
     "darkZoneConfirmFrames": 5,
@@ -55,6 +57,7 @@
     "combatCloseDepth": 1,
     "combatYawDegrees": 12,
     "lowHealthThreshold": 50,
+    "healthFixedFaceDeathFrames": 72,
     "survivalBloodDangerThreshold": 0.52,
     "criticalHealthThreshold": 18,
     "emergencyEscapeYawDegrees": 34,
@@ -73,10 +76,12 @@
     "firstDoorSearchIntervalFrames": 320,
     "firstDoorSpawnRouteFrames": 720,
     "firstDoorSpawnScanFrames": 36,
-    "firstDoorOpeningLockFrames": 820,
-    "firstDoorOpeningForwardLockFrames": 210,
+    "firstDoorOpeningLockFrames": 760,
+    "firstDoorOpeningForwardLockFrames": 340,
+    "firstDoorOpeningPillarStraightFrames": 560,
+    "firstDoorOpeningRightBiasFrames": 1280,
     "firstDoorRightWallRunFrames": 230,
-    "firstDoorCorridorTransitFrames": 360,
+    "firstDoorCorridorTransitFrames": 340,
     "firstDoorCorridorTurnDepth": 0.24,
     "firstDoorCorridorTurnStuckFrames": 14,
     "firstDoorCorridorSkirtFrames": 18,
@@ -243,6 +248,224 @@
       "mode": "deterministic-weighted-priority",
       "defaultThreshold": 0
     },
+    "phasePipelines": [
+      {
+        "id": "retry-settle",
+        "when": "recoveryFrames > 0",
+        "priority": 100,
+        "exclusive": true,
+        "allowedStageIds": [
+          "recovery-escape",
+          "stuck-escape",
+          "low-health-escape",
+          "low-health-goal-first"
+        ],
+        "allowedStagePrefixes": [
+          "recovery-",
+          "stuck-",
+          "low-health-"
+        ]
+      },
+      {
+        "id": "first-door-approach",
+        "when": "doorOpenedCount == 0 && routeMode == door-approach && firstDoorPhaseReady == true",
+        "priority": 80,
+        "exclusive": true,
+        "allowedStageIds": [
+          "recovery-escape",
+          "stuck-escape",
+          "first-door-route-vision-approach",
+          "first-door-route-vision-hold",
+          "first-door-pattern-contact-use",
+          "first-door-gap-wall-probe-use",
+          "spawn-landmark-loop-ingress-trim",
+          "door-corner-probe",
+          "door-wall-probe",
+          "door-corridor-probe"
+        ],
+        "allowedStagePrefixes": [
+          "first-door-",
+          "door-approach-",
+          "door-corner-",
+          "door-wall-",
+          "door-corridor-",
+          "route-dead-end-",
+          "route-escape-",
+          "route-ingress-",
+          "route-planner-",
+          "closed-door-first-door-",
+          "closed-door-",
+          "spawn-barrel-",
+          "spawn-corner-",
+          "spawn-gap-",
+          "spawn-landmark-",
+          "stuck-",
+          "recovery-"
+        ],
+        "actionSequences": [
+          {
+            "id": "first-door-corner-use",
+            "exclusive": true,
+            "maxFrames": 180,
+            "triggerStagePrefixes": [
+              "closed-door-first-door-corner-sequence",
+              "closed-door-first-door-corner-",
+              "door-approach-wall-corner-backoff-before-use",
+              "door-approach-right-corner-backoff",
+              "door-approach-ingress-corner-backoff",
+              "first-door-pattern-contact-use",
+              "door-approach-weak-vision-contact-probe",
+              "door-corner-probe",
+              "door-wall-probe",
+              "door-corridor-probe"
+            ],
+            "startStepRules": [
+              {
+                "stepId": "contact-forward",
+                "when": "routeMode == door-approach && currentRoute == first-door-route && doorOpenedCount <= 0 && predictions < 720 && firstDoorVision9x9Score >= 0.38 && firstDoorUse3x3Score <= 0.04 && firstDoorVision9x9RedScore < 0.08 && bridgeDoorScore >= 0.24 && footObstacleScore >= 0.50 && motionObstacleScore >= 0.50 && computerRoomConfidence < 0.25 && postDoorTerminalSurface < 0.25 && usePulseCooldown <= 0"
+              }
+            ],
+            "steps": [
+              {
+                "id": "backoff",
+                "frames": 1,
+                "action": {
+                  "moveBackward": "true",
+                  "moveForward": "false",
+                  "turnYaw": "0",
+                  "useKey": "false"
+                }
+              },
+              {
+                "id": "align-turn",
+                "frames": 4,
+                "action": {
+                  "moveBackward": "false",
+                  "moveForward": "false",
+                  "turnYaw": "4",
+                  "useKey": "false"
+                }
+              },
+              {
+                "id": "contact-forward",
+                "frames": 36,
+                "action": {
+                  "moveForward": "true",
+                  "moveBackward": "false",
+                  "turnYaw": "0",
+                  "useKey": "false"
+                }
+              },
+              {
+                "id": "pre-use-stop",
+                "frames": 8,
+                "action": {
+                  "moveForward": "false",
+                  "moveBackward": "false",
+                  "turnYaw": "0",
+                  "useKey": "false"
+                }
+              },
+              {
+                "id": "stop-use",
+                "frames": 8,
+                "action": {
+                  "moveForward": "false",
+                  "moveBackward": "false",
+                  "turnYaw": "0",
+                  "useKey": "true"
+                }
+              },
+              {
+                "id": "post-use-settle",
+                "frames": 18,
+                "action": {
+                  "moveForward": "false",
+                  "moveBackward": "false",
+                  "turnYaw": "0",
+                  "useKey": "false"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "opening-home",
+        "when": "doorOpenedCount == 0 && routeMode == spawn-approach",
+        "priority": 60,
+        "exclusive": true,
+        "allowedStageIds": [
+          "recovery-escape",
+          "stuck-escape",
+          "wall-follow-fallback",
+          "open-space-cruise",
+          "demo-spawn-sense-settle-left",
+          "demo-spawn-sense-settle-right",
+          "demo-spawn-initial-foot-clear",
+          "route-planner-structural-advance"
+        ],
+        "allowedStagePrefixes": [
+          "demo-spawn-",
+          "spawn-",
+          "route-planner-",
+          "route-dead-end-",
+          "stuck-",
+          "recovery-"
+        ]
+      },
+      {
+        "id": "post-door-route",
+        "when": "doorOpenedCount > 0 && centralHallEntered == false",
+        "priority": 50,
+        "exclusive": true,
+        "allowedStageIds": [
+          "low-health-escape",
+          "low-health-goal-first",
+          "recovery-escape",
+          "stuck-escape",
+          "combat-visual",
+          "combat-auditory",
+          "combat-visual-center-fire",
+          "computer-room-audio-enemy-orient",
+          "bridge-poison-straight-lock",
+          "bridge-poison-threat-bypass-lock",
+          "bridge-route-cruise",
+          "computer-room-route-cruise"
+        ],
+        "allowedStagePrefixes": [
+          "post-door-",
+          "computer-room-",
+          "bridge-",
+          "central-hall-",
+          "combat-",
+          "low-health-",
+          "recovery-",
+          "stuck-"
+        ]
+      },
+      {
+        "id": "central-hall-route",
+        "when": "centralHallEntered",
+        "priority": 40,
+        "exclusive": true,
+        "allowedStagePrefixes": [
+          "central-hall-",
+          "final-room-",
+          "exit-switch-",
+          "combat-",
+          "low-health-",
+          "recovery-",
+          "stuck-"
+        ]
+      },
+      {
+        "id": "fallback-all",
+        "when": "true",
+        "priority": 0,
+        "exclusive": false
+      }
+    ],
     "stages": [
       {
         "id": "low-health-escape",
@@ -253,7 +476,7 @@
           "safe-zone": 0.45,
           "enemy": 0.2
         },
-        "when": "criticalHealth",
+        "when": "criticalHealth && doorOpenedCount > 0",
         "action": {
           "moveForward": "depthSig > 0.42",
           "moveBackward": "depthSig <= $blockedDepth",
@@ -291,7 +514,7 @@
           "central-hall": 0.34,
           "safe-zone": 0.20
         },
-        "when": "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeGreenHazard >= 0.18 && depthSig > $blockedDepth && motionForwardProgress >= 0.08 && footObstacleScore < 0.55 && motionObstacleScore < 0.55 && moveRepeatFrames < 72",
+        "when": "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeGreenHazard >= 0.18 && depthSig > $blockedDepth && motionForwardProgress >= 0.08 && footObstacleScore < 0.55 && motionObstacleScore < 0.55 && moveRepeatFrames < 72 && trustedCombatEvidence == false && visualEnemyVisible == false",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -313,7 +536,7 @@
           "enemy": 0.16,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeConfidence >= 0.20 && depthSig > $blockedDepth && visualEnemyVisible && visualEnemyFireReady == false && visualEnemyCentered == false && visualEnemyConfidence < 0.78",
+        "when": "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeConfidence >= 0.20 && depthSig > $blockedDepth && visualEnemyVisible && trustedCombatEvidence == false && enemyStructuralDecoy",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -337,7 +560,7 @@
           "enemy": 0.18,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && routeDeadEndRisk == false && bridgeConfidence >= 0.42 && computerRoomConfidence >= 0.30 && depthSig > $blockedDepth && visualEnemyVisible && visualEnemyCentered == false && visualEnemyFireReady == false && visualEnemyConfidence < 0.62 && trustedCombatEvidence && audioEnemyStrong",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && routeDeadEndRisk == false && bridgeConfidence >= 0.42 && computerRoomConfidence >= 0.30 && depthSig > $blockedDepth && visualEnemyVisible && trustedCombatEvidence == false && enemyStructuralDecoy",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -384,7 +607,7 @@
           "central-hall": 0.32,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && currentRoute == cross-bridge-route && routeDeadEndRisk == false && routeAbortHint == corner-stall && bridgeConfidence >= 0.30 && bridgeDoorScore < 0.30 && spawnCorridorGapTurn == right && spawnCorridorGapScore >= 0.18 && depthSig > $blockedDepth && visualEnemyFireReady == false",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && currentRoute == cross-bridge-route && routeDeadEndRisk == false && routeAbortHint == corner-stall && bridgeLaneVisible && bridgeConfidence >= 0.30 && bridgeDoorScore < 0.30 && spawnCorridorGapTurn == right && spawnCorridorGapScore >= 0.18 && depthSig > $blockedDepth && visualEnemyFireReady == false",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -392,6 +615,50 @@
           "strafeRight": "false",
           "turnYaw": "8",
           "attackKey": "false",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-cross-bridge-route-lock",
+        "objective": "reach-central-hall",
+        "priority": 87.49,
+        "threshold": 0,
+        "evidence": {
+          "bridge": 0.72,
+          "central-hall": 0.36,
+          "computer-room": 0.24,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && terminalVisualCombatDecoy == false && visualEnemyVisible == false && routeDeadEndRisk == false && currentRoute == cross-bridge-route && bridgeConfidence >= 0.58 && computerRoomConfidence >= 0.55 && depthSig > 0.50 && footObstacleScore < 0.55 && motionObstacleScore < 0.55 && moveRepeatFrames < 120",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-cross-bridge-wall-left-release",
+        "objective": "reach-central-hall",
+        "priority": 87.485,
+        "threshold": 0,
+        "evidence": {
+          "bridge": 0.68,
+          "central-hall": 0.36,
+          "computer-room": 0.24,
+          "safe-zone": 0.20
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && terminalVisualCombatDecoy == false && trustedCombatEvidence == false && visualEnemyVisible == false && routeDeadEndRisk == false && currentRoute == cross-bridge-route && bridgeConfidence >= 0.58 && computerRoomConfidence >= 0.55 && context == wall && depthSig > 0.45 && motionForwardProgress < 0.18",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-6",
           "useKey": "false",
           "runKey": "true"
         }
@@ -435,14 +702,14 @@
       },
       {
         "id": "post-door-audio-combat-fallback",
-        "objective": "avoid-enemy",
+        "objective": "engage-front-enemy",
         "priority": 88.5,
         "threshold": 0,
         "evidence": {
           "enemy": 0.85,
           "safe-zone": 0.2
         },
-        "when": "doorOpenedCount <= 0 && postDoorAudioCue && soundEvent && health < 90",
+        "when": "doorOpenedCount > 0 && postDoorAudioCue && soundEvent && health < 90",
         "action": {
           "moveForward": "depthSig > 0.5",
           "strafeLeft": "$enableStrafeRun && combatYaw > 0",
@@ -460,7 +727,7 @@
           "computer-room": 0.75,
           "corridor": 0.25
         },
-        "when": "doorOpenedCount <= 0 && postDoorAudioCue",
+        "when": "doorOpenedCount > 0 && postDoorAudioCue",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -473,14 +740,14 @@
       },
       {
         "id": "combat-visual-center-fire",
-        "objective": "avoid-enemy",
+        "objective": "engage-front-enemy",
         "priority": 87.4,
         "threshold": 0,
         "evidence": {
           "enemy": 1,
           "safe-zone": 0.12
         },
-        "when": "doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && audioEnemyStrong || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyConfidence >= 0.52 && absFaceSig >= $combatFaceThreshold || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyConfidence >= 0.88 || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyFireReady && enemyConfidence >= 0.35",
+        "when": "doorOpenedCount > 0 && combatRouteEngageAllowed && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && audioEnemyStrong || doorOpenedCount > 0 && combatRouteEngageAllowed && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyConfidence >= 0.52 && absFaceSig >= $combatFaceThreshold || doorOpenedCount > 0 && combatRouteEngageAllowed && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyConfidence >= 0.88 || doorOpenedCount > 0 && combatRouteEngageAllowed && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyFireReady && enemyConfidence >= 0.42 && visualEnemyConfidence >= 0.42",
         "action": {
           "moveForward": "visualEnemyCentered && depthSig > 0.58",
           "moveBackward": "false",
@@ -508,6 +775,72 @@
           "strafeLeft": "false",
           "strafeRight": "false",
           "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-computer-room-ingress-right-lane-bias",
+        "objective": "enter-computer-control-room",
+        "priority": 86.872,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.58,
+          "bridge": 0.34,
+          "central-hall": 0.24,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && context == open-space && centralHallEntered == false && trustedCombatEvidence == false && visualEnemyVisible == false && routeDeadEndRisk == false && bridgeLaneVisible == false && predictions >= 900 && predictions < 2200 && depthSig >= 0.78 && computerRoomConfidence >= 0.20 && postDoorTerminalSurface >= 0.28 && spawnCorridorGapTurn == right && spawnCorridorGapScore >= 0.24 && spawnLandmarkRouteEvidence >= 0.38 && moveRepeatFrames >= 6 && moveRepeatFrames < 64 && motionForwardProgress >= 0.06 && motionForwardProgress < 0.45",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "3",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-computer-room-left-trim-repeat-lateral-release",
+        "objective": "reach-central-hall",
+        "priority": 86.874,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.58,
+          "bridge": 0.38,
+          "central-hall": 0.30,
+          "safe-zone": 0.20
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && trustedCombatEvidence == false && visualEnemyVisible == false && routeDeadEndRisk == false && bridgeLaneVisible == false && (computerRoomEntered || context == computer-room) && computerRoomConfidence >= 0.20 && wallVector >= 0.34 && depthSig > 0.50 && motionForwardProgress >= 0.08 && moveRepeatFrames >= 96 && actionRepeatFrames >= 96",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-8",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-computer-room-right-wall-parallel-left-trim",
+        "objective": "reach-central-hall",
+        "priority": 86.873,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.56,
+          "bridge": 0.36,
+          "central-hall": 0.28,
+          "safe-zone": 0.20
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && trustedCombatEvidence == false && visualEnemyVisible == false && routeDeadEndRisk == false && bridgeLaneVisible == false && (computerRoomEntered || computerRoomCombatContext || computerRoomConfidence >= 0.28) && computerRoomConfidence >= 0.20 && wallVector >= 0.34 && depthSig > 0.50 && motionForwardProgress >= 0.08 && moveRepeatFrames >= 8 && moveRepeatFrames < 96",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-4",
           "useKey": "false",
           "runKey": "true"
         }
@@ -556,7 +889,7 @@
       },
       {
         "id": "computer-room-audio-enemy-orient",
-        "objective": "avoid-enemy",
+        "objective": "engage-front-enemy",
         "priority": 86.8,
         "threshold": 0,
         "evidence": {
@@ -564,7 +897,7 @@
           "computer-room": 0.35,
           "safe-zone": 0.15
         },
-        "when": "doorOpenedCount > 0 && centralHallEntered == false && trustedCombatEvidence && audioEnemyStrong && computerRoomCombatContext && ammoLikelyEmpty == false && turnRepeatFrames < 10",
+        "when": "doorOpenedCount > 0 && centralHallEntered == false && trustedCombatEvidence && audioEnemyStrong && computerRoomCombatContext && terminalVisualCombatDecoy == false && visualEnemySuppressed == false && ammoLikelyEmpty == false && turnRepeatFrames < 10",
         "action": {
           "moveForward": "audioEnemyFront && depthSig > 0.55",
           "moveBackward": "false",
@@ -573,6 +906,28 @@
           "turnYaw": "enemyCombatYaw",
           "attackKey": "ammoLikelyEmpty == false && audioEnemyFront || ammoLikelyEmpty == false && visualEnemyFireReady || ammoLikelyEmpty == false && visualEnemyConfidence >= 0.35 || ammoLikelyEmpty == false && absFaceSig >= $combatFaceThreshold",
           "runKey": "false"
+        }
+      },
+      {
+        "id": "post-door-computer-room-right-wall-left-release",
+        "objective": "reach-central-hall",
+        "priority": 86.864,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.58,
+          "bridge": 0.36,
+          "central-hall": 0.28,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && bridgeLaneVisible == false && (computerRoomEntered || computerRoomCombatContext) && computerRoomConfidence >= 0.28 && wallVector >= 0.25 && motionForwardProgress < 0.16 && moveRepeatFrames >= 48 && moveRepeatFrames < 144 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.50",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-8",
+          "useKey": "false",
+          "runKey": "true"
         }
       },
       {
@@ -588,13 +943,13 @@
         },
         "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && bridgeLaneVisible == false && computerRoomConfidence >= 0.68 && bridgeConfidence >= 0.50 && postDoorTerminalSurface < 0.24 && depthSig > 0.82 && motionForwardProgress >= 0 && motionForwardProgress < 0.12 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && moveRepeatFrames >= 24 && routeTopologyBarrelZoneEvidence < 0.85",
         "action": {
-          "moveForward": "false",
+          "moveForward": "true",
           "moveBackward": "false",
-          "strafeLeft": "false",
+          "strafeLeft": "$enableStrafeRun",
           "strafeRight": "false",
-          "turnYaw": "12",
+          "turnYaw": "-5",
           "useKey": "false",
-          "runKey": "false"
+          "runKey": "true"
         }
       },
       {
@@ -672,13 +1027,13 @@
         },
         "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && moveRepeatFrames >= 60 && routeTopologyBarrelZoneEvidence >= 0.60 && routeTopologyCenterCorridorAlignment <= -0.04 && computerRoomConfidence >= 0.12 && depthSig > 0.50",
         "action": {
-          "moveForward": "false",
+          "moveForward": "true",
           "moveBackward": "false",
-          "strafeLeft": "false",
+          "strafeLeft": "$enableStrafeRun",
           "strafeRight": "false",
-          "turnYaw": "28",
+          "turnYaw": "-6",
           "useKey": "false",
-          "runKey": "false"
+          "runKey": "true"
         }
       },
       {
@@ -819,13 +1174,13 @@
         },
         "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeLaneVisible == false && bridgeDoorScore < 0.30 && moveRepeatFrames >= 120 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.80",
         "action": {
-          "moveForward": "false",
+          "moveForward": "true",
           "moveBackward": "false",
-          "strafeLeft": "false",
+          "strafeLeft": "$enableStrafeRun",
           "strafeRight": "false",
-          "turnYaw": "24",
+          "turnYaw": "-6",
           "useKey": "false",
-          "runKey": "false"
+          "runKey": "true"
         }
       },
       {
@@ -922,7 +1277,7 @@
           "central-hall": 0.44,
           "door": 0.44
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && usePulseCooldown <= 0 && visualEnemyConfidence < 0.45 && blueFloorScore < 0.12 && depthSig >= 0.42 && depthSig <= 0.72 && bridgeDoorScore >= 0.34 && postDoorTerminalSurface >= 0.45 && spawnCorridorGapScore >= 0.28 && spawnLandmarkRouteEvidence >= 0.38",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && usePulseCooldown <= 0 && visualEnemyConfidence < 0.45 && blueFloorScore < 0.12 && depthSig >= 0.42 && depthSig <= 0.72 && bridgeDoorScore >= 0.34 && postDoorTerminalSurface >= 0.45 && wallVector < 0.58 && spawnCorridorGapScore >= 0.28 && spawnLandmarkRouteEvidence >= 0.38",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -943,7 +1298,7 @@
           "central-hall": 0.45,
           "door": 0.46
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && usePulseCooldown <= 0 && visualEnemyConfidence < 0.45 && blueFloorScore < 0.12 && routePostDoorBridgeDoorMemory == true && routePostDoorBridgeDoorMemoryFrames >= 6 && depthSig >= 0.42 && depthSig <= 0.78 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore >= 0.06 && spawnCorridorGapScore >= 0.20 && spawnLandmarkRouteEvidence >= 0.30",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && usePulseCooldown <= 0 && visualEnemyConfidence < 0.45 && blueFloorScore < 0.12 && routePostDoorBridgeDoorMemory == true && routePostDoorBridgeDoorMemoryFrames >= 6 && depthSig >= 0.42 && depthSig <= 0.78 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore >= 0.06 && wallVector < 0.58 && spawnCorridorGapScore >= 0.20 && spawnLandmarkRouteEvidence >= 0.30",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -1237,7 +1592,7 @@
           "computer-room": 0.24,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && actionRepeatFrames < 32 && turnRepeatFrames < 18 && spawnCorridorGapScore >= 0.20 && bridgeDoorScore >= 0.10 && bridgeDoorScore < 0.20 && postDoorTerminalSurface >= 0.30 && computerRoomConfidence >= 0.10 && computerPanelScore < 0.50 && computerDarkPanelScore < 0.50 && depthSig > 0.50",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && actionRepeatFrames < 32 && turnRepeatFrames < 18 && spawnCorridorGapScore >= 0.20 && spawnSecretDoorScore < 0.55 && bridgeDoorScore >= 0.10 && bridgeDoorScore < 0.20 && postDoorTerminalSurface >= 0.30 && computerRoomConfidence >= 0.10 && computerPanelScore < 0.50 && computerDarkPanelScore < 0.50 && depthSig > 0.50",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1312,7 +1667,7 @@
         }
       },
       {
-        "id": "post-door-terminal-forward-repeat-release-right",
+        "id": "post-door-terminal-forward-repeat-release-left",
         "objective": "reach-central-hall",
         "priority": 86.386,
         "threshold": 0,
@@ -1323,13 +1678,13 @@
         },
         "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeCorridorBridgeLock == false && turnRepeatFrames < 14 && actionRepeatFrames >= 18 && postDoorTerminalSurface >= 0.30 && computerRoomConfidence >= 0.08 && bridgeDoorScore < 0.42 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.50 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeCorridorBridgeLock == false && turnRepeatFrames < 14 && moveRepeatFrames >= 72 && postDoorTerminalSurface >= 0.30 && computerRoomConfidence >= 0.08 && bridgeDoorScore < 0.42 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.50 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeCorridorBridgeLock == false && bridgeLaneVisible == false && turnRepeatFrames < 14 && moveRepeatFrames >= 96 && postDoorTerminalSurface >= 0.30 && computerRoomConfidence >= 0.08 && bridgeDoorScore < 0.42 && depthSig > 0.50",
         "action": {
-          "moveForward": "false",
+          "moveForward": "true",
           "moveBackward": "false",
-          "strafeLeft": "false",
+          "strafeLeft": "$enableStrafeRun",
           "strafeRight": "false",
-          "turnYaw": "10",
+          "turnYaw": "-8",
           "useKey": "false",
-          "runKey": "false"
+          "runKey": "true"
         }
       },
       {
@@ -1363,7 +1718,7 @@
           "computer-room": 0.28,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && actionRepeatFrames < 28 && turnRepeatFrames < 18 && spawnCorridorGapScore >= 0.32 && bridgeDoorScore >= 0.20 && bridgeDoorScore < 0.42 && postDoorTerminalSurface >= 0.30 && computerPanelScore < 0.50 && computerDarkPanelScore < 0.50 && depthSig > 0.50",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && actionRepeatFrames < 28 && turnRepeatFrames < 18 && spawnCorridorGapScore >= 0.32 && spawnSecretDoorScore < 0.55 && bridgeDoorScore >= 0.20 && bridgeDoorScore < 0.42 && postDoorTerminalSurface >= 0.30 && computerPanelScore < 0.50 && computerDarkPanelScore < 0.50 && depthSig > 0.50",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1405,7 +1760,7 @@
           "bridge": 0.34,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeLoopBudgetExceeded == false && turnRepeatFrames >= 1 && turnRepeatFrames < 8 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore < 0.42 && depthSig > 0.50",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeLoopBudgetExceeded == false && routePostDoorTerminalDeadEndScore >= 0.50 && motionForwardProgress < 0.18 && actionRepeatFrames >= 1 && actionRepeatFrames < 8 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore < 0.42 && depthSig > 0.50 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeLoopBudgetExceeded == false && motionForwardProgress < 0.18 && turnRepeatFrames >= 1 && turnRepeatFrames < 8 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore < 0.42 && depthSig > 0.50",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -1510,7 +1865,7 @@
           "bridge": 0.24,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && computerPanelScore >= 0.32 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && computerDarkPanelScore >= 0.16 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && computerRoomScore >= 0.08 && postDoorTerminalSurface >= 0.30 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && postDoorTerminalSurface >= 0.32 && computerRoomConfidence >= 0.10 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeDoorScore >= 0.30 && bridgeConfidence >= 0.20 && spawnCorridorGapScore >= 0.28 && depthSig > 0.50",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeConfidence < 0.58 && wallVector < 0.58 && computerPanelScore >= 0.32 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeConfidence < 0.58 && wallVector < 0.58 && computerDarkPanelScore >= 0.16 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeConfidence < 0.58 && wallVector < 0.58 && computerRoomScore >= 0.08 && postDoorTerminalSurface >= 0.30 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeConfidence < 0.58 && wallVector < 0.58 && postDoorTerminalSurface >= 0.32 && computerRoomConfidence >= 0.10 && depthSig > 0.50 && moveRepeatFrames < 96 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && bridgeConfidence < 0.58 && wallVector < 0.58 && bridgeDoorScore >= 0.30 && bridgeConfidence >= 0.20 && spawnCorridorGapScore >= 0.28 && depthSig > 0.50",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1607,9 +1962,75 @@
         }
       },
       {
+        "id": "post-door-terminal-decoy-bridge-left-release",
+        "objective": "reach-central-hall",
+        "priority": 86.39157,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.56,
+          "bridge": 0.48,
+          "central-hall": 0.30,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && terminalVisualCombatDecoy && routeDeadEndRisk == false && computerRoomConfidence >= 0.55 && bridgeConfidence >= 0.58 && postDoorTerminalSurface >= 0.20 && spawnSecretDoorScore >= 0.55 && spawnCorridorGapScore >= 0.25 && spawnLandmarkRouteEvidence >= 0.38 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.50",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-6",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-secret-anchor-bridge-left-sustain",
+        "objective": "reach-central-hall",
+        "priority": 86.391569,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.46,
+          "central-hall": 0.30,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.50 && bridgeConfidence >= 0.45 && spawnSecretDoorScore >= 0.55 && spawnCorridorGapScore >= 0.30 && spawnLandmarkRouteEvidence >= 0.42 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.50",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-6",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-terminal-decoy-wall-left-release",
+        "objective": "reach-central-hall",
+        "priority": 86.391568,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.56,
+          "bridge": 0.42,
+          "central-hall": 0.28,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && trustedEnemyThreat < 0.20 && enemyConfidencePeak < 0.78 && terminalVisualCombatDecoy && routeDeadEndRisk == false && currentRoute == cross-bridge-route && currentLandmark == cross-bridge-lane && computerRoomConfidence >= 0.55 && bridgeConfidence >= 0.48 && postDoorTerminalSurface >= 0.24 && spawnCorridorGapScore >= 0.30 && spawnLandmarkRouteEvidence >= 0.38 && routeTopologyWallDistanceNormalized <= 0.42 && routeTopologyBarrelZoneEvidence < 0.85 && moveRepeatFrames >= 24",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-7",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
         "id": "post-door-terminal-decoy-forward-resume",
         "objective": "reach-central-hall",
-        "priority": 86.391545,
+        "priority": 86.391565,
         "threshold": 0,
         "evidence": {
           "computer-room": 0.56,
@@ -1617,13 +2038,56 @@
           "central-hall": 0.24,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && terminalVisualCombatDecoy && routeDeadEndRisk == false && computerRoomConfidence >= 0.55 && bridgeConfidence >= 0.42 && postDoorTerminalSurface >= 0.24 && spawnCorridorGapScore >= 0.30 && spawnLandmarkRouteEvidence >= 0.38 && routeTopologyBarrelZoneEvidence < 0.85 && moveRepeatFrames < 96",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && terminalVisualCombatDecoy && routeDeadEndRisk == false && routePostDoorTerminalDeadEndScore < 0.50 && computerRoomConfidence >= 0.55 && bridgeConfidence >= 0.42 && postDoorTerminalSurface >= 0.24 && spawnCorridorGapScore >= 0.30 && spawnLandmarkRouteEvidence >= 0.38 && routeTopologyBarrelZoneEvidence < 0.85 && moveRepeatFrames < 96",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
           "strafeLeft": "false",
           "strafeRight": "false",
           "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-terminal-gap-left-sustain",
+        "objective": "reach-central-hall",
+        "priority": 86.391559,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.44,
+          "central-hall": 0.24,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && postDoorTerminalSurface >= 0.30 && spawnCorridorGapScore >= 0.24 && spawnLandmarkRouteEvidence >= 0.38 && motionForwardProgress >= -0.08 && motionForwardProgress < 0.12 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && depthSig > 0.35 && bridgeDoorScore < 0.42 && routeTopologyBarrelZoneEvidence < 0.88 && actionRepeatFrames < 6 && moveRepeatFrames < 24 && turnRepeatFrames < 12",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-6",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-computer-room-cross-bridge-left-bias-commit",
+        "objective": "reach-central-hall",
+        "priority": 86.39205,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.58,
+          "bridge": 0.42,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && trustedCombatEvidence == false && visualEnemyVisible == false && routeDeadEndRisk == false && (computerRoomEntered || context == computer-room || computerRoomConfidence >= 0.68) && bridgeLaneVisible != true && bridgeConfidence >= 0.22 && bridgeConfidence < 0.64 && bridgeDoorScore < 0.28 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && footObstacleScore < 0.55 && motionObstacleScore < 0.55 && moveRepeatFrames >= 16 && moveRepeatFrames < 96 && routeTopologyBarrelZoneEvidence < 0.88",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-5",
           "useKey": "false",
           "runKey": "true"
         }
@@ -1694,6 +2158,28 @@
         }
       },
       {
+        "id": "post-door-monitor-gap-stall-left-wall-commit",
+        "objective": "reach-central-hall",
+        "priority": 86.39157,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.44,
+          "central-hall": 0.28,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.55 && computerRoomConfidence < 0.66 && bridgeConfidence >= 0.45 && postDoorTerminalSurface >= 0.22 && postDoorTerminalSurface < 0.36 && depthSig > 0.50 && spawnCorridorGapScore >= 0.18 && spawnCorridorGapScore <= 0.27 && spawnLandmarkRouteEvidence >= 0.28 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && routeTopologyBarrelZoneEvidence < 0.70 && moveRepeatFrames < 96",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-4",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
         "id": "post-door-monitor-route-resume",
         "objective": "reach-central-hall",
         "priority": 86.39152,
@@ -1710,7 +2196,73 @@
           "moveBackward": "false",
           "strafeLeft": "false",
           "strafeRight": "false",
-          "turnYaw": "recommendedYaw",
+          "turnYaw": "-3",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-monitor-stale-left-trim-backoff-right",
+        "objective": "reach-central-hall",
+        "priority": 86.391565,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.42,
+          "central-hall": 0.28,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.45 && postDoorTerminalSurface >= 0.45 && depthSig > 0.50 && moveRepeatFrames >= 240 && spawnCorridorGapScore >= 0.12 && spawnCorridorGapScore < 0.20 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyWallDistanceNormalized > 0 && routeTopologyWallDistanceNormalized <= 0.58 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && routeTopologyBarrelZoneEvidence < 0.90",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "true",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "12",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "post-door-monitor-left-trim-straight-release",
+        "objective": "reach-central-hall",
+        "priority": 86.39156,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.42,
+          "central-hall": 0.26,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.45 && postDoorTerminalSurface >= 0.45 && depthSig > 0.50 && moveRepeatFrames >= 180 && spawnCorridorGapScore >= 0.12 && spawnCorridorGapScore < 0.20 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyWallDistanceNormalized > 0 && routeTopologyWallDistanceNormalized <= 0.58 && routeTopologyBarrelZoneEvidence < 0.90",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "post-door-monitor-wall-left-trim",
+        "objective": "reach-central-hall",
+        "priority": 86.391555,
+        "threshold": 0,
+        "evidence": {
+          "computer-room": 0.54,
+          "bridge": 0.40,
+          "central-hall": 0.28,
+          "safe-zone": 0.18
+        },
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && bridgeDoorScore > 0.02 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && moveRepeatFrames >= 64 && wallVector >= 0.48 && spawnCorridorGapScore >= 0.12 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && bridgeDoorScore > 0.02 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && moveRepeatFrames >= 64 && routeTopologyWallDistanceNormalized > 0 && routeTopologyWallDistanceNormalized <= 0.58 && spawnCorridorGapScore >= 0.12 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.45 && depthSig > 0.50 && moveRepeatFrames >= 64 && spawnCorridorGapScore >= 0.12 && spawnCorridorGapScore < 0.20 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && moveRepeatFrames >= 64 && footObstacleScore >= 0.55 && spawnCorridorGapScore >= 0.12 && spawnCorridorGapScore < 0.20 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && trustedCombatEvidence == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && moveRepeatFrames >= 64 && motionObstacleScore >= 0.55 && spawnCorridorGapScore >= 0.12 && spawnCorridorGapScore < 0.20 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-4",
           "useKey": "false",
           "runKey": "true"
         }
@@ -1718,7 +2270,7 @@
       {
         "id": "post-door-monitor-route-straight-release",
         "objective": "reach-central-hall",
-        "priority": 86.39153,
+        "priority": 86.39154,
         "threshold": 0,
         "evidence": {
           "computer-room": 0.54,
@@ -1726,7 +2278,7 @@
           "central-hall": 0.24,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && bridgeLaneVisible || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && moveRepeatFrames < 120 && bridgeLaneVisible == false || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.50 && spawnLandmarkRouteEvidence >= 0.50 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && bridgeLaneVisible == false",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && bridgeLaneVisible == true || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.30 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && bridgeLaneVisible == false && routeTopologyWallDistanceNormalized > 0.58 && routeTopologyCenterCorridorAlignment >= -0.05 && bridgeDoorScore < 0.30 && footObstacleScore < 0.60 && motionObstacleScore < 0.60 || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.50 && spawnLandmarkRouteEvidence >= 0.50 && postDoorTerminalSurface >= 0.22 && depthSig > 0.50 && moveRepeatFrames >= 64 && bridgeLaneVisible == false || doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && computerRoomConfidence >= 0.45 && bridgeConfidence >= 0.38 && postDoorTerminalSurface >= 0.18 && depthSig > 0.50 && moveRepeatFrames >= 112 && routeTopologyWallDistanceNormalized > 0.58 && spawnCorridorGapScore >= 0.12 && spawnLandmarkRouteEvidence >= 0.28 && routeTopologyBarrelZoneEvidence < 0.90",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1810,7 +2362,7 @@
           "computer-room": 0.20,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && actionRepeatFrames >= 24",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && wallVector < 0.58 && actionRepeatFrames >= 24",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1852,7 +2404,7 @@
           "central-hall": 0.24,
           "safe-zone": 0.18
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && actionRepeatFrames < 72 && moveRepeatFrames < 96 && computerRoomConfidence >= 0.20 && postDoorTerminalSurface >= 0.30 && depthSig > 0.50 && spawnCorridorGapScore >= 0.15",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && actionRepeatFrames < 72 && moveRepeatFrames < 96 && computerRoomConfidence >= 0.20 && postDoorTerminalSurface >= 0.30 && bridgeDoorScore < 0.30 && depthSig > 0.50 && spawnCorridorGapScore >= 0.15",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1873,7 +2425,7 @@
           "computer-room": 0.18,
           "safe-zone": 0.20
         },
-        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && depthSig > 0.45 && spawnCorridorGapScore >= 0.20 && spawnLandmarkRouteEvidence >= 0.37 && motionObstacleScore < 0.70",
+        "when": "doorOpenedCount > 0 && routeMode == post-door && centralHallEntered == false && visualEnemyVisible == false && routeDeadEndRisk == false && wallVector < 0.58 && depthSig > 0.45 && spawnCorridorGapScore >= 0.20 && spawnLandmarkRouteEvidence >= 0.37 && motionObstacleScore < 0.70",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -1970,7 +2522,7 @@
       },
       {
         "id": "combat-auditory",
-        "objective": "avoid-enemy",
+        "objective": "engage-front-enemy",
         "priority": 80,
         "threshold": 0.35,
         "evidence": {
@@ -1987,7 +2539,7 @@
       },
       {
         "id": "combat-visual",
-        "objective": "avoid-enemy",
+        "objective": "engage-front-enemy",
         "priority": 79,
         "threshold": 0.35,
         "evidence": {
@@ -1999,7 +2551,7 @@
           "strafeLeft": "false",
           "strafeRight": "false",
           "turnYaw": "visualEnemyYaw",
-          "attackKey": "ammoLikelyEmpty == false && visualEnemyFireReady || ammoLikelyEmpty == false && trustedCombatEvidence && depthSig < 0.82"
+          "attackKey": "ammoLikelyEmpty == false && visualEnemyFireReady"
         }
       },
       {
@@ -2058,6 +2610,27 @@
           "strafeLeft": "false",
           "strafeRight": "false",
           "turnYaw": "routeFallbackYaw",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-wall-corner-backoff-before-use",
+        "objective": "open-first-door",
+        "priority": 86.1195,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.50,
+          "corridor": 0.46,
+          "safe-zone": 0.24
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == wall && predictions >= 1200 && predictions < 9000 && depthSig > 0.14 && depthSig <= 0.46 && motionForwardProgress < 0.16 && spawnSecretDoorScore < 0.62 && bridgeDoorScore < 0.34 && spawnCorridorGapScore >= 0.40 && spawnLandmarkRouteEvidence > 0.50 && footObstacleScore >= 0.50 && motionObstacleScore >= 0.45 && routeTextureWallOcclusion == false && firstDoorUse3x3Score < 0.22 && moveRepeatFrames >= 8 && moveRepeatFrames < 48",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "true",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "doorIngressYaw",
           "useKey": "false",
           "runKey": "false"
         }
@@ -2131,7 +2704,7 @@
           "door": 0.64,
           "corridor": 0.40
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 850 && predictions < 1450 && routeDeadEndRisk && routeDeadEndTrimRequired && depthSig >= 0.90 && blueFloorScore < 0.08 && spawnSecretDoorScore < 0.42 && spawnCorridorGapTurn == right && spawnCorridorGapScore >= 0.24 && spawnCorridorGapScore < 0.32 && bridgeDoorScore >= 0.08 && bridgeDoorScore < 0.16 && firstDoorVision9x9Score >= 0.48 && firstDoorVision9x9RedScore >= 0.18 && firstDoorUse3x3Score < 0.22 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 850 && predictions < 1450 && routeDeadEndRisk && routeDeadEndTrimRequired && depthSig >= 0.90 && blueFloorScore < 0.08 && spawnSecretDoorScore < 0.42 && spawnCorridorGapTurn == right && spawnCorridorGapScore >= 0.24 && spawnCorridorGapScore < 0.32 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && firstDoorVision9x9Score >= 0.48 && firstDoorVision9x9RedScore >= 0.18 && firstDoorUse3x3Score < 0.22 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2280,6 +2853,46 @@
           "turnYaw": "0",
           "useKey": "true",
           "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-stale-red-panel-probe-use",
+        "objective": "open-first-door",
+        "priority": 86.182,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.68,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && usePulseCooldown <= 0 && predictions >= 1200 && predictions < 9000 && depthSig <= 0.54 && blueFloorScore < 0.20 && bridgeDoorScore >= 0.12 && bridgeDoorScore < 0.34 && spawnCorridorGapScore >= 0.28 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.38 && spawnSecretDoorScore < 0.62 && firstDoorVision9x9Score >= 0.42 && firstDoorVision9x9RedScore >= 0.14 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-stale-red-panel-centerline-advance",
+        "objective": "approach-first-door",
+        "priority": 86.181,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.58,
+          "corridor": 0.58
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && predictions >= 1200 && predictions < 9000 && depthSig > 0.54 && depthSig <= 0.82 && blueFloorScore < 0.20 && bridgeDoorScore >= 0.12 && bridgeDoorScore < 0.34 && spawnCorridorGapScore >= 0.28 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.38 && spawnSecretDoorScore < 0.62 && firstDoorVision9x9Score >= 0.42 && firstDoorVision9x9RedScore >= 0.14 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false && moveRepeatFrames >= 96",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "true"
         }
       },
       {
@@ -2451,7 +3064,7 @@
           "door": 0.58,
           "corridor": 0.38
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 72 && usePulseCooldown > 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.70 && bridgeDoorScore >= 0.25 && spawnCorridorGapScore >= 0.28 && spawnLandmarkRouteEvidence >= 0.40 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 30 && usePulseCooldown > 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.70 && bridgeDoorScore >= 0.25 && spawnCorridorGapScore >= 0.28 && spawnLandmarkRouteEvidence >= 0.40 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2459,6 +3072,106 @@
           "strafeRight": "false",
           "turnYaw": "0",
           "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-post-use-low-depth-retry-use",
+        "objective": "open-first-door",
+        "priority": 86.118638,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.58,
+          "corridor": 0.40
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && currentRoute == first-door-route && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 50 && usePulseAgeFrames <= 130 && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && depthSig > 0.04 && depthSig <= 0.44 && bridgeDoorScore >= 0.30 && bridgeDoorScore < 0.38 && spawnCorridorGapScore >= 0.34 && spawnCorridorGapScore < 0.44 && spawnLandmarkRouteEvidence >= 0.45 && firstDoorVision9x9Score >= 0.42 && firstDoorVision9x9Score < 0.62 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-post-use-low-depth-forward-nudge",
+        "objective": "open-first-door",
+        "priority": 86.118537,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.54,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && currentRoute == first-door-route && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 80 && predictions >= 900 && predictions < 9000 && depthSig > 0.04 && depthSig <= 0.44 && bridgeDoorScore >= 0.30 && bridgeDoorScore < 0.38 && spawnCorridorGapScore >= 0.34 && spawnCorridorGapScore < 0.44 && spawnLandmarkRouteEvidence >= 0.45 && firstDoorVision9x9Score >= 0.42 && firstDoorVision9x9Score < 0.62 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "$enableStrafeRun",
+          "turnYaw": "4",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-post-use-vision-right-realign",
+        "objective": "open-first-door",
+        "priority": 86.118535,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.54,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 54 && usePulseCooldown > 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.70 && bridgeDoorScore < 0.14 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.28 && firstDoorVision9x9Score >= 0.42 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "6",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-post-use-vision-backoff-recenter",
+        "objective": "open-first-door",
+        "priority": 86.118552,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.52,
+          "corridor": 0.44
+        },
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 42 && usePulseAgeFrames <= 90 && predictions >= 900 && predictions < 9000 && depthSig >= 0.70 && bridgeDoorScore < 0.14 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.28 && firstDoorVision9x9Score >= 0.42 && footObstacleScore >= 0.50 && motionObstacleScore >= 0.50 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "true",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "6",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-post-use-vision-memory-use",
+        "objective": "open-first-door",
+        "priority": 86.11864,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.58,
+          "corridor": 0.40
+        },
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 72 && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.50 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.36 && spawnLandmarkRouteEvidence >= 0.24 && firstDoorVision9x9Score >= 0.42 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
           "runKey": "false"
         }
       },
@@ -2471,7 +3184,7 @@
           "door": 0.50,
           "corridor": 0.42
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 36 && usePulseCooldown > 0 && actionRepeatFrames < 8 && predictions >= 900 && predictions < 9000 && depthSig >= 0.90 && spawnCorridorGapScore < 0.40 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 18 && usePulseAgeFrames <= 42 && usePulseCooldown > 0 && actionRepeatFrames < 8 && predictions >= 900 && predictions < 9000 && depthSig >= 0.82 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.28 && firstDoorUse3x3Score < 0.34 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2485,13 +3198,13 @@
       {
         "id": "door-approach-post-use-left-stall-backoff",
         "objective": "locate-first-door-corridor",
-        "priority": 86.118535,
+        "priority": 86.118545,
         "threshold": 0,
         "evidence": {
           "door": 0.45,
           "corridor": 0.50
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 42 && usePulseAgeFrames <= 54 && predictions >= 900 && predictions < 9000 && depthSig >= 0.85 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 42 && usePulseAgeFrames <= 84 && predictions >= 900 && predictions < 9000 && depthSig >= 0.70 && bridgeDoorScore >= 0.08 && spawnCorridorGapScore < 0.46 && spawnLandmarkRouteEvidence >= 0.24 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "true",
@@ -2511,7 +3224,7 @@
           "door": 0.50,
           "corridor": 0.42
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 36 && usePulseAgeFrames <= 72 && usePulseCooldown > 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.85 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 30 && usePulseAgeFrames <= 72 && usePulseCooldown > 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.85 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2525,13 +3238,13 @@
       {
         "id": "door-approach-post-use-stale-door-memory-use",
         "objective": "open-first-door",
-        "priority": 86.118615,
+        "priority": 86.118635,
         "threshold": 0,
         "evidence": {
           "door": 0.62,
           "corridor": 0.40
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 72 && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.64 && bridgeDoorScore >= 0.24 && spawnCorridorGapScore >= 0.24 && spawnLandmarkRouteEvidence >= 0.35 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 54 && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && depthSig >= 0.50 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore < 0.60 && spawnCorridorGapScore >= 0.16 && spawnLandmarkRouteEvidence >= 0.24 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2551,7 +3264,7 @@
           "door": 0.56,
           "corridor": 0.40
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 48 && usePulseCooldown <= 0 && predictions >= 2200 && predictions < 9000 && depthSig >= 0.85 && spawnSecretDoorScore >= 0.30 && spawnSecretDoorScore < 0.45 && courtyardScore >= 0.25 && spawnCorridorGapScore >= 0.20 && spawnCorridorGapScore < 0.28 && spawnLandmarkRouteEvidence >= 0.32 && spawnLandmarkRouteEvidence < 0.42 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 48 && usePulseCooldown <= 0 && predictions >= 2200 && predictions < 9000 && depthSig >= 0.85 && bridgeDoorScore >= 0.24 && spawnSecretDoorScore >= 0.30 && spawnSecretDoorScore < 0.45 && courtyardScore >= 0.25 && spawnCorridorGapScore >= 0.20 && spawnCorridorGapScore < 0.28 && spawnLandmarkRouteEvidence >= 0.32 && spawnLandmarkRouteEvidence < 0.42 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2571,7 +3284,7 @@
           "door": 0.60,
           "corridor": 0.40
         },
-        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 72 && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 9000 && depthSig >= 0.85 && bridgeDoorScore >= 0.25 && bridgeDoorScore < 0.55 && spawnCorridorGapScore >= 0.24 && spawnCorridorGapScore < 0.40 && spawnLandmarkRouteEvidence >= 0.35 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && previousRouteMode == door-approach && lastUsePulsePrediction >= 0 && usePulseAgeFrames > 72 && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 9000 && depthSig >= 0.50 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.55 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.46 && spawnLandmarkRouteEvidence >= 0.24 && footObstacleScore >= 0.50 && motionObstacleScore >= 0.50 && firstDoorUse3x3Score < 0.42 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2811,7 +3524,7 @@
           "safe-zone": 0.38,
           "corridor": 0.62
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 900 && predictions < 9000 && routeDeadEndTrimRequired && actionRepeatFrames >= 12 && spawnCorridorGapScore >= 0.20 && spawnSecretDoorScore < 0.80 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions >= 900 && predictions < 9000 && routeDeadEndTrimRequired && actionRepeatFrames >= 12 && spawnCorridorGapScore >= 0.20 && spawnSecretDoorScore < 0.80 && firstDoorVision9x9Score < 0.46 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2851,7 +3564,7 @@
           "door": 0.54,
           "corridor": 0.42
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 2400 && predictions < 9000 && routeDeadEndTrimRequired && depthSig >= 0.90 && bridgeDoorScore >= 0.05 && bridgeDoorScore < 0.14 && spawnSecretDoorScore < 0.12 && courtyardScore < 0.08 && spawnCorridorGapScore >= 0.30 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.44 && spawnLandmarkRouteEvidence < 0.58 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 2400 && predictions < 9000 && routeDeadEndTrimRequired && depthSig >= 0.90 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore < 0.12 && courtyardScore < 0.08 && spawnCorridorGapScore >= 0.30 && spawnCorridorGapScore < 0.42 && spawnLandmarkRouteEvidence >= 0.44 && spawnLandmarkRouteEvidence < 0.58 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -2871,7 +3584,7 @@
           "safe-zone": 0.38,
           "corridor": 0.62
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 520 && predictions < 9000 && routeDeadEndTrimRequired && spawnCorridorGapScore >= 0.25 && spawnSecretDoorScore < 0.80 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions >= 520 && predictions < 9000 && routeDeadEndTrimRequired && spawnCorridorGapScore >= 0.25 && spawnSecretDoorScore < 0.80 && firstDoorVision9x9Score < 0.46 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -2880,6 +3593,26 @@
           "turnYaw": "doorIngressYaw",
           "useKey": "false",
           "runKey": "true"
+        }
+      },
+      {
+        "id": "door-approach-firstdoor-vision-deadend-use",
+        "objective": "open-first-door",
+        "priority": 86.11867,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.58,
+          "corridor": 0.40
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && routeDeadEndTrimRequired && depthSig >= 0.85 && footObstacleScore >= 0.50 && motionObstacleScore >= 0.50 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && courtyardScore >= 0.22 && spawnCorridorGapScore >= 0.20 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.34 && firstDoorVision9x9Score >= 0.40 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
         }
       },
       {
@@ -3051,7 +3784,7 @@
           "door": 0.54,
           "corridor": 0.46
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1000 && predictions < 9000 && depthSig <= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.08 && bridgeDoorScore < 0.22 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1000 && predictions < 9000 && depthSig <= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3071,7 +3804,67 @@
           "door": 0.56,
           "corridor": 0.44
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1000 && predictions < 9000 && depthSig <= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.22 && bridgeDoorScore < 0.30 && spawnSecretDoorScore >= 0.04 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1000 && predictions < 9000 && depthSig <= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore >= 0.04 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapScore < 0.34 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-open-lane-bridge-memory-use",
+        "objective": "open-first-door",
+        "priority": 86.11745,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.55,
+          "corridor": 0.45
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 520 && predictions < 9000 && actionRepeatFrames >= 4 && depthSig >= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore < 0.06 && spawnCorridorGapScore >= 0.36 && spawnCorridorGapScore < 0.46 && spawnLandmarkRouteEvidence >= 0.48 && footObstacleScore < 0.45 && motionObstacleScore < 0.45 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-first-route-weak-memory-use",
+        "objective": "open-first-door",
+        "priority": 86.11746,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.54,
+          "corridor": 0.44
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && currentRoute == first-door-route && context == open-space && usePulseCooldown <= 0 && predictions >= 520 && predictions < 9000 && actionRepeatFrames >= 4 && depthSig >= 0.86 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.20 && bridgeDoorScore < 0.30 && spawnSecretDoorScore < 0.06 && spawnCorridorGapScore >= 0.32 && spawnCorridorGapScore < 0.38 && spawnLandmarkRouteEvidence >= 0.44 && spawnLandmarkRouteEvidence < 0.50 && footObstacleScore < 0.60 && motionObstacleScore < 0.60 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "door-approach-first-route-long-vision-use",
+        "objective": "open-first-door",
+        "priority": 86.11866,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.58,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && currentRoute == first-door-route && context == open-space && usePulseCooldown <= 0 && predictions >= 900 && predictions < 9000 && moveRepeatFrames >= 48 && depthSig >= 0.80 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.22 && bridgeDoorScore < 0.36 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.30 && spawnCorridorGapScore < 0.50 && spawnLandmarkRouteEvidence >= 0.40 && firstDoorVision9x9Score >= 0.42 && firstDoorVision9x9Score < 0.62 && firstDoorVision9x9RedScore < 0.24 && firstDoorUse3x3Score < 0.30 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3351,7 +4144,7 @@
           "door": 0.68,
           "corridor": 0.46
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1200 && predictions < 9000 && depthSig >= 0.90 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.34 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.18 && spawnCorridorGapScore < 0.46 && spawnLandmarkRouteEvidence >= 0.30 && footObstacleScore >= 0.45 && footObstacleScore < 0.75 && motionObstacleScore >= 0.45 && motionObstacleScore < 0.75 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1200 && predictions < 9000 && depthSig >= 0.90 && blueFloorScore < 0.08 && bridgeDoorScore >= 0.34 && firstDoorVision9x9Score < 0.46 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.18 && spawnCorridorGapScore < 0.46 && spawnLandmarkRouteEvidence >= 0.30 && footObstacleScore >= 0.45 && footObstacleScore < 0.75 && motionObstacleScore >= 0.45 && motionObstacleScore < 0.75 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3391,7 +4184,7 @@
           "door": 0.53,
           "corridor": 0.45
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 3600 && depthSig >= 0.90 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardScore < 0.30 && courtyardTurn == left && bridgeDoorScore < 0.32 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.18 && spawnCorridorGapScore < 0.30 && spawnLandmarkRouteEvidence >= 0.30 && spawnLandmarkRouteEvidence < 0.45 && footObstacleScore >= 0.50 && footObstacleScore < 0.70 && motionObstacleScore >= 0.50 && motionObstacleScore < 0.70 && firstDoorVision9x9Score < 0.42 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 3600 && depthSig >= 0.90 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardScore < 0.30 && courtyardTurn == left && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.32 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.18 && spawnCorridorGapScore < 0.30 && spawnLandmarkRouteEvidence >= 0.30 && spawnLandmarkRouteEvidence < 0.45 && footObstacleScore >= 0.50 && footObstacleScore < 0.70 && motionObstacleScore >= 0.50 && motionObstacleScore < 0.70 && firstDoorVision9x9Score < 0.42 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3431,7 +4224,7 @@
           "door": 0.53,
           "corridor": 0.45
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 3000 && predictions < 9000 && depthSig >= 0.90 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardScore < 0.25 && courtyardTurn == left && bridgeDoorScore < 0.08 && spawnSecretDoorScore < 0.12 && spawnCorridorGapScore >= 0.20 && spawnCorridorGapScore < 0.26 && spawnLandmarkRouteEvidence >= 0.33 && spawnLandmarkRouteEvidence < 0.42 && footObstacleScore >= 0.55 && footObstacleScore < 0.70 && motionObstacleScore >= 0.55 && motionObstacleScore < 0.70 && firstDoorVision9x9Score < 0.12 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 3000 && predictions < 9000 && depthSig >= 0.90 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardScore < 0.25 && courtyardTurn == left && bridgeDoorScore >= 0.24 && bridgeDoorScore < 0.34 && spawnSecretDoorScore < 0.12 && spawnCorridorGapScore >= 0.20 && spawnCorridorGapScore < 0.26 && spawnLandmarkRouteEvidence >= 0.33 && spawnLandmarkRouteEvidence < 0.42 && footObstacleScore >= 0.55 && footObstacleScore < 0.70 && motionObstacleScore >= 0.55 && motionObstacleScore < 0.70 && firstDoorVision9x9Score < 0.12 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3611,7 +4404,7 @@
           "door": 0.50,
           "corridor": 0.46
         },
-        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 9000 && actionRepeatFrames >= 2 && depthSig <= 0.86 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardTurn == left && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.14 && spawnCorridorGapScore < 0.30 && spawnLandmarkRouteEvidence >= 0.30 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && usePulseCooldown <= 0 && predictions >= 1800 && predictions < 9000 && actionRepeatFrames >= 2 && depthSig <= 0.86 && blueFloorScore < 0.05 && courtyardScore >= 0.20 && courtyardTurn == left && bridgeDoorScore >= 0.24 && spawnSecretDoorScore < 0.42 && spawnCorridorGapScore >= 0.14 && spawnCorridorGapScore < 0.30 && spawnLandmarkRouteEvidence >= 0.30 && footObstacleScore >= 0.55 && motionObstacleScore >= 0.55 && firstDoorUse3x3Score < 0.22 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3799,6 +4592,22 @@
         }
       },
       {
+        "id": "door-approach-weak-vision-contact-probe",
+        "objective": "open-first-door",
+        "priority": 86.12,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.62,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && currentRoute == first-door-route && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && footObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && bridgeDoorScore >= 0.24 && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && footObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && currentRoute == first-door-route && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && motionObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && bridgeDoorScore >= 0.24 && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && motionObstacleScore >= 0.58",
+        "action": {
+          "moveForward": "absQDelta <= $doorAimToleranceDegrees && depthSig > $doorUseDepth",
+          "turnYaw": "doorProbeYaw",
+          "useKey": "absQDelta <= $doorAimToleranceDegrees && depthSig <= $doorUseDepth"
+        }
+      },
+      {
         "id": "door-wall-probe",
         "objective": "open-first-door",
         "priority": 69,
@@ -3916,13 +4725,13 @@
       {
         "id": "central-hall-opening-burst-fire",
         "objective": "engage-front-enemy",
-        "priority": 92,
+        "priority": 99,
         "threshold": 0,
         "evidence": {
           "enemy": 0.75,
           "central-hall": 0.45
         },
-        "when": "centralHallEntered && enemyDefeatedCount <= 0 && ammoLikelyEmpty == false && survivalGoalFirst == false && enemyStructuralDecoy == false && centralHallFrames <= $centralHallOpeningBurstFrames && combatFireFrames < $centralHallOpeningBurstShots",
+        "when": "centralHallEntered && enemyDefeatedCount <= 0 && ammoLikelyEmpty == false && enemyStructuralDecoy == false && centralHallFrames <= $centralHallOpeningBurstFrames && combatFireFrames < $centralHallOpeningBurstShots",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -3943,7 +4752,7 @@
           "enemy": 1,
           "central-hall": 0.45
         },
-        "when": "centralHallEntered && enemyDefeatedCount <= 0 && ammoLikelyEmpty == false && survivalGoalFirst == false",
+        "when": "centralHallEntered && combatRouteEngageAllowed && enemyDefeatedCount <= 0 && ammoLikelyEmpty == false && survivalGoalFirst == false && trustedCombatEvidence && enemyStructuralDecoy == false",
         "action": {
           "moveForward": "depthSig > 0.55",
           "strafeLeft": "$enableStrafeRun && combatYaw > 0",
@@ -4327,7 +5136,7 @@
           "corridor": 0.42,
           "safe-zone": 0.30
         },
-        "when": "doorOpenedCount <= 0 && predictions < 48 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions < 18 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -4347,7 +5156,7 @@
           "corridor": 0.42,
           "safe-zone": 0.30
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 48 && predictions < 96 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions >= 18 && predictions < 36 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "false",
           "moveBackward": "false",
@@ -4372,6 +5181,26 @@
           "moveForward": "false",
           "moveBackward": "true",
           "turnYaw": "routeWallPivotYaw",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "demo-spawn-low-gap-doorwall-ne-reacquire",
+        "objective": "find-corridor-to-first-door",
+        "priority": 84,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.3,
+          "corridor": 0.54
+        },
+        "when": "doorOpenedCount <= 0 && predictions >= 220 && predictions < 420 && blueFloorScore < 0.12 && spawnCorridorGapScore < 0.23 && spawnLandmarkRouteEvidence >= 0.30 && firstDoorVision9x9Score >= 0.30 && firstDoorUse3x3Score < 0.22 && footObstacleScore >= 0.30 && motionObstacleScore >= 0.30",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "7",
           "useKey": "false",
           "runKey": "true"
         }
@@ -4459,7 +5288,7 @@
           "door": 0.28,
           "corridor": 0.60
         },
-        "when": "doorOpenedCount <= 0 && context == open-space && predictions >= 560 && predictions < 720 && blueFloorScore < 0.08 && depthSig >= 0.90 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapTurn == right && spawnLandmarkRouteEvidence >= 0.34 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && context == open-space && predictions >= 900 && predictions < 1080 && blueFloorScore < 0.08 && depthSig >= 0.90 && spawnCorridorGapScore >= 0.16 && spawnCorridorGapTurn == right && spawnLandmarkRouteEvidence >= 0.34 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -4479,7 +5308,7 @@
           "door": 0.24,
           "corridor": 0.54
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 420 && predictions < 560 && blueFloorScore < 0.08 && depthSig >= 0.90 && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && context == open-space && predictions >= 420 && predictions < 900 && blueFloorScore < 0.08 && depthSig >= 0.90 && footObstacleFlickerScore < 0.18 && spawnCorridorGapScore < 0.30 && courtyardScore < 0.30 && bridgeDoorScore < 0.30 && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -4499,7 +5328,7 @@
           "door": 0.28,
           "corridor": 0.60
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 420 && predictions < 680 && blueFloorScore >= 0.08 && depthSig >= 0.62 && spawnCorridorGapScore >= 0.22 && spawnCorridorGapTurn == right && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions >= 900 && predictions < 1080 && blueFloorScore >= 0.08 && depthSig >= 0.62 && spawnCorridorGapScore >= 0.22 && spawnCorridorGapTurn == right && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -4519,7 +5348,7 @@
           "door": 0.25,
           "corridor": 0.58
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 420 && predictions < 620 && routeAbortHint == spawn-route-arc && routeFootClearRequired == false && firstDoorUse3x3Score < 0.22",
+        "when": "doorOpenedCount <= 0 && predictions >= 900 && predictions < 1080 && routeAbortHint == spawn-route-arc && routeFootClearRequired == false && firstDoorUse3x3Score < 0.22",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -4539,7 +5368,7 @@
           "door": 0.3,
           "corridor": 0.62
         },
-        "when": "doorOpenedCount <= 0 && predictions >= 520 && firstDoorUse3x3Score < 0.22 && routeFootClearRequired == false && routeTextureWallOcclusion == false && routePlannerAdvanceReady && routeConfidence >= 0.30",
+        "when": "doorOpenedCount <= 0 && predictions >= 900 && firstDoorUse3x3Score < 0.22 && routeFootClearRequired == false && routeTextureWallOcclusion == false && routePlannerAdvanceReady && routeConfidence >= 0.30",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",
@@ -5366,6 +6195,26 @@
         }
       },
       {
+        "id": "door-approach-corridor-ingress-long-hold-left-release",
+        "objective": "approach-first-door",
+        "priority": 86.18,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.5,
+          "corridor": 0.5
+        },
+        "when": "routeMode == door-approach && context == corridor && doorOpenedCount <= 0 && spawnSecretDoorScore < 0.62 && spawnCorridorGapScore >= 0.32 && spawnLandmarkRouteEvidence >= 0.46 && firstDoorVision9x9Score >= 0.30 && firstDoorVision9x9Score < 0.46 && firstDoorUse3x3Score < 0.22 && bridgeDoorScore >= 0.16 && bridgeDoorScore < 0.34 && depthSig > 0.32 && depthSig < 0.70 && actionRepeatFrames >= 96 && moveRepeatFrames >= 96 && routeTextureWallOcclusion == false",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "$enableStrafeRun",
+          "strafeRight": "false",
+          "turnYaw": "-8",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
         "id": "door-approach-corridor-ingress-hold",
         "objective": "approach-first-door",
         "priority": 86.07,
@@ -5375,6 +6224,66 @@
           "corridor": 0.56
         },
         "when": "routeMode == door-approach && context == corridor && doorOpenedCount <= 0 && spawnSecretDoorScore < 0.62 && spawnCorridorGapScore >= 0.32 && spawnLandmarkRouteEvidence >= 0.46 && firstDoorUse3x3Score < 0.22",
+        "action": {
+          "moveForward": "true",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "routeFallbackYaw",
+          "useKey": "false",
+          "runKey": "true"
+        }
+      },
+      {
+        "id": "closed-door-first-door-corner-post-use-settle",
+        "objective": "approach-first-door",
+        "priority": 86.19,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.54,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && usePulseCooldown > 0 && firstDoorVision9x9Score >= 0.30 && firstDoorUse3x3Score < 0.12 && footObstacleScore >= 0.50 && motionForwardProgress <= 0.24 && computerRoomConfidence <= 0.32 && computerPanelScore <= 0.40",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "false",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "closed-door-first-door-corner-stop-use",
+        "objective": "approach-first-door",
+        "priority": 86.18,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.56,
+          "corridor": 0.42
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && predictions >= 24 && firstDoorVision9x9Score >= 0.38 && firstDoorVision9x9RedScore <= 0.08 && firstDoorUse3x3Score >= 0.06 && firstDoorUse3x3Score < 0.12 && bridgeDoorScore < 0.24 && footObstacleScore >= 0.60 && motionObstacleScore >= 0.60 && motionForwardProgress <= 0.14 && computerRoomConfidence <= 0.32 && computerPanelScore <= 0.40",
+        "action": {
+          "moveForward": "false",
+          "moveBackward": "false",
+          "strafeLeft": "false",
+          "strafeRight": "false",
+          "turnYaw": "0",
+          "useKey": "true",
+          "runKey": "false"
+        }
+      },
+      {
+        "id": "closed-door-first-door-weak-vision-reacquire",
+        "objective": "approach-first-door",
+        "priority": 86.13,
+        "threshold": 0,
+        "evidence": {
+          "door": 0.48,
+          "corridor": 0.56
+        },
+        "when": "doorOpenedCount <= 0 && routeMode == door-approach && predictions >= 24 && context == open-space && firstDoorWallPatternDetected == true && firstDoorVision9x9Score >= 0.30 && firstDoorUse3x3Score < 0.08 && bridgeDoorScore < 0.14 && computerRoomConfidence <= 0.32 && computerPanelScore <= 0.40 && computerDarkPanelScore <= 0.30 && footObstacleScore < 0.56 && motionObstacleScore < 0.56 && routeTextureWallOcclusion == false",
         "action": {
           "moveForward": "true",
           "moveBackward": "false",

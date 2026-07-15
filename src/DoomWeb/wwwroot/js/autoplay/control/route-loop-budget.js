@@ -58,7 +58,7 @@
       && useProbeScore < 0.22
       && spawnCorridorGapScore < 0.42;
     const spawnRouteArc = predictions >= 260
-      && predictions < 520
+      && predictions < 620
       && Math.max(actionRepeatFrames, turnRepeatFrames) >= 1
       && motionForwardProgress >= 0.20
       && Math.max(spawnCorridorGapScore, spawnLandmarkRouteEvidence) >= 0.30

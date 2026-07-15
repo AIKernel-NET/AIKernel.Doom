@@ -8,6 +8,7 @@
       settleFrames: 0,
       cooldownFrames: 0,
       reason: "none",
+      restartRequestId: "",
       healthRetryFrames: 0,
       awaitingRecovery: false,
       completedReason: "none"
@@ -24,6 +25,7 @@
       cooldownFrames: state?.cooldownFrames || 0,
       settleFrames: state?.settleFrames || 0,
       reason: state?.reason || "none",
+      restartRequestId: state?.restartRequestId || "",
       awaitingRecovery: Boolean(state?.awaitingRecovery),
       completedReason: state?.completedReason || "none"
     };
@@ -40,6 +42,7 @@
     state.settleFrames = 0;
     state.cooldownFrames = 0;
     state.reason = "none";
+    state.restartRequestId = "";
     state.healthRetryFrames = 0;
     state.awaitingRecovery = false;
     state.completedReason = "none";
@@ -78,6 +81,11 @@
     return sequence.filter(step => step.waitFrames || Number.isFinite(Number(step.keycode)));
   }
 
+  function normalizeRetryReason(value) {
+    const text = String(value ?? "").trim();
+    return text && text.toLowerCase() !== "none" ? text : "";
+  }
+
   function schedule(state, status, host = {}) {
     if (!state || host.senseOnly || host.runtimeState !== "running") {
       return { scheduled: false, reason: "inactive" };
@@ -87,9 +95,19 @@
       state.cooldownFrames -= 1;
     }
 
+    const nativeRestartRequest = status?.csharpFirstDoor;
+    const nativeRestartRequestId = normalizeRetryReason(nativeRestartRequest?.restartRequestId);
+    const nativeRestartReason = normalizeRetryReason(nativeRestartRequest?.restartReason);
+    const nativeRestartRequested = nativeRestartRequest?.restartRequested === true
+      && nativeRestartRequestId.length > 0
+      && nativeRestartReason.length > 0;
+    const retryReason = nativeRestartRequested
+      ? nativeRestartReason
+      : normalizeRetryReason(status?.healthSensor?.retryReason);
     const healthRetryRequested = Boolean(
-      status?.healthSensor?.retryRequested &&
-      (status?.healthSensor?.likelyDead || status?.healthSensor?.retryReason !== "none"));
+      nativeRestartRequested
+      || (status?.healthSensor?.retryRequested
+        && (status?.healthSensor?.likelyDead || retryReason)));
     state.healthRetryFrames = healthRetryRequested
       ? Math.min(12, Number(state.healthRetryFrames || 0) + 1)
       : 0;
@@ -97,6 +115,7 @@
     if (!healthRetryRequested) {
       state.awaitingRecovery = false;
       state.completedReason = "none";
+      state.restartRequestId = "";
       if (state.settleFrames > 0) {
         return { scheduled: false, reason: "settling" };
       }
@@ -117,7 +136,7 @@
       }
     }
 
-    if (state.healthRetryFrames < 3) {
+    if (!nativeRestartRequested && state.healthRetryFrames < 3) {
       return { scheduled: false, reason: "debounce" };
     }
 
@@ -125,7 +144,8 @@
       return { scheduled: false, reason: "busy" };
     }
 
-    state.reason = status?.healthSensor?.retryReason || "health-death";
+    state.reason = retryReason || "health-death";
+    state.restartRequestId = nativeRestartRequested ? nativeRestartRequestId : "";
     host.releaseInputs?.();
     host.resetSensors?.("pre-retry-reset", state.reason);
     state.sequence = buildRetrySequence({
@@ -136,7 +156,12 @@
     });
     host.logQueued?.(state.reason);
 
-    return { scheduled: true, reason: state.reason, queuedSteps: state.sequence.length };
+    return {
+      scheduled: true,
+      reason: state.reason,
+      restartRequestId: state.restartRequestId,
+      queuedSteps: state.sequence.length
+    };
   }
 
   function completeIfDone(state, host = {}) {

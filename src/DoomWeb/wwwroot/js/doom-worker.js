@@ -1,5 +1,39 @@
-(function () {
-  "use strict";
+"use strict";
+
+const pendingWorkerMessages = [];
+
+  const workerCacheKey = (() => {
+    try {
+      return new URL(self.location.href).searchParams.get("v") || "dev";
+    } catch {
+      return "dev";
+    }
+  })();
+  let csharpControlReady = null;
+
+  function loadCSharpControl() {
+    if (!csharpControlReady) {
+      const moduleUrl = new URL("../csharp-control/main.js", self.location.href);
+      moduleUrl.search = `?v=${encodeURIComponent(workerCacheKey)}`;
+      csharpControlReady = import(moduleUrl.href).then(() => {
+        if (typeof self.aiKernelDoomControl?.evaluateBrowserFirstDoor !== "function"
+          || typeof self.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function") {
+          throw new Error("C# FirstDoor/post-COMPUTERROOM control bridge is unavailable in worker.");
+        }
+
+        return true;
+      }).catch((error) => {
+        self.AIKernelDoomCSharpControlError = error instanceof Error ? error.message : String(error);
+        throw error;
+      });
+      self.AIKernelDoomCSharpControlReady = csharpControlReady;
+    }
+
+    return csharpControlReady;
+  }
+
+  await loadCSharpControl();
+  self.onmessage = event => pendingWorkerMessages.push(event);
 
   self.window = self;
   self.window.requestAnimationFrame = self.window.requestAnimationFrame || function (callback) {
@@ -11,19 +45,12 @@
     self.clearTimeout(handle);
   };
 
-  const workerCacheKey = (() => {
-    try {
-      return new URL(self.location.href).searchParams.get("v") || "dev";
-    } catch {
-      return "dev";
-    }
-  })();
   function resolveWorkerScriptBase() {
     try {
       const url = new URL(self.location.href);
-      return url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1) || "/js/";
+      return url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1) || "./";
     } catch {
-      return "/js/";
+      return "./";
     }
   }
 
@@ -55,7 +82,7 @@
       return false;
     });
 
-  importScripts(
+  const runtimeScriptUrls = [
     scriptUrl("/js/autoplay-profile.js"),
     scriptUrl("/js/autoplay/gpu-contracts.js"),
     scriptUrl("/js/webgpu-provider.js"),
@@ -87,6 +114,8 @@
     scriptUrl("/js/autoplay/control/runtime-packets.js"),
     scriptUrl("/js/autoplay/wasm-state.js"),
     scriptUrl("/js/autoplay/control-runtime.js"),
+    scriptUrl("/js/autoplay/csharp-first-door-adapter.js"),
+    scriptUrl("/js/autoplay/csharp-post-computer-room-route-adapter.js"),
     scriptUrl("/js/autoplay/doom-sensor-inputs.js"),
     scriptUrl("/js/autoplay/doom-action-adapter.js"),
     scriptUrl("/js/autoplay/doom-retry-dispatch.js"),
@@ -98,7 +127,10 @@
     scriptUrl("/js/bonsai.js"),
     scriptUrl("/js/doom-debug-audio.js"),
     scriptUrl("/js/doom.js")
-  );
+  ];
+  for (const runtimeScriptUrl of runtimeScriptUrls) {
+    await import(runtimeScriptUrl);
+  }
 
   let runtime = null;
 
@@ -215,28 +247,33 @@
     }
   }
 
-  self.onmessage = function (event) {
+  async function initializeRuntime(message) {
+    try {
+      await loadCSharpControl();
+      applyGpuModeState(message.gpuMode);
+      runtime = new self.AIKernelDoomRuntime({
+        canvas: message.canvas,
+        moduleUrl: message.moduleUrl,
+        modelManifestUrl: message.modelManifestUrl,
+        autoplayProfileUrl: message.autoplayProfileUrl,
+        log: function (tag, className, text) {
+          post("log", { tag, className, text });
+        },
+        onStatusChange: function (status, reason) {
+          post("status", { status, reason });
+        }
+      });
+      post("ready", { status: runtime.status() });
+    } catch (error) {
+      post("init-error", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  function handleWorkerMessage(event) {
     const message = event.data || {};
 
     if (message.type === "init") {
-      try {
-        applyGpuModeState(message.gpuMode);
-        runtime = new self.AIKernelDoomRuntime({
-          canvas: message.canvas,
-          moduleUrl: message.moduleUrl,
-          modelManifestUrl: message.modelManifestUrl,
-          autoplayProfileUrl: message.autoplayProfileUrl,
-          log: function (tag, className, text) {
-            post("log", { tag, className, text });
-          },
-          onStatusChange: function (status, reason) {
-            post("status", { status, reason });
-          }
-        });
-        post("ready", { status: runtime.status() });
-      } catch (error) {
-        post("init-error", { error: error instanceof Error ? error.message : String(error) });
-      }
+      initializeRuntime(message);
       return;
     }
 
@@ -267,7 +304,18 @@
         runtime.queueInput(message.keycode, message.pressed);
       }
     }
-  };
+  }
+
+  self.onmessage = handleWorkerMessage;
+  for (const pendingWorkerMessage of pendingWorkerMessages) {
+    handleWorkerMessage(pendingWorkerMessage);
+  }
+  pendingWorkerMessages.length = 0;
+
+  post("host-ready", {
+    csharpControlReady: typeof self.aiKernelDoomControl?.evaluateBrowserFirstDoor === "function"
+      && typeof self.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute === "function"
+  });
 
   self.onerror = function (message, source, lineno, colno, error) {
     post("fatal", {
@@ -282,4 +330,3 @@
       detail: formatError(event.reason)
     });
   };
-})();

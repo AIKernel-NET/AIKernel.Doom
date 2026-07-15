@@ -125,6 +125,12 @@ public sealed record DoomRoutePlannerInput
     /// JA: 1 が中央照準を示す UseProbe alignment score です。
     /// </summary>
     public float UseProbeAlignment { get; init; }
+
+    /// <summary>
+    /// EN: Autoplay prediction frame counter used to gate deterministic route phases.
+    /// JA: deterministic route phase の gate に使う autoplay prediction frame counter です。
+    /// </summary>
+    public int Predictions { get; init; }
 }
 
 /// <summary>
@@ -942,7 +948,7 @@ public sealed class DoomRouteLoopBudgetEvaluator
             && useProbe < 0.22f
             && gap < 0.42f;
         var spawnRouteArc = input.Predictions >= 260
-            && input.Predictions < 520
+            && input.Predictions < 620
             && Math.Max(actionRepeat, turnRepeat) >= 1
             && motionProgress >= 0.20f
             && Math.Max(gap, landmark) >= 0.30f

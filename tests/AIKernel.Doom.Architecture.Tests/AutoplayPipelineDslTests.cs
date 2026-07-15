@@ -22,6 +22,24 @@ public sealed class AutoplayPipelineDslTests
     }
 
     [Fact]
+    public void AutoplayPipelineExpressionCompiler_HonorsParenthesizedBooleanGroups()
+    {
+        var context = new AutoplayPipelineContext(
+            new SensorFusion([0, 0, 0, 0, 0, 0], 1, 100, 0, "open-space", false, 0, 0),
+            recoveryFrames: 0,
+            AutoplayOptimizationProfile.Default);
+
+        Assert.False(AutoplayPipelineExpressionCompiler.CompileBooleanExpression("(false || false)")(context));
+        Assert.False(AutoplayPipelineExpressionCompiler.CompileBooleanExpression("(false || (false && true))")(context));
+        Assert.True(AutoplayPipelineExpressionCompiler.CompileBooleanExpression("(true && (false || true))")(context));
+        Assert.True(AutoplayPipelineExpressionCompiler.CompileBooleanExpression("health >= 20 && (context != wall || $doorUseDepth >= 0.4)")(context));
+        Assert.False(AutoplayPipelineExpressionCompiler.CompileBooleanExpression("health < 20 && (context != wall || $doorUseDepth >= 0.4)")(context));
+
+        Assert.False(AutoplayPipelineExpressionCompiler.CompileDynamicPredicate("(false || false)")(new DynamicPipelineContext()));
+        Assert.True(AutoplayPipelineExpressionCompiler.CompileDynamicPredicate("(true && (false || true))")(new DynamicPipelineContext()));
+    }
+
+    [Fact]
     public void AutoplayProfile_ProfileJson_DefinesSemanticObjectivesAndArbitration()
     {
         var profilePath = Path.Combine(FindRepoRoot(AppContext.BaseDirectory), "src", "DoomWeb", "wwwroot", "demo", "doom", "autoplay-profile.json");
@@ -1463,6 +1481,7 @@ public sealed class AutoplayPipelineDslTests
         var bridge = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.92f, 100, 0, "bridge", false, 0, 0)
             {
+                DoorOpenedCount = 1,
                 SensorTensor = AutoplaySensorTensor.FromChannels(
                     ("semantic.bridge", 0.92f),
                     ("vision.open", 0.80f),
@@ -1477,6 +1496,27 @@ public sealed class AutoplayPipelineDslTests
         Assert.False(bridge.Action.StrafeRight);
         Assert.Equal(0, bridge.Action.TurnYaw);
 
+        var bridgeEnemy = strategy.EvaluateTick(
+            new SensorFusion([0, 0, 0, 0, 0, 0], 0.92f, 100, 0.40f, "bridge", false, 0, 0)
+            {
+                DoorOpenedCount = 1,
+                SensorTensor = AutoplaySensorTensor.FromChannels(
+                    ("semantic.bridge", 0.92f),
+                    ("vision.enemy", 0.58f),
+                    ("system.combat", 0.76f),
+                    ("system.ammo", 1.0f),
+                    ("vision.open", 0.80f),
+                    ("system.health", 1.0f),
+                    ("system.enabled", 1.0f))
+            },
+            recoveryFrames: 0);
+
+        Assert.Equal("combat-visual-center-fire", bridgeEnemy.StageId);
+        Assert.Equal("engage-front-enemy", bridgeEnemy.Objective);
+        Assert.False(bridgeEnemy.Action.MoveForward);
+        Assert.False(bridgeEnemy.Action.AttackKey);
+        Assert.NotEqual(0, bridgeEnemy.Action.TurnYaw);
+
         var terminalFalsePositiveTensor = AutoplaySensorTensor.FromChannels(
             ("semantic.computer", 0.80f),
             ("vision.enemy", 0.44f),
@@ -1487,6 +1527,7 @@ public sealed class AutoplayPipelineDslTests
         var terminalFalsePositive = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.88f, 100, 0, "computer-room", false, 0, 0)
             {
+                DoorOpenedCount = 1,
                 SensorTensor = terminalFalsePositiveTensor
             },
             recoveryFrames: 0);
@@ -1534,6 +1575,7 @@ public sealed class AutoplayPipelineDslTests
         var centeredEnemy = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.72f, 100, 0.04f, "computer-room", false, 0, 0)
             {
+                DoorOpenedCount = 1,
                 SensorTensor = AutoplaySensorTensor.FromChannels(
                     ("semantic.computer", 0.62f),
                     ("vision.enemy", 0.58f),
@@ -1555,6 +1597,7 @@ public sealed class AutoplayPipelineDslTests
         var emptyAmmoCombatResidual = strategy.EvaluateTick(
             new SensorFusion([0, 0, 0, 0, 0, 0], 0.72f, 100, 0.04f, "computer-room", false, 0, 0)
             {
+                DoorOpenedCount = 1,
                 SensorTensor = AutoplaySensorTensor.FromChannels(
                     ("semantic.computer", 0.62f),
                     ("vision.enemy", 0.58f),
@@ -1818,9 +1861,11 @@ public sealed class AutoplayPipelineDslTests
         Assert.Contains("internal sealed class AutoplayPipelineContext", pipelineContext, StringComparison.Ordinal);
         Assert.Contains("SensorFusion sensor", pipelineContext, StringComparison.Ordinal);
         Assert.Contains("SemanticScore(string symbol)", pipelineContext, StringComparison.Ordinal);
-        Assert.Contains("SemanticScore(\"computer-room\") >= 0.5f", pipelineContext, StringComparison.Ordinal);
-        Assert.Contains("SemanticScore(\"bridge\") >= 0.5f", pipelineContext, StringComparison.Ordinal);
-        Assert.Contains("SemanticScore(\"central-hall\") >= 0.5f", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("Sensor.TrustedFirstDoorOpenMilestone", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("Math.Max(0, Sensor.DoorOpenedCount)", pipelineContext, StringComparison.Ordinal);
+        Assert.Contains("DoorOpenedCount > 0", pipelineContext, StringComparison.Ordinal);
+        Assert.DoesNotContain("SemanticScore(\"computer-room\") >= 0.5f", pipelineContext, StringComparison.Ordinal);
+        Assert.DoesNotContain("SemanticScore(\"bridge\") >= 0.5f", pipelineContext, StringComparison.Ordinal);
         Assert.DoesNotContain("Sensor.SensorTensor.SemanticScore(\"computer-room\") > 0.2f", pipelineContext, StringComparison.Ordinal);
         Assert.Contains("AutoplayPipelineExpressionCompiler.CompileBooleanExpression", compiler, StringComparison.Ordinal);
         Assert.DoesNotContain("private static bool Compare", compiler, StringComparison.Ordinal);
@@ -2422,20 +2467,50 @@ public sealed class AutoplayPipelineDslTests
     }
 
     [Fact]
-    public void SeparatedDoorProbeStrafeRunnerV4_DefaultDsl_StillProbesDoor()
+    public void SeparatedDoorProbeStrafeRunnerV4_DefaultDsl_UsesSemanticDoorSequence()
     {
-        var strategy = new SeparatedDoorProbeStrafeRunnerV4(AutoplayOptimizationProfile.Default with
+        var strategy = new DynamicPipelineAutoplayStrategy(AutoplayOptimizationProfile.Default with
         {
             DoorUseDepth = 0.72f,
             DoorAimToleranceDegrees = 10
         });
 
-        var action = strategy.ExecuteTick(
-            new SensorFusion([0.72f, 0.76f, 0.80f, 0.60f, 0.64f, 0.68f], 0.70f, 100, 0, "corner", false, 18, 0),
-            recoveryFrames: 0);
+        var sensor = new SensorFusion([0.72f, 0.76f, 0.80f, 0.60f, 0.64f, 0.68f], 0.70f, 100, 0, "corner", false, 18, 0)
+        {
+            SensorTensor = AutoplaySensorTensor.FromChannels(
+                ("semantic.door", 0.72f),
+                ("vision.target", 0.62f),
+                ("vision.open", 0.18f),
+                ("system.enabled", 1))
+        };
+        var firstDecision = strategy.EvaluateTick(sensor, recoveryFrames: 0);
+        ActionCommand? sequenceUseAction = null;
+        var sequenceStepIds = new List<string>();
+        for (var frame = 0; frame < 96; frame++)
+        {
+            var decision = strategy.EvaluateTick(sensor, recoveryFrames: 0);
+            sequenceStepIds.Add(decision.ActionSequenceStepId);
+            if (decision.Action.UseKey)
+            {
+                sequenceUseAction = decision.Action;
+                break;
+            }
+        }
 
-        Assert.True(action.UseKey);
-        Assert.False(action.AttackKey);
+        Assert.Equal("first-door-corner-use", firstDecision.ActionSequenceId);
+        Assert.Equal("backoff", firstDecision.ActionSequenceStepId);
+        Assert.True(firstDecision.Action.MoveBackward);
+        Assert.False(firstDecision.Action.UseKey);
+        Assert.Contains("align-turn", sequenceStepIds);
+        Assert.Contains("contact-forward", sequenceStepIds);
+        Assert.Contains("pre-use-stop", sequenceStepIds);
+        Assert.Contains("stop-use", sequenceStepIds);
+        Assert.NotNull(sequenceUseAction);
+        Assert.False(sequenceUseAction.MoveForward);
+        Assert.False(sequenceUseAction.MoveBackward);
+        Assert.False(sequenceUseAction.StrafeLeft);
+        Assert.False(sequenceUseAction.StrafeRight);
+        Assert.Equal(0, sequenceUseAction.TurnYaw);
     }
 
     private sealed class SpyPhainesis(List<string> calls) : IPhainesis

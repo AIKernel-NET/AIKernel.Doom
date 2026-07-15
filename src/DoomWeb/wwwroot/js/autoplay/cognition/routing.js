@@ -141,6 +141,27 @@
     }));
   }
 
+  function hasPostDoorComputerRoomEvidence(input = {}) {
+    const routeText = [
+      input.currentRoute,
+      input.route,
+      input.routeMode,
+      input.controlPipeline,
+      input.safetyReason,
+      input.stage,
+      input.semanticObjective,
+      input.currentObjective
+    ].join(" ").toLowerCase();
+    return Boolean(input.computerRoomEntered)
+      || Boolean(input.bridgeLaneVisible)
+      || number(input.bridgeConfidence) >= 0.30
+      || number(input.computerRoomConfidence) >= 0.34
+      || number(input.bridgeDoorScore) >= 0.18
+      || routeText.indexOf("cross-bridge") >= 0
+      || routeText.indexOf("central-hall") >= 0
+      || routeText.indexOf("computer-room") >= 0;
+  }
+
   function inferControlPipeline(input = {}) {
     if (!input.enabled) {
       return "Idle";
@@ -150,15 +171,17 @@
       return "Retry";
     }
 
+    const firstDoorOpened = number(input.doorOpenedCount) > 0;
+
     if (input.doorTransitionGraceActive) {
-      return input.computerRoomEntered ? "ComputerRoom" : "FirstDoor";
+      return firstDoorOpened || input.computerRoomEntered ? "ComputerRoom" : "FirstDoor";
     }
 
     if (input.computerRoomEntered && !input.centralHallEntered) {
       return "ComputerRoom";
     }
 
-    if (number(input.doorOpenedCount) <= 0) {
+    if (!firstDoorOpened) {
       const objective = input.firstDoorObjective || inferFirstDoorObjective(input);
       return objective === "find-corridor-to-first-door"
         || objective === "follow-demo-route-to-first-door"
@@ -168,8 +191,8 @@
         : "FirstDoor";
     }
 
-    if (number(input.doorOpenedCount) > 0 && !input.computerRoomEntered) {
-      return "FirstDoor";
+    if (firstDoorOpened && !input.computerRoomEntered) {
+      return "ComputerRoom";
     }
 
     if (input.centralHallEntered && number(input.enemyDefeatedCount) <= 0 && !input.ammoLikelyEmpty) {
@@ -192,7 +215,7 @@
       return "ComputerRoom";
     }
 
-    if (number(input.doorOpenedCount) > 0 && !input.computerPanelVisible && input.bridgeLaneVisible) {
+    if (firstDoorOpened && !input.computerPanelVisible && input.bridgeLaneVisible) {
       return "Bridge";
     }
 
@@ -234,13 +257,19 @@
         : (number(input.enemyDefeatedCount) > 0 ? "secure-central-hall" : "engage-front-enemy");
     }
 
-    if (number(input.doorOpenedCount) > 0 && !input.computerRoomEntered) {
+    const firstDoorOpened = number(input.doorOpenedCount) > 0;
+
+    if (firstDoorOpened && hasPostDoorComputerRoomEvidence(input)) {
+      return "reach-central-hall";
+    }
+
+    if (firstDoorOpened && !input.computerRoomEntered) {
       return "enter-computer-control-room";
     }
 
     const firstDoorObjective = input.firstDoorObjective || inferFirstDoorObjective(input);
     if (input.doorTransitionGraceActive) {
-      return input.computerRoomEntered ? "reach-central-hall" : firstDoorObjective;
+      return firstDoorOpened || input.computerRoomEntered ? "reach-central-hall" : firstDoorObjective;
     }
 
     if (input.computerRoomEntered && input.bridgeLaneVisible) {
@@ -255,11 +284,13 @@
       return "restore-relative-motion";
     }
 
-    if (number(input.doorOpenedCount) <= 0) {
+    if (!firstDoorOpened) {
       return firstDoorObjective;
     }
 
-    return firstDoorObjective || "reach-central-hall";
+    return hasPostDoorComputerRoomEvidence(input)
+      ? "reach-central-hall"
+      : (firstDoorObjective || "enter-computer-control-room");
   }
 
   function activeDetectionsForPipeline(input = {}) {

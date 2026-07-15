@@ -144,6 +144,82 @@ const postDoorMilestoneContext = adapter.createContext({}, {
 assert(postDoorMilestoneContext.values.doorOpenedCount === 1, "Control context should import door-opened milestones into DSL values");
 assert(postDoorMilestoneContext.values.routeMode === "post-door", "Door-opened milestones should switch route mode to post-door");
 
+const resetDoorCountDominatesLegacyContext = adapter.createContext({}, {
+  firstDoorVision9x9Score: 0.4,
+  doorOpenedCount: 0,
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 0
+  },
+  autoplayState: {
+    doorOpenedCount: 0,
+    milestones: {
+      doorOpened: 1,
+      doorOpenedCount: 0
+    }
+  }
+});
+assert(resetDoorCountDominatesLegacyContext.values.doorOpenedCount === 0, "Explicit zero doorOpenedCount should dominate stale legacy doorOpened aliases");
+assert(resetDoorCountDominatesLegacyContext.values.routeMode !== "post-door", "Stale legacy doorOpened aliases should not push retry/reset states into post-door mode");
+
+const preDoorHealthNoiseContext = adapter.createContext({}, {
+  healthSensor: {
+    value: 12,
+    health: 12,
+    lowHealth: true,
+    lowHealthThreshold: 50,
+    criticalBloodAlive: true,
+    bloodDangerScore: 0.76,
+    healthDangerReason: "face-heartbeat-blood",
+    faceLifePhase: "moribund",
+    faceLifeLevel: 1,
+    faceHeartbeatAlive: true,
+    retryRequested: false,
+    likelyDead: false
+  },
+  health: 100,
+  doorOpenedCount: 0,
+  firstDoorVision9x9Score: 0.32,
+  spawnCorridorGapScore: 0.34,
+  spawnCorridorGapTurn: "right"
+});
+assert(preDoorHealthNoiseContext.values.preDoorHealthDangerSuppressed === true, "Pre-door face/health noise should be suppressed until the first door is opened");
+assert(preDoorHealthNoiseContext.values.criticalHealth === false, "Suppressed pre-door health noise should not expose criticalHealth to CTG/Kairos");
+assert(preDoorHealthNoiseContext.values.lowHealthGoalFirst === false, "Suppressed pre-door health noise should not force low-health goal routing");
+assert(preDoorHealthNoiseContext.values.survivalGoalFirst === false, "Suppressed pre-door health noise should not force survival routing");
+assert(preDoorHealthNoiseContext.values.lethalRisk === 0, "Suppressed pre-door health noise should not contribute lethal risk");
+assert(preDoorHealthNoiseContext.values.criticalBloodAlive === false, "Suppressed pre-door blood signal should not remain critical");
+assert(preDoorHealthNoiseContext.values.healthDangerReason === "pre-door-suppressed", "Suppressed pre-door health danger should be diagnosable");
+
+const stalePostDoorPreviousModeContext = adapter.createContext({}, {
+  previousRouteMode: "post-door",
+  routeMode: "post-door",
+  autoplayState: {
+    routeMode: "post-door",
+    milestones: {
+      doorOpened: 1,
+      doorOpenedCount: 0
+    }
+  },
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 0
+  },
+  doorOpenedCount: 0,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorUse3x3Score: 0,
+  computerRoomConfidence: 0.76,
+  computerPanelScore: 0.70,
+  bridgeGreenHazard: 0.54
+});
+assert(stalePostDoorPreviousModeContext.values.previousRouteMode === "none", "Closed-door reset states should sanitize stale post-door previous route mode");
+assert(stalePostDoorPreviousModeContext.values.routeMode !== "post-door", "Closed-door reset states should not preserve stale post-door route mode");
+assert(stalePostDoorPreviousModeContext.values.bridgeConfidence === 0, "Closed-door reset states should mask stale post-door bridge confidence");
+assert(stalePostDoorPreviousModeContext.values.computerRoomConfidence === 0, "Closed-door reset states should mask stale ComputerRoom confidence");
+assert(stalePostDoorPreviousModeContext.values.postDoorTerminalSurface === 0, "Closed-door reset states should mask stale post-door terminal surface");
+assert(stalePostDoorPreviousModeContext.values.computerRoomEntered === false, "Closed-door reset states should clear stale ComputerRoom entry");
+assert(stalePostDoorPreviousModeContext.values.computerRoomCombatContext === false, "Closed-door reset states should not keep ComputerRoom combat context alive");
+
 const postDoorMilestoneTerminalContext = adapter.createContext({}, {
   milestones: {
     doorOpened: 1,
@@ -155,6 +231,42 @@ const postDoorMilestoneTerminalContext = adapter.createContext({}, {
 assert(postDoorMilestoneTerminalContext.values.postDoorTerminalSurface === 0.48, "Control context should project post-door terminal surface from milestone sensor scores");
 assert(postDoorMilestoneTerminalContext.values.computerDarkPanelScore === 0.48, "Milestone computer dark panel score should be available to DSL conditions");
 assert(postDoorMilestoneTerminalContext.values.currentRoute === "computer-room-route", "Post-door terminal evidence should promote the route label to ComputerRoom");
+
+const postDoorCentralDoorContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.32,
+  bridgeDoorScore: 0.28,
+  bridgeConfidence: 0.12,
+  centralHallConfidence: 0.20
+});
+assert(postDoorCentralDoorContext.values.routeMode === "post-door", "Post-door central door evidence should stay in post-door mode");
+assert(postDoorCentralDoorContext.values.currentRoute === "central-hall-route", "Central Hall door evidence should promote the post-door route label");
+
+const postDoorTerminalWallDoorDecoyContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.58,
+  bridgeDoorScore: 0.34,
+  bridgeConfidence: 0.12,
+  centralHallConfidence: 0.10,
+  postDoorTerminalSurface: 0.56
+});
+assert(postDoorTerminalWallDoorDecoyContext.values.currentRoute !== "central-hall-route", "Bridge-door-like terminal wall evidence should not promote to Central Hall before central hall evidence is trusted");
+
+const postDoorComputerRoomCarryContext = adapter.createContext({}, {
+  doorOpenedCount: 1,
+  currentObjective: "find-corridor-to-first-door",
+  currentRoute: "computer-room-post-door-route-hold",
+  controlPipeline: "computer-room-post-door-route-hold",
+  computerRoomConfidence: 0.29,
+  computerPanelScore: 0.18,
+  bridgeConfidence: 0.32,
+  firstDoorVision9x9Score: 0.12,
+  firstDoorUse3x3Score: 0
+});
+assert(postDoorComputerRoomCarryContext.values.computerRoomEntered === true, "Post-door ComputerRoom route carry should keep the ComputerRoom milestone latched");
+assert(postDoorComputerRoomCarryContext.values.currentRoute !== "first-door-route", "Post-door carry should not fall back to a FirstDoor route label");
 
 const stickyDoorApproachContext = adapter.createContext({}, {
   previousRouteMode: "door-approach",
@@ -381,6 +493,7 @@ const postDoorEnemyMemoryContext = adapter.createContext({}, {
   faceSig: 0.01,
   audioEnemyConfidence: 0,
   audioEnemyDirection: "none",
+  firstDoorVision9x9RedScore: 0.12,
   postDoorTerminalSurface: 0.53,
   computerRoomScore: 0.16,
   computerPanelScore: 0.53,

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DoomCapabilities/DoomCapabilities.csproj" />
+    <Project Path="src/DoomControlBrowser/DoomControlBrowser.csproj" />
     <Project Path="src/DoomDemo/DoomDemo.csproj" />
     <Project Path="src/DoomOptimizer/DoomOptimizer.csproj" />
     <Project Path="src/DoomProvider/DoomProvider.csproj" />

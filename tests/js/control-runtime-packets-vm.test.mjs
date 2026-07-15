@@ -94,6 +94,20 @@ const criticalHealthVeto = packets.applyZoeVeto({ move: "forward", fire: true },
 }, zoeHelpers);
 assert(criticalHealthVeto.zoeVetoed === true, "Default Zoe guard should stop critical-health unsafe actions");
 assert(criticalHealthVeto.move === "none" && criticalHealthVeto.fire === false, "Critical-health Zoe veto should neutralize movement and fire");
+const untrustedFaceHealth = packets.applyZoeVeto({ move: "forward", fire: true }, {
+  health: 12,
+  healthThreatEvidenceTrusted: false,
+  faceVitalEnabled: false,
+  faceHeartbeatAlive: false,
+  faceHeartbeatOpacity: 0,
+  criticalBloodAlive: false,
+  likelyDead: false,
+  retryRequested: false
+}, {
+  parameters: { lowHealthThreshold: 50, criticalHealthThreshold: 18 }
+}, zoeHelpers);
+assert(untrustedFaceHealth.zoeVetoed === false, "Untrusted face-only health should not veto an otherwise valid action");
+assert(untrustedFaceHealth.move === "forward" && untrustedFaceHealth.fire === true, "Untrusted face-only health should preserve combat/navigation action");
 
 const action = packets.actionFromStage(
   {
@@ -172,6 +186,9 @@ const status = packets.statusFromAction(action, [{ id: "door-route" }], {
     usePulseCooldown: 45,
     usePulseSuppressedFrames: 3,
     lastUsePulsePrediction: 1201,
+    actionSequenceId: "first-door-corner-use",
+    actionSequenceStepId: "settle-use",
+    actionSequenceFrame: 81,
     criticalBloodAlive: true,
     bloodDangerScore: 0.66,
     healthDangerReason: "face-heartbeat-blood",
@@ -184,6 +201,9 @@ const status = packets.statusFromAction(action, [{ id: "door-route" }], {
 
 assert(status.runtimeId === "packet-runtime", "status should preserve runtime id");
 assert(status.controlPipeline === "door-route", "status should expose selected pipeline");
+assert(status.actionSequenceId === "first-door-corner-use", "status should expose active semantic action sequence");
+assert(status.actionSequenceStepId === "settle-use", "status should expose active semantic action sequence step");
+assert(status.actionSequenceFrame === 81, "status should expose active semantic action sequence frame");
 assert(status.decisionTrace.payload.objective === "open-door", "status should build decision trace from action");
 assert(status.stageEvaluations.length === 1, "status should preserve stage evaluations");
 assert(status.pipelineState?.krisis?.kairos?.selectedAxis, "status should expose PipelineState DTO");
@@ -212,7 +232,52 @@ assert(status.pipelineState?.aisthesis?.routePlan?.routeLoopBudgetExceeded === t
 assert(status.pipelineState?.aisthesis?.routePlan?.routeBarrelLaneRisk === true, "PipelineState route plan should expose barrel-lane risk");
 assert(status.pipelineState?.aisthesis?.routePlan?.routeDeadEndRisk === true, "PipelineState route plan should expose topology dead-end risk");
 assert(status.pipelineState?.aisthesis?.routePlan?.routeDeadEndTrimRequired === true, "PipelineState route plan should expose topology dead-end trim evidence");
-assert(status.goalState?.telos === "FirstDoor", "status should expose GoalState DTO");
+assert(status.goalState?.telos === "ComputerRoom", "status should expose post-door GoalState DTO even when stale first-door text remains");
+
+const postDoorSparseGoalStatus = packets.statusFromAction({
+  move: "none",
+  turn: "none",
+  fire: false,
+  use: false,
+  pipeline: "sensor-recovery",
+  stage: "idle",
+  objective: "idle"
+}, [{ id: "sensor-recovery" }], {
+  profile: { strategyName: "PacketProfile" },
+  values: {
+    doorOpenedCount: 1,
+    currentRoute: "post-door-corridor-route"
+  }
+}, 4, {
+  runtimeId: "packet-runtime",
+  createDecisionTrace: payload => ({ version: "trace-test", payload })
+});
+assert(postDoorSparseGoalStatus.goalState?.telos === "ComputerRoom", "Post-door sparse actions should not make TELOS fall back to Monitor");
+
+const stalePostDoorGoalStatus = packets.statusFromAction({
+  move: "forward",
+  turn: "none",
+  fire: false,
+  use: false,
+  pipeline: "ComputerRoom",
+  stage: "ComputerRoom",
+  objective: "enter-computer-room",
+  strategyPriority: 4,
+  evidenceScore: 0.44
+}, [{ id: "ComputerRoom" }], {
+  profile: { strategyName: "PacketProfile" },
+  values: {
+    doorOpenedCount: 0,
+    firstDoorUseAttempted: true,
+    computerRoomConfidence: 0.64
+  }
+}, 4, {
+  runtimeId: "packet-runtime",
+  createDecisionTrace: payload => ({ version: "trace-test", payload })
+});
+assert(stalePostDoorGoalStatus.goalState?.telos === "FirstDoor", "GoalState DTO should suppress stale ComputerRoom TELOS while the first door is closed");
+assert(stalePostDoorGoalStatus.goalState?.objective === "Open First Door", "GoalState DTO should guide stale post-door intent back to first-door opening");
+
 assert(status.debugOverlay?.regions?.length > 0, "status should expose DebugOverlay DTO regions");
 assert(Array.isArray(status.debugOverlay?.vision9x9) && status.debugOverlay.vision9x9.length === 81, "DebugOverlay should expose DTO 9x9 vision heat grid");
 assert(status.debugOverlay?.vision9x9?.[40] === 0.84, "DebugOverlay should preserve the 9x9 door heat peak");
@@ -370,6 +435,35 @@ assert(canonicalStatus.debugOverlay?.regions?.[0]?.kind === "canonical", "canoni
 assert(canonicalStatus.autoplayState?.currentRoute === "canonical-route", "canonical AutoplayState should override JS fallback projection");
 assert(canonicalStatus.autoplayState?.pipelineState?.krisis?.kairos?.selectedAxis === "pathos", "canonical AutoplayState should be completed with PipelineState for UI clients");
 assert(canonicalStatus.autoplayState?.goalState?.priority === "CanonicalPriority", "canonical AutoplayState should be completed with GoalState for UI clients");
+
+const staleCanonicalGoalStatus = packets.statusFromAction(
+  Object.assign({}, action, {
+    pipeline: "ComputerRoom",
+    stage: "ComputerRoom",
+    objective: "enter-computer-room",
+    goalState: {
+      telos: "ComputerRoom",
+      objective: "Reach Central Hall",
+      priority: "[L] Approach Target",
+      subObjectives: [{ kind: "objective", label: "Reach Central Hall" }]
+    }
+  }),
+  [],
+  {
+    profile: { strategyName: "PacketProfile" },
+    values: {
+      doorOpenedCount: 0,
+      firstDoorUseAttempted: true
+    }
+  },
+  6,
+  {
+    runtimeId: "packet-runtime",
+    createDecisionTrace: payload => ({ version: "trace-test", payload })
+  });
+assert(staleCanonicalGoalStatus.goalState?.telos === "FirstDoor", "canonical stale ComputerRoom GoalState should be normalized while first door is closed");
+assert(staleCanonicalGoalStatus.goalState?.objective === "Open First Door", "canonical stale ComputerRoom GoalState should point back to opening the first door");
+assert(staleCanonicalGoalStatus.goalState?.subObjectives?.[0]?.label === "Open First Door", "canonical stale sub-objective should be normalized with the main objective");
 assert(canonicalStatus.autoplayState?.debugOverlay?.regions?.[0]?.kind === "canonical", "canonical AutoplayState should be completed with DebugOverlay for UI clients");
 
 const combatStatus = packets.statusFromAction(

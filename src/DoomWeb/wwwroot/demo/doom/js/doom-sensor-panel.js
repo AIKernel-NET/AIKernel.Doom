@@ -8,7 +8,7 @@
     audio: Object.freeze({ label: "Audio", signal: "stereo energy", panel: "aisthesis", stage: "primary" }),
     movement: Object.freeze({ label: "Movement", signal: "motion vector", panel: "aisthesis", stage: "primary" }),
     compass: Object.freeze({ label: "Compass", signal: "heading vector", panel: "aisthesis", stage: "primary" }),
-    health: Object.freeze({ label: "Health", signal: "life state", panel: "aisthesis", stage: "primary" }),
+    health: Object.freeze({ label: "Face Vital", signal: "heart state", panel: "aisthesis", stage: "primary" }),
     spatial: Object.freeze({ label: "Spatial", signal: "Topos state", panel: "krisis", stage: "topos" }),
     motor: Object.freeze({ label: "Motor", signal: "input vector", panel: "kinesis", stage: "motion" })
   });
@@ -16,7 +16,7 @@
   const detectionDescriptors = Object.freeze({
     motion: Object.freeze({ label: "Looming", signal: "flow / approach", panel: "noesis", stage: "phainesis" }),
     wall: Object.freeze({ label: "Stuck", signal: "wall / trap", panel: "noesis", stage: "phainesis" }),
-    health: Object.freeze({ label: "HP Veto", signal: "life audit", panel: "kinesis", stage: "zoe" }),
+    health: Object.freeze({ label: "Face Vital", signal: "heart audit", panel: "kinesis", stage: "zoe" }),
     enemy: Object.freeze({ label: "Enemy", signal: "enemy seen", panel: "noesis", stage: "phainesis" }),
     hud: Object.freeze({ label: "Entropy", signal: "HUD / uncertainty", panel: "noesis", stage: "phainesis" }),
     computer: Object.freeze({ label: "Item", signal: "backtrack / room", panel: "noesis", stage: "phainesis" }),
@@ -138,7 +138,7 @@
           title: "Zoe",
           items: Object.freeze([
             detectionChip("health"),
-            signalChip("HP veto", "life guard"),
+            signalChip("Face veto", "heart guard"),
             signalChip("Life audit", "action check"),
             signalChip("Fatal avoid", "forced stop")
           ])

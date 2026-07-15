@@ -57,7 +57,10 @@ public sealed class DoomWebAssetCacheTests
             "module.json"));
 
         Assert.Contains("\"entry\": \"doom.wasm\"", manifest, StringComparison.Ordinal);
-        Assert.Contains("\"sha256\": \"d0e432c3c9bf8e562a5b36c9eab3381270d7a67bc46a01ebd3f90bb10bfe35ee\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"sizeBytes\": 408325", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"sha256\": \"1c2255fcae02158387c08f0d190888525ed4976b5ef89c1aa7ac1ca9c3819e09\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"sizeBytes\": 4196020", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"sha256\": \"1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771\"", manifest, StringComparison.Ordinal);
         Assert.Contains("\"doomgenericCommit\": \"dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284\"", manifest, StringComparison.Ordinal);
         Assert.Contains("fetch-doomgeneric.ps1", manifest, StringComparison.Ordinal);
         Assert.Contains("doomgeneric-aikernel.patch", manifest, StringComparison.Ordinal);

@@ -95,6 +95,127 @@
     ];
   }
 
+  function normalizeLifePhase(value) {
+    const text = String(value || "unknown").toLowerCase();
+    if (text === "healthy"
+      || text === "wounded"
+      || text === "damaged"
+      || text === "critical"
+      || text === "moribund"
+      || text === "dead"
+      || text === "invulnerable") {
+      return text;
+    }
+
+    return "unknown";
+  }
+
+  function firstKnownLifePhase(...values) {
+    for (const value of values) {
+      const phase = normalizeLifePhase(value);
+      if (phase !== "unknown") {
+        return phase;
+      }
+    }
+
+    return "unknown";
+  }
+
+  function firstExplicitBoolean(...values) {
+    for (const value of values) {
+      if (value === true || value === false) {
+        return value;
+      }
+      if (value === 1 || value === 0) {
+        return value === 1;
+      }
+      if (value === "true" || value === "false") {
+        return value === "true";
+      }
+    }
+
+    return false;
+  }
+
+  function resolveLifeLevel(phase, ...values) {
+    for (const value of values) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+
+      const level = Math.max(0, Math.min(5, Math.round(parsed)));
+      if (phase !== "dead" && phase !== "unknown" && level === 0) {
+        continue;
+      }
+
+      return level;
+    }
+
+    return NaN;
+  }
+
+  function resolveLifeStatus(autoplay = {}, zoe = {}) {
+    const health = autoplay.healthSensor || {};
+    const phase = firstKnownLifePhase(
+      autoplay.healthLikelyDead || health.likelyDead ? "dead" : undefined,
+      autoplay.healthFaceLifePhase,
+      health.healthFaceLifePhase,
+      autoplay.faceLifePhase,
+      health.faceLifePhase,
+      zoe.faceLifePhase,
+      zoe.FaceLifePhase,
+      health.faceLifeTemplatePhase,
+      health.healthFaceLifeTemplatePhase,
+      health.faceLifeQuantizedPhase,
+      health.healthFaceLifeQuantizedPhase);
+    const rawLevel = resolveLifeLevel(
+      phase,
+      autoplay.healthFaceLifeLevel,
+      health.healthFaceLifeLevel,
+      autoplay.faceLifeLevel,
+      health.faceLifeLevel,
+      zoe.faceLifeLevel,
+      zoe.FaceLifeLevel,
+      health.faceLifeTemplateLevel,
+      health.healthFaceLifeTemplateLevel,
+      health.faceLifeQuantizedLevel,
+      health.healthFaceLifeQuantizedLevel);
+    const fallbackLevel = phase === "healthy" || phase === "invulnerable" ? 5
+      : (phase === "wounded" ? 4
+        : (phase === "damaged" ? 3
+          : (phase === "critical" ? 2
+            : (phase === "moribund" ? 1 : 0))));
+    const level = Number.isFinite(rawLevel)
+      ? Math.max(0, Math.min(5, Math.round(rawLevel)))
+      : fallbackLevel;
+    const heartbeatAlive = firstExplicitBoolean(
+      health.faceHeartbeatAlive,
+      health.healthFaceHeartbeatAlive,
+      autoplay.faceHeartbeatAlive,
+      autoplay.healthFaceHeartbeatAlive);
+    const opacity = Math.max(0, Math.min(1, Number(
+      health.faceHeartbeatVisualOpacity
+      ?? health.healthFaceHeartbeatVisualOpacity
+      ?? autoplay.faceHeartbeatVisualOpacity
+      ?? autoplay.healthFaceHeartbeatVisualOpacity
+      ?? health.faceHeartbeatOpacity
+      ?? health.healthFaceHeartbeatOpacity
+      ?? autoplay.faceHeartbeatOpacity
+      ?? autoplay.healthFaceHeartbeatOpacity
+      ?? (heartbeatAlive ? 1 : 0)) || 0));
+    const heartbeat = heartbeatAlive || phase === "invulnerable" ? "hb" : `fade${opacity.toFixed(2)}`;
+    const symbol = phase === "invulnerable" ? "∞" : (phase === "dead" ? "0" : String(level));
+    return {
+      phase,
+      symbol,
+      heartbeat,
+      warning: phase === "critical" || phase === "moribund",
+      dead: phase === "dead" || autoplay.healthLikelyDead || health.likelyDead,
+      value: `vital ${symbol} ${phase} ${heartbeat}`
+    };
+  }
+
   function applyRowMetadataDataset(rowNode, metadata = {}) {
     if (!rowNode?.dataset || !metadata || typeof metadata !== "object") {
       return;
@@ -140,7 +261,7 @@
     const kinesis = pipeline.kinesis || pipeline.Kinesis || {};
     const action = autoplay.action || kinesis.action || kinesis.Action || {};
     const zoe = kinesis.zoe || kinesis.Zoe || {};
-    const health = Number(zoe.health ?? zoe.Health ?? autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+    const life = resolveLifeStatus(autoplay, zoe);
     const lethalRisk = Number(zoe.lethalRisk ?? zoe.LethalRisk ?? autoplay.lethalRisk ?? 0);
     const telos = resolveWith(options, "resolveTelosObjective", fallbackTelos, autoplay);
     const objective = resolveWith(options, "resolvePrimaryObjective", fallbackObjective, autoplay);
@@ -150,9 +271,9 @@
     const routeConfidence = Number(route.routeConfidence ?? route.RouteConfidence ?? autoplay.routeConfidence ?? 0);
     const selectedAxis = kairos.selectedAxis || kairos.SelectedAxis || autoplay.kairosPriorityAxis || "monitor";
     const useState = `use=${Boolean(action.use)} cooldown=${Number(autoplay.useCooldown || 0)} latch=${Number(autoplay.firstDoorUseLatchFrames || 0)}`;
-    const healthTone = autoplay.healthLikelyDead || Boolean(zoe.vetoed ?? zoe.Vetoed)
+    const healthTone = life.dead || Boolean(zoe.vetoed ?? zoe.Vetoed)
       ? "health is-danger"
-      : ((Number.isFinite(health) && health < 50) || lethalRisk >= 0.50 ? "health is-warn" : "health");
+      : (life.warning || lethalRisk >= 0.50 ? "health is-warn" : "health");
     const progress = [
       `door=${milestones.doorOpened || 0}`,
       `computer=${milestones.computerRoomEntered ? "yes" : "no"}`,
@@ -168,7 +289,7 @@
       { label: "KAIROS", value: `${labelize(selectedAxis)} ${Number(kairos.confidence ?? kairos.Confidence ?? routeConfidence).toFixed(2)}`, tone: "" },
       ...resolveGpuRuntimeRows(status, autoplay),
       { label: "ACTION", value: `${action.move || "none"} / ${action.turn || "none"} / fire=${Boolean(action.fire)} / ${useState}`, tone: "" },
-      { label: "HEALTH", value: `hp=${Number.isFinite(health) ? Math.round(health) : "?"} risk=${Number.isFinite(lethalRisk) ? lethalRisk.toFixed(2) : "0.00"}`, tone: healthTone },
+      { label: "FACE VITAL", value: `${life.value} risk=${Number.isFinite(lethalRisk) ? lethalRisk.toFixed(2) : "0.00"}`, tone: healthTone },
       { label: "PROGRESS", value: progress, tone: "" }
     ];
   }

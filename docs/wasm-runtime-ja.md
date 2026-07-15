@@ -12,7 +12,7 @@ Native DOOM runtime は `src/DoomWasm.Native` にあります。これは doomge
 int doom_init(void);
 int doom_tick(void);
 uint8_t* doom_render(void);
-void doom_input(int keycode, int pressed);
+int doom_input(int keycode, int pressed);
 ```
 
 `doom_init` は WAD を memory-backed mount から初期化します。`doom_tick` は 1 tic 進めます。`doom_render` は WASM linear memory 上の 320x200 paletted 8-bit framebuffer を返します。`doom_input` は key press / release を DOOM event queue に流します。

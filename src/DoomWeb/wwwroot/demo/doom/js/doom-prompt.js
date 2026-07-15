@@ -131,7 +131,7 @@
     let doomDebugCaptureApi = null;
     let doomObjectiveStatusPanelScriptLoading = null;
     let doomBridgeAudioSnapshot = null;
-    let doomAudioHudEnvelope = { left: 0, right: 0, balance: 0, updatedAt: 0 };
+    let doomAudioHudEnvelope = { left: 0, right: 0, balance: 0, peak: 0, level: 0, attenuation: 1, updatedAt: 0 };
     let doomAudioEventHolds = [];
     let doomCompassDisplayState = {
       heading: null,
@@ -943,6 +943,17 @@
           #doom-debug-bar .doom-sensor-node.is-aisthesis .doom-panel-signal-chip {
             min-height: 36px;
           }
+          #doom-debug-bar .doom-sensor-node.is-krisis .doom-sensor-stages {
+            grid-template-columns: minmax(0, 1fr) !important;
+          }
+          #doom-debug-bar .doom-kairos-radar {
+            grid-template-columns: 74px minmax(0, 1fr);
+            min-height: 64px;
+          }
+          #doom-debug-bar .doom-kairos-radar svg {
+            width: 74px;
+            height: 64px;
+          }
         }
         .doom-panel-signal-chip {
           display: inline-flex;
@@ -1359,6 +1370,65 @@
         }
         #doom-debug-overlay.is-gpu-backed .debug-region {
           display: none !important;
+        }
+        #doom-debug-overlay .debug-life-heart {
+          position: absolute;
+          left: 3.2%;
+          top: 18.4%;
+          width: 56px;
+          height: 48px;
+          z-index: 58;
+          pointer-events: none;
+          contain: layout paint;
+          filter: drop-shadow(0 0 8px rgba(255,67,102,.30)) drop-shadow(0 1px 3px rgba(0,0,0,.72));
+        }
+        #doom-debug-overlay .debug-life-heart .life-heart-icon {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          color: rgba(255,75,104,.88);
+          font: 900 42px/1 ui-monospace, Consolas, monospace;
+          text-shadow: 0 0 8px rgba(255,64,96,.42), 0 1px 2px rgba(0,0,0,.9);
+          opacity: var(--life-heart-beat, 1);
+          transform: scale(var(--life-heart-scale, 1));
+          transform-origin: center;
+          transition: opacity .16s linear, transform .16s ease-out;
+        }
+        #doom-debug-overlay .debug-life-heart .life-heart-value {
+          position: absolute;
+          inset: 4px 0 8px;
+          display: grid;
+          place-items: center;
+          color: #fff7f7;
+          font: 900 16px/1 ui-monospace, Consolas, monospace;
+          text-shadow: 0 1px 2px rgba(0,0,0,.96);
+        }
+        #doom-debug-overlay .debug-life-heart .life-heart-label {
+          position: absolute;
+          left: 42px;
+          top: 17px;
+          min-width: 86px;
+          color: #ffd8de;
+          font: 700 9px/1.05 ui-monospace, Consolas, monospace;
+          text-transform: uppercase;
+          text-shadow: 0 1px 2px rgba(0,0,0,.96);
+          white-space: nowrap;
+        }
+        #doom-debug-overlay .debug-life-heart.is-warning .life-heart-icon {
+          color: rgba(255,198,78,.90);
+          text-shadow: 0 0 9px rgba(255,185,63,.50), 0 1px 2px rgba(0,0,0,.9);
+        }
+        #doom-debug-overlay .debug-life-heart.is-dead .life-heart-icon {
+          color: rgba(255,42,52,.90);
+          text-shadow: 0 0 10px rgba(255,39,39,.60), 0 1px 2px rgba(0,0,0,.9);
+        }
+        #doom-debug-overlay .debug-life-heart.is-invulnerable .life-heart-icon {
+          color: rgba(105,246,255,.92);
+          text-shadow: 0 0 10px rgba(88,235,255,.58), 0 0 18px rgba(255,230,118,.22), 0 1px 2px rgba(0,0,0,.9);
+        }
+        #doom-debug-overlay .debug-life-heart.is-invulnerable .life-heart-label {
+          color: #dffbff;
         }
         #doom-debug-overlay .debug-region {
           position: absolute;
@@ -2112,10 +2182,13 @@
       const kairos = krisis.kairos || krisis.Kairos || {};
       const zoe = kinesis.zoe || kinesis.Zoe || {};
       const action = autoplay.action || autoplay.currentAction || {};
-      const health = Number(zoe.health ?? zoe.Health ?? autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
+      const lifeGlyph = resolveLifeGlyph(autoplay, zoe);
       const lethalRisk = Number(zoe.lethalRisk ?? zoe.LethalRisk ?? autoplay.lethalRisk ?? 0);
       const zoeVetoed = Boolean(zoe.vetoed || zoe.Vetoed || autoplay.zoeVetoed);
-      const zoeWarning = Boolean(zoe.warning || zoe.Warning || zoe.lowHealth || zoe.LowHealth) || lethalRisk >= 0.50 || health < Number(zoe.healthThreshold ?? zoe.HealthThreshold ?? 50);
+      const zoeWarning = Boolean(zoe.warning || zoe.Warning || zoe.lowHealth || zoe.LowHealth)
+        || lethalRisk >= 0.50
+        || lifeGlyph.warning
+        || lifeGlyph.dead;
       const enemyCue = resolveDoomEnemyCue(autoplay, noesis);
       const bridgeHazard = Number(autoplay.bridgeGreenHazard ?? autoplay.milestones?.bridgeGreenCenter ?? 0);
       const axis = String(kairos.selectedAxis || kairos.SelectedAxis || autoplay.kairosPriorityAxis?.selectedAxis || "monitor").toUpperCase();
@@ -2161,7 +2234,7 @@
             `action=${action.move || "none"}/${action.turn || "none"} use=${Boolean(action.use)} fire=${Boolean(action.fire)}`,
             `repeat=${autoplay.actionRepeatFrames || autoplay.repeatActionFrames || 0} turn=${autoplay.repeatTurnFrames || 0}`,
             `useCd=${autoplay.useCooldown || kinesis.usePulseCooldownFrames || kinesis.UsePulseCooldownFrames || 0}`,
-            `hp=${Number.isFinite(health) ? Math.round(health) : 100} zoe=${zoeVetoed ? "VETO" : (zoeWarning ? "warn" : "clear")} risk=${lethalRisk.toFixed(2)}`,
+            `${lifeGlyph.detail} zoe=${zoeVetoed ? "VETO" : (zoeWarning ? "warn" : "clear")} risk=${lethalRisk.toFixed(2)}`,
             `enemy=${enemyCue.short}`
           ].join("\n")
         }
@@ -2284,6 +2357,7 @@
       "locate-first-door-corridor": "Lock Door Corridor",
       "approach-first-door": "Approach First Door",
       "open-first-door": "Open First Door",
+      "enter-computer-room": "Enter Computer Room",
       "enter-computer-control-room": "Enter Computer Room",
       "reach-central-hall": "Reach Central Hall",
       "engage-front-enemy": "Engage Front Enemy",
@@ -2309,6 +2383,151 @@
       return key
         .replace(/[-_]+/g, " ")
         .replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
+    function normalizeLifePhase(value) {
+      const text = String(value || "unknown").toLowerCase();
+      if (text === "healthy"
+        || text === "wounded"
+        || text === "damaged"
+        || text === "critical"
+        || text === "moribund"
+        || text === "dead"
+        || text === "invulnerable") {
+        return text;
+      }
+
+      return "unknown";
+    }
+
+    function firstKnownLifePhase(...values) {
+      for (const value of values) {
+        const phase = normalizeLifePhase(value);
+        if (phase !== "unknown") {
+          return phase;
+        }
+      }
+
+      return "unknown";
+    }
+
+    function firstExplicitBoolean(...values) {
+      for (const value of values) {
+        if (value === true || value === false) {
+          return value;
+        }
+        if (value === 1 || value === 0) {
+          return value === 1;
+        }
+        if (value === "true" || value === "false") {
+          return value === "true";
+        }
+      }
+
+      return false;
+    }
+
+    function resolveLifeLevel(phase, ...values) {
+      for (const value of values) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          continue;
+        }
+
+        const level = Math.max(0, Math.min(5, Math.round(parsed)));
+        if (phase !== "dead" && phase !== "unknown" && level === 0) {
+          continue;
+        }
+
+        return level;
+      }
+
+      return NaN;
+    }
+
+    function resolveLifeGlyph(autoplay = {}, zoe = {}) {
+      const health = autoplay.healthSensor || {};
+      const phase = firstKnownLifePhase(
+        autoplay.healthLikelyDead || health.likelyDead ? "dead" : undefined,
+        autoplay.healthFaceLifePhase,
+        health.healthFaceLifePhase,
+        autoplay.faceLifePhase,
+        health.faceLifePhase,
+        zoe.faceLifePhase,
+        zoe.FaceLifePhase,
+        health.faceLifeTemplatePhase,
+        health.healthFaceLifeTemplatePhase,
+        health.faceLifeQuantizedPhase,
+        health.healthFaceLifeQuantizedPhase);
+      const rawLevel = resolveLifeLevel(
+        phase,
+        autoplay.healthFaceLifeLevel,
+        health.healthFaceLifeLevel,
+        autoplay.faceLifeLevel,
+        health.faceLifeLevel,
+        zoe.faceLifeLevel,
+        zoe.FaceLifeLevel,
+        health.faceLifeTemplateLevel,
+        health.healthFaceLifeTemplateLevel,
+        health.faceLifeQuantizedLevel,
+        health.healthFaceLifeQuantizedLevel);
+      const fallbackLevel = phase === "healthy" || phase === "invulnerable" ? 5
+        : (phase === "wounded" ? 4
+          : (phase === "damaged" ? 3
+            : (phase === "critical" ? 2
+              : (phase === "moribund" ? 1 : 0))));
+      const level = Number.isFinite(rawLevel)
+        ? Math.max(0, Math.min(5, Math.round(rawLevel)))
+        : fallbackLevel;
+      const heartbeatAlive = firstExplicitBoolean(
+        health.faceHeartbeatAlive,
+        health.healthFaceHeartbeatAlive,
+        autoplay.faceHeartbeatAlive,
+        autoplay.healthFaceHeartbeatAlive);
+      const opacityCandidates = [
+        health.faceHeartbeatVisualOpacity,
+        health.healthFaceHeartbeatVisualOpacity,
+        autoplay.faceHeartbeatVisualOpacity,
+        autoplay.healthFaceHeartbeatVisualOpacity,
+        zoe.faceHeartbeatVisualOpacity,
+        zoe.FaceHeartbeatVisualOpacity,
+        health.faceHeartbeatOpacity,
+        health.healthFaceHeartbeatOpacity,
+        autoplay.faceHeartbeatOpacity,
+        autoplay.healthFaceHeartbeatOpacity,
+        zoe.faceHeartbeatOpacity,
+        zoe.FaceHeartbeatOpacity
+      ]
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value));
+      const opacity = Math.max(0, Math.min(1, opacityCandidates.length > 0 ? Math.max(...opacityCandidates) : (heartbeatAlive ? 1 : 0)));
+      const heartbeat = heartbeatAlive || phase === "invulnerable"
+        ? "hb"
+        : `fade${opacity.toFixed(2)}`;
+      const symbol = phase === "invulnerable" ? "∞" : (phase === "dead" ? "0" : String(level));
+      const bars = phase === "invulnerable"
+        ? "■■■■■"
+        : "■".repeat(level) + "□".repeat(Math.max(0, 5 - level));
+      return {
+        phase,
+        level,
+        opacity,
+        heartbeat,
+        symbol,
+        bars,
+        short: `vital ${symbol} ${heartbeat}`,
+        detail: `vital ${symbol} ${bars} ${heartbeat}`,
+        warning: phase === "critical" || phase === "moribund",
+        dead: phase === "dead",
+        invulnerable: phase === "invulnerable"
+      };
+    }
+
+    function formatAutoplayHealthText(autoplay = {}) {
+      const health = autoplay.healthSensor || {};
+      const life = resolveLifeGlyph(autoplay);
+      const dead = life.dead || autoplay.healthLikelyDead || health.likelyDead;
+      return `${dead ? "dead" : "live"}/${life.phase}/${life.heartbeat}/v${life.symbol}/fade${life.opacity.toFixed(2)}/z${Number(autoplay.healthZeroScore || health.zeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || health.activeColumns || 0}/a${autoplay.healthActiveCells || health.activeCells || 0}/${autoplay.healthSignature || health.signature || "000000000000000000000000"}`;
     }
 
     function resolveGoalPanelValue(name, fallback, autoplay) {
@@ -2353,7 +2572,7 @@
         return labelize(objective);
       }
 
-      if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered || autoplay.controlPipeline === "ComputerRoom") {
+      if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered) {
         return "Navigate Control Room";
       }
 
@@ -2391,12 +2610,12 @@
         return "Exit";
       }
 
-      if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered || autoplay.controlPipeline === "ComputerRoom") {
+      if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered) {
         return "ComputerRoom";
       }
 
       if ((milestones.doorOpened || 0) > 0 || milestones.darkZoneEntered || (milestones.computerRoomAdvanceFrames || 0) > 0) {
-        return "ComputerRoom";
+        return "PostDoor";
       }
 
       if (objective.indexOf("first-door") >= 0
@@ -3014,8 +3233,7 @@
       const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
       const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
       const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-      const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
-      const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+      const healthText = formatAutoplayHealthText(autoplay);
       const retryDispatch = autoplay.retryDispatch || {};
       const retryText = `${retryDispatch.active ? "active" : "idle"}/${retryDispatch.cooldownFrames || 0}/${retryDispatch.reason || "none"}`;
       const movement = autoplay.movementSensor || {};
@@ -3477,7 +3695,7 @@
       doomAudioReadout = document.createElement("div");
       doomAudioReadout.id = "doom-audio-readout";
       doomAudioReadout.style.cssText = "grid-row:1;grid-column:2;min-width:0;line-height:1.25;text-shadow:0 1px 2px #000;white-space:normal;overflow:hidden;";
-      doomAudioReadout.textContent = "L 0.00 R 0.00";
+      doomAudioReadout.textContent = "L 0.000 R 0.000\nLv 0.00 Att 1.00";
       const bandRack = document.createElement("div");
       bandRack.style.cssText = "grid-row:2;grid-column:1 / span 2;width:100%;display:grid;grid-template-rows:repeat(3,5px);gap:2px;";
       doomAudioLowFill = createAudioBandFill("#8ee4ff");
@@ -3611,7 +3829,7 @@
         audio: { label: "Audio", signal: "stereo energy", panel: "aisthesis", stage: "primary" },
         movement: { label: "Movement", signal: "motion vector", panel: "aisthesis", stage: "primary" },
         compass: { label: "Compass", signal: "heading vector", panel: "aisthesis", stage: "primary" },
-        health: { label: "Health", signal: "life state", panel: "aisthesis", stage: "primary" },
+        health: { label: "Face Vital", signal: "heart state", panel: "aisthesis", stage: "primary" },
         spatial: { label: "Spatial", signal: "Topos state", panel: "krisis", stage: "topos" },
         motor: { label: "Motor", signal: "input vector", panel: "kinesis", stage: "motion" }
       };
@@ -3621,7 +3839,7 @@
       return {
         motion: { label: "Looming", signal: "flow / approach" },
         wall: { label: "Stuck", signal: "wall / trap" },
-        health: { label: "HP Veto", signal: "life audit" },
+        health: { label: "Face Vital", signal: "heart audit" },
         enemy: { label: "Enemy", signal: "enemy seen" },
         hud: { label: "Entropy", signal: "HUD / uncertainty" },
         computer: { label: "Item", signal: "backtrack / room" },
@@ -3962,11 +4180,26 @@
       const autoplay = status?.autoplay || {};
       const pipeline = autoplay.pipelineState || autoplay.PipelineState || {};
       const krisis = pipeline.krisis || pipeline.Krisis || {};
-      const kairos = krisis.kairos || krisis.Kairos || autoplay.kairosPriorityAxis || {};
+      const kairos = krisis.kairos
+        || krisis.Kairos
+        || autoplay.kairosPriorityAxis
+        || autoplay.KairosPriorityAxis
+        || autoplay.ctgCarrier?.kairos
+        || autoplay.ctgCarrier?.Kairos
+        || autoplay.toposDecisionCarrier?.kairos
+        || autoplay.toposDecisionCarrier?.Kairos
+        || autoplay.ctgObservedScores
+        || {};
       const logos = clampHud01(Number(kairos.logos ?? kairos.Logos ?? autoplay.kairosLogos ?? 0));
       const pathos = clampHud01(Number(kairos.pathos ?? kairos.Pathos ?? autoplay.kairosPathos ?? 0));
       const ethos = clampHud01(Number(kairos.ethos ?? kairos.Ethos ?? autoplay.kairosEthos ?? 0));
-      let axis = String(kairos.selectedAxis || kairos.SelectedAxis || autoplay.kairosPriorityAxis?.selectedAxis || "").toUpperCase();
+      let axis = String(kairos.selectedAxis
+        || kairos.SelectedAxis
+        || kairos.dominantAxis
+        || kairos.DominantAxis
+        || autoplay.toposDecisionCarrier?.dominantAxis
+        || autoplay.kairosPriorityAxis?.selectedAxis
+        || "").toUpperCase();
       if (!axis || axis === "MONITOR") {
         const strongest = [
           ["L", logos],
@@ -4215,7 +4448,8 @@
       }
 
       const autoplay = status?.autoplay || {};
-      const runtimeAudio = autoplay.auditorySnapshot || status?.audio || {};
+      const statusAudio = status?.audio || {};
+      const runtimeAudio = Object.assign({}, statusAudio, autoplay.auditorySnapshot || {});
       const providerBridgeAudio = window.AIKernelWasmAudioProvider?.status?.().lastSnapshot || null;
       const bridgeAudio = fresherAudioSnapshot(doomBridgeAudioSnapshot, providerBridgeAudio);
       const audio = selectHudAudioSnapshot(runtimeAudio, bridgeAudio);
@@ -4223,7 +4457,16 @@
       const leftRaw = clampHud01(Number(audio.leftEnergy || 0));
       const rightRaw = clampHud01(Number(audio.rightEnergy || 0));
       const balance = Math.max(-1, Math.min(1, Number(audio.balance || 0)));
-      const audioEnvelope = updateAudioHudEnvelope(leftRaw, rightRaw, balance);
+      const audioPeakRaw = clampHud01(Math.max(
+        leftRaw,
+        rightRaw,
+        Number(audio.lowEnergy || 0),
+        Number(audio.midEnergy || 0),
+        Number(audio.highEnergy || 0),
+        Number(audio.peakEnergy || 0)));
+      const audioLevelRaw = readHudAudioLevel(audio, audioPeakRaw);
+      const audioAttenuationRaw = readHudAudioAttenuation(audio, audioLevelRaw);
+      const audioEnvelope = updateAudioHudEnvelope(leftRaw, rightRaw, balance, audioPeakRaw, audioLevelRaw, audioAttenuationRaw);
       const left = audioHudLevel(audioEnvelope.left);
       const right = audioHudLevel(audioEnvelope.right);
       if (doomAudioLeftFill) {
@@ -4233,7 +4476,14 @@
         doomAudioRightFill.style.transform = `scaleY(${right.toFixed(3)})`;
       }
       if (doomAudioReadout) {
-        doomAudioReadout.textContent = `L ${leftRaw.toFixed(3)} R ${rightRaw.toFixed(3)} B ${balance.toFixed(2)}`;
+        const level = clampHud01(Number(audioEnvelope.level || 0));
+        const attenuation = clampHud01(Number(audioEnvelope.attenuation ?? (1 - level)));
+        const rmsEnergy = clampHud01(Number(audio.rmsEnergy || 0));
+        const zeroCrossing = clampHud01(Number(audio.zeroCrossingRate || 0));
+        const crestFactor = Math.max(0, Number(audio.crestFactor || 0));
+        const semanticLabel = resolveHudAudioSemanticLabel(audio, statusAudio, autoplay);
+        doomAudioReadout.textContent = `L ${leftRaw.toFixed(3)} R ${rightRaw.toFixed(3)}\nLv ${level.toFixed(2)} Att ${attenuation.toFixed(2)}\nRms ${rmsEnergy.toFixed(2)} Zc ${zeroCrossing.toFixed(2)}\n${semanticLabel}`;
+        doomAudioReadout.title = `audio peak=${audioPeakRaw.toFixed(4)} sourceLevel=${audioLevelRaw.toFixed(3)} level=${level.toFixed(3)} sourceAttenuation=${audioAttenuationRaw.toFixed(3)} attenuation=${attenuation.toFixed(3)} balance=${balance.toFixed(3)} rms=${rmsEnergy.toFixed(3)} crest=${crestFactor.toFixed(3)} zeroCrossing=${zeroCrossing.toFixed(3)} transient=${Number(audio.transientScore || 0).toFixed(3)} bands=${Number(audio.bandLowRatio || 0).toFixed(3)}/${Number(audio.bandMidRatio || 0).toFixed(3)}/${Number(audio.bandHighRatio || 0).toFixed(3)}`;
       }
       updateAudioBandBars(audio);
 
@@ -4274,9 +4524,9 @@
     }
 
     function updateAudioBandBars(audio) {
-      const low = audioHudLevel(Number(audio?.lowEnergy || 0));
-      const mid = audioHudLevel(Number(audio?.midEnergy || 0));
-      const high = audioHudLevel(Number(audio?.highEnergy || 0));
+      const low = audioHudLevel(readHudAudioBandValue(audio, "lowEnergy", "bandLowRatio"));
+      const mid = audioHudLevel(readHudAudioBandValue(audio, "midEnergy", "bandMidRatio"));
+      const high = audioHudLevel(readHudAudioBandValue(audio, "highEnergy", "bandHighRatio"));
       if (doomAudioLowFill) {
         doomAudioLowFill.style.transform = `scaleX(${low.toFixed(3)})`;
       }
@@ -4288,6 +4538,15 @@
       }
     }
 
+    function readHudAudioBandValue(audio, energyKey, ratioKey) {
+      const ratio = Number(audio?.[ratioKey]);
+      if (Number.isFinite(ratio) && ratio > 0) {
+        return ratio;
+      }
+
+      return Number(audio?.[energyKey] || 0);
+    }
+
     function updateAudioEventBadge(audio, spatial, leftRaw, rightRaw, balance, autoplay = {}) {
       if (!doomAudioEventBadge) {
         return;
@@ -4296,7 +4555,7 @@
       const now = typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
         : Date.now();
-      const audioType = normalizeHudEventType(audio?.eventType);
+      const audioType = normalizeHudEventType(audio?.semanticEventType || audio?.semanticClass || audio?.eventType);
       const spatialType = normalizeHudEventType(spatial?.eventType);
       const eventType = audioType !== "none" ? audioType : spatialType;
       const phaseText = String(`${autoplay?.objective || ""} ${autoplay?.controlPipeline || ""} ${autoplay?.strategyContext || ""}`).toLowerCase();
@@ -4400,6 +4659,14 @@
         return "Door motion";
       }
 
+      if (eventType === "door-open") {
+        return "Door open";
+      }
+
+      if (eventType === "door-open-failed") {
+        return "Door failed";
+      }
+
       if (eventType === "use-failed-voice") {
         return "Use failed";
       }
@@ -4414,6 +4681,22 @@
 
       if (eventType.indexOf("spatial") >= 0) {
         return "Spatial cue";
+      }
+
+      if (eventType === "weapon-fire") {
+        return "Weapon fire";
+      }
+
+      if (eventType === "enemy-attack") {
+        return "Enemy attack";
+      }
+
+      if (eventType === "enemy-voice") {
+        return "Enemy voice";
+      }
+
+      if (eventType === "unclassified-sfx") {
+        return "Unclassified SFX";
       }
 
       return "Audio cue";
@@ -4659,12 +4942,12 @@
 
       if (key === "health") {
         const health = status?.health || autoplay.healthSensor || {};
+        const lifeGlyph = resolveLifeGlyph(autoplay, health);
         if (health.likelyDead || health.retryRequested) {
-          return "retry signal";
+          return `${lifeGlyph.short} retry`;
         }
-        const confidence = Number(health.confidence || 0);
-        if (health.active || confidence > 0) {
-          return `live / c ${confidence.toFixed(2)}`;
+        if (health.active || lifeGlyph.phase !== "unknown" || lifeGlyph.opacity > 0) {
+          return `${lifeGlyph.short} / ${lifeGlyph.phase}`;
         }
         return descriptor.signal;
       }
@@ -4963,7 +5246,11 @@
         Number(snapshot.rightEnergy || 0),
         Number(snapshot.lowEnergy || 0),
         Number(snapshot.midEnergy || 0),
-        Number(snapshot.highEnergy || 0)
+        Number(snapshot.highEnergy || 0),
+        Number(snapshot.peakEnergy || 0),
+        Number(snapshot.waveformPeak || 0),
+        Number(snapshot.rmsEnergy || 0),
+        Number(snapshot.meanAbsEnergy || 0)
       );
     }
 
@@ -5002,26 +5289,87 @@
         : runtimeAudio || {};
     }
 
-    function updateAudioHudEnvelope(leftRaw, rightRaw, balance) {
+    function meaningfulHudAudioLabel(value) {
+      const text = String(value || "").trim();
+      if (!text || /^(none|neutral|no audio|no audio event)$/i.test(text)) {
+        return "";
+      }
+
+      return text;
+    }
+
+    function resolveHudAudioSemanticLabel(audio = {}, statusAudio = {}, autoplay = {}) {
+      const candidates = [
+        statusAudio.semanticLabel,
+        autoplay.doorOpenAudioEvidence?.semanticLabel,
+        audio.semanticLabel,
+        statusAudio.semanticEventType,
+        audio.semanticEventType,
+        statusAudio.eventType,
+        audio.eventType
+      ];
+      for (const candidate of candidates) {
+        const label = meaningfulHudAudioLabel(candidate);
+        if (label) {
+          return label;
+        }
+      }
+
+      return "No audio";
+    }
+
+    function readHudAudioLevel(audio, peakRaw = 0) {
+      const supplied = Number(audio?.level);
+      if (Number.isFinite(supplied)) {
+        return clampHud01(supplied);
+      }
+
+      return clampHud01(Math.sqrt(Math.max(0, clampHud01(peakRaw)) * 2.25));
+    }
+
+    function readHudAudioAttenuation(audio, levelRaw = 0) {
+      const supplied = Number(audio?.attenuation);
+      if (Number.isFinite(supplied)) {
+        return clampHud01(supplied);
+      }
+
+      return clampHud01(1 - clampHud01(levelRaw));
+    }
+
+    function updateAudioHudEnvelope(leftRaw, rightRaw, balance, peakRaw = Math.max(leftRaw, rightRaw), levelRaw = readHudAudioLevel(null, peakRaw), attenuationRaw = readHudAudioAttenuation(null, levelRaw)) {
       const now = typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
         : Date.now();
       const previousAt = doomAudioHudEnvelope.updatedAt || now;
       const elapsedMs = Math.max(0, now - previousAt);
       const decay = Math.pow(0.34, elapsedMs / 1000);
-      const hasCurrentSignal = leftRaw > 0.001 || rightRaw > 0.001;
+      const hasCurrentSignal = peakRaw > 0.001;
       const heldLeft = clampHud01(doomAudioHudEnvelope.left * decay);
       const heldRight = clampHud01(doomAudioHudEnvelope.right * decay);
+      const heldPeak = clampHud01(Math.max(
+        Number(doomAudioHudEnvelope.peak || 0),
+        Number(doomAudioHudEnvelope.left || 0),
+        Number(doomAudioHudEnvelope.right || 0)) * decay);
       const nextLeft = hasCurrentSignal ? leftRaw : heldLeft;
       const nextRight = hasCurrentSignal ? rightRaw : heldRight;
+      const nextPeak = hasCurrentSignal ? clampHud01(peakRaw) : heldPeak;
+      const nextLevel = hasCurrentSignal
+        ? clampHud01(levelRaw)
+        : clampHud01(Number(doomAudioHudEnvelope.level || 0) * decay);
       const nextBalance = hasCurrentSignal
         ? balance
         : doomAudioHudEnvelope.balance;
+      const nextAttenuation = hasCurrentSignal
+        ? clampHud01(attenuationRaw)
+        : clampHud01(1 - nextLevel);
 
       doomAudioHudEnvelope = {
         left: nextLeft,
         right: nextRight,
         balance: nextBalance,
+        peak: nextPeak,
+        level: nextLevel,
+        attenuation: nextAttenuation,
         updatedAt: now
       };
 
@@ -5158,7 +5506,7 @@
         updateRuntimeStatus(status, "status");
         const milestones = autoplay.milestones || {};
         const motionText = `${autoplay.motion9Signature || "000000000"}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/o${Number(autoplay.motionObstacleScore || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/e${Number(autoplay.motionEntranceScore || 0).toFixed(2)}`;
-        appendConsoleLine("[ RESP ]", "log-info", `${status.state}: wasmLoaded=${status.wasmLoaded}; wadLoaded=${status.wadLoaded}; modelLoaded=${status.modelLoaded}; autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}; manualMove=${Boolean(autoplay.manualMove)}; pipeline=${autoplay.controlPipeline || "Idle"}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; motion9=${motionText}; ammo=${autoplay.ammoLikelyEmpty ? "empty" : "ok"}; health=${autoplay.healthLikelyDead ? "dead" : "live"}; doors=${milestones.doorOpened || 0}; enemies=${milestones.enemyDefeated || 0}; predictions=${autoplay.predictions || 0}; reused=${autoplay.reused || 0}; fps=${status.fps || 0}/${status.targetFps || 30}; yield=${Math.round(status.uiYieldMs || 16)}ms; gpuWait=${Math.round(status.lastGpuWaitMs || 0)}ms; gpuTimeouts=${status.gpuWaitTimeouts || 0}; renderer=${status.renderer}; framebuffer=${status.framebuffer}`);
+        appendConsoleLine("[ RESP ]", "log-info", `${status.state}: wasmLoaded=${status.wasmLoaded}; wadLoaded=${status.wadLoaded}; modelLoaded=${status.modelLoaded}; autoplay=${autoplay.enabled ? autoplay.mode || "on" : "off"}; manualMove=${Boolean(autoplay.manualMove)}; pipeline=${autoplay.controlPipeline || "Idle"}; vision=${autoplay.vision || "none"}; zeroCopy=${Boolean(autoplay.zeroCopy)}; safety=${autoplay.safetyReason || "none"}; motion9=${motionText}; ammo=${autoplay.ammoLikelyEmpty ? "empty" : "ok"}; health=${formatAutoplayHealthText(autoplay)}; doors=${milestones.doorOpened || 0}; enemies=${milestones.enemyDefeated || 0}; predictions=${autoplay.predictions || 0}; reused=${autoplay.reused || 0}; fps=${status.fps || 0}/${status.targetFps || 30}; yield=${Math.round(status.uiYieldMs || 16)}ms; gpuWait=${Math.round(status.lastGpuWaitMs || 0)}ms; gpuTimeouts=${status.gpuWaitTimeouts || 0}; renderer=${status.renderer}; framebuffer=${status.framebuffer}`);
         return;
       }
 
@@ -5221,7 +5569,13 @@
         const audio = status.audio || {};
         const bridge = window.AIKernelWasmAudioProvider?.status?.() || {};
         const bridgeAudio = bridge.lastSnapshot || {};
-        appendConsoleLine("[ AUDIO]", audio.muted === false ? "log-ok" : "log-info", `muted=${audio.muted !== false}; bridge=${bridge.contextState || "unknown"}; native=${audio.nativeAvailable ? "yes" : "no"}/${audio.nativeReady ? "ready" : "off"}; nativeEvents=${audio.nativeEvents || 0}; nativeFrames=${audio.nativeFramesDrained || 0}; pending=${audio.nativeAvailableFrames || 0}; pcm=${bridge.pcmPacketCount || 0}/${bridge.pcmFramesPlayed || 0}/g${Number(bridge.lastPcmGain || 0).toFixed(1)}/p${Number(bridge.lastPcmPeak || 0).toFixed(2)}; left=${Number(audio.leftEnergy || 0).toFixed(2)}; right=${Number(audio.rightEnergy || 0).toFixed(2)}; bridgeLeft=${Number(bridgeAudio.leftEnergy || 0).toFixed(2)}; bridgeRight=${Number(bridgeAudio.rightEnergy || 0).toFixed(2)}; balance=${Number(audio.balance || bridgeAudio.balance || 0).toFixed(2)}; bands=${Number(audio.lowEnergy || 0).toFixed(2)}/${Number(audio.midEnergy || 0).toFixed(2)}/${Number(audio.highEnergy || 0).toFixed(2)}/${audio.dominantBand || "none"}; event=${audio.eventType || bridgeAudio.eventType || "none"}; lastError=${bridge.lastError || "none"}`);
+        const audioPeak = clampHud01(Math.max(Number(audio.leftEnergy || 0), Number(audio.rightEnergy || 0), Number(audio.lowEnergy || 0), Number(audio.midEnergy || 0), Number(audio.highEnergy || 0), Number(audio.peakEnergy || 0)));
+        const bridgePeak = clampHud01(Math.max(Number(bridgeAudio.leftEnergy || 0), Number(bridgeAudio.rightEnergy || 0), Number(bridgeAudio.lowEnergy || 0), Number(bridgeAudio.midEnergy || 0), Number(bridgeAudio.highEnergy || 0), Number(bridgeAudio.peakEnergy || 0)));
+        const audioLevel = readHudAudioLevel(audio, audioPeak);
+        const bridgeLevel = readHudAudioLevel(bridgeAudio, bridgePeak);
+        const audioAttenuation = readHudAudioAttenuation(audio, audioLevel);
+        const bridgeAttenuation = readHudAudioAttenuation(bridgeAudio, bridgeLevel);
+        appendConsoleLine("[ AUDIO]", audio.muted === false ? "log-ok" : "log-info", `muted=${audio.muted !== false}; bridge=${bridge.contextState || "unknown"}; native=${audio.nativeAvailable ? "yes" : "no"}/${audio.nativeReady ? "ready" : "off"}; nativeEvents=${audio.nativeEvents || 0}; nativeFrames=${audio.nativeFramesDrained || 0}; pending=${audio.nativeAvailableFrames || 0}; pcm=${bridge.pcmPacketCount || 0}/${bridge.pcmFramesPlayed || 0}/g${Number(bridge.lastPcmGain || 0).toFixed(1)}/p${Number(bridge.lastPcmPeak || 0).toFixed(2)}; left=${Number(audio.leftEnergy || 0).toFixed(2)}; right=${Number(audio.rightEnergy || 0).toFixed(2)}; level=${audioLevel.toFixed(2)}; att=${audioAttenuation.toFixed(2)}; bridgeLeft=${Number(bridgeAudio.leftEnergy || 0).toFixed(2)}; bridgeRight=${Number(bridgeAudio.rightEnergy || 0).toFixed(2)}; bridgeLevel=${bridgeLevel.toFixed(2)}; bridgeAtt=${bridgeAttenuation.toFixed(2)}; balance=${Number(audio.balance || bridgeAudio.balance || 0).toFixed(2)}; bands=${Number(audio.lowEnergy || 0).toFixed(2)}/${Number(audio.midEnergy || 0).toFixed(2)}/${Number(audio.highEnergy || 0).toFixed(2)}/${audio.dominantBand || "none"}; event=${audio.eventType || bridgeAudio.eventType || "none"}; lastError=${bridge.lastError || "none"}`);
         return;
       }
 
@@ -5389,8 +5743,7 @@
         const computerText = `computer=${milestones.computerRoomEntered ? "yes" : "no"}/${milestones.computerRoomFrames || 0}/${Number(milestones.computerRoomScore || 0).toFixed(2)}/${Number(milestones.computerBlueScore || 0).toFixed(2)}/${Number(milestones.computerRedLightScore || 0).toFixed(2)}/${Number(milestones.computerDarkPanelScore || 0).toFixed(2)}/${Number(milestones.computerPanelScore || 0).toFixed(2)}`;
         const milestoneText = `door=${milestones.doorOpened || 0}; dark=${milestones.darkZoneEntered ? "yes" : "no"}/${milestones.darkZoneFrames || 0}; darkArea=${Number(milestones.darkAreaScore || 0).toFixed(2)}; luma=${Number(milestones.gameplayLuma || 0).toFixed(1)}; ${computerText}; ${routeText}; ${mapText}; ${progressText}; enemy=${milestones.enemyDefeated || 0}; ${alertText}; bursts=${milestones.combatFireFrames || 0}; peak=${Number(milestones.enemyConfidencePeak || 0).toFixed(2)}; drop=${milestones.enemyDropFrames || 0}`;
         const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-        const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
-        const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${Number(autoplay.healthZeroScore || 0).toFixed(2)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+        const healthText = formatAutoplayHealthText(autoplay);
         const motionText = `${autoplay.motion9Signature || "000000000"}/${Number(autoplay.motion9Delta ?? 255).toFixed(2)}/f${Number(autoplay.motionForwardProgress || 0).toFixed(2)}/o${Number(autoplay.motionObstacleScore || 0).toFixed(2)}/t${Number(autoplay.motionTurnScore || 0).toFixed(2)}/e${Number(autoplay.motionEntranceScore || 0).toFixed(2)}/s${Number(autoplay.motionStallScore || 0).toFixed(2)}/${autoplay.motionIntent || "idle"}`;
         const footText = `${Number(autoplay.footObstacleScore || 0).toFixed(2)}/${Number(autoplay.priorFootObstacleScore || 0).toFixed(2)}/f${Number(autoplay.footObstacleFlickerScore || 0).toFixed(2)}/b${autoplay.footObstacleBounceFrames || 0}/d${Number(autoplay.footObstacleBandDelta || 0).toFixed(2)}`;
         updateRuntimeStatus(status, "autoplay-status");
@@ -5445,6 +5798,14 @@
         }
 
         await typeDoomCheat(cheat);
+        if (cheat === "iddqd") {
+          if (typeof doomRuntime.setAutoplayInvulnerableHint === "function") {
+            await Promise.resolve(doomRuntime.setAutoplayInvulnerableHint(1800));
+            appendConsoleLine("[CHEAT]", "log-ok", "face-vital invulnerable hint latched for Zoe/HUD.");
+          } else {
+            appendConsoleLine("[CHEAT]", "log-warn", "face-vital invulnerable hint is unavailable on this runtime surface.");
+          }
+        }
         appendConsoleLine("[CHEAT]", "log-ok", `${cheat} sent as DOOM key events.`);
       }
 
@@ -5456,6 +5817,7 @@
 
         const wasAutoplay = Boolean(doomRuntime.status().autoplay?.enabled);
         await doomRuntime.setAutoplay(false);
+        doomRuntime.resetAutoplaySensorState?.("pre-restart-play");
         releaseAllDoomInputs();
         for (let index = 0; index < 3; index += 1) {
           sendDoomInput("use", true, 320);
@@ -5463,6 +5825,7 @@
           sendDoomInput("enter", true, 220);
           await new Promise(resolve => setTimeout(resolve, 320));
         }
+        doomRuntime.resetAutoplaySensorState?.("post-restart-play");
         if (wasAutoplay) {
           await doomRuntime.setAutoplay(true);
         }
@@ -5782,10 +6145,20 @@
       return (await ensureDoomDebugCaptureApi()).captureGpuSpatialReasoningOutput(options);
     }
 
+    async function captureHealthFaceDiagnostics(options = {}) {
+      if (!doomRuntime || typeof doomRuntime.captureHealthFaceDiagnostics !== "function") {
+        return {
+          ok: false,
+          reason: "health-face-diagnostics-unavailable",
+          timestamp: new Date().toISOString()
+        };
+      }
+
+      return doomRuntime.captureHealthFaceDiagnostics(options);
+    }
+
     function getLastPublishedCapture() {
-      return (doomDebugCaptureApi || window.AIKernelDoomDebugCapture)?.getLastPublishedCapture?.()
-        || window.AIKernelDoomLastPublishedRawCapture
-        || null;
+      return window.AIKernelDoomLastPublishedRawCapture || null;
     }
 
     async function getSchemaDefinitions() {
@@ -5898,6 +6271,7 @@
       captureDisplayFrame,
       captureGpuAisthesisFeatures,
       captureGpuSpatialReasoningOutput,
+      captureHealthFaceDiagnostics,
       getLastPublishedCapture,
       getSchemaDefinitions,
       sendSchemaDefinitions,
@@ -5914,6 +6288,7 @@
       captureGameFrame,
       captureGpuAisthesisFeatures,
       captureGpuSpatialReasoningOutput,
+      captureHealthFaceDiagnostics,
       getLastPublishedCapture
     });
 
@@ -6571,8 +6946,8 @@
 
       if (panic) {
         panic.hidden = false;
+        panic.style.display = "block";
       }
-      panic.style.display = "block";
       setApprovalNoticeHtml("ready");
       promptInput.disabled = false;
       promptSubmit.disabled = false;

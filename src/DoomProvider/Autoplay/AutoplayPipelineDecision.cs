@@ -88,6 +88,42 @@ public sealed record AutoplayPipelineDecision(
     /// JA: 評価済み C# runtime context から射影された集約済み autoplay packet です。
     /// </summary>
     public DoomAutoplayStateDto AutoplayState { get; init; } = DoomAutoplayStateDto.Empty;
+
+    /// <summary>
+    /// EN: Active phase pipeline set chosen before stage arbitration.
+    /// JA: stage arbitration の前に選択された active phase pipeline set です。
+    /// </summary>
+    public string PhasePipelineId { get; init; } = "fallback-all";
+
+    /// <summary>
+    /// EN: Whether the active phase pipeline is expected to suppress unrelated stages.
+    /// JA: active phase pipeline が無関係な stage を抑制する想定かどうかを示します。
+    /// </summary>
+    public bool PhasePipelineExclusive { get; init; }
+
+    /// <summary>
+    /// EN: Number of stages admitted into arbitration after phase-pipeline filtering.
+    /// JA: phase-pipeline filtering 後に arbitration へ入った stage 数です。
+    /// </summary>
+    public int ActiveStageCount { get; init; }
+
+    /// <summary>
+    /// EN: Active semantic compound action sequence selected by the phase runtime.
+    /// JA: phase runtime が選択した active semantic compound action sequence です。
+    /// </summary>
+    public string ActionSequenceId { get; init; } = "none";
+
+    /// <summary>
+    /// EN: Active step identifier inside the semantic compound action sequence.
+    /// JA: semantic compound action sequence 内の active step identifier です。
+    /// </summary>
+    public string ActionSequenceStepId { get; init; } = "none";
+
+    /// <summary>
+    /// EN: One-based frame index inside the active semantic compound action sequence.
+    /// JA: active semantic compound action sequence 内の 1-based frame index です。
+    /// </summary>
+    public int ActionSequenceFrame { get; init; }
 }
 
 /// <summary>

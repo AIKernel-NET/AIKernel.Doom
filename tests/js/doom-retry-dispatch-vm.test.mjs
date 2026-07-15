@@ -132,6 +132,64 @@ const recovered = retry.schedule(repeatState, { healthSensor: { retryRequested: 
 assert(recovered.reason === "not-requested", "cleared health evidence should release the retry recovery latch");
 assert(retry.snapshot(repeatState).awaitingRecovery === false, "recovery latch should clear when health retry evidence clears");
 
+const noReasonRetryState = retry.createState();
+const noReasonRetryStatus = {
+  healthSensor: {
+    retryRequested: true,
+    likelyDead: false,
+    retryReason: "none"
+  }
+};
+assert(retry.schedule(noReasonRetryState, noReasonRetryStatus, host).reason === "not-requested", "health retry with reason=none and no death evidence must not schedule");
+assert(retry.schedule(noReasonRetryState, { healthSensor: { retryRequested: true, likelyDead: false } }, host).reason === "not-requested", "health retry without reason and no death evidence must not schedule");
+assert(retry.snapshot(noReasonRetryState).active === false, "reasonless retry must leave retry dispatcher inactive");
+
+const nativeRestartState = retry.createState();
+const nativeRestartStatus = {
+  csharpFirstDoor: {
+    nativeDeathConfirmed: true,
+    restartRequested: true,
+    restartRequestId: "native-death:1:512:9",
+    restartReason: "native-player-death-confirmed"
+  },
+  healthSensor: {
+    retryRequested: false,
+    likelyDead: false,
+    retryReason: "none"
+  }
+};
+const nativeRestartScheduled = retry.schedule(nativeRestartState, nativeRestartStatus, host);
+assert(nativeRestartScheduled.scheduled === true, "validated C# restart requests should enter the existing retry sequence immediately");
+assert(nativeRestartScheduled.queuedSteps === 24, "native restart transport must retain the existing bounded tap sequence");
+assert(nativeRestartScheduled.reason === "native-player-death-confirmed", "native C# restart reason should cross mechanically");
+assert(nativeRestartScheduled.restartRequestId === "native-death:1:512:9", "native C# restart id should cross mechanically");
+assert(retry.snapshot(nativeRestartState).restartRequestId === "native-death:1:512:9", "retry snapshot should retain native restart correlation");
+retry.clear(nativeRestartState, host);
+
+const malformedNativeRestartState = retry.createState();
+const malformedNativeRestart = retry.schedule(malformedNativeRestartState, {
+  csharpFirstDoor: {
+    restartRequested: true,
+    restartRequestId: "",
+    restartReason: "native-player-death-confirmed"
+  },
+  healthSensor: { retryRequested: false }
+}, host);
+assert(malformedNativeRestart.reason === "not-requested", "incomplete native restart transport must fail closed");
+
+const deadWithoutReasonState = retry.createState();
+const deadWithoutReasonStatus = {
+  healthSensor: {
+    retryRequested: true,
+    likelyDead: true
+  }
+};
+retry.schedule(deadWithoutReasonState, deadWithoutReasonStatus, host);
+retry.schedule(deadWithoutReasonState, deadWithoutReasonStatus, host);
+const deadWithoutReasonScheduled = retry.schedule(deadWithoutReasonState, deadWithoutReasonStatus, host);
+assert(deadWithoutReasonScheduled.scheduled === true, "likely-dead evidence without explicit reason should still schedule");
+assert(deadWithoutReasonScheduled.reason === "health-death", "likely-dead evidence without explicit reason should normalize to health-death");
+
 retry.clear(state, host);
 assert(retry.snapshot(state).reason === "none", "clear should reset reason");
 assert(queued.some(item => item.name === "enter" && item.pressed === false), "clear should release enter key");

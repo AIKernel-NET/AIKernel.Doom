@@ -16,6 +16,163 @@
     return Boolean(value);
   }
 
+  function normalizeLifePhase(value) {
+    const text = String(value || "unknown").toLowerCase();
+    if (text === "healthy"
+      || text === "wounded"
+      || text === "damaged"
+      || text === "critical"
+      || text === "moribund"
+      || text === "dead"
+      || text === "invulnerable") {
+      return text;
+    }
+
+    return "unknown";
+  }
+
+  function firstKnownLifePhase(...values) {
+    for (const value of values) {
+      const phase = normalizeLifePhase(value);
+      if (phase !== "unknown") {
+        return phase;
+      }
+    }
+
+    return "unknown";
+  }
+
+  function firstExplicitBoolean(...values) {
+    for (const value of values) {
+      if (value === true || value === false) {
+        return value;
+      }
+      if (value === 1 || value === 0) {
+        return value === 1;
+      }
+      if (value === "true" || value === "false") {
+        return value === "true";
+      }
+    }
+
+    return false;
+  }
+
+  function resolveLifeLevel(phase, ...values) {
+    for (const value of values) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+
+      const level = Math.max(0, Math.min(5, Math.round(parsed)));
+      if (phase !== "dead" && phase !== "unknown" && level === 0) {
+        continue;
+      }
+
+      return level;
+    }
+
+    return NaN;
+  }
+
+  function resolveLifeText(autoplay = {}) {
+    const health = autoplay.healthSensor || {};
+    const pipeline = autoplay.pipelineState || autoplay.PipelineState || {};
+    const kinesis = pipeline.kinesis || pipeline.Kinesis || {};
+    const zoe = kinesis.zoe || kinesis.Zoe || {};
+    const likelyDead = Boolean(
+      autoplay.healthLikelyDead
+      || autoplay.likelyDead
+      || autoplay.healthNoHeartbeatDeath
+      || autoplay.noHeartbeatDeath
+      || autoplay.healthFixedFaceDeath
+      || autoplay.fixedFaceDeath
+      || autoplay.healthFaceLifeNoHeartbeatDeath
+      || health.likelyDead
+      || health.retryRequested
+      || health.healthNoHeartbeatDeath
+      || health.faceLifeNoHeartbeatDeath
+      || health.noHeartbeatDeath
+      || health.healthFixedFaceDeath
+      || health.fixedFaceDeath);
+    const invulnerable = Boolean(
+      autoplay.healthInvulnerable
+      || autoplay.invulnerable
+      || autoplay.godMode
+      || health.healthInvulnerable
+      || health.invulnerable
+      || health.godMode);
+    const phase = likelyDead
+      ? "dead"
+      : (invulnerable
+        ? "invulnerable"
+        : firstKnownLifePhase(
+          autoplay.healthFaceLifePhase,
+          health.healthFaceLifePhase,
+          autoplay.faceLifePhase,
+          health.faceLifePhase,
+          zoe.faceLifePhase,
+          zoe.FaceLifePhase,
+          health.faceLifeTemplatePhase,
+          health.healthFaceLifeTemplatePhase,
+          health.faceLifeQuantizedPhase,
+          health.healthFaceLifeQuantizedPhase));
+    const rawLevel = likelyDead
+      ? 0
+      : (invulnerable
+        ? 5
+        : resolveLifeLevel(
+          phase,
+          autoplay.healthFaceLifeLevel,
+          health.healthFaceLifeLevel,
+          autoplay.faceLifeLevel,
+          health.faceLifeLevel,
+          zoe.faceLifeLevel,
+          zoe.FaceLifeLevel,
+          health.faceLifeTemplateLevel,
+          health.healthFaceLifeTemplateLevel,
+          health.faceLifeQuantizedLevel,
+          health.healthFaceLifeQuantizedLevel));
+    const fallbackLevel = phase === "healthy" || phase === "invulnerable" ? 5
+      : (phase === "wounded" ? 4
+        : (phase === "damaged" ? 3
+          : (phase === "critical" ? 2
+            : (phase === "moribund" ? 1 : 0))));
+    const level = Number.isFinite(rawLevel)
+      ? Math.max(0, Math.min(5, Math.round(rawLevel)))
+      : fallbackLevel;
+    const heartbeatAlive = firstExplicitBoolean(
+      health.faceHeartbeatAlive,
+      health.healthFaceHeartbeatAlive,
+      autoplay.faceHeartbeatAlive,
+      autoplay.healthFaceHeartbeatAlive);
+    const noHeartbeatFrames = Math.max(0, Math.floor(number(
+      health.faceNoHeartbeatFrames
+      ?? health.healthFaceNoHeartbeatFrames
+      ?? autoplay.healthFaceNoHeartbeatFrames
+      ?? autoplay.faceNoHeartbeatFrames,
+      0)));
+    const opacity = likelyDead
+      ? 1
+      : Math.max(0, Math.min(1, number(
+        health.faceHeartbeatVisualOpacity
+        ?? health.healthFaceHeartbeatVisualOpacity
+        ?? autoplay.faceHeartbeatVisualOpacity
+        ?? autoplay.healthFaceHeartbeatVisualOpacity
+        ?? health.faceHeartbeatOpacity
+        ?? health.healthFaceHeartbeatOpacity
+        ?? autoplay.faceHeartbeatOpacity
+        ?? autoplay.healthFaceHeartbeatOpacity,
+        heartbeatAlive ? 1 : 0)));
+    const heartbeat = likelyDead
+      ? "flat"
+      : (heartbeatAlive || phase === "invulnerable" ? "hb" : `fade${opacity.toFixed(2)}`);
+    const symbol = phase === "invulnerable" ? "∞" : (phase === "dead" ? "0" : String(level));
+    const dead = likelyDead || phase === "dead";
+    return `${dead ? "dead" : "live"}/${phase}/${heartbeat}/v${symbol}/fade${opacity.toFixed(2)}/nh${noHeartbeatFrames}/z${fixed(autoplay.healthZeroScore ?? health.zeroScore)}/c${autoplay.healthActiveColumns || health.activeColumns || 0}/a${autoplay.healthActiveCells || health.activeCells || 0}/${autoplay.healthSignature || health.signature || "000000000000000000000000"}`;
+  }
+
   function htmlEscape(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -130,8 +287,7 @@
     const strategyText = `${autoplay.strategyName || "unknown"}/${autoplay.strategyContext || "unknown"}/p${autoplay.strategyPriority || 0}`;
     const enemyText = `${fixed(autoplay.enemyConfidence)}/${autoplay.enemyTurn || "none"}/${autoplay.enemyCluster || "none"}/${autoplay.enemyFireReady ? "fire" : "hold"}/${fixed(autoplay.enemyDistance, 2, 1)}/c${fixed(autoplay.enemyCenterCellConfidence)}`;
     const ammoText = `${autoplay.ammoLikelyEmpty ? "empty" : "ok"}/${autoplay.ammoSignature || "000000000000000000000"}`;
-    const healthValue = Number(autoplay.healthEstimatedPercent ?? autoplay.healthSensor?.value ?? autoplay.healthSensor?.health ?? 100);
-    const healthText = `${autoplay.healthLikelyDead ? "dead" : "live"}/hp${Number.isFinite(healthValue) ? Math.round(healthValue) : 100}/z${fixed(autoplay.healthZeroScore)}/c${autoplay.healthActiveColumns || 0}/a${autoplay.healthActiveCells || 0}/${autoplay.healthSignature || "000000000000000000000000"}`;
+    const healthText = resolveLifeText(autoplay);
     const retryDispatch = autoplay.retryDispatch || {};
     const retryText = `${retryDispatch.active ? "active" : "idle"}/${retryDispatch.cooldownFrames || 0}/${retryDispatch.reason || "none"}`;
     const movement = autoplay.movementSensor || {};

@@ -51,6 +51,30 @@ public sealed record SensorFusion(
     int QDelta)
 {
     /// <summary>
+    /// [EN] Gets or initializes the trusted gameplay door-open count supplied by the runtime boundary.
+    /// [JA] runtime boundary が供給する信頼済み gameplay door-open count を取得または初期化します。
+    /// </summary>
+    public int DoorOpenedCount { get; init; }
+
+    /// <summary>
+    /// [EN] Gets or initializes whether a trusted first-door-open milestone has been observed.
+    /// [JA] 信頼済み first-door-open milestone が観測済みかどうかを取得または初期化します。
+    /// </summary>
+    public bool TrustedFirstDoorOpenMilestone { get; init; }
+
+    /// <summary>
+    /// [EN] Gets or initializes the remaining cooldown before another Use pulse may be emitted.
+    /// [JA] 次の Use pulse を出力できるまでの残り cooldown を取得または初期化します。
+    /// </summary>
+    public int UsePulseCooldownFrames { get; init; }
+
+    /// <summary>
+    /// [EN] Gets or initializes whether gameplay telemetry has confirmed central-hall entry.
+    /// [JA] gameplay telemetry が central-hall entry を確認済みかどうかを取得または初期化します。
+    /// </summary>
+    public bool CentralHallEntered { get; init; }
+
+    /// <summary>
     /// [EN] Gets or initializes the canonical tensor view derived from this fused sensor packet.
     /// [JA] この fused sensor packet から派生した canonical tensor view を取得または初期化します。
     /// </summary>

@@ -38,6 +38,153 @@
     return Math.max(0, Math.min(1, number(value, 0)));
   }
 
+  function faceHealthPercentFromLevel(level, phase) {
+    const normalizedPhase = String(phase || "").trim().toLowerCase();
+    if (normalizedPhase === "dead" || normalizedPhase === "death" || normalizedPhase === "dead-fixed") {
+      return 0;
+    }
+    if (normalizedPhase === "invulnerable" || normalizedPhase === "god" || normalizedPhase === "iddqd") {
+      return 100;
+    }
+
+    const parsed = Math.round(number(level, NaN));
+    if (!Number.isFinite(parsed)) {
+      return NaN;
+    }
+
+    if (parsed >= 5) {
+      return 100;
+    }
+    if (parsed === 4) {
+      return 75;
+    }
+    if (parsed === 3) {
+      return 55;
+    }
+    if (parsed === 2) {
+      return 30;
+    }
+    if (parsed === 1) {
+      return 12;
+    }
+    return NaN;
+  }
+
+  function meaningfulFaceValue(...values) {
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const text = String(value).trim().toLowerCase();
+      if (text && text !== "unknown" && text !== "none") {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  function isDefinitiveFacePhase(phase) {
+    const normalized = String(phase || "").trim().toLowerCase();
+    return normalized === "dead"
+      || normalized === "death"
+      || normalized === "dead-fixed"
+      || normalized === "invulnerable"
+      || normalized === "god"
+      || normalized === "iddqd";
+  }
+
+  function resolveHealthPercent(fallback, ...sources) {
+    let numericHealth = NaN;
+    let faceHealth = NaN;
+    let faceConfidence = 0;
+    let faceAuthoritative = false;
+
+    sources.forEach(source => {
+      if (!source || typeof source !== "object") {
+        return;
+      }
+
+      const numeric = number(
+        source.health
+          ?? source.hp
+          ?? source.value
+          ?? source.estimatedPercent
+          ?? source.healthEstimatedPercent,
+        NaN);
+      if (Number.isFinite(numeric) && !Number.isFinite(numericHealth)) {
+        numericHealth = Math.max(0, Math.min(100, numeric));
+      }
+
+      const stablePhase = meaningfulFaceValue(
+        source.faceLifeTemplatePhase,
+        source.healthFaceLifeTemplatePhase,
+        source.faceLifePhase,
+        source.healthFaceLifePhase);
+      const stableLevel = meaningfulFaceValue(
+        source.faceLifeTemplateLevel,
+        source.healthFaceLifeTemplateLevel,
+        source.faceLifeLevel,
+        source.healthFaceLifeLevel);
+      let candidate = faceHealthPercentFromLevel(stableLevel, stablePhase);
+      if (!Number.isFinite(candidate)) {
+        const quantizedPhase = meaningfulFaceValue(
+          source.faceLifeQuantizedPhase,
+          source.healthFaceLifeQuantizedPhase);
+        const quantizedLevel = meaningfulFaceValue(
+          source.faceLifeQuantizedLevel,
+          source.healthFaceLifeQuantizedLevel);
+        const quantizedCandidate = faceHealthPercentFromLevel(quantizedLevel, quantizedPhase);
+        const quantizedConfidence = clamp01(source.faceLifeQuantizedConfidence
+          ?? source.healthFaceLifeQuantizedConfidence
+          ?? source.faceTemplateConfidence
+          ?? source.healthFaceTemplateConfidence
+          ?? 0);
+        if (Number.isFinite(quantizedCandidate)
+            && (isDefinitiveFacePhase(quantizedPhase) || quantizedConfidence >= 0.92)) {
+          candidate = quantizedCandidate;
+        }
+      }
+      if (!Number.isFinite(candidate) && Number.isFinite(numeric) && numeric > 0 && numeric <= 5) {
+        const phaseHint = meaningfulFaceValue(
+          stablePhase,
+          source.faceLifePattern,
+          source.healthFaceLifePattern);
+        if (phaseHint !== undefined || source.faceHeartbeatAlive === true || source.faceSignatureValid === true) {
+          candidate = faceHealthPercentFromLevel(numeric, phaseHint);
+        }
+      }
+      const confidence = clamp01(
+        source.faceLifeTemplateConfidence
+          ?? source.healthFaceLifeTemplateConfidence
+          ?? source.faceTemplateConfidence
+          ?? source.healthFaceTemplateConfidence
+          ?? source.faceLifeConfidence
+          ?? source.healthFaceLifeConfidence);
+      if (Number.isFinite(candidate) && confidence >= faceConfidence) {
+        faceHealth = candidate;
+        faceConfidence = confidence;
+        faceAuthoritative = faceAuthoritative
+          || Boolean(source.faceLifeTemplateAuthoritative)
+          || Boolean(source.healthFaceLifeTemplateAuthoritative);
+      }
+    });
+
+    const faceTrusted = Number.isFinite(faceHealth)
+      && (faceAuthoritative || !Number.isFinite(numericHealth) || numericHealth <= 0);
+    const numericLooksLikeFaceLevel = Number.isFinite(faceHealth)
+      && Number.isFinite(numericHealth)
+      && numericHealth > 0
+      && numericHealth <= 5;
+    if (faceTrusted || numericLooksLikeFaceLevel) {
+      return faceHealth;
+    }
+    if (Number.isFinite(numericHealth)) {
+      return numericHealth;
+    }
+    return Math.max(0, Math.min(100, number(fallback, 100)));
+  }
+
   function requireFunction(value, name) {
     if (typeof value !== "function") {
       throw new Error(`AIKernelDoomControlRuntimePackets requires ${name}.`);
@@ -89,18 +236,9 @@
   }
 
   function resolveCanonicalPipelineState(action, context) {
-    const values = context?.values || {};
     return firstObjectPacket(
       action?.pipelineState,
-      action?.PipelineState,
-      action?.autoplayState?.pipelineState,
-      action?.AutoplayState?.PipelineState,
-      context?.pipelineState,
-      context?.PipelineState,
-      context?.state?.pipelineState,
-      context?.state?.PipelineState,
-      values.pipelineState,
-      values.PipelineState);
+      action?.PipelineState);
   }
 
   function resolveCanonicalGoalState(action, context, autoplayState) {
@@ -138,16 +276,11 @@
   }
 
   function resolveCanonicalAutoplayState(action, context) {
-    const values = context?.values || {};
     return firstObjectPacket(
       action?.autoplayState,
       action?.AutoplayState,
       context?.autoplayState,
-      context?.AutoplayState,
-      context?.state?.autoplayState,
-      context?.state?.AutoplayState,
-      values.autoplayState,
-      values.AutoplayState);
+      context?.AutoplayState);
   }
 
   function completeCanonicalAutoplayState(autoplayState, pipelineState, goalState, debugOverlay) {
@@ -156,9 +289,9 @@
     }
 
     return Object.assign({}, autoplayState, {
-      pipelineState: autoplayState.pipelineState || autoplayState.PipelineState || pipelineState,
-      goalState: autoplayState.goalState || autoplayState.GoalState || goalState,
-      debugOverlay: autoplayState.debugOverlay || autoplayState.DebugOverlay || debugOverlay
+      pipelineState,
+      goalState,
+      debugOverlay
     });
   }
 
@@ -602,25 +735,80 @@
   }
 
   function createZoeProjection(action, values) {
-    const health = Math.max(0, Math.min(100, number(values.health, number(values.hp, 100))));
-    const lowHealthThreshold = Math.max(1, Math.min(100, number(values.lowHealthThreshold, 50)));
-    const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, number(values.criticalHealthThreshold, 18)));
-    const criticalBloodAlive = Boolean(values.criticalBloodAlive || values.healthCriticalBloodAlive);
-    const bloodDangerScore = clamp01(number(values.bloodDangerScore ?? values.healthBloodDangerScore, criticalBloodAlive ? 0.58 : 0));
+    const healthSensor = values?.healthSensor && typeof values.healthSensor === "object" ? values.healthSensor : {};
+    const lowHealthThreshold = Math.max(1, Math.min(100, number(
+      healthSensor.lowHealthThreshold ?? values.lowHealthThreshold,
+      50)));
+    const criticalHealthThreshold = Math.max(1, Math.min(lowHealthThreshold, number(
+      healthSensor.criticalHealthThreshold ?? values.criticalHealthThreshold,
+      18)));
+    const numericHealth = Math.max(
+      number(healthSensor.health, NaN),
+      number(healthSensor.value, NaN),
+      number(healthSensor.estimatedPercent, NaN),
+      number(values.health, NaN),
+      number(values.hp, NaN),
+      number(values.value, NaN),
+      number(values.estimatedPercent, NaN));
+    const faceAuthoritative = Boolean(
+      healthSensor.faceLifeTemplateAuthoritative
+        || healthSensor.healthFaceLifeTemplateAuthoritative
+        || values.faceLifeTemplateAuthoritative
+        || values.healthFaceLifeTemplateAuthoritative);
+    const criticalBloodAlive = Boolean(
+      healthSensor.criticalBloodAlive
+      || values.criticalBloodAlive
+      || values.healthCriticalBloodAlive);
+    const health = Number.isFinite(numericHealth)
+      && numericHealth >= lowHealthThreshold
+      && !faceAuthoritative
+      && !criticalBloodAlive
+      && healthSensor.retryRequested !== true
+      && healthSensor.likelyDead !== true
+      ? Math.max(0, Math.min(100, numericHealth))
+      : resolveHealthPercent(100, healthSensor, values);
+    const faceVitalEvidence = faceAuthoritative
+      || criticalBloodAlive
+      || healthSensor.retryRequested === true
+      || healthSensor.likelyDead === true
+      || values.retryRequested === true
+      || values.likelyDead === true
+      || Boolean(healthSensor.faceVitalEnabled || values.faceVitalEnabled)
+      || Boolean(healthSensor.faceHeartbeatAlive || healthSensor.healthFaceHeartbeatAlive || values.faceHeartbeatAlive || values.healthFaceHeartbeatAlive)
+      || number(
+        healthSensor.faceHeartbeatOpacity
+          ?? healthSensor.healthFaceHeartbeatOpacity
+          ?? values.faceHeartbeatOpacity
+          ?? values.healthFaceHeartbeatOpacity,
+        0) > 0.05;
+    const preDoorSuppressed = values.preDoorHealthDangerSuppressed === true
+      && healthSensor.retryRequested !== true
+      && healthSensor.likelyDead !== true;
+    const trustedHealth = preDoorSuppressed
+      ? 100
+      : (values.healthThreatEvidenceTrusted === false
+        && !faceVitalEvidence
+        && health > 0
+        && health < lowHealthThreshold
+      ? 100
+      : health);
+    const bloodDangerScore = clamp01(number(
+      healthSensor.bloodDangerScore ?? values.bloodDangerScore ?? values.healthBloodDangerScore,
+      criticalBloodAlive ? 0.58 : 0));
     const lethalRisk = clamp01(number(
       values.lethalRisk,
-      health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold))));
+      trustedHealth <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - trustedHealth) / lowHealthThreshold))));
     const adjustedLethalRisk = clamp01(Math.max(lethalRisk, bloodDangerScore));
-    const lowHealth = Boolean(values.lowHealth) || criticalBloodAlive || (health > 0 && health < lowHealthThreshold);
-    const criticalHealth = Boolean(values.criticalHealth) || (health > 0 && health < criticalHealthThreshold);
+    const lowHealth = criticalBloodAlive || (trustedHealth > 0 && trustedHealth < lowHealthThreshold);
+    const criticalHealth = trustedHealth > 0 && trustedHealth < criticalHealthThreshold;
     const vetoed = Boolean(action?.zoeVetoed);
     const warning = vetoed || lowHealth || criticalHealth || adjustedLethalRisk >= 0.50;
     const lastReason = vetoed
       ? (action?.svcEvent || "zoe-veto")
       : (criticalHealth
-        ? "critical-health"
+          ? "critical-health"
         : (criticalBloodAlive
-          ? (values.healthDangerReason || "face-heartbeat-blood")
+          ? (healthSensor.healthDangerReason || values.healthDangerReason || "face-heartbeat-blood")
           : (lowHealth ? "low-health-goal-first" : "none")));
     return {
       vetoed,
@@ -629,7 +817,7 @@
       criticalHealth,
       criticalBloodAlive,
       bloodDangerScore,
-      health,
+      health: trustedHealth,
       lethalRisk: adjustedLethalRisk,
       healthThreshold: lowHealthThreshold,
       criticalHealthThreshold,
@@ -1494,10 +1682,96 @@
     return text.replace(/\b([a-z])/g, match => match.toUpperCase());
   }
 
-  function resolveTelos(objective, pipeline) {
+  const postFirstDoorIntentPattern = /post[- ]?door|computer|monitor|bridge|central-hall|cross-bridge|gatekeeper|final|exit/i;
+
+  function isPostFirstDoorIntent(value) {
+    return postFirstDoorIntentPattern.test(String(value || ""));
+  }
+
+  function resolveDoorOpenedCount(context) {
+    const values = context?.values || {};
+    const opened = Math.max(
+      number(values.doorOpenedCount, 0),
+      number(values.milestones?.doorOpenedCount, 0),
+      number(values.milestones?.doorOpened, 0),
+      number(context?.state?.doorOpenedCount, 0),
+      number(context?.state?.milestones?.doorOpenedCount, 0),
+      number(context?.state?.milestones?.doorOpened, 0));
+    if (opened > 0) {
+      return opened;
+    }
+
+    if (Boolean(values.openingResetProjectionActive)) {
+      return 0;
+    }
+
+    const routeText = [
+      values.currentRoute,
+      values.route,
+      values.routeMode,
+      values.previousRouteMode,
+      values.objective,
+      values.currentObjective,
+      values.routeObjective,
+      values.controlPipeline,
+      values.stage,
+      values.semanticMemory?.phase,
+      values.semanticMemory?.objective
+    ].join(" ").toLowerCase();
+    const postDoorIntent = /\b(post-door|computer-room|central-hall|reach-central-hall|cross-bridge)\b/.test(routeText);
+    const postDoorVisualEvidence = Math.max(
+      number(values.computerRoomConfidence ?? values.semanticMemory?.symbols?.["computer-room"], 0),
+      number(values.postDoorTerminalSurface, 0),
+      number(values.computerRoomScore, 0),
+      number(values.computerPanelScore, 0),
+      number(values.computerDarkPanelScore, 0),
+      number(values.bridgeConfidence, 0)) >= 0.34;
+    const closedFirstDoorContradiction = number(values.firstDoorVision9x9Score, 0) >= 0.36
+      && number(values.firstDoorUse3x3Score, 0) <= 0.08
+      && number(values.postDoorTerminalSurface, 0) < 0.34
+      && number(values.computerRoomConfidence ?? values.semanticMemory?.symbols?.["computer-room"], 0) < 0.34
+      && number(values.bridgeConfidence, 0) < 0.42;
+    if ((Boolean(values.computerRoomEntered) || (postDoorIntent && postDoorVisualEvidence))
+      && !closedFirstDoorContradiction) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  function resolveTelos(objective, pipeline, context) {
     const text = `${objective || ""} ${pipeline || ""}`.toLowerCase();
     if (text.includes("retry") || text.includes("death")) {
       return "Recovery";
+    }
+
+    const doorOpened = resolveDoorOpenedCount(context) > 0;
+    const values = context?.values || {};
+    const routeText = [
+      values.currentRoute,
+      values.route,
+      values.routeMode,
+      values.previousRouteMode,
+      values.controlPipeline,
+      values.stage,
+      values.safetyReason
+    ].join(" ").toLowerCase();
+    if (!doorOpened && isPostFirstDoorIntent(text)) {
+      return "FirstDoor";
+    }
+
+    if (doorOpened && !(text.includes("retry") || text.includes("death"))) {
+      return "ComputerRoom";
+    }
+
+    if (doorOpened && (
+      isPostFirstDoorIntent(`${text} ${routeText}`)
+        || text.includes("first-door")
+        || text.includes("open-door")
+        || text.includes("corridor")
+        || text.includes("openinghome")
+        || text.includes("demo-spawn"))) {
+      return "ComputerRoom";
     }
 
     if (text.includes("computer") || text.includes("central-hall")) {
@@ -1541,10 +1815,14 @@
   function createGoalState(action, context, pipelineState) {
     const objective = action?.objective || "idle";
     const pipeline = action?.pipeline || action?.stage || "none";
+    const firstDoorClosedPostDoorIntent = resolveDoorOpenedCount(context) <= 0
+      && isPostFirstDoorIntent(`${objective} ${pipeline}`);
     const kairos = pipelineState?.krisis?.kairos || resolveKairosPriorityAxis(action, context);
     const selectedAxis = String(kairos.selectedAxis || "logos").toLowerCase();
     const prefix = axisPrefix(selectedAxis);
-    const objectiveLabel = labelize(objective === "idle" ? pipeline : objective);
+    const objectiveLabel = firstDoorClosedPostDoorIntent
+      ? (context?.values?.firstDoorUseAttempted ? "Open First Door" : "Locate First Door Corridor")
+      : labelize(objective === "idle" ? pipeline : objective);
     let priority = `[${prefix}] ${selectedAxis === "pathos" ? "Avoid Threat" : (selectedAxis === "ethos" ? "Pursue Goal" : "Approach Target")}`;
     if (action?.use) {
       priority = `[${prefix}] Use / Open`;
@@ -1558,7 +1836,7 @@
     const kairosSignal = `Kairos: ${labelize(selectedAxis)} ${clamp01(score).toFixed(2)}`;
     return {
       enabled: true,
-      telos: resolveTelos(objective, pipeline),
+      telos: resolveTelos(objective, pipeline, context),
       objective: objectiveLabel,
       priority,
       priorityAxis: labelize(selectedAxis),
@@ -1568,6 +1846,38 @@
         { kind: "kairos", label: kairosSignal }
       ]
     };
+  }
+
+  function normalizeGoalStateForDoorState(goalState, action, context) {
+    if (!goalState || resolveDoorOpenedCount(context) > 0) {
+      return goalState;
+    }
+
+    const text = [
+      goalState.telos,
+      goalState.Telos,
+      goalState.objective,
+      goalState.Objective,
+      action?.objective,
+      action?.pipeline,
+      action?.stage
+    ].join(" ");
+    if (!isPostFirstDoorIntent(text)) {
+      return goalState;
+    }
+
+    const values = context?.values || {};
+    const objective = values.firstDoorUseAttempted ? "Open First Door" : "Locate First Door Corridor";
+    const normalized = Object.assign({}, goalState, {
+      telos: "FirstDoor",
+      objective
+    });
+    if (Array.isArray(goalState.subObjectives)) {
+      normalized.subObjectives = goalState.subObjectives.map(item => item?.kind === "objective"
+        ? Object.assign({}, item, { label: objective })
+        : item);
+    }
+    return normalized;
   }
 
   function createDebugOverlay(action, context, pipelineState, goalState) {
@@ -1688,14 +1998,18 @@
     }
     const zoe = pipelineState?.kinesis?.zoe || {};
     if (zoe.vetoed || zoe.warning || zoe.lowHealth || number(zoe.lethalRisk, 0) >= 0.50) {
+      const facePhase = zoe.faceLifePhase || values.faceLifePhase || values.healthFaceLifePhase || "audit";
+      const faceLevel = Number.isFinite(Number(zoe.faceLifeLevel ?? values.faceLifeLevel))
+        ? Math.max(0, Math.min(5, Math.round(Number(zoe.faceLifeLevel ?? values.faceLifeLevel))))
+        : "?";
       regions.push({
         kind: "zoe",
         label: zoe.vetoed ? "ZOE VETO" : "ZOE WARN",
-        value: `hp=${Math.round(number(zoe.health, number(values.health, 100)))} risk=${clamp01(number(zoe.lethalRisk, 0)).toFixed(2)} ${zoe.lastReason || "health"}`,
-        left: 4,
-        top: 5,
-        width: 28,
-        height: 8,
+        value: `vital=${facePhase}/${faceLevel} risk=${clamp01(number(zoe.lethalRisk, 0)).toFixed(2)} ${zoe.lastReason || "health"}`,
+        left: 3.6,
+        top: 17.2,
+        width: 27,
+        height: 7.4,
         priority: zoe.vetoed ? "high" : "mid",
         active: true
       });
@@ -1761,6 +2075,9 @@
         yaw: actionYaw
       },
       routePlan: pipelineState?.aisthesis?.routePlan || {},
+      healthThreatEvidenceTrusted: Boolean(values.healthThreatEvidenceTrusted),
+      preDoorHealthDangerSuppressed: Boolean(values.preDoorHealthDangerSuppressed),
+      healthDeathOrRetry: Boolean(values.healthDeathOrRetry),
       navigator: {
         routeFallbackYaw: number(values.routeFallbackYaw, 0),
         spawnCorridorGapYaw: number(values.spawnCorridorGapTurn === "right" ? 1 : (values.spawnCorridorGapTurn === "left" ? -1 : 0), 0),
@@ -1835,7 +2152,157 @@
     };
   }
 
+  function shouldForceClosedDoorFirstDoorBackoff(context, action = {}) {
+    const values = context?.values || {};
+    const state = context?.state || {};
+    const doorOpenedCount = Math.max(
+      number(values.doorOpenedCount, 0),
+      number(values.milestones?.doorOpenedCount, 0),
+      number(values.milestones?.doorOpened, 0),
+      number(state.doorOpenedCount, 0),
+      number(state.autoplayState?.doorOpenedCount, 0),
+      number(state.autoplayState?.milestones?.doorOpenedCount, 0),
+      number(state.autoplayState?.milestones?.doorOpened, 0));
+    if (doorOpenedCount > 0) {
+      return false;
+    }
+
+    const routeMode = String(values.routeMode || values.previousRouteMode || "").toLowerCase();
+    const routeText = [
+      values.currentRoute,
+      values.route,
+      values.currentLandmark,
+      values.routeLandmark
+    ].join(" ").toLowerCase();
+    const hintText = [
+      values.routeActionHint,
+      values.routeHint,
+      state.routeActionHint,
+      state.routeHint
+    ].join(" ").toLowerCase();
+    const predictions = Math.max(0, Math.floor(number(
+      values.predictions ?? state.predictions ?? context?.predictions,
+      0)));
+    const firstDoorUseScore = number(values.firstDoorUse3x3Score ?? state.firstDoorUse3x3Score, 0);
+    const firstDoorVisionScore = number(values.firstDoorVision9x9Score ?? state.firstDoorVision9x9Score, 0);
+    const firstDoorVisionRedScore = number(
+      values.firstDoorVision9x9RedScore ?? values.firstDoorRedScore ?? state.firstDoorVision9x9RedScore ?? state.firstDoorRedScore,
+      0);
+    const bridgeDoorScore = number(values.bridgeDoorScore ?? state.bridgeDoorScore, 0);
+    const contactPressure = Math.max(
+      number(values.footObstacleScore ?? state.footObstacleScore, 0),
+      number(values.motionObstacleScore ?? state.motionObstacleScore, 0));
+    const postDoorEvidence = Math.max(
+      number(values.computerRoomConfidence ?? state.computerRoomConfidence, 0),
+      number(values.computerRoomScore ?? state.computerRoomScore, 0),
+      number(values.postDoorTerminalSurface ?? state.postDoorTerminalSurface, 0),
+      number(values.bridgeConfidence ?? state.bridgeConfidence, 0));
+    const firstDoorBackoffText = [
+      action?.pipeline,
+      action?.stage,
+      action?.safetyReason,
+      values.pipeline,
+      values.stage,
+      values.controlPipeline,
+      values.safetyReason
+    ].join(" ").toLowerCase();
+    const advanceFirstDoorPreUseApproach = routeMode === "door-approach"
+      && routeText.indexOf("first-door") >= 0
+      && hintText.indexOf("advance-first-door") >= 0
+      && hintText.indexOf("clear-foot") < 0
+      && firstDoorBackoffText.indexOf("forced") < 0
+      && firstDoorBackoffText.indexOf("structural-fallback") < 0
+      && firstDoorUseScore <= 0.04
+      && firstDoorVisionRedScore < 0.06
+      && firstDoorVisionScore >= 0.28
+      && postDoorEvidence < 0.25;
+    if (advanceFirstDoorPreUseApproach) {
+      return false;
+    }
+
+    const earlyAdvanceFirstDoorApproach = predictions < 900
+      && routeMode === "door-approach"
+      && routeText.indexOf("first-door") >= 0
+      && hintText.indexOf("advance-first-door") >= 0
+      && firstDoorBackoffText.indexOf("structural-fallback") < 0
+      && firstDoorUseScore <= 0.04
+      && firstDoorVisionRedScore < 0.06
+      && firstDoorVisionScore >= 0.28
+      && (predictions < 850 || contactPressure < 0.60 || bridgeDoorScore >= 0.10)
+      && contactPressure < 0.58
+      && postDoorEvidence < 0.25;
+    if (earlyAdvanceFirstDoorApproach) {
+      return false;
+    }
+
+    const text = [
+      action?.stage,
+      action?.pipeline,
+      action?.safetyReason,
+      action?.svcEvent,
+      action?.actionSequenceId,
+      action?.actionSequenceStepId,
+      values.stage,
+      values.pipeline,
+      values.controlPipeline,
+      values.safetyReason,
+      values.routeActionHint,
+      values.actionSequenceId,
+      values.actionSequenceStepId,
+      state.autoplayState?.safetyReason,
+      state.autoplayState?.stage,
+      state.autoplayState?.suggestedAction?.stage,
+      state.autoplayState?.suggestedAction?.safetyReason
+    ].join(" ").toLowerCase();
+    return text.indexOf("closed-door-first-door-corner-backoff") >= 0;
+  }
+
+  function forceClosedDoorFirstDoorBackoffAction(action, context) {
+    if (!shouldForceClosedDoorFirstDoorBackoff(context, action)) {
+      return action;
+    }
+
+    return Object.assign({}, action || {}, {
+      move: "back",
+      turn: "none",
+      turnYaw: 0,
+      yaw: 0,
+      strafe: false,
+      run: false,
+      use: false,
+      useKey: false,
+      fire: false,
+      attackKey: false,
+      stage: action?.stage || "closed-door-first-door-corner-backoff",
+      safetyReason: action?.safetyReason || "closed-door-first-door-corner-backoff",
+      pipeline: action?.pipeline || "closed-door-first-door-corner-sequence",
+      actionSequenceId: action?.actionSequenceId || "first-door-corner-use",
+      actionSequenceStepId: action?.actionSequenceStepId || "backoff"
+    });
+  }
+
+  function forceClosedDoorFirstDoorBackoffAutoplayState(autoplayState, context, action) {
+    if (!autoplayState || !shouldForceClosedDoorFirstDoorBackoff(context, action)) {
+      return autoplayState;
+    }
+
+    const forcedSuggestedAction = {
+      move: "back",
+      turn: "none",
+      strafe: false,
+      use: false,
+      fire: false,
+      yaw: 0
+    };
+    return Object.assign({}, autoplayState, {
+      safetyReason: autoplayState.safetyReason || "closed-door-first-door-corner-backoff",
+      suggestedAction: Object.assign({}, autoplayState.suggestedAction || {}, forcedSuggestedAction),
+      action: Object.assign({}, autoplayState.action || {}, forcedSuggestedAction)
+    });
+  }
+
   function statusFromAction(action, evaluations, context, predictions, helpers = {}) {
+    action = forceClosedDoorFirstDoorBackoffAction(action, context);
     const createDecisionTrace = requireFunction(helpers.createDecisionTrace, "helpers.createDecisionTrace");
     const runtimeId = helpers.runtimeId || "control-runtime";
     const controller = helpers.controller || DEFAULT_CONTROLLER;
@@ -1854,13 +2321,17 @@
       stageEvaluations,
       predictions: predictions || 0
     });
-    const canonicalAutoplayState = resolveCanonicalAutoplayState(action, context);
+    const canonicalAutoplayState = forceClosedDoorFirstDoorBackoffAutoplayState(
+      resolveCanonicalAutoplayState(action, context),
+      context,
+      action);
     const pipelineState = resolveCanonicalPipelineState(action, context)
-      || canonicalAutoplayState?.pipelineState
-      || canonicalAutoplayState?.PipelineState
       || createPipelineState(action, context);
-    const goalState = resolveCanonicalGoalState(action, context, canonicalAutoplayState)
-      || createGoalState(action, context, pipelineState);
+    const goalState = normalizeGoalStateForDoorState(
+      resolveCanonicalGoalState(action, context, canonicalAutoplayState)
+        || createGoalState(action, context, pipelineState),
+      action,
+      context);
     const debugOverlay = resolveCanonicalDebugOverlay(action, context, canonicalAutoplayState)
       || createDebugOverlay(action, context, pipelineState, goalState);
     const autoplayState = completeCanonicalAutoplayState(canonicalAutoplayState, pipelineState, goalState, debugOverlay)
@@ -1872,6 +2343,12 @@
       controller,
       runtimeId,
       controlPipeline: action?.pipeline || "none",
+      phasePipeline: action?.phasePipeline || context?.values?.phasePipelineId || "fallback-all",
+      phasePipelineExclusive: Boolean(action?.phasePipelineExclusive ?? context?.values?.phasePipelineExclusive),
+      activeStageCount: number(action?.activeStageCount ?? context?.values?.activeStageCount, stageEvaluations.length),
+      actionSequenceId: action?.actionSequenceId || context?.values?.actionSequenceId || "none",
+      actionSequenceStepId: action?.actionSequenceStepId || context?.values?.actionSequenceStepId || "none",
+      actionSequenceFrame: number(action?.actionSequenceFrame ?? context?.values?.actionSequenceFrame, 0),
       stage: action?.stage || "none",
       objective: action?.objective || "idle",
       strategyPriority: number(action?.strategyPriority, 0),
@@ -1983,7 +2460,12 @@
         firstDoorUse3x3Score: number(context?.values?.firstDoorUse3x3Score, 0),
         firstDoorVision9x9Score: number(context?.values?.firstDoorVision9x9Score, 0),
         courtyardScore: number(context?.values?.courtyardScore, 0),
-        bridgeDoorScore: number(context?.values?.bridgeDoorScore, 0)
+        bridgeDoorScore: number(context?.values?.bridgeDoorScore, 0),
+        healthThreatEvidenceTrusted: Boolean(context?.values?.healthThreatEvidenceTrusted),
+        preDoorHealthDangerSuppressed: Boolean(context?.values?.preDoorHealthDangerSuppressed),
+        healthDeathOrRetry: Boolean(context?.values?.healthDeathOrRetry),
+        health: number(context?.values?.health, 100),
+        hp: number(context?.values?.hp, 100)
       },
       predictions: predictions || 0,
       lastLatencyMs: 0,

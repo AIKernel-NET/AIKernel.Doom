@@ -426,7 +426,13 @@
       this.facePoseDiversity = 0;
       this.faceFixedFrames = 0;
       this.faceLifePattern = "unknown";
+      this.faceVitalSemanticSignatureLast = "";
+      this.faceHeartbeatVisualOpacity = 0;
+      this.faceHeartbeatPulseCooldownFrames = 0;
+      this.healthFaceLifeLevelHistory = [];
+      this.healthFaceRecoveryFrames = 0;
       this.healthNoHeartbeatFrames = 0;
+      this.healthDeathUxHoldFrames = 0;
       this.cornerSignal = 0;
       this.wallSignatureMemory = [];
       this.cornerSignatureMemory = [];
@@ -473,6 +479,7 @@
       this.firstDoorCorridorSuppressFrames = 0;
       this.firstDoorWallOnlyCandidateFrames = 0;
       this.computerRoomAdvanceFrames = 0;
+      this.computerRoomWallReleaseFrames = 0;
       this.computerRoomFrames = 0;
       this.computerRoomEntered = false;
       this.computerRoomScore = 0;
@@ -554,6 +561,251 @@
         this.log("[AUTOPLAY]", "log-warn", `autoplay profile validation warnings: ${validation.errors.join("; ")}`);
       }
       this.log("[AUTOPLAY]", "log-info", `Bonsai supervisor configured: ${manifest?.name || "Bonsai-1.7B"} (${manifest?.quantization || "Q1_0"}); strategy=${this.strategyName}; profile=${this.profile.version || "unknown"}.`);
+    }
+
+    resetAutoplayProgress(reason = "progress-reset") {
+      this.mode = this.enabled ? "idle" : "disabled";
+      this.lastAction = neutralAction();
+      this.predictions = 0;
+      this.reused = 0;
+      this.lastLatencyMs = 0;
+      this.lastError = "";
+      this.previousFrame = null;
+      this.frameHistory = [];
+      this.stuckFrames = 0;
+      this.fireCooldown = 0;
+      this.safetyReason = reason;
+      this.recoveryFrames = 0;
+      this.recoveryTurn = "left";
+      this.useCooldown = 0;
+      this.mobilityMode = "idle";
+      this.breadcrumbTrail = [];
+      this.loopEscapeFrames = 0;
+      this.loopEscapeTurn = "left";
+      this.hardStuckEscapeFrames = 0;
+      this.hardStuckEscapeTurn = "left";
+      this.openAdvanceStallFrames = 0;
+      this.openStallEscapeFrames = 0;
+      this.openStallEscapeTurn = "left";
+      this.cornerExitCommitFrames = 0;
+      this.cornerExitTurn = "left";
+      this.mapRushCorrectionFrames = 0;
+      this.mapRushCorrectionBackFrames = 0;
+      this.mapRushCorrectionTurn = "left";
+      this.mapRushCorrectionReversals = 0;
+      this.mapDoorSweepFrames = 0;
+      this.mapDoorSweepTurn = "left";
+      this.firstDoorCorridorSearchFrames = 0;
+      this.firstDoorCorridorSearchTurn = "right";
+      this.courtyardRescueFrames = 0;
+      this.courtyardRescueTurnFrames = 0;
+      this.courtyardRescueTurn = "left";
+      this.courtyardRescueMode = "center-left";
+      this.courtyardScore = 0;
+      this.courtyardTurn = "none";
+      this.spawnSecretDoorScore = 0;
+      this.spawnSecretDoorTurn = "none";
+      this.spawnWestStairScore = 0;
+      this.spawnWestStairTurn = "none";
+      this.spawnCenterAnchorScore = 0;
+      this.spawnCenterAnchorTurn = "right";
+      this.spawnLandmarkRouteEvidence = 0;
+      this.spawnLandmarkRouteTurn = "right";
+      this.spawnLandmarkRouteKind = "none";
+      this.spawnLandmarkRouteFrames = 0;
+      this.firstDoorDeadEndTurnFrames = 0;
+      this.spawnCorridorGapScore = 0;
+      this.spawnCorridorGapTurn = "none";
+      this.spawnCorridorGapFrames = 0;
+      this.spawnCorridorGapAlignFrames = 0;
+      this.bridgeBrownScore = 0;
+      this.bridgeGreenLeft = 0;
+      this.bridgeGreenCenter = 0;
+      this.bridgeGreenRight = 0;
+      this.bridgeLaneTurn = "none";
+      this.bridgeDoorScore = 0;
+      this.wallHugSide = "left";
+      this.targetConfidence = 0;
+      this.soundCueActive = false;
+      this.auditorySnapshot = createAuditorySnapshot();
+      this.spatialSnapshot = createSpatialSnapshot();
+      this.visionSensorSnapshot = createVisionSensorSnapshot();
+      this.motorSensorSnapshot = createMotorSensorSnapshot();
+      this.movementSensorSnapshot = createMovementSensorSnapshot();
+      this.compassSensorSnapshot = createCompassSensorSnapshot();
+      this.spatialSensorSnapshot = createSpatialSensorSnapshot();
+      this.healthSensorSnapshot = createHealthSensorSnapshot();
+      this.ctgCarrier = createCtgCarrier();
+      this.ctgObservedScores = createCtgObservedScores();
+      this.toposDecisionCarrier = createToposDecisionCarrier();
+      this.toposEthosObjective = "find-and-open-first-door";
+      this.toposEthosFrames = 0;
+      this.nousCarrier = createNousCarrier();
+      this.sensorDetections = [];
+      this.spatialHistory = [];
+      this.chronosWindow = createChronosWindow();
+      this.phantasiaSnapshot = createPhantasiaSnapshot();
+      this.phainomenon = createPhainomenon();
+      this.nousDetectorResult = this.phainomenon;
+      this.itemMemory = [];
+      this.repeatActionSignature = "";
+      this.repeatActionFrames = 0;
+      this.kinesisActionSignature = "";
+      this.kinesisActionRepeatFrames = 0;
+      this.repeatTurnFrames = 0;
+      this.repeatTurnDirection = "right";
+      this.quantizedStallFrames = 0;
+      this.quantizedFrameChange = 255;
+      this.regionQuantizedFrameChange = 255;
+      this.statusBarQuantizedFrameChange = 255;
+      this.regionSignature = "000000";
+      this.region9Signature = "000000000";
+      this.vision9x9Signature = "0".repeat(VISION_GRID_COLUMNS * VISION_GRID_ROWS);
+      this.motion9Signature = "000000000";
+      this.motion9Delta = 255;
+      this.motionForwardProgress = 0;
+      this.motionObstacleScore = 0;
+      this.motionTurnScore = 0;
+      this.motionEntranceScore = 0;
+      this.motionStallScore = 0;
+      this.footObstacleScore = 0;
+      this.priorFootObstacleScore = 0;
+      this.footObstacleFlickerScore = 0;
+      this.footObstacleBandDelta = 0;
+      this.footObstacleBounceFrames = 0;
+      this.inputStallFrames = 0;
+      this.motionIntent = "idle";
+      this.depthSignature = "0000";
+      this.depthEstimate = 1;
+      this.faceSignature = "0000000000000000";
+      this.faceQuantizedFrameChange = 255;
+      this.facePoseSignatureHistory = [];
+      this.facePoseDiversity = 0;
+      this.faceFixedFrames = 0;
+      this.faceLifePattern = "unknown";
+      this.faceVitalSemanticSignatureLast = "";
+      this.faceHeartbeatVisualOpacity = 0;
+      this.faceHeartbeatPulseCooldownFrames = 0;
+      this.healthFaceLifeLevelHistory = [];
+      this.healthFaceRecoveryFrames = 0;
+      this.healthNoHeartbeatFrames = 0;
+      this.healthDeathUxHoldFrames = 0;
+      this.cornerSignal = 0;
+      this.wallSignatureMemory = [];
+      this.cornerSignatureMemory = [];
+      this.depthSignatureMemory = [];
+      this.signatureMatchKind = "none";
+      this.signatureMatchDistance = 255;
+      this.depthSignatureDistance = 255;
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+      this.wallUseProbeTurn = "left";
+      this.pendingUseResponseFrames = 0;
+      this.lastUseDepthEstimate = 1;
+      this.lastUseWasBlocked = false;
+      this.lastUseProbeStage = 0;
+      this.doorTransitionArmedFrames = 0;
+      this.darkZoneFrames = 0;
+      this.darkZoneEntered = false;
+      this.darkAreaScore = 0;
+      this.gameplayLuma = 0;
+      this.blueFloorScore = 0;
+      this.mapDoorSectorMatch = false;
+      this.mapDarkSectorMatch = false;
+      this.mapEnemyZoneMatch = false;
+      this.mapSectorId = "unknown";
+      this.firstDoorCorridorLocated = false;
+      this.firstDoorCorridorFrames = 0;
+      this.firstDoorCorridorSignature = 0;
+      this.firstDoorUseAttempted = false;
+      this.firstDoorUseSignature = 0;
+      this.firstDoorVision9x9Score = 0;
+      this.firstDoorVision9x9Box = null;
+      this.firstDoorVision9x9Heatmap = [];
+      this.firstDoorVision9x9RedScore = 0;
+      this.firstDoorUse3x3Score = 0;
+      this.firstDoorUse3x3Turn = "none";
+      this.firstDoorUse3x3Reason = "none";
+      this.firstDoorUseFrame = 0;
+      this.firstDoorTransitionFrames = 0;
+      this.firstDoorUseLatchFrames = 0;
+      this.firstDoorUsePulsed = false;
+      this.firstDoorLockedUseCycles = 0;
+      this.firstDoorReprobeFrames = 0;
+      this.firstDoorReprobeTurn = "right";
+      this.firstDoorCorridorSuppressFrames = 0;
+      this.firstDoorWallOnlyCandidateFrames = 0;
+      this.computerRoomAdvanceFrames = 0;
+      this.computerRoomWallReleaseFrames = 0;
+      this.computerRoomFrames = 0;
+      this.computerRoomEntered = false;
+      this.computerRoomScore = 0;
+      this.computerBlueScore = 0;
+      this.computerRedLightScore = 0;
+      this.computerDarkPanelScore = 0;
+      this.computerPanelScore = 0;
+      this.centralHallFrames = 0;
+      this.centralHallEntered = false;
+      this.centralHallEnemySweepFrames = 0;
+      this.centralHallEnemySweepTurn = "right";
+      this.stairsCandidateFrames = 0;
+      this.stairsEntered = false;
+      this.finalRoomCandidateFrames = 0;
+      this.finalRoomEntered = false;
+      this.exitSwitchUseFrames = 0;
+      this.exitSwitchPressed = false;
+      this.cornerSuppressFrames = 0;
+      this.wallDetachFrames = 0;
+      this.wallDetachTurn = "left";
+      this.wallSurveyFrames = 0;
+      this.wallSurveyTurn = "left";
+      this.wallSurveyDecisionFrames = 0;
+      this.wallFollowFrames = 0;
+      this.wallFollowSide = "right";
+      this.semanticContextResetFrames = 0;
+      this.semanticContextResetCooldownFrames = 0;
+      this.contextResetReason = reason;
+      this.combatSurveyFrames = 0;
+      this.combatSurveyTurn = "right";
+      this.combatContextActive = false;
+      this.topologicalTransitionBlocked = false;
+      this.enemyConfidence = 0;
+      this.enemyTurn = "none";
+      this.enemyDistance = 1;
+      this.enemyCluster = "none";
+      this.enemyFireReady = false;
+      this.enemyCenterCellConfidence = 0;
+      this.enemyAllRegionPeak = 0;
+      this.enemyLateralBias = 0;
+      this.ammoSignature = "000000000000000000000";
+      this.ammoLikelyEmpty = false;
+      this.healthSignature = "000000000000000000000000";
+      this.healthLikelyDead = false;
+      this.healthZeroScore = 0;
+      this.healthActiveColumns = 0;
+      this.healthActiveCells = 0;
+      this.healthDeathTintScore = 0;
+      this.healthStatusDeathTintScore = 0;
+      this.healthFaceDeathTintScore = 0;
+      this.healthEstimatedPercent = 100;
+      this.doorOpenedCount = 0;
+      this.enemyDefeatedCount = 0;
+      this.combatFireFrames = 0;
+      this.enemyConfidencePeak = 0;
+      this.enemyDropFrames = 0;
+      this.combatBurstFrames = 0;
+      this.combatBurstShots = 0;
+      this.enemyAlertFrames = 0;
+      this.enemyAlertTurn = "none";
+      this.enemyAlertCluster = "none";
+      this.enemyAlertDepth = 1;
+      this.enemyAlertPeakConfidence = 0;
+      this.strategyContext = "retry-reset";
+      this.strategyPriority = 0;
+      this.controlPipeline = "OpeningHome";
+      this.objective = "find-and-open-first-door";
+      this.semanticMemory = createE1M1SemanticMemory();
+      return this.status();
     }
 
     setEnabled(enabled) {
@@ -676,7 +928,13 @@
         this.facePoseDiversity = 0;
         this.faceFixedFrames = 0;
         this.faceLifePattern = "unknown";
+        this.faceVitalSemanticSignatureLast = "";
+        this.faceHeartbeatVisualOpacity = 0;
+        this.faceHeartbeatPulseCooldownFrames = 0;
+        this.healthFaceLifeLevelHistory = [];
+        this.healthFaceRecoveryFrames = 0;
         this.healthNoHeartbeatFrames = 0;
+        this.healthDeathUxHoldFrames = 0;
         this.cornerSignal = 0;
         this.wallSignatureMemory = [];
         this.cornerSignatureMemory = [];
@@ -723,6 +981,7 @@
         this.firstDoorCorridorSuppressFrames = 0;
         this.firstDoorWallOnlyCandidateFrames = 0;
         this.computerRoomAdvanceFrames = 0;
+        this.computerRoomWallReleaseFrames = 0;
         this.computerRoomFrames = 0;
         this.computerRoomEntered = false;
         this.computerRoomScore = 0;
@@ -796,6 +1055,10 @@
     }
 
     status() {
+      if (this.doorOpenedCount > 0 && !Boolean(this.semanticMemory?.firstDoor?.opened)) {
+        this.syncPostDoorSemanticMemory("status-post-door-reconcile");
+      }
+
       return {
         enabled: this.enabled,
         mode: this.mode,
@@ -939,8 +1202,21 @@
         healthDeathTintScore: round2(this.healthDeathTintScore),
         healthStatusDeathTintScore: round2(this.healthStatusDeathTintScore),
         healthFaceDeathTintScore: round2(this.healthFaceDeathTintScore),
+        healthFaceBloodScore: round2(this.healthFaceBloodScore),
+        healthFaceBloodRatio: round2(this.healthFaceBloodRatio),
+        healthFaceLifeLevel: this.healthFaceLifeLevel,
+        healthFaceLifePhase: this.healthFaceLifePhase || "unknown",
+        healthFaceLifeTemplateLevel: this.healthFaceLifeTemplateLevel,
+        healthFaceLifeTemplatePhase: this.healthFaceLifeTemplatePhase || "unknown",
+        healthFaceLifeQuantizedLevel: this.healthFaceLifeQuantizedLevel,
+        healthFaceLifeQuantizedPhase: this.healthFaceLifeQuantizedPhase || "unknown",
+        healthFaceTemplateConfidence: round2(this.healthFaceTemplateConfidence),
+        doorOpenedCount: this.doorOpenedCount,
+        computerRoomEntered: this.computerRoomEntered,
+        centralHallEntered: this.centralHallEntered,
         milestones: {
           doorOpened: this.doorOpenedCount,
+          doorOpenedCount: this.doorOpenedCount,
           enemyDefeated: this.enemyDefeatedCount,
           darkZoneEntered: this.darkZoneEntered,
           darkZoneFrames: this.darkZoneFrames,
@@ -1092,6 +1368,62 @@
       });
     }
 
+    syncPostDoorSemanticMemory(reason = "post-door-milestone") {
+      if (this.doorOpenedCount <= 0) {
+        return;
+      }
+
+      const phase = inferControlPipeline(this);
+      const objective = inferObjective(this);
+      this.semanticMemory = updateE1M1SemanticMemory(this.semanticMemory, {
+        phase,
+        objective,
+        predictions: this.predictions,
+        depthEstimate: this.depthEstimate,
+        doorOpenedCount: this.doorOpenedCount,
+        firstDoorLikelyOpened: true,
+        firstDoorCorridorSignature: Math.max(this.firstDoorCorridorSignature, 0.62),
+        firstDoorUseSignature: Math.max(this.firstDoorUseSignature, 0.58),
+        spawnCorridorGapScore: this.spawnCorridorGapScore,
+        spawnCorridorGapTurn: this.spawnCorridorGapTurn,
+        spawnLandmarkRouteEvidence: this.spawnLandmarkRouteEvidence,
+        spawnLandmarkRouteTurn: this.spawnLandmarkRouteTurn,
+        motionEntranceScore: this.motionEntranceScore,
+        motionForwardProgress: this.motionForwardProgress,
+        motionTurnScore: this.motionTurnScore,
+        motionObstacleScore: this.motionObstacleScore,
+        blueFloorScore: this.blueFloorScore,
+        computerRoomScore: Math.max(this.computerRoomScore, this.computerRoomEntered ? 0.56 : 0),
+        computerPanelScore: this.computerPanelScore,
+        computerDarkPanelScore: this.computerDarkPanelScore,
+        computerRedLightScore: this.computerRedLightScore,
+        darkAreaScore: this.darkAreaScore,
+        darkZoneEntered: this.darkZoneEntered || this.doorOpenedCount > 0,
+        bridgeBrownScore: this.bridgeBrownScore,
+        bridgeGreenLeft: this.bridgeGreenLeft,
+        bridgeGreenCenter: this.bridgeGreenCenter,
+        bridgeGreenRight: this.bridgeGreenRight,
+        bridgeLaneVisible: controllerBridgeLaneVisible(this),
+        bridgeLaneTurn: this.bridgeLaneTurn,
+        bridgeDoorScore: this.bridgeDoorScore,
+        centralHallEntered: this.centralHallEntered,
+        centralHallFrames: this.centralHallFrames,
+        finalRoomEntered: this.finalRoomEntered,
+        exitSwitchUseFrames: this.exitSwitchUseFrames,
+        exitSwitchPressed: this.exitSwitchPressed,
+        enemyConfidence: this.enemyConfidence,
+        enemyConfidencePeak: this.enemyConfidencePeak,
+        enemyAlertTurn: this.enemyAlertTurn,
+        healthLikelyDead: this.healthLikelyDead
+      });
+      if (this.semanticMemory?.firstDoor) {
+        this.semanticMemory.firstDoor.opened = true;
+      }
+      this.semanticMemory.phase = phase;
+      this.semanticMemory.objective = objective;
+      this.semanticMemory.lastMilestoneReason = reason;
+    }
+
     async predict(state) {
       if (!this.enabled) {
         return neutralAction();
@@ -1214,38 +1546,74 @@
       }
 
       if (this.healthSensorSnapshot.retryRequested) {
-        this.combatFireFrames = 0;
-        this.enemyConfidencePeak = 0;
-        this.enemyDropFrames = 0;
-        this.strategyContext = "health-retry";
-        this.strategyPriority = 100;
-        this.controlPipeline = "Retry";
-        this.objective = "retry-after-death";
-        this.safetyReason = "dead-restart";
-        this.mobilityMode = "reborn-use";
-        this.auditorySnapshot = auditorySnapshot;
-        this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
-        this.ctgCarrier = createCtgCarrier({
-          phase: "Retry",
-          pipeline: "Retry",
-          lastDecision: "retry-requested",
-          confidence: this.healthSensorSnapshot.confidence,
-          timestamp: this.healthSensorSnapshot.timestamp,
-          retryRequested: true,
-          retryReason: "health-death",
-          retryPriority: this.healthSensorSnapshot.retryPriority,
-          ternaryTrace: this.nousCarrier?.bonsaiTernary || {}
-        });
-        this.nousCarrier = buildNousCarrier(this, state, this.healthSensorSnapshot.timestamp);
-        this.lastAction = normalizeAction({
-          move: "none",
-          turn: "none",
-          fire: false,
-          strafe: false,
-          use: ((state?.frame || 0) % 18) < 5,
-          run: false
-        });
-        return this.lastAction;
+        const healthRetry = this.healthSensorSnapshot || {};
+        const faceLifePhase = String(healthRetry.faceLifePhase || healthRetry.healthFaceLifePhase || "unknown").toLowerCase();
+        const faceLifeLevel = Math.max(0, Math.min(5, Math.round(Number(healthRetry.faceLifeLevel ?? healthRetry.healthFaceLifeLevel ?? 0) || 0)));
+        const faceTemplateConfidence = Number(healthRetry.faceLifeTemplateConfidence ?? healthRetry.faceTemplateConfidence ?? 0);
+        const faceNoHeartbeatFrames = Math.max(0, Math.floor(Number(healthRetry.faceNoHeartbeatFrames ?? healthRetry.healthFaceNoHeartbeatFrames ?? 0) || 0));
+        const faceHeartbeatAlive = healthRetry.faceHeartbeatAlive === true || healthRetry.healthFaceHeartbeatAlive === true;
+        const faceHeartbeatOpacity = Math.max(0, Math.min(1, Number(
+          healthRetry.faceHeartbeatOpacity
+            ?? healthRetry.healthFaceHeartbeatOpacity
+            ?? (faceHeartbeatAlive ? 1 : 0)) || 0));
+        const deathTintScore = Number(healthRetry.deathTintScore ?? healthRetry.healthDeathTintScore ?? 0);
+        const fixedFaceDeath = healthRetry.fixedFaceDeath === true || healthRetry.healthFixedFaceDeath === true;
+        const openingHardHealthRetry = (
+          fixedFaceDeath
+            && faceNoHeartbeatFrames >= 72
+        )
+          || ((faceLifePhase === "dead" || faceLifePhase === "death")
+            && faceTemplateConfidence >= 0.78
+            && faceNoHeartbeatFrames >= 72)
+          || (!faceHeartbeatAlive
+            && faceLifeLevel <= 1
+            && faceNoHeartbeatFrames >= 108
+            && faceHeartbeatOpacity <= 0.18)
+          || (deathTintScore >= 0.72
+            && faceNoHeartbeatFrames >= 96);
+        if (this.doorOpenedCount <= 0 && !openingHardHealthRetry) {
+          healthRetry.retrySuppressed = true;
+          healthRetry.retrySuppressedReason = healthRetry.retryReason || "health-retry";
+          healthRetry.retryControlSuppressed = true;
+          this.safetyReason = `opening-health-retry-suppressed:${healthRetry.retrySuppressedReason}`;
+          if (!this.lastOpeningHealthRetrySuppressedFrame || (state?.frame || 0) - this.lastOpeningHealthRetrySuppressedFrame >= 60) {
+            this.lastOpeningHealthRetrySuppressedFrame = state?.frame || 0;
+            this.log?.("[AUTOPLAY]", "log-info", `opening supervisor health retry suppressed: reason=${healthRetry.retrySuppressedReason}; face=${faceLifePhase}/${faceLifeLevel}; hb=${faceNoHeartbeatFrames}; opacity=${faceHeartbeatOpacity.toFixed(2)}.`);
+          }
+        } else {
+          this.combatFireFrames = 0;
+          this.enemyConfidencePeak = 0;
+          this.enemyDropFrames = 0;
+          this.strategyContext = "health-retry";
+          this.strategyPriority = 100;
+          this.controlPipeline = "Retry";
+          this.objective = "retry-after-death";
+          this.safetyReason = "dead-restart";
+          this.mobilityMode = "reborn-use";
+          this.auditorySnapshot = auditorySnapshot;
+          this.spatialSnapshot = buildSpatialSnapshot(state, auditorySnapshot);
+          this.ctgCarrier = createCtgCarrier({
+            phase: "Retry",
+            pipeline: "Retry",
+            lastDecision: "retry-requested",
+            confidence: this.healthSensorSnapshot.confidence,
+            timestamp: this.healthSensorSnapshot.timestamp,
+            retryRequested: true,
+            retryReason: "health-death",
+            retryPriority: this.healthSensorSnapshot.retryPriority,
+            ternaryTrace: this.nousCarrier?.bonsaiTernary || {}
+          });
+          this.nousCarrier = buildNousCarrier(this, state, this.healthSensorSnapshot.timestamp);
+          this.lastAction = normalizeAction({
+            move: "none",
+            turn: "none",
+            fire: false,
+            strafe: false,
+            use: ((state?.frame || 0) % 18) < 5,
+            run: false
+          });
+          return this.lastAction;
+        }
       }
       if (this.pendingUseResponseFrames > 0) {
         const useResponseDelta = Math.max(quantizedFrameChange, regionQuantizedFrameChange);
@@ -1619,6 +1987,7 @@
 
       safe = this.applySensorFusionStrategy(safe, sensor, frame, state);
       safe = this.applyCtgToposFeedback(safe, sensor, frame, state);
+      safe = enforceClosedDoorFirstDoorBackoffMotor(this, safe);
       updateKinesisActionLoop(this, safe);
       if (safe.use && this.pendingUseResponseFrames <= 0) {
         if (this.doorOpenedCount <= 0 && this.firstDoorCorridorLocated) {
@@ -1764,6 +2133,19 @@
       const bridgeBrownThreshold = profileNumber(this.profile, "bridgeBrownThreshold", BRIDGE_BROWN_THRESHOLD);
       const bridgeGreenHazardThreshold = profileNumber(this.profile, "bridgeGreenHazardThreshold", BRIDGE_GREEN_HAZARD_THRESHOLD);
       const bridgeGreenHazard = Math.max(this.bridgeGreenLeft, this.bridgeGreenCenter, this.bridgeGreenRight);
+      if (this.doorOpenedCount <= 0
+        && this.predictions < firstDoorSpawnScanFrames
+        && Number(this.firstDoorUse3x3Score || 0) < 0.22) {
+        this.clearPostDoorProgressForOpening("pre-semantic-opening-sense-settle");
+        const openingSenseSettle = this.openingSenseSettleAction();
+        if (openingSenseSettle) {
+          return openingSenseSettle;
+        }
+      }
+      if (this.closedFirstDoorPostDoorLeakActive()) {
+        this.clearPostDoorProgressForOpening("closed-first-door-postdoor-leak");
+      }
+
       const bridgeVisualCueStrong = this.computerRoomEntered
         && (this.bridgeBrownScore >= bridgeBrownThreshold * 0.55
           || bridgeGreenHazard >= bridgeGreenHazardThreshold + 0.08
@@ -1813,6 +2195,7 @@
         && !this.firstDoorCorridorLocated
         && this.predictions <= firstDoorOpeningLockFrames;
       if (openingRouteLocked) {
+        this.clearPostDoorProgressForOpening("opening-route-lock");
         this.wallUseProbeFrames = 0;
         this.wallUseProbeStage = 0;
         this.hardStuckEscapeFrames = 0;
@@ -1874,6 +2257,11 @@
 
         if (spawnWestStairAnchorVisible) {
           return this.openingSpawnLandmarkAnchorAction("west-stair", "right");
+        }
+
+        const openingSenseSettle = this.openingSenseSettleAction();
+        if (openingSenseSettle) {
+          return openingSenseSettle;
         }
 
         if (this.predictions < firstDoorOpeningForwardLockFrames) {
@@ -3201,6 +3589,7 @@
         this.strategyContext = "semantic-opening-route";
         this.controlPipeline = "OpeningHome";
         this.safetyReason = "semantic-route-lock";
+        this.clearPostDoorProgressForOpening("semantic-route-lock");
 
         const routeCourtyardSuppressed = Number(this.firstDoorCorridorSuppressFrames || 0) > 0;
         if (this.courtyardRescueFrames > 0
@@ -3299,8 +3688,76 @@
       });
     }
 
+    postDoorComputerRoomEgressBonsaiAction(sensor, frame, options = {}) {
+      const wallVector = Number(sensor?.wallVector || 0);
+      const footObstacle = Math.max(
+        Number(this.footObstacleScore || 0),
+        Number(this.motionObstacleScore || 0),
+        Number(sensor?.footObstacleScore || 0),
+        Number(frame?.footObstacleScore || 0));
+      const greenLeft = Number(this.bridgeGreenLeft || 0);
+      const greenRight = Number(this.bridgeGreenRight || 0);
+      const greenCenter = Number(this.bridgeGreenCenter || 0);
+      const greenHazard = Math.max(greenLeft, greenCenter, greenRight);
+      const bridgeCueTurn = options.bridgeCueTurn === "left" || options.bridgeCueTurn === "right"
+        ? options.bridgeCueTurn
+        : "none";
+      const routeYaw = targetTurnDirection(frame);
+      const rightCueAllowed = bridgeCueTurn === "right"
+        && wallVector <= 0.20
+        && footObstacle < 0.58
+        && greenRight <= greenLeft + 0.08;
+      const leftWallRelease = wallVector >= 0.22
+        || footObstacle >= 0.58
+        || greenRight >= greenLeft + 0.08
+        || (greenCenter >= BRIDGE_GREEN_HAZARD_THRESHOLD && greenRight >= greenLeft);
+      const rightWallRelease = wallVector <= -0.28
+        || greenLeft >= greenRight + 0.14;
+      let turn = "none";
+      let mode = "post-door-computer-room-egress-forward";
+      let strafe = false;
+
+      if (leftWallRelease) {
+        turn = "left";
+        strafe = wallVector >= 0.30 || footObstacle >= 0.62 || greenHazard >= BRIDGE_GREEN_HAZARD_THRESHOLD;
+        mode = "post-door-computer-room-egress-left-wall-parallel";
+      } else if (rightWallRelease) {
+        turn = "right";
+        strafe = Math.abs(wallVector) >= 0.34 || greenHazard >= BRIDGE_GREEN_HAZARD_THRESHOLD + 0.06;
+        mode = "post-door-computer-room-egress-right-wall-parallel";
+      } else if (rightCueAllowed) {
+        turn = "right";
+        mode = "post-door-computer-room-egress-right-cue-align";
+      } else if (bridgeCueTurn === "left") {
+        turn = "left";
+        mode = "post-door-computer-room-egress-left-cue-align";
+      } else if (routeYaw === "left" || routeYaw === "right") {
+        turn = routeYaw;
+        mode = `post-door-computer-room-egress-route-${routeYaw}`;
+      }
+
+      this.computerRoomAdvanceFrames = Math.max(0, this.computerRoomAdvanceFrames - 1);
+      this.strategyPriority = 2;
+      this.strategyContext = "post-door-route";
+      this.controlPipeline = "ComputerRoom";
+      this.safetyReason = mode;
+      this.mobilityMode = mode;
+      return normalizeAction({
+        move: "forward",
+        turn,
+        fire: false,
+        strafe,
+        use: false,
+        run: true
+      });
+    }
+
     computerRoomAdvanceAction(sensor, frame) {
       const wallVector = Number(sensor?.wallVector || 0);
+      const previousLeftTrimLoop = this.lastAction?.move === "forward"
+        && this.lastAction?.turn === "left"
+        && this.lastAction?.strafe === true
+        && Number(this.kinesisActionRepeatFrames || 0) >= 72;
       const openLaneStall = this.computerRoomEntered
         && !this.centralHallEntered
         && Number(sensor?.depthSig ?? this.depthEstimate ?? 1) >= 0.74
@@ -3322,6 +3779,43 @@
         && (this.bridgeLaneTurn === "left" || this.bridgeLaneTurn === "right")
         ? this.bridgeLaneTurn
         : "none";
+      const postDoorCentralRouteActive = this.computerRoomEntered
+        && this.doorOpenedCount > 0
+        && !this.centralHallEntered
+        && !this.finalRoomEntered
+        && !this.healthLikelyDead
+        && (this.objective === "reach-central-hall"
+          || this.objective === "cross-bridge"
+          || this.objective === "enter-computer-room"
+          || bridgeCueStrong
+          || Number(this.bridgeBrownScore || 0) >= 0.12
+          || Math.max(Number(this.bridgeGreenLeft || 0), Number(this.bridgeGreenCenter || 0), Number(this.bridgeGreenRight || 0)) >= 0.18);
+      if (previousLeftTrimLoop && !openLaneStall && Number(this.computerRoomWallReleaseFrames || 0) <= 0) {
+        this.computerRoomWallReleaseFrames = 64;
+      }
+
+      if (postDoorCentralRouteActive) {
+        return this.postDoorComputerRoomEgressBonsaiAction(sensor, frame, { bridgeCueTurn });
+      }
+
+      if (Number(this.computerRoomWallReleaseFrames || 0) > 0 && !openLaneStall && bridgeCueTurn === "none") {
+        this.computerRoomWallReleaseFrames = Math.max(0, this.computerRoomWallReleaseFrames - 1);
+        this.computerRoomAdvanceFrames = Math.max(0, this.computerRoomAdvanceFrames - 1);
+        this.strategyPriority = 2;
+        this.strategyContext = "computer-room";
+        this.controlPipeline = "ComputerRoom";
+        this.safetyReason = "computer-room-wall-trim-release";
+        this.mobilityMode = "computer-room-wall-parallel-release";
+        return normalizeAction({
+          move: "forward",
+          turn: "none",
+          fire: false,
+          strafe: false,
+          use: false,
+          run: true
+        });
+      }
+
       const turn = openLaneSurvey
         ? openLaneSurveyTurn
         : (openLaneStall
@@ -3388,6 +3882,11 @@
     }
 
     openingForwardLockAction(totalFrames) {
+      const openingSenseSettle = this.openingSenseSettleAction();
+      if (openingSenseSettle) {
+        return openingSenseSettle;
+      }
+
       this.strategyPriority = 3;
       this.strategyContext = "spawn-home";
       this.controlPipeline = "OpeningHome";
@@ -3399,11 +3898,154 @@
       this.courtyardRescueFrames = 0;
       return normalizeAction({
         move: "forward",
-        turn: "none",
+        turn: "right",
+        fire: false,
+        strafe: true,
+        use: false,
+        run: true
+      });
+    }
+
+    closedFirstDoorPostDoorLeakActive() {
+      if (this.doorOpenedCount > 0) {
+        return false;
+      }
+
+      const freshDoorTransition = Boolean(
+        Number(this.firstDoorTransitionFrames || 0) > 0
+        || Number(this.pendingUseResponseFrames || 0) > 0
+        || Number(this.doorTransitionArmedFrames || 0) > 0
+        || Number(this.firstDoorUseLatchFrames || 0) > 0
+        || this.firstDoorUsePulsed);
+      if (freshDoorTransition) {
+        return false;
+      }
+
+      const pipeline = String(this.controlPipeline || "");
+      const objective = String(this.objective || "");
+      const postDoorPipeline = pipeline === "ComputerRoom"
+        || pipeline === "Bridge"
+        || pipeline === "CentralHall"
+        || pipeline === "ExitRoom";
+      const postDoorObjective = /post[- ]?door|computer|monitor|central|bridge|cross[- ]?bridge|gatekeeper|final|exit/i.test(objective);
+      return Boolean(
+        this.computerRoomEntered
+        || this.darkZoneEntered
+        || this.centralHallEntered
+        || this.stairsEntered
+        || this.finalRoomEntered
+        || Number(this.computerRoomFrames || 0) > 0
+        || Number(this.computerRoomAdvanceFrames || 0) > 0
+        || Number(this.centralHallFrames || 0) > 0
+        || Number(this.stairsCandidateFrames || 0) > 0
+        || Number(this.finalRoomCandidateFrames || 0) > 0
+        || Number(this.exitSwitchUseFrames || 0) > 0
+        || this.exitSwitchPressed
+        || postDoorPipeline
+        || postDoorObjective);
+    }
+
+    clearPostDoorProgressForOpening(reason = "opening-route-lock") {
+      if (this.doorOpenedCount > 0) {
+        return false;
+      }
+
+      const stalePostDoorState = Boolean(
+        this.computerRoomEntered
+        || this.centralHallEntered
+        || this.stairsEntered
+        || this.finalRoomEntered
+        || this.computerRoomFrames > 0
+        || this.centralHallFrames > 0
+        || this.stairsCandidateFrames > 0
+        || this.finalRoomCandidateFrames > 0
+        || this.exitSwitchUseFrames > 0
+        || this.exitSwitchPressed
+        || this.controlPipeline === "ComputerRoom"
+        || this.controlPipeline === "CentralHall"
+        || this.controlPipeline === "ExitRoom"
+        || this.objective === "reach-central-hall"
+        || this.objective === "engage-front-enemy"
+        || this.objective === "reach-exit");
+
+      this.doorOpenedCount = 0;
+      this.computerRoomAdvanceFrames = 0;
+      this.computerRoomWallReleaseFrames = 0;
+      this.computerRoomFrames = 0;
+      this.computerRoomEntered = false;
+      this.computerRoomScore = 0;
+      this.computerBlueScore = 0;
+      this.computerRedLightScore = 0;
+      this.computerDarkPanelScore = 0;
+      this.computerPanelScore = 0;
+      this.centralHallFrames = 0;
+      this.centralHallEntered = false;
+      this.centralHallEnemySweepFrames = 0;
+      this.stairsCandidateFrames = 0;
+      this.stairsEntered = false;
+      this.finalRoomCandidateFrames = 0;
+      this.finalRoomEntered = false;
+      this.exitSwitchUseFrames = 0;
+      this.exitSwitchPressed = false;
+      this.enemyDefeatedCount = 0;
+      this.combatFireFrames = 0;
+      this.enemyConfidencePeak = 0;
+      this.enemyDropFrames = 0;
+      this.combatBurstFrames = 0;
+      this.combatBurstShots = 0;
+      this.enemyAlertFrames = 0;
+      this.enemyAlertTurn = "none";
+      this.enemyAlertCluster = "none";
+      this.enemyAlertPeakConfidence = 0;
+      this.combatContextActive = false;
+      this.objective = "find-and-open-first-door";
+      this.controlPipeline = "OpeningHome";
+      this.strategyContext = "spawn-home";
+      this.contextResetReason = reason;
+      if (stalePostDoorState) {
+        this.semanticMemory = createE1M1SemanticMemory();
+      }
+
+      return stalePostDoorState;
+    }
+
+    openingSenseSettleAction() {
+      if (this.doorOpenedCount > 0 || Number(this.firstDoorUse3x3Score || 0) >= 0.22) {
+        return null;
+      }
+
+      const frame = Math.max(0, Number(this.predictions || 0));
+      const settleFrames = Math.max(
+        24,
+        Math.min(72, Math.round(profileNumber(this.profile, "firstDoorSpawnScanFrames", FIRST_DOOR_SPAWN_SCAN_FRAMES))));
+      const halfFrames = Math.max(8, Math.floor(settleFrames * 0.5));
+      const turn = frame < halfFrames
+        ? "left"
+        : (frame < settleFrames ? "right" : "none");
+      if (turn === "none") {
+        return null;
+      }
+
+      this.clearPostDoorProgressForOpening("opening-sense-settle");
+      this.strategyPriority = 3;
+      this.strategyContext = "spawn-home";
+      this.controlPipeline = "OpeningHome";
+      this.safetyReason = `opening-sense-settle-${turn}`;
+      this.mobilityMode = `opening-sense-settle-${turn}`;
+      this.wallUseProbeFrames = 0;
+      this.wallUseProbeStage = 0;
+      this.spawnCorridorGapFrames = 0;
+      this.spawnCorridorGapAlignFrames = 0;
+      this.courtyardRescueFrames = 0;
+      this.courtyardRescueTurnFrames = 0;
+      this.repeatTurnFrames = 0;
+      return normalizeAction({
+        move: "none",
+        turn,
         fire: false,
         strafe: false,
         use: false,
-        run: true
+        run: false
       });
     }
 
@@ -3530,9 +4172,9 @@
           move: "forward",
           turn: sidePressure ? awayTurn : "right",
           fire: false,
-          strafe: sidePressure,
+          strafe: true,
           use: false,
-          run: !sidePressure
+          run: true
         });
       }
 
@@ -3619,6 +4261,7 @@
 
     openingRouteLockAction(scanFrames, wallRunFrames, lockFrames, sensor = null) {
       const frame = Math.max(0, Number(this.predictions || 0));
+      this.clearPostDoorProgressForOpening("opening-route-lock");
       this.strategyPriority = 3;
       this.strategyContext = "spawn-home";
       this.controlPipeline = "OpeningHome";
@@ -3626,6 +4269,11 @@
       this.wallUseProbeFrames = 0;
       this.wallUseProbeStage = 0;
       this.mobilityMode = "opening-lock";
+
+      const openingSenseSettle = this.openingSenseSettleAction();
+      if (openingSenseSettle) {
+        return openingSenseSettle;
+      }
 
       const routeSensor = sensor || buildSensorFusionPacket({
           frame: this.previousFrame || {},
@@ -5136,6 +5784,18 @@
           return;
         }
 
+        const fireBudget = Math.max(3, Math.round(profileNumber(this.profile, "centralHallCombatFireBudget", 14)));
+        const staleConfidence = Math.max(0.18, Math.min(0.90, profileNumber(this.profile, "centralHallCombatStaleConfidence", 0.54)));
+        if (this.combatFireFrames >= fireBudget && frontConfidence <= staleConfidence) {
+          this.enemyDefeatedCount += 1;
+          this.combatFireFrames = 0;
+          this.enemyConfidencePeak = 0;
+          this.enemyDropFrames = 0;
+          this.enemyAlertFrames = 0;
+          this.safetyReason = "central-hall-combat-budget-cleared";
+          return;
+        }
+
         if (frontConfidence <= 0.14) {
           this.enemyDropFrames += 1;
         } else {
@@ -5266,6 +5926,36 @@
     const quantizedHealth = quantizeFrameSample(frame.healthSample);
     const healthSensorEnabled = sensorEnabled(state?.sensors, "health");
     const healthHudReady = frame.healthHudReady !== false;
+    const faceSignature = regionSignature(quantizedFace);
+    const faceSignatureHasSignal = /[1-9a-f]/i.test(faceSignature);
+    const frameFaceLifePhase = String(
+      frame.healthFaceLifePhase
+      ?? frame.faceLifePhase
+      ?? frame.healthFaceLifeTemplatePhase
+      ?? frame.faceLifeTemplatePhase
+      ?? frame.healthFaceLifeQuantizedPhase
+      ?? frame.faceLifeQuantizedPhase
+      ?? "unknown").toLowerCase();
+    const frameFaceLifeLevel = Number(
+      frame.healthFaceLifeLevel
+      ?? frame.faceLifeLevel
+      ?? frame.healthFaceLifeTemplateLevel
+      ?? frame.faceLifeTemplateLevel
+      ?? frame.healthFaceLifeQuantizedLevel
+      ?? frame.faceLifeQuantizedLevel
+      ?? NaN);
+    const frameFaceTemplateConfidence = Number(frame.healthFaceTemplateConfidence ?? frame.faceTemplateConfidence ?? 0);
+    const faceLifeSemanticEvidence = frameFaceLifePhase !== "unknown"
+      || (Number.isFinite(frameFaceLifeLevel) && frameFaceLifeLevel > 0)
+      || frameFaceTemplateConfidence > 0.18;
+    const faceVitalEnabled = healthHudReady
+      && (healthSensorEnabled || faceSignatureHasSignal || faceLifeSemanticEvidence);
+    const faceHistory = Array.isArray(controller.facePoseSignatureHistory)
+      ? controller.facePoseSignatureHistory
+      : [];
+    const facePoseDiversityPreview = faceSignatureHasSignal
+      ? Math.min(3, new Set(faceHistory.concat(faceSignature)).size)
+      : 0;
     const rawHealthState = Object.assign(
       healthHudReady
         ? estimateHealthState(frame.healthSample, quantizedHealth)
@@ -5276,39 +5966,132 @@
         statusDeathTintScore: clamp01(Number(frame.healthStatusDeathTintScore ?? 0)),
         faceDeathTintScore: clamp01(Number(frame.healthFaceDeathTintScore ?? 0)),
         faceBloodScore: clamp01(Number(frame.healthFaceBloodScore ?? 0)),
-        faceBloodRatio: clamp01(Number(frame.healthFaceBloodRatio ?? 0))
+        faceBloodRatio: clamp01(Number(frame.healthFaceBloodRatio ?? 0)),
+        faceSignature,
+        faceRedSignature: frame.healthFaceRedSignature || frame.faceRedSignature || "",
+        faceEdgeSignature: frame.healthFaceEdgeSignature || frame.faceEdgeSignature || "",
+        faceEyeWhiteSignature: frame.healthFaceEyeWhiteSignature || frame.faceEyeWhiteSignature || "",
+        faceEyeYellowSignature: frame.healthFaceEyeYellowSignature || frame.faceEyeYellowSignature || "",
+        faceRedScore: clamp01(Number(frame.healthFaceRedScore ?? frame.faceRedScore ?? frame.healthFaceBloodScore ?? 0)),
+        faceEyeWhiteScore: clamp01(Number(frame.healthFaceEyeWhiteScore ?? frame.faceEyeWhiteScore ?? 0)),
+        faceEyeYellowScore: clamp01(Number(frame.healthFaceEyeYellowScore ?? frame.faceEyeYellowScore ?? 0)),
+        faceEyeRedScore: clamp01(Number(frame.healthFaceEyeRedScore ?? frame.faceEyeRedScore ?? 0)),
+        faceEdgeScore: clamp01(Number(frame.healthFaceEdgeScore ?? frame.faceEdgeScore ?? 0)),
+        faceLumaScore: clamp01(Number(frame.healthFaceLumaScore ?? frame.faceLumaScore ?? 0)),
+        faceLifePhase: frame.healthFaceLifePhase ?? frame.faceLifePhase,
+        healthFaceLifePhase: frame.healthFaceLifePhase ?? frame.faceLifePhase,
+        faceLifeLevel: frame.healthFaceLifeLevel ?? frame.faceLifeLevel,
+        healthFaceLifeLevel: frame.healthFaceLifeLevel ?? frame.faceLifeLevel,
+        faceLifeTemplatePhase: frame.healthFaceLifeTemplatePhase ?? frame.faceLifeTemplatePhase,
+        healthFaceLifeTemplatePhase: frame.healthFaceLifeTemplatePhase ?? frame.faceLifeTemplatePhase,
+        faceLifeTemplateLevel: frame.healthFaceLifeTemplateLevel ?? frame.faceLifeTemplateLevel,
+        healthFaceLifeTemplateLevel: frame.healthFaceLifeTemplateLevel ?? frame.faceLifeTemplateLevel,
+        faceLifeQuantizedPhase: frame.healthFaceLifeQuantizedPhase ?? frame.faceLifeQuantizedPhase,
+        healthFaceLifeQuantizedPhase: frame.healthFaceLifeQuantizedPhase ?? frame.faceLifeQuantizedPhase,
+        faceLifeQuantizedLevel: frame.healthFaceLifeQuantizedLevel ?? frame.faceLifeQuantizedLevel,
+        healthFaceLifeQuantizedLevel: frame.healthFaceLifeQuantizedLevel ?? frame.faceLifeQuantizedLevel,
+        faceTemplateConfidence: frame.healthFaceTemplateConfidence ?? frame.faceTemplateConfidence,
+        healthFaceTemplateConfidence: frame.healthFaceTemplateConfidence ?? frame.faceTemplateConfidence,
+        facePoseDiversity: facePoseDiversityPreview,
+        faceFixedFrames: Number(controller.faceFixedFrames || 0),
+        faceNoHeartbeatFrames: Number(controller.healthNoHeartbeatFrames || 0),
+        fixedFaceDeathFrames: Math.max(1, Math.floor(profileNumber(controller.profile, "healthFixedFaceDeathFrames", 72)))
       });
     const rawFaceQuantizedFrameChange = previous?.quantizedFace ? averageSampleDelta(previous.quantizedFace, quantizedFace) : 255;
-    const faceQuantizedFrameChange = healthSensorEnabled ? rawFaceQuantizedFrameChange : 255;
+    const faceQuantizedFrameChange = faceVitalEnabled ? rawFaceQuantizedFrameChange : 255;
     const visualStallDelta = Math.min(quantizedFrameChange, regionQuantizedFrameChange, region9QuantizedFrameChange);
-    const faceDeathScore = healthSensorEnabled
+    const faceDeathScore = faceVitalEnabled
       ? Math.max(estimateFaceDeathScore(quantizedFace), rawHealthState.faceDeathTintScore * 0.75)
       : 0;
-    const healthState = healthSensorEnabled
+    const healthState = faceVitalEnabled
       ? refineHealthState(rawHealthState, faceDeathScore, faceQuantizedFrameChange, visualStallDelta)
       : createDisabledHealthState(rawHealthState.signature);
+    applyFaceLifeTemporalFloor(controller, healthState);
+    const faceLifeTemplateConfidenceForRuntime = Math.max(
+      Number(healthState.faceLifeTemplateConfidence || 0),
+      Number(healthState.healthFaceTemplateConfidence || 0),
+      Number(healthState.faceTemplateConfidence || 0),
+      Number(frameFaceTemplateConfidence || 0));
+    if (faceLifeTemplateConfidenceForRuntime > Number(healthState.faceLifeTemplateConfidence || 0)) {
+      healthState.faceLifeTemplateConfidence = faceLifeTemplateConfidenceForRuntime;
+    }
+    healthState.healthFaceTemplateConfidence = faceLifeTemplateConfidenceForRuntime;
     const healthDeathTintEvidence = Math.max(
       Number(healthState.faceDeathScore || faceDeathScore || 0) / 0.16,
       Number(healthState.deathTintScore || 0) / 0.42,
       Number(healthState.statusDeathTintScore || 0) / 0.36,
       Number(healthState.faceDeathTintScore || 0) / 0.22,
       Number(healthState.zeroScore || 0) / 0.52,
-      Number(healthState.faceBloodScore || 0) / 0.30
+      Number(healthState.faceBloodScore || 0) / 0.30,
+      (healthState.faceLifePhase === "dead" ? 1.4 : 0),
+      (healthState.faceLifePhase === "moribund" && Number(healthState.faceLifeTemplateConfidence || 0) >= 0.68 ? 1.0 : 0),
+      (healthState.faceLifePhase === "critical" && Number(healthState.faceLifeTemplateConfidence || 0) >= 0.82 ? 0.78 : 0)
     ) >= 1;
-    const healthNoHeartbeatCandidate = healthSensorEnabled
+    const lowFaceTemplateEvidence = healthState.faceLifePhase === "dead"
+      || (healthState.faceLifePhase === "moribund" && Number(healthState.faceLifeTemplateConfidence || 0) >= 0.64)
+      || (healthState.faceLifePhase === "critical" && Number(healthState.faceLifeTemplateConfidence || 0) >= 0.82);
+    const severeLowFaceBloodEvidence = Number(healthState.faceBloodScore || 0) >= 0.70
+      || Number(healthState.faceBloodRatio || 0) >= 0.48
+      || Number(healthState.statusDeathTintScore || 0) >= 0.62
+      || Number(healthState.faceDeathTintScore || 0) >= 0.50;
+    const severeLowFaceNoHeartbeatCandidate = healthState.faceLifePhase === "dead"
+      || (Number(healthState.faceLifeLevel || 0) > 0
+        && Number(healthState.faceLifeLevel || 0) <= 1
+        && severeLowFaceBloodEvidence
+        && Number(healthState.faceLifeTemplateConfidence || healthState.healthFaceTemplateConfidence || 0) >= 0.50)
+      || (healthState.faceLifePhase === "moribund"
+        && severeLowFaceBloodEvidence
+        && Number(healthState.faceLifeTemplateConfidence || healthState.healthFaceTemplateConfidence || 0) >= 0.45);
+    const lowFaceNoHeartbeatCandidate = lowFaceTemplateEvidence
+      || healthState.faceLifePhase === "dead"
+      || severeLowFaceNoHeartbeatCandidate
+      || (Number(healthState.faceLifeLevel || 0) > 0
+        && Number(healthState.faceLifeLevel || 0) <= 1
+        && Number(healthState.faceLifeTemplateConfidence || healthState.healthFaceTemplateConfidence || 0) >= 0.58);
+    const fixedFaceHeartbeatCandidate = !healthState.faceHeartbeatAlive
+      && healthState.faceSignatureValid !== false
+      && Number(healthState.facePoseDiversity || 0) <= 1
+      && (faceQuantizedFrameChange <= 2.4
+        || lowFaceTemplateEvidence
+        || Number(controller.faceFixedFrames || 0) >= Math.floor(profileNumber(controller.profile, "healthFixedFaceDeathFrames", 72) * 0.35));
+    const healthNoHeartbeatCandidate = faceVitalEnabled
       && healthState.hudReady !== false
-      && !healthState.faceHeartbeatAlive
-      && (faceQuantizedFrameChange <= 0.32
-        || healthState.faceSignatureValid === false
-        || (healthDeathTintEvidence && Number(healthState.freezeScore || 0) >= 0.5));
+      && ((!healthState.faceHeartbeatAlive
+        && (faceQuantizedFrameChange <= 0.32
+          || healthState.faceSignatureValid === false
+          || fixedFaceHeartbeatCandidate
+          || lowFaceNoHeartbeatCandidate
+          || (healthDeathTintEvidence && Number(healthState.freezeScore || 0) >= 0.5)))
+        || severeLowFaceNoHeartbeatCandidate);
     controller.healthNoHeartbeatFrames = healthNoHeartbeatCandidate
       ? Math.min(MAX_STUCK_COUNTER, Number(controller.healthNoHeartbeatFrames || 0) + 1)
       : 0;
     const healthNoHeartbeatDeathFrames = Math.max(1, Math.floor(profileNumber(controller.profile, "healthNoHeartbeatDeathFrames", 90)));
+    const healthFixedFaceDeathFrames = Math.max(1, Math.floor(profileNumber(controller.profile, "healthFixedFaceDeathFrames", 72)));
+    const healthFixedFaceNoHeartbeatEvidence = faceVitalEnabled
+      && healthState.hudReady !== false
+      && healthState.faceSignatureValid !== false
+      && Number(healthState.facePoseDiversity || 0) <= 1
+      && Number(controller.faceFixedFrames || 0) >= healthFixedFaceDeathFrames
+      && Number(controller.healthNoHeartbeatFrames || 0) >= Math.floor(healthFixedFaceDeathFrames * 0.5);
     healthState.faceNoHeartbeatFrames = controller.healthNoHeartbeatFrames;
     healthState.noHeartbeatDeathFrames = healthNoHeartbeatDeathFrames;
-    const healthNoHeartbeatDeath = controller.healthNoHeartbeatFrames >= healthNoHeartbeatDeathFrames
-      && healthDeathTintEvidence;
+    healthState.fixedFaceDeathFrames = healthFixedFaceDeathFrames;
+    const healthLowLifeNoHeartbeatEvidence = faceVitalEnabled
+      && healthState.hudReady !== false
+      && !healthState.faceHeartbeatAlive
+      && Number(controller.healthNoHeartbeatFrames || 0) >= Math.floor(healthNoHeartbeatDeathFrames * 0.55)
+      && (healthState.faceLifePhase === "dead"
+        || healthState.faceLifePhase === "moribund"
+        || Number(healthState.faceLifeLevel || 0) <= 1
+        || (Number(healthState.faceLifeLevel || 0) <= 2
+          && Number(healthState.faceLifeTemplateConfidence || 0) >= 0.78));
+    healthState.lowLifeNoHeartbeatEvidence = healthLowLifeNoHeartbeatEvidence;
+    const healthNoHeartbeatDeath = (controller.healthNoHeartbeatFrames >= healthNoHeartbeatDeathFrames
+      && healthDeathTintEvidence)
+      || (controller.healthNoHeartbeatFrames >= healthFixedFaceDeathFrames
+        && healthFixedFaceNoHeartbeatEvidence)
+      || healthLowLifeNoHeartbeatEvidence;
     if (healthNoHeartbeatDeath && !healthState.likelyDead) {
       healthState.likelyDead = true;
       healthState.noHeartbeatDeath = true;
@@ -5422,6 +6205,7 @@
       ammoState,
       quantizedHealth,
       healthSensorEnabled,
+      faceVitalEnabled,
       faceQuantizedFrameChange,
       visualStallDelta,
       faceDeathScore,
@@ -5468,6 +6252,7 @@
       quantizedFace,
       ammoState,
       healthSensorEnabled,
+      faceVitalEnabled,
       faceQuantizedFrameChange,
       faceDeathScore,
       healthState,
@@ -5584,18 +6369,46 @@
     controller.healthCriticalBloodAlive = Boolean(healthState.criticalBloodAlive);
     controller.healthBloodDangerScore = clamp01(Number(healthState.bloodDangerScore || 0));
     controller.healthDangerReason = healthState.healthDangerReason || "none";
-    controller.healthNoHeartbeatFrames = Number(healthState.faceNoHeartbeatFrames || controller.healthNoHeartbeatFrames || 0);
+    controller.healthNoHeartbeatFrames = Math.max(0, Math.floor(Number(
+      healthState.faceNoHeartbeatFrames
+        ?? healthState.healthFaceNoHeartbeatFrames
+        ?? controller.healthNoHeartbeatFrames
+        ?? 0) || 0));
     controller.healthZeroScore = healthState.zeroScore || 0;
     controller.healthActiveColumns = healthState.activeColumns || 0;
     controller.healthActiveCells = healthState.activeCells || 0;
     controller.healthDeathTintScore = healthState.deathTintScore || 0;
     controller.healthStatusDeathTintScore = healthState.statusDeathTintScore || 0;
     controller.healthFaceDeathTintScore = healthState.faceDeathTintScore || 0;
+    controller.healthFaceBloodScore = healthState.faceBloodScore || 0;
+    controller.healthFaceBloodRatio = healthState.faceBloodRatio || 0;
+    controller.healthFaceRedScore = healthState.faceRedScore || 0;
+    controller.healthFaceEyeWhiteScore = healthState.faceEyeWhiteScore || 0;
+    controller.healthFaceEyeYellowScore = healthState.faceEyeYellowScore || 0;
+    controller.healthFaceEyeRedScore = healthState.faceEyeRedScore || 0;
+    controller.healthFaceEdgeScore = healthState.faceEdgeScore || 0;
+    controller.healthFaceLumaScore = healthState.faceLumaScore || 0;
+    controller.healthFaceRedSignature = healthState.faceRedSignature || "";
+    controller.healthFaceEdgeSignature = healthState.faceEdgeSignature || "";
+    controller.healthFaceEyeWhiteSignature = healthState.faceEyeWhiteSignature || "";
+    controller.healthFaceEyeYellowSignature = healthState.faceEyeYellowSignature || "";
+    controller.healthFaceLifeLevel = healthState.faceLifeLevel ?? 0;
+    controller.healthFaceLifePhase = healthState.faceLifePhase ?? "unknown";
+    controller.healthFaceLifeTemplateLevel = healthState.faceLifeTemplateLevel ?? 0;
+    controller.healthFaceLifeTemplatePhase = healthState.faceLifeTemplatePhase ?? "unknown";
+    controller.healthFaceLifeQuantizedLevel = healthState.faceLifeQuantizedLevel ?? 0;
+    controller.healthFaceLifeQuantizedPhase = healthState.faceLifeQuantizedPhase ?? "unknown";
+    controller.healthFaceTemplateConfidence = Math.max(
+      Number(healthState.faceLifeTemplateConfidence || 0),
+      Number(healthState.healthFaceTemplateConfidence || 0),
+      Number(healthState.faceTemplateConfidence || 0));
     controller.healthEstimatedPercent = Number.isFinite(Number(healthState.estimatedPercent))
       ? Math.max(0, Math.min(100, Math.round(Number(healthState.estimatedPercent))))
       : 100;
     controller.healthSensorSnapshot = createHealthSensorSnapshot({
-      active: healthSensorEnabled,
+      active: faceVitalEnabled,
+      healthSensorEnabled,
+      faceVitalEnabled,
       likelyDead: controller.healthLikelyDead,
       zeroScore: controller.healthZeroScore,
       deathTintScore: controller.healthDeathTintScore,
@@ -5603,14 +6416,59 @@
       faceDeathTintScore: controller.healthFaceDeathTintScore,
       faceBloodScore: healthState.faceBloodScore,
       faceBloodRatio: healthState.faceBloodRatio,
+      faceRedScore: healthState.faceRedScore,
+      faceEyeWhiteScore: healthState.faceEyeWhiteScore,
+      faceEyeYellowScore: healthState.faceEyeYellowScore,
+      faceEyeRedScore: healthState.faceEyeRedScore,
+      faceEdgeScore: healthState.faceEdgeScore,
+      faceLumaScore: healthState.faceLumaScore,
+      faceRedSignature: healthState.faceRedSignature,
+      faceEdgeSignature: healthState.faceEdgeSignature,
+      faceEyeWhiteSignature: healthState.faceEyeWhiteSignature,
+      faceEyeYellowSignature: healthState.faceEyeYellowSignature,
       facePoseDiversity: faceLife.poseDiversity,
       faceLifePattern: faceLife.pattern,
+      faceLifePhase: healthState.faceLifePhase,
+      faceLifeLevel: healthState.faceLifeLevel,
+      faceLifeTemplateLevel: healthState.faceLifeTemplateLevel,
+      faceLifeTemplatePhase: healthState.faceLifeTemplatePhase,
+      faceLifeQuantizedLevel: healthState.faceLifeQuantizedLevel,
+      faceLifeQuantizedPhase: healthState.faceLifeQuantizedPhase,
+      faceTemplateConfidence: controller.healthFaceTemplateConfidence,
+      healthFaceTemplateConfidence: controller.healthFaceTemplateConfidence,
+      faceLifeTemporalRawLevel: healthState.faceLifeTemporalRawLevel,
+      faceLifeTemporalFloorLevel: healthState.faceLifeTemporalFloorLevel,
+      faceLifeTemporalFloorApplied: healthState.faceLifeTemporalFloorApplied,
+      faceLifeRecoveryFrames: healthState.faceLifeRecoveryFrames,
+      faceLifeRecoveryRequiredFrames: healthState.faceLifeRecoveryRequiredFrames,
+      lowLifeNoHeartbeatEvidence: healthState.lowLifeNoHeartbeatEvidence,
       faceFixedFrames: faceLife.fixedFrames,
       faceHeartbeatScore: healthState.faceHeartbeatScore,
       faceHeartbeatAlive: healthState.faceHeartbeatAlive,
+      faceHeartbeatOpacity: healthState.faceHeartbeatOpacity,
+      faceHeartbeatVisualOpacity: healthState.faceHeartbeatVisualOpacity ?? healthState.faceHeartbeatOpacity,
+      faceHeartbeatCurrentPulse: healthState.faceHeartbeatCurrentPulse,
+      faceHeartbeatPulseAccepted: healthState.faceHeartbeatPulseAccepted,
+      faceHeartbeatPulseKind: healthState.faceHeartbeatPulseKind,
+      healthFaceHeartbeatScore: healthState.healthFaceHeartbeatScore ?? healthState.faceHeartbeatScore,
+      healthFaceHeartbeatAlive: healthState.healthFaceHeartbeatAlive ?? healthState.faceHeartbeatAlive,
+      healthFaceHeartbeatOpacity: healthState.healthFaceHeartbeatOpacity ?? healthState.faceHeartbeatOpacity,
+      healthFaceHeartbeatVisualOpacity: healthState.healthFaceHeartbeatVisualOpacity
+        ?? healthState.faceHeartbeatVisualOpacity
+        ?? healthState.healthFaceHeartbeatOpacity
+        ?? healthState.faceHeartbeatOpacity,
+      healthFaceHeartbeatCurrentPulse: healthState.healthFaceHeartbeatCurrentPulse ?? healthState.faceHeartbeatCurrentPulse,
+      healthFaceHeartbeatPulseAccepted: healthState.healthFaceHeartbeatPulseAccepted ?? healthState.faceHeartbeatPulseAccepted,
+      healthFaceHeartbeatPulseKind: healthState.healthFaceHeartbeatPulseKind ?? healthState.faceHeartbeatPulseKind,
       faceNoHeartbeatFrames: healthState.faceNoHeartbeatFrames,
+      healthFaceNoHeartbeatFrames: healthState.healthFaceNoHeartbeatFrames ?? healthState.faceNoHeartbeatFrames,
       noHeartbeatDeath: healthState.noHeartbeatDeath,
+      healthNoHeartbeatDeath: healthState.healthNoHeartbeatDeath ?? healthState.noHeartbeatDeath,
       noHeartbeatDeathFrames: healthState.noHeartbeatDeathFrames,
+      fixedFaceDeath: healthState.fixedFaceDeath,
+      healthFaceLifeNoHeartbeatDeath: healthState.healthFaceLifeNoHeartbeatDeath ?? healthState.faceLifeNoHeartbeatDeath,
+      healthFixedFaceDeath: healthState.healthFixedFaceDeath ?? healthState.fixedFaceDeath,
+      fixedFaceDeathFrames: healthState.fixedFaceDeathFrames,
       criticalBloodAlive: healthState.criticalBloodAlive,
       bloodDangerScore: healthState.bloodDangerScore,
       healthDangerReason: healthState.healthDangerReason,
@@ -5632,11 +6490,52 @@
       retryReason: healthState.retryReason,
       timestamp: state?.timestamp || DEFAULT_SNAPSHOT_TIMESTAMP
     });
+    const healthDeathUxHoldFrames = Math.max(0, Math.floor(profileNumber(controller.profile, "healthDeathUxHoldFrames", 45)));
+    if (controller.healthSensorSnapshot.likelyDead && healthDeathUxHoldFrames > 0) {
+      controller.healthDeathUxHoldFrames = Math.min(MAX_STUCK_COUNTER, Number(controller.healthDeathUxHoldFrames || 0) + 1);
+      controller.healthSensorSnapshot.deathUxHoldFrames = controller.healthDeathUxHoldFrames;
+      controller.healthSensorSnapshot.deathUxHoldRequiredFrames = healthDeathUxHoldFrames;
+      if (controller.healthDeathUxHoldFrames < healthDeathUxHoldFrames) {
+        const originalRetryReason = controller.healthSensorSnapshot.retryReason && controller.healthSensorSnapshot.retryReason !== "none"
+          ? controller.healthSensorSnapshot.retryReason
+          : "health-death";
+        controller.healthSensorSnapshot.retryRequested = false;
+        controller.healthSensorSnapshot.retryReason = `${originalRetryReason}-ux-hold`;
+        controller.healthSensorSnapshot.retryPipeline = "none";
+        controller.healthSensorSnapshot.retryPriority = 0;
+      }
+    } else {
+      controller.healthDeathUxHoldFrames = 0;
+      controller.healthSensorSnapshot.deathUxHoldFrames = 0;
+      controller.healthSensorSnapshot.deathUxHoldRequiredFrames = healthDeathUxHoldFrames;
+    }
     controller.healthLikelyDead = Boolean(controller.healthSensorSnapshot.likelyDead);
     controller.healthCriticalBloodAlive = Boolean(controller.healthSensorSnapshot.criticalBloodAlive);
     controller.healthBloodDangerScore = clamp01(Number(controller.healthSensorSnapshot.bloodDangerScore || 0));
     controller.healthDangerReason = controller.healthSensorSnapshot.healthDangerReason || "none";
-    controller.healthNoHeartbeatFrames = Number(controller.healthSensorSnapshot.faceNoHeartbeatFrames || controller.healthNoHeartbeatFrames || 0);
+    controller.healthNoHeartbeatFrames = Math.max(0, Math.floor(Number(
+      controller.healthSensorSnapshot.faceNoHeartbeatFrames
+        ?? controller.healthSensorSnapshot.healthFaceNoHeartbeatFrames
+        ?? controller.healthNoHeartbeatFrames
+        ?? 0) || 0));
+    controller.healthFaceHeartbeatAlive = (
+      controller.healthSensorSnapshot.faceHeartbeatAlive
+        ?? controller.healthSensorSnapshot.healthFaceHeartbeatAlive
+        ?? false) === true;
+    controller.healthFaceHeartbeatOpacity = clamp01(Number(
+      controller.healthSensorSnapshot.faceHeartbeatOpacity
+      ?? controller.healthSensorSnapshot.healthFaceHeartbeatOpacity
+      ?? (controller.healthFaceHeartbeatAlive ? 1 : 0)));
+    controller.healthFaceLifeLevel = controller.healthSensorSnapshot.faceLifeLevel ?? controller.healthFaceLifeLevel ?? 0;
+    controller.healthFaceLifePhase = controller.healthSensorSnapshot.faceLifePhase ?? controller.healthFaceLifePhase ?? "unknown";
+    controller.healthFaceLifeTemplateLevel = controller.healthSensorSnapshot.faceLifeTemplateLevel ?? controller.healthFaceLifeTemplateLevel ?? 0;
+    controller.healthFaceLifeTemplatePhase = controller.healthSensorSnapshot.faceLifeTemplatePhase ?? controller.healthFaceLifeTemplatePhase ?? "unknown";
+    controller.healthFaceLifeQuantizedLevel = controller.healthSensorSnapshot.faceLifeQuantizedLevel ?? controller.healthFaceLifeQuantizedLevel ?? 0;
+    controller.healthFaceLifeQuantizedPhase = controller.healthSensorSnapshot.faceLifeQuantizedPhase ?? controller.healthFaceLifeQuantizedPhase ?? "unknown";
+    controller.healthFaceTemplateConfidence = Math.max(
+      Number(controller.healthSensorSnapshot.faceLifeTemplateConfidence || 0),
+      Number(controller.healthSensorSnapshot.healthFaceTemplateConfidence || 0),
+      Number(controller.healthFaceTemplateConfidence || 0));
     controller.healthEstimatedPercent = Number.isFinite(Number(controller.healthSensorSnapshot.estimatedPercent))
       ? Math.max(0, Math.min(100, Math.round(Number(controller.healthSensorSnapshot.estimatedPercent))))
       : controller.healthEstimatedPercent;
@@ -5650,33 +6549,340 @@
     });
   }
 
+  function faceLifePhaseFromLevelForRuntime(level) {
+    const numeric = Number(level);
+    if (!Number.isFinite(numeric)) {
+      return "unknown";
+    }
+
+    if (numeric <= 0) {
+      return "dead";
+    }
+
+    if (numeric <= 1) {
+      return "moribund";
+    }
+
+    if (numeric <= 2) {
+      return "critical";
+    }
+
+    if (numeric <= 3) {
+      return "damaged";
+    }
+
+    if (numeric <= 4) {
+      return "wounded";
+    }
+
+    return "healthy";
+  }
+
+  function faceLifePercentFromLevelForRuntime(level) {
+    const numeric = Number(level);
+    if (!Number.isFinite(numeric)) {
+      return 100;
+    }
+
+    if (numeric <= 0) {
+      return 0;
+    }
+
+    if (numeric <= 1) {
+      return 12;
+    }
+
+    if (numeric <= 2) {
+      return 30;
+    }
+
+    if (numeric <= 3) {
+      return 55;
+    }
+
+    if (numeric <= 4) {
+      return 80;
+    }
+
+    return 100;
+  }
+
+  function applyFaceLifeTemporalFloor(controller, healthState) {
+    if (!healthState || healthState.hudReady === false) {
+      if (Array.isArray(controller.healthFaceLifeLevelHistory)) {
+        controller.healthFaceLifeLevelHistory.length = 0;
+      }
+      controller.healthFaceRecoveryFrames = 0;
+      return;
+    }
+
+    if (!Array.isArray(controller.healthFaceLifeLevelHistory)) {
+      controller.healthFaceLifeLevelHistory = [];
+    }
+
+    const phase = String(healthState.faceLifePhase || "unknown");
+    const level = Number(healthState.faceLifeLevel);
+    const known = phase !== "unknown" && Number.isFinite(level);
+    if (!known) {
+      controller.healthFaceRecoveryFrames = 0;
+      return;
+    }
+
+    const invulnerable = phase === "invulnerable" || healthState.invulnerable === true;
+    if (invulnerable) {
+      controller.healthFaceLifeLevelHistory.length = 0;
+      controller.healthFaceRecoveryFrames = 0;
+      return;
+    }
+
+    const windowFrames = Math.max(3, Math.floor(profileNumber(controller.profile, "healthFaceLifeMinWindowFrames", 9)));
+    const recoveryFrames = Math.max(1, Math.floor(profileNumber(controller.profile, "healthFaceRecoveryConfirmFrames", 7)));
+    const boundedLevel = Math.max(0, Math.min(5, Math.round(level)));
+    controller.healthFaceLifeLevelHistory.push({
+      level: boundedLevel,
+      phase,
+      confidence: Number(healthState.faceLifeTemplateConfidence || 0),
+      heartbeat: healthState.faceHeartbeatAlive === true
+    });
+    while (controller.healthFaceLifeLevelHistory.length > windowFrames) {
+      controller.healthFaceLifeLevelHistory.shift();
+    }
+
+    const lowFloor = controller.healthFaceLifeLevelHistory.reduce((lowest, entry) => {
+      const entryLevel = Number(entry?.level);
+      return Number.isFinite(entryLevel) ? Math.min(lowest, entryLevel) : lowest;
+    }, boundedLevel);
+    const shouldConfirmRecovery = boundedLevel >= 4 && lowFloor <= 2;
+    controller.healthFaceRecoveryFrames = shouldConfirmRecovery
+      ? Math.min(MAX_STUCK_COUNTER, Number(controller.healthFaceRecoveryFrames || 0) + 1)
+      : 0;
+    if (!shouldConfirmRecovery || controller.healthFaceRecoveryFrames >= recoveryFrames) {
+      if (controller.healthFaceRecoveryFrames >= recoveryFrames) {
+        controller.healthFaceLifeLevelHistory = controller.healthFaceLifeLevelHistory
+          .filter(entry => Number(entry?.level) >= 4)
+          .slice(-windowFrames);
+      }
+      healthState.faceLifeTemporalFloorLevel = boundedLevel;
+      healthState.faceLifeTemporalFloorApplied = false;
+      healthState.faceLifeRecoveryFrames = controller.healthFaceRecoveryFrames;
+      healthState.faceLifeRecoveryRequiredFrames = recoveryFrames;
+      return;
+    }
+
+    const floorPhase = faceLifePhaseFromLevelForRuntime(lowFloor);
+    const floorPercent = faceLifePercentFromLevelForRuntime(lowFloor);
+    healthState.faceLifeTemporalRawLevel = boundedLevel;
+    healthState.faceLifeTemporalFloorLevel = lowFloor;
+    healthState.faceLifeTemporalFloorApplied = true;
+    healthState.faceLifeRecoveryFrames = controller.healthFaceRecoveryFrames;
+    healthState.faceLifeRecoveryRequiredFrames = recoveryFrames;
+    healthState.faceLifeLevel = lowFloor;
+    healthState.faceLifePhase = floorPhase;
+    healthState.estimatedPercent = Math.min(Number(healthState.estimatedPercent ?? 100), floorPercent);
+    healthState.value = Math.min(Number(healthState.value ?? 100), floorPercent);
+    healthState.health = Math.min(Number(healthState.health ?? 100), floorPercent);
+    healthState.lowHealth = true;
+    if (!healthState.healthDangerReason || healthState.healthDangerReason === "none") {
+      healthState.healthDangerReason = "face-life-window-min";
+    }
+  }
+
+  function refreshFaceHeartbeatOpacity(healthState) {
+    if (!healthState) {
+      return 0;
+    }
+
+    const opacity = clamp01(Number(requireSensoryCognition("estimateFaceHeartbeatOpacity")({
+      faceLifePhase: healthState.faceLifePhase ?? healthState.healthFaceLifePhase,
+      likelyDead: healthState.likelyDead,
+      faceHeartbeatAlive: healthState.faceHeartbeatAlive,
+      faceNoHeartbeatFrames: healthState.faceNoHeartbeatFrames ?? healthState.healthFaceNoHeartbeatFrames,
+      noHeartbeatDeathFrames: healthState.noHeartbeatDeathFrames ?? healthState.healthNoHeartbeatDeathFrames
+    })) || 0);
+    healthState.faceHeartbeatOpacity = opacity;
+    healthState.healthFaceHeartbeatOpacity = opacity;
+    return opacity;
+  }
+
   function updateFaceLifePattern(controller, faceSignature, healthState, faceQuantizedFrameChange) {
-    const signature = String(faceSignature || "0000000000000000");
-    const valid = /[1-9a-f]/i.test(signature) && healthState?.hudReady !== false;
+    const rawSignature = String(faceSignature || "0000000000000000");
+    const phaseForHeartbeat = String(
+      healthState?.faceLifePhase
+      ?? healthState?.healthFaceLifePhase
+      ?? healthState?.faceLifeTemplatePhase
+      ?? healthState?.healthFaceLifeTemplatePhase
+      ?? "unknown").toLowerCase();
+    const levelForHeartbeat = Number(
+      healthState?.faceLifeLevel
+      ?? healthState?.healthFaceLifeLevel
+      ?? healthState?.faceLifeTemplateLevel
+      ?? healthState?.healthFaceLifeTemplateLevel
+      ?? 0);
+    const templateBucket = Math.round(clamp01(Number(
+      healthState?.faceLifeTemplateConfidence
+      ?? healthState?.healthFaceTemplateConfidence
+      ?? healthState?.faceTemplateConfidence
+      ?? 0)) * 10);
+    const rawSignatureValid = /[1-9a-f]/i.test(rawSignature);
+    const semanticValid = phaseForHeartbeat !== "unknown"
+      || (Number.isFinite(levelForHeartbeat) && levelForHeartbeat > 0)
+      || templateBucket > 0;
+    const valid = (rawSignatureValid || semanticValid) && healthState?.hudReady !== false;
+    const semanticSignature = semanticValid
+      ? `life:${phaseForHeartbeat}:${Number.isFinite(levelForHeartbeat) ? levelForHeartbeat : 0}:${templateBucket}`
+      : "";
+    const signature = rawSignatureValid ? rawSignature : (semanticSignature || rawSignature);
     if (!Array.isArray(controller.facePoseSignatureHistory)) {
       controller.facePoseSignatureHistory = [];
     }
 
+    const previousSignature = valid && controller.facePoseSignatureHistory.length > 0
+      ? String(controller.facePoseSignatureHistory[controller.facePoseSignatureHistory.length - 1] || "")
+      : "";
+    const featureSignature = [
+      healthState?.faceRedSignature,
+      healthState?.faceEdgeSignature,
+      healthState?.faceEyeWhiteSignature,
+      healthState?.faceEyeYellowSignature
+    ]
+      .map(value => String(value || ""))
+      .join("|");
+    const previousSemanticSignature = valid ? String(controller.faceVitalSemanticSignatureLast || "") : "";
+    const previousFeatureSignature = valid ? String(controller.faceVitalFeatureSignatureLast || "") : "";
     if (valid) {
       const historyLimit = Math.max(12, Math.round(profileNumber(controller.profile, "healthFacePoseHistoryFrames", 36)));
       controller.facePoseSignatureHistory.push(signature);
       while (controller.facePoseSignatureHistory.length > historyLimit) {
         controller.facePoseSignatureHistory.shift();
       }
+      controller.faceVitalFeatureSignatureLast = featureSignature;
+      controller.faceVitalSemanticSignatureLast = semanticSignature;
     } else {
       controller.facePoseSignatureHistory.length = 0;
+      controller.faceVitalFeatureSignatureLast = "";
+      controller.faceVitalSemanticSignatureLast = "";
     }
 
     const unique = new Set(controller.facePoseSignatureHistory).size;
     const delta = Number(faceQuantizedFrameChange ?? 255);
-    const heartbeatAlive = Boolean(healthState?.faceHeartbeatAlive)
-      || (valid && unique >= 2 && Number(healthState?.faceNoHeartbeatFrames || 0) < profileNumber(controller.profile, "healthNoHeartbeatDeathFrames", 90));
+    const templateConfidenceForHeartbeat = Math.max(
+      Number(healthState?.faceLifeTemplateConfidence || 0),
+      Number(healthState?.healthFaceTemplateConfidence || 0),
+      Number(healthState?.faceTemplateConfidence || 0),
+      Number(templateBucket || 0) / 10);
+    const severeBloodForHeartbeat = Math.max(
+      Number(healthState?.faceBloodScore || 0),
+      Number(healthState?.faceBloodRatio || 0) * 1.25,
+      Number(healthState?.statusDeathTintScore || 0) * 0.85,
+      Number(healthState?.faceDeathTintScore || 0) * 1.05);
+    const lowLifeFixedForHeartbeat = valid
+      && unique <= 1
+      && (phaseForHeartbeat === "dead"
+        || (phaseForHeartbeat === "moribund" && severeBloodForHeartbeat >= 0.56 && templateConfidenceForHeartbeat >= 0.45)
+        || (Number.isFinite(levelForHeartbeat)
+          && levelForHeartbeat > 0
+          && levelForHeartbeat <= 1
+          && severeBloodForHeartbeat >= 0.60
+          && templateConfidenceForHeartbeat >= 0.50));
+    const previousVisualOpacity = clamp01(Number(
+      controller.faceHeartbeatVisualOpacity
+      ?? healthState?.faceHeartbeatOpacity
+      ?? healthState?.healthFaceHeartbeatOpacity
+      ?? 0) || 0);
+    const heartbeatDecayRate = Math.max(0.40, Math.min(0.96, profileNumber(controller.profile, "healthHeartbeatOpacityDecayRate", 0.78)));
+    const heartbeatDecayStep = Math.max(0, Math.min(0.12, profileNumber(controller.profile, "healthHeartbeatOpacityDecayStep", 0.018)));
+    const decayedVisualOpacity = previousVisualOpacity <= 0
+      ? 0
+      : Math.max(0, previousVisualOpacity * heartbeatDecayRate - heartbeatDecayStep);
+    controller.faceHeartbeatPulseCooldownFrames = Math.max(0, Math.floor(Number(controller.faceHeartbeatPulseCooldownFrames || 0)) - 1);
+    const signaturePulse = valid
+      && rawSignatureValid
+      && previousSignature.length > 0
+      && previousSignature !== signature;
+    const featurePulse = valid
+      && featureSignature.replace(/[|0]/g, "").length > 0
+      && previousFeatureSignature.length > 0
+      && previousFeatureSignature !== featureSignature;
+    const semanticPulse = valid
+      && semanticSignature.length > 0
+      && previousSemanticSignature.length > 0
+      && previousSemanticSignature !== semanticSignature;
+    const motionPulse = valid && delta >= 0.65 && delta <= 24;
+    const observationPulse = valid
+      && !signaturePulse
+      && !featurePulse
+      && !semanticPulse
+      && !motionPulse
+      && previousSignature.length > 0
+      && phaseForHeartbeat !== "dead"
+      && Number.isFinite(levelForHeartbeat)
+      && levelForHeartbeat >= 2
+      && !lowLifeFixedForHeartbeat
+      && (rawSignatureValid || semanticValid || featureSignature.replace(/[|0]/g, "").length > 0);
+    const currentPulse = !lowLifeFixedForHeartbeat
+      && (signaturePulse || featurePulse || semanticPulse || motionPulse);
+    const heartbeatPulseCooldownFrames = Math.max(2, Math.round(profileNumber(controller.profile, "healthHeartbeatPulseCooldownFrames", 7)));
+    const acceptedPulse = (currentPulse || observationPulse) && Number(controller.faceHeartbeatPulseCooldownFrames || 0) <= 0;
+    const nextVisualOpacity = acceptedPulse ? 1 : decayedVisualOpacity;
+    const historyAlive = valid
+      && !lowLifeFixedForHeartbeat
+      && unique >= 2
+      && Number(healthState?.faceNoHeartbeatFrames || 0) < profileNumber(controller.profile, "healthNoHeartbeatDeathFrames", 90);
+    const heartbeatAlive = currentPulse || historyAlive;
     const bloodDanger = clamp01(Math.max(
       Number(healthState?.bloodDangerScore || 0),
       Number(healthState?.faceBloodScore || 0) * 0.75,
       Number(healthState?.faceBloodRatio || 0) * 1.1));
     if (heartbeatAlive) {
       controller.faceFixedFrames = 0;
+      if (currentPulse
+        && healthState
+        && healthState.likelyDead !== true
+        && String(healthState.faceLifePhase || healthState.healthFaceLifePhase || "").toLowerCase() !== "dead") {
+        healthState.faceHeartbeatAlive = true;
+        healthState.healthFaceHeartbeatAlive = true;
+        healthState.faceNoHeartbeatFrames = 0;
+        healthState.healthFaceNoHeartbeatFrames = 0;
+        healthState.faceHeartbeatCurrentPulse = true;
+        healthState.healthFaceHeartbeatCurrentPulse = true;
+        healthState.faceHeartbeatPulseAccepted = acceptedPulse;
+        healthState.healthFaceHeartbeatPulseAccepted = acceptedPulse;
+        healthState.faceHeartbeatPulseKind = acceptedPulse
+          ? (signaturePulse ? "signature" : (featurePulse ? "feature" : (semanticPulse ? "semantic" : (motionPulse ? "motion" : "observed"))))
+          : "cooldown";
+        healthState.faceHeartbeatScore = Math.max(0.35, Number(healthState.faceHeartbeatScore || healthState.healthFaceHeartbeatScore || 0));
+        healthState.healthFaceHeartbeatScore = healthState.faceHeartbeatScore;
+        healthState.noHeartbeatDeath = false;
+        healthState.healthNoHeartbeatDeath = false;
+        healthState.faceLifeNoHeartbeatDeath = false;
+        healthState.healthFaceLifeNoHeartbeatDeath = false;
+        if (acceptedPulse) {
+          controller.faceHeartbeatPulseCooldownFrames = heartbeatPulseCooldownFrames;
+        }
+      } else if (healthState && !currentPulse) {
+        healthState.faceHeartbeatAlive = false;
+        healthState.healthFaceHeartbeatAlive = false;
+        healthState.faceHeartbeatCurrentPulse = false;
+        healthState.healthFaceHeartbeatCurrentPulse = false;
+        healthState.faceHeartbeatPulseAccepted = false;
+        healthState.healthFaceHeartbeatPulseAccepted = false;
+        healthState.faceHeartbeatPulseKind = historyAlive ? "decay" : "none";
+      }
+    } else if (observationPulse && healthState) {
+      // A visible face sample keeps the badge visible, but it is not a
+      // physiological pulse. Preserve the logical no-heartbeat clock until
+      // an actual signature/feature/semantic/motion transition is observed.
+      healthState.faceHeartbeatAlive = false;
+      healthState.healthFaceHeartbeatAlive = false;
+      healthState.faceHeartbeatCurrentPulse = false;
+      healthState.healthFaceHeartbeatCurrentPulse = false;
+      healthState.faceHeartbeatPulseAccepted = acceptedPulse;
+      healthState.healthFaceHeartbeatPulseAccepted = acceptedPulse;
+      healthState.faceHeartbeatPulseKind = acceptedPulse ? "observed" : "cooldown";
+      healthState.healthFaceHeartbeatPulseKind = healthState.faceHeartbeatPulseKind;
+      if (acceptedPulse) {
+        controller.faceHeartbeatPulseCooldownFrames = heartbeatPulseCooldownFrames;
+      }
     } else if (valid && (delta <= 0.32 || Number(healthState?.faceNoHeartbeatFrames || 0) > 0)) {
       controller.faceFixedFrames = Math.min(MAX_STUCK_COUNTER, Number(controller.faceFixedFrames || 0) + 1);
     } else {
@@ -5691,6 +6897,21 @@
         : (heartbeatAlive || unique >= 2
           ? "alive-cycle"
           : (valid ? (controller.faceFixedFrames > 0 ? "fixed" : "single") : "unknown")));
+    if (healthState) {
+      const phase = String(healthState.faceLifePhase || healthState.healthFaceLifePhase || "").toLowerCase();
+      const dead = healthState.likelyDead === true || phase === "dead";
+      const invulnerable = phase === "invulnerable";
+      const displayOpacity = dead
+        ? 0
+        : (invulnerable
+          ? 1
+          : (valid ? nextVisualOpacity : 0));
+      controller.faceHeartbeatVisualOpacity = displayOpacity;
+      healthState.faceHeartbeatOpacity = displayOpacity;
+      healthState.healthFaceHeartbeatOpacity = displayOpacity;
+      healthState.faceHeartbeatVisualOpacity = displayOpacity;
+      healthState.healthFaceHeartbeatVisualOpacity = displayOpacity;
+    }
     return {
       poseDiversity: controller.facePoseDiversity,
       fixedFrames: controller.faceFixedFrames,
@@ -5947,6 +7168,17 @@
       && controller.gameplayLuma > 0
       && controller.gameplayLuma <= 112
       && !controller.healthLikelyDead;
+    const computerRoomDarkWallRecovery = controller.doorOpenedCount === 0
+      && controller.firstDoorCorridorLocated
+      && controller.blueFloorScore < blueFloorHomeThreshold
+      && controller.computerRoomScore >= 0.12
+      && controller.computerDarkPanelScore >= 0.54
+      && controller.bridgeDoorScore >= 0.12
+      && controller.bridgeDoorScore <= 0.38
+      && controller.firstDoorUse3x3Score <= 0.08
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 116
+      && !controller.healthLikelyDead;
     const computerRoomPanelAfterDoor = controller.doorOpenedCount > 0
       && controller.darkZoneEntered
       && controller.computerRoomScore >= 0.14
@@ -5979,10 +7211,25 @@
         || controller.bridgeBrownScore >= 0.12
         || controller.bridgeDoorScore >= 0.03)
       && !controller.healthLikelyDead;
+    const postDoorComputerRoomRouteStable = controller.doorOpenedCount > 0
+      && depthEstimate >= 0.82
+      && controller.gameplayLuma > 0
+      && controller.gameplayLuma <= 120
+      && postDoorTerminalSurface >= 0.30
+      && (controller.spawnCorridorGapScore >= 0.30
+        || controller.bridgeDoorScore >= 0.10
+        || postDoorBridgeCue >= 0.24
+        || controller.bridgeBrownScore >= 0.16)
+      && !controller.healthLikelyDead;
+    const firstDoorPostUseContext = controller.firstDoorUseAttempted
+      || controller.firstDoorUsePulsed
+      || controller.pendingUseResponseFrames > 0
+      || controller.doorTransitionArmedFrames > 0
+      || controller.firstDoorTransitionFrames > 0;
     const visualPostDoorRecovery = controller.doorOpenedCount === 0
       && controller.firstDoorCorridorLocated
-      && !controller.firstDoorUseAttempted
-      && (computerRoomVisualAfterDoor || computerRoomWhiteWallRecovery)
+      && firstDoorPostUseContext
+      && (computerRoomVisualAfterDoor || computerRoomWhiteWallRecovery || computerRoomDarkWallRecovery)
       && controller.blueFloorScore < blueFloorHomeThreshold
       && controller.predictions >= firstDoorSpawnScanFrames + 120;
     const postDoorAudioType = normalizeAuditoryEventType(auditorySnapshot?.eventType || controller.auditorySnapshot?.eventType);
@@ -6017,8 +7264,7 @@
         || computerRoomWhiteWallRecovery
         || controller.computerRoomScore >= 0.10
         || controller.computerDarkPanelScore >= 0.20
-        || controller.computerPanelScore >= 0.12
-        || hostileZoneSignal);
+        || controller.computerPanelScore >= 0.12);
     const firstDoorLikelyOpened = controller.firstDoorTransitionFrames >= 10
       || visualPostDoorRecovery
       || postDoorAudioSpatialCue
@@ -6035,19 +7281,26 @@
     const firstDoorAudioSuccess = controller.auditorySnapshot?.eventType === "use-success-gate"
       || auditorySnapshot?.eventType === "use-success-gate"
       || postDoorAudioSpatialCue;
+    const firstDoorVisualSuccess = visualPostDoorRecovery
+      && (computerRoomVisualAfterDoor || computerRoomWhiteWallRecovery || computerRoomDarkWallRecovery)
+      && controller.firstDoorUseAttempted
+      && controller.firstDoorUseSignature >= Math.max(0.28, firstDoorUseSignatureThreshold * 0.55)
+      && controller.firstDoorTransitionFrames >= 2;
     const firstDoorOpeningConfirmed = controller.doorOpenedCount === 0
       && controller.firstDoorCorridorLocated
-      && firstDoorAudioSuccess
+      && (firstDoorAudioSuccess || firstDoorVisualSuccess)
       && !firstDoorAudioFailure
       && ((controller.firstDoorUseAttempted
           && controller.firstDoorUseSignature >= firstDoorUseSignatureThreshold)
-        || visualPostDoorRecovery)
+        || visualPostDoorRecovery
+        || firstDoorVisualSuccess)
       && (controller.firstDoorTransitionFrames >= 8
         || controller.darkZoneFrames >= Math.max(2, Math.floor(darkZoneConfirmFrames * 0.5))
         || (controller.mapDoorSectorMatch && (controller.mapDarkSectorMatch || darkZoneCandidate || computerRoomVisualAfterDoor))
         || (controller.doorTransitionArmedFrames > 0 && computerRoomVisualAfterDoor && hostileZoneSignal)
         || postDoorAudioSpatialCue
-        || visualPostDoorRecovery);
+        || visualPostDoorRecovery
+        || firstDoorVisualSuccess);
     if (firstDoorOpeningConfirmed) {
       controller.doorOpenedCount = 1;
       controller.darkZoneEntered = true;
@@ -6074,6 +7327,7 @@
       controller.loopEscapeFrames = 0;
       controller.mapSectorId = "door-open-transition";
       controller.safetyReason = "first-door-open-confirmed";
+      controller.syncPostDoorSemanticMemory("first-door-open-confirmed");
     }
 
     const computerRoomCombatAfterDoor = controller.doorOpenedCount > 0
@@ -6088,8 +7342,8 @@
       || controller.darkZoneEntered
       || visualPostDoorRecovery
       || postDoorAudioSpatialCue
-      || computerRoomWhiteWallRecovery
       || controller.firstDoorTransitionFrames >= 10
+      || (firstDoorPostUseContext && computerRoomWhiteWallRecovery)
       || (controller.firstDoorUseAttempted && controller.doorTransitionArmedFrames > 0);
     const combatTransitionStable = !combatContextActive
       || controller.doorOpenedCount > 0
@@ -6098,17 +7352,26 @@
     controller.topologicalTransitionBlocked = Boolean(computerRoomVisualAfterDoor && (!firstDoorTopologyAllowsComputerRoom || !combatTransitionStable));
     const postDoorTopologyStable = controller.doorOpenedCount > 0 && controller.darkZoneEntered;
     const computerRoomCandidate = !controller.topologicalTransitionBlocked
+      && postDoorTopologyStable
       && (((firstDoorLikelyOpened || postDoorTopologyStable) && (computerRoomVisualAfterDoor || computerRoomPanelAfterDoor))
         || computerRoomCombatAfterDoor
         || computerRoomRouteAfterDoor
-        || postDoorWeakComputerPanelCue);
+        || postDoorWeakComputerPanelCue
+        || postDoorComputerRoomRouteStable);
     if (computerRoomCandidate) {
       controller.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, controller.computerRoomFrames + 1);
+      if (postDoorComputerRoomRouteStable) {
+        controller.computerRoomFrames = Math.min(MAX_STUCK_COUNTER, controller.computerRoomFrames + 1);
+      }
     } else {
       controller.computerRoomFrames = Math.max(0, controller.computerRoomFrames - 1);
     }
 
-    if (!controller.computerRoomEntered && controller.computerRoomFrames >= computerRoomConfirmFrames) {
+    const computerRoomPromotionAllowed = postDoorTopologyStable;
+    const requiredComputerRoomFrames = postDoorComputerRoomRouteStable
+      ? Math.max(3, Math.floor(computerRoomConfirmFrames * 0.5))
+      : computerRoomConfirmFrames;
+    if (!controller.computerRoomEntered && controller.computerRoomFrames >= requiredComputerRoomFrames && computerRoomPromotionAllowed) {
       controller.doorOpenedCount = Math.max(controller.doorOpenedCount, 1);
       controller.darkZoneEntered = true;
       controller.computerRoomAdvanceFrames = Math.max(
@@ -6127,6 +7390,7 @@
       controller.computerRoomEntered = true;
       controller.mapSectorId = "visual-computer-room";
       controller.safetyReason = "computer-room-confirmed";
+      controller.syncPostDoorSemanticMemory("computer-room-confirmed");
     }
 
     const centralHallFrame = Number(state?.frame || 0);
@@ -6167,7 +7431,7 @@
       controller.centralHallFrames = Math.max(0, controller.centralHallFrames - 1);
     }
 
-    if (!controller.centralHallEntered && controller.centralHallFrames >= 8) {
+    if (!controller.centralHallEntered && controller.centralHallFrames >= 4) {
       controller.centralHallEntered = true;
       controller.mapSectorId = "visual-central-hall";
       controller.safetyReason = "central-hall-confirmed";
@@ -6469,6 +7733,21 @@
     let faceBloodTintMax = 0;
     let faceBloodPixelCount = 0;
     const faceBloodRows = new Array(FACE_HEIGHT).fill(0);
+    const faceFeatureCellCount = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    const faceRedCellTotal = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    const faceEyeWhiteCellTotal = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    const faceEyeYellowCellTotal = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    const faceLumaPixels = new Array(FACE_WIDTH * FACE_HEIGHT).fill(0);
+    let faceRedTotal = 0;
+    let faceRedMax = 0;
+    let faceEyeWhiteTotal = 0;
+    let faceEyeWhiteMax = 0;
+    let faceEyeYellowTotal = 0;
+    let faceEyeYellowMax = 0;
+    let faceEyeRedTotal = 0;
+    let faceEyeRedMax = 0;
+    let faceEyeCount = 0;
+    let faceLumaTotal = 0;
     let darkAreaTotal = 0;
     let blueFloorTotal = 0;
     let blueFloorLowerTotal = 0;
@@ -6782,6 +8061,29 @@
       for (let x = FACE_X; x < FACE_X + FACE_WIDTH; x += 1) {
         const value = indices[Math.min(HEIGHT - 1, y) * WIDTH + Math.min(WIDTH - 1, x)] || 0;
         const deathTintScore = scoreDeathTintPaletteIndex(value, rgbaBytes);
+        const dx = x - FACE_X;
+        const dy = y - FACE_Y;
+        const feature = faceFeatureScores(value, rgbaBytes);
+        const featureColumn = Math.max(0, Math.min(FACE_SAMPLE_COLUMNS - 1, Math.floor(dx * FACE_SAMPLE_COLUMNS / FACE_WIDTH)));
+        const featureRow = Math.max(0, Math.min(FACE_SAMPLE_ROWS - 1, Math.floor(dy * FACE_SAMPLE_ROWS / FACE_HEIGHT)));
+        const featureIndex = featureRow * FACE_SAMPLE_COLUMNS + featureColumn;
+        faceFeatureCellCount[featureIndex] += 1;
+        faceRedCellTotal[featureIndex] += feature.blood;
+        faceEyeWhiteCellTotal[featureIndex] += feature.eyeWhite;
+        faceEyeYellowCellTotal[featureIndex] += feature.eyeYellow;
+        faceLumaPixels[dy * FACE_WIDTH + dx] = feature.luma;
+        faceRedTotal += feature.blood;
+        faceRedMax = Math.max(faceRedMax, feature.blood);
+        faceLumaTotal += feature.luma;
+        if (dy >= 7 && dy <= 17 && dx >= 7 && dx <= 25) {
+          faceEyeCount += 1;
+          faceEyeWhiteTotal += feature.eyeWhite;
+          faceEyeWhiteMax = Math.max(faceEyeWhiteMax, feature.eyeWhite);
+          faceEyeYellowTotal += feature.eyeYellow;
+          faceEyeYellowMax = Math.max(faceEyeYellowMax, feature.eyeYellow);
+          faceEyeRedTotal += feature.blood;
+          faceEyeRedMax = Math.max(faceEyeRedMax, feature.blood);
+        }
         faceBloodTintTotal += deathTintScore;
         faceBloodTintMax = Math.max(faceBloodTintMax, deathTintScore);
         if (deathTintScore >= 0.16) {
@@ -6856,6 +8158,16 @@
     const faceBloodAverage = (FACE_WIDTH * FACE_HEIGHT) ? faceBloodTintTotal / (FACE_WIDTH * FACE_HEIGHT) : 0;
     const faceBloodRatio = (FACE_WIDTH * FACE_HEIGHT) ? faceBloodPixelCount / (FACE_WIDTH * FACE_HEIGHT) : 0;
     const faceBloodRowCoverage = FACE_WIDTH ? Math.max(...faceBloodRows) / FACE_WIDTH : 0;
+    const faceFeaturePixelCount = Math.max(1, FACE_WIDTH * FACE_HEIGHT);
+    const faceEdgeFeatures = estimateFaceEdgeFeatures(faceLumaPixels);
+    const faceRedSignature = faceFeatureSignature(faceRedCellTotal, faceFeatureCellCount);
+    const faceEyeWhiteSignature = faceFeatureSignature(faceEyeWhiteCellTotal, faceFeatureCellCount);
+    const faceEyeYellowSignature = faceFeatureSignature(faceEyeYellowCellTotal, faceFeatureCellCount);
+    const faceRedScore = round2(clamp01((faceRedMax * 0.48) + ((faceRedTotal / faceFeaturePixelCount) * 0.52)));
+    const faceEyeWhiteScore = round2(clamp01((faceEyeWhiteMax * 0.62) + ((faceEyeWhiteTotal / Math.max(1, faceEyeCount)) * 0.38)));
+    const faceEyeYellowScore = round2(clamp01((faceEyeYellowMax * 0.62) + ((faceEyeYellowTotal / Math.max(1, faceEyeCount)) * 0.38)));
+    const faceEyeRedScore = round2(clamp01((faceEyeRedMax * 0.55) + ((faceEyeRedTotal / Math.max(1, faceEyeCount)) * 0.45)));
+    const faceLumaScore = round2(clamp01(faceLumaTotal / faceFeaturePixelCount));
     const faceBloodScore = round2(clamp01(Math.max(
       faceDeathTintScore,
       faceBloodAverage * 1.45,
@@ -6866,6 +8178,8 @@
       (gameplayDeathTintScore * 0.54) + (statusDeathTintScore * 0.28) + (faceDeathTintScore * 0.18),
       faceDeathTintScore * 0.82,
       statusDeathTintScore * 0.72)));
+    const quantizedFaceSample = quantizeFrameSample(faceSample);
+    const faceSignature = regionSignature(quantizedFaceSample);
     const rawHealthState = Object.assign(
       healthHudReady
         ? estimateHealthState(healthSample, quantizeFrameSample(healthSample))
@@ -6879,9 +8193,20 @@
         statusDeathTintScore,
         faceDeathTintScore,
         faceBloodScore,
-        faceBloodRatio
+        faceBloodRatio,
+        faceSignature,
+        faceRedSignature,
+        faceEdgeSignature: faceEdgeFeatures.signature,
+        faceEyeWhiteSignature,
+        faceEyeYellowSignature,
+        faceRedScore,
+        faceEyeWhiteScore,
+        faceEyeYellowScore,
+        faceEyeRedScore,
+        faceEdgeScore: faceEdgeFeatures.score,
+        faceLumaScore
       });
-    const summaryFaceDeathScore = Math.max(estimateFaceDeathScore(quantizeFrameSample(faceSample)), faceDeathTintScore * 0.75);
+    const summaryFaceDeathScore = Math.max(estimateFaceDeathScore(quantizedFaceSample), faceDeathTintScore * 0.75);
     const healthState = refineHealthState(rawHealthState, summaryFaceDeathScore, 255, 255);
     const courtyardLowerLeftScore = ((courtyardLowerLeftCount ? courtyardLowerLeft / courtyardLowerLeftCount : 0) * 0.68)
       + (courtyardLowerLeftMax * 0.32);
@@ -6990,7 +8315,40 @@
       healthFaceDeathTintScore: healthState.faceDeathTintScore || 0,
       healthFaceBloodScore: healthState.faceBloodScore || 0,
       healthFaceBloodRatio: healthState.faceBloodRatio || 0,
+      healthFaceRedScore: healthState.faceRedScore || faceRedScore,
+      healthFaceEyeWhiteScore: healthState.faceEyeWhiteScore || faceEyeWhiteScore,
+      healthFaceEyeYellowScore: healthState.faceEyeYellowScore || faceEyeYellowScore,
+      healthFaceEyeRedScore: healthState.faceEyeRedScore || faceEyeRedScore,
+      healthFaceEdgeScore: healthState.faceEdgeScore || faceEdgeFeatures.score,
+      healthFaceLumaScore: healthState.faceLumaScore || faceLumaScore,
+      healthFaceRedSignature: healthState.faceRedSignature || faceRedSignature,
+      healthFaceEdgeSignature: healthState.faceEdgeSignature || faceEdgeFeatures.signature,
+      healthFaceEyeWhiteSignature: healthState.faceEyeWhiteSignature || faceEyeWhiteSignature,
+      healthFaceEyeYellowSignature: healthState.faceEyeYellowSignature || faceEyeYellowSignature,
+      healthFaceLifeLevel: healthState.faceLifeLevel ?? 0,
+      healthFaceLifePhase: healthState.faceLifePhase ?? "unknown",
+      healthFaceLifeTemplateLevel: healthState.faceLifeTemplateLevel ?? 0,
+      healthFaceLifeTemplatePhase: healthState.faceLifeTemplatePhase ?? "unknown",
+      healthFaceLifeQuantizedLevel: healthState.faceLifeQuantizedLevel ?? 0,
+      healthFaceLifeQuantizedPhase: healthState.faceLifeQuantizedPhase ?? "unknown",
+      healthFaceTemplateConfidence: healthState.faceLifeTemplateConfidence ?? 0,
+      healthFaceHeartbeatScore: healthState.healthFaceHeartbeatScore ?? healthState.faceHeartbeatScore ?? 0,
+      healthFaceHeartbeatAlive: Boolean(healthState.healthFaceHeartbeatAlive ?? healthState.faceHeartbeatAlive),
+      healthFaceHeartbeatOpacity: healthState.healthFaceHeartbeatOpacity ?? healthState.faceHeartbeatOpacity ?? 0,
+      healthFaceHeartbeatVisualOpacity: healthState.healthFaceHeartbeatVisualOpacity
+        ?? healthState.faceHeartbeatVisualOpacity
+        ?? healthState.healthFaceHeartbeatOpacity
+        ?? healthState.faceHeartbeatOpacity
+        ?? 0,
+      healthFaceNoHeartbeatFrames: healthState.healthFaceNoHeartbeatFrames ?? healthState.faceNoHeartbeatFrames ?? 0,
+      healthNoHeartbeatDeath: Boolean(healthState.healthNoHeartbeatDeath ?? healthState.noHeartbeatDeath),
+      healthFaceLifeNoHeartbeatDeath: Boolean(healthState.healthFaceLifeNoHeartbeatDeath ?? healthState.faceLifeNoHeartbeatDeath),
+      healthFixedFaceDeath: Boolean(healthState.healthFixedFaceDeath ?? healthState.fixedFaceDeath),
+      healthFaceFixedFrames: healthState.healthFaceFixedFrames ?? healthState.faceFixedFrames ?? 0,
+      healthFaceBloodDeathFrames: healthState.healthFaceBloodDeathFrames ?? healthState.faceBloodDeathFrames ?? 0,
       faceSample,
+      faceSignature,
+      healthFaceSignature: healthState.faceSignature || faceSignature,
       faceAverage: faceSample.length ? Math.round(faceTotal / faceSample.length) : 0,
       statusBarAverage: statusSample.length ? Math.round(statusTotal / statusSample.length) : 0,
       gameplayLuma: gameplayLumaCount ? round2(gameplayLumaTotal / gameplayLumaCount) : 0,
@@ -7385,6 +8743,16 @@
       Number(controller?.enemyConfidence || 0),
       Number(controller?.enemyAllRegionPeak || 0),
       Number(controller?.enemyCenterCellConfidence || 0));
+    const terminalVisualCombatDecoy = Boolean(controller?.terminalVisualCombatDecoy)
+      || (terminalSurface >= 0.24
+        && visualTrace <= 0.46
+        && Number(controller?.audioEnemyConfidence || 0) < 0.34
+        && Number(controller?.firstDoorVisionRedScore || 0) <= 0.08
+        && !Boolean(controller?.darkDamageCombatEvidence));
+    if (terminalVisualCombatDecoy) {
+      return false;
+    }
+
     return Number(controller?.doorOpenedCount || 0) > 0
       && !controller?.enemyStructuralDecoy
       && Number(controller?.enemyConfidencePeak || 0) >= 0.62
@@ -7736,6 +9104,76 @@
 
   function regionSignature(sample) {
     return requireSensorTensor("regionSignature")(sample, "000000");
+  }
+
+  function paletteRgb(index, rgbaBytes) {
+    const paletteIndex = Number(index || 0);
+    if (!rgbaBytes || paletteIndex < 0 || paletteIndex > 255) {
+      return { red: 0, green: 0, blue: 0 };
+    }
+
+    const offset = paletteIndex * 4;
+    return {
+      red: Number(rgbaBytes[offset] || 0),
+      green: Number(rgbaBytes[offset + 1] || 0),
+      blue: Number(rgbaBytes[offset + 2] || 0)
+    };
+  }
+
+  function faceFeatureScores(index, rgbaBytes) {
+    const rgb = paletteRgb(index, rgbaBytes);
+    const red = rgb.red / 255;
+    const green = rgb.green / 255;
+    const blue = rgb.blue / 255;
+    const luma = clamp01(((0.299 * rgb.red) + (0.587 * rgb.green) + (0.114 * rgb.blue)) / 255);
+    const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+    const blood = clamp01((red - Math.max(green, blue) * 0.72) * 2.3) * clamp01((red - 0.25) * 2.2);
+    const eyeWhite = clamp01((luma - 0.56) * 2.6) * clamp01((0.4 - saturation) * 2.2);
+    const eyeYellow = clamp01((((red + green) * 0.5) - blue * 0.72) * 2.0) * clamp01((luma - 0.42) * 2.0);
+    return { blood, eyeWhite, eyeYellow, luma };
+  }
+
+  function faceFeatureSignature(totals, counts) {
+    const signature = [];
+    for (let index = 0; index < totals.length; index += 1) {
+      const average = counts[index] > 0 ? totals[index] / counts[index] : 0;
+      signature.push(Math.max(0, Math.min(15, Math.round(average * 15))).toString(16));
+    }
+
+    return signature.join("");
+  }
+
+  function estimateFaceEdgeFeatures(lumaPixels) {
+    if (!lumaPixels?.length) {
+      return { signature: "0000000000000000", score: 0 };
+    }
+
+    const totals = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    const counts = new Array(FACE_SAMPLE_COLUMNS * FACE_SAMPLE_ROWS).fill(0);
+    let total = 0;
+    let count = 0;
+    const at = (x, y) => Number(lumaPixels[Math.max(0, Math.min(FACE_HEIGHT - 1, y)) * FACE_WIDTH + Math.max(0, Math.min(FACE_WIDTH - 1, x))] || 0);
+    for (let y = 1; y < FACE_HEIGHT - 1; y += 1) {
+      for (let x = 1; x < FACE_WIDTH - 1; x += 1) {
+        const gx = (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1))
+          - (at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1));
+        const gy = (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1))
+          - (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1));
+        const edge = clamp01(Math.sqrt((gx * gx) + (gy * gy)));
+        const column = Math.max(0, Math.min(FACE_SAMPLE_COLUMNS - 1, Math.floor(x * FACE_SAMPLE_COLUMNS / FACE_WIDTH)));
+        const row = Math.max(0, Math.min(FACE_SAMPLE_ROWS - 1, Math.floor(y * FACE_SAMPLE_ROWS / FACE_HEIGHT)));
+        const cellIndex = row * FACE_SAMPLE_COLUMNS + column;
+        totals[cellIndex] += edge;
+        counts[cellIndex] += 1;
+        total += edge;
+        count += 1;
+      }
+    }
+
+    return {
+      signature: faceFeatureSignature(totals, counts),
+      score: round2(count ? total / count : 0)
+    };
   }
 
   function estimateDepthDistance(depthSample) {
@@ -9550,7 +10988,10 @@
         vetoed: false
       });
 
-    if (safeFeedback.applied && controller.safetyReason !== "dead-restart" && controller.safetyReason !== "door-opened") {
+    if (safeFeedback.applied
+      && controller.safetyReason !== "dead-restart"
+      && controller.safetyReason !== "door-opened"
+      && !isClosedDoorFirstDoorBackoffReason(controller.safetyReason)) {
       controller.safetyReason = `ctg-topos-${safeFeedback.reason}`;
       controller.mobilityMode = `ctg-topos-${carrier.dominantAxis.toLowerCase()}`;
     }
@@ -10214,6 +11655,73 @@
 
   function neutralAction() {
     return requireKinesisCognition("neutralAction")();
+  }
+
+  function enforceClosedDoorFirstDoorBackoffMotor(controller, action) {
+    if (Number(controller?.doorOpenedCount || 0) > 0
+      || !isClosedDoorFirstDoorBackoffReason(controller?.safetyReason)) {
+      return action;
+    }
+
+    const routeMode = String(controller?.routeMode || controller?.previousRouteMode || "").toLowerCase();
+    const routeText = [
+      controller?.currentRoute,
+      controller?.route,
+      controller?.currentLandmark,
+      controller?.routeLandmark
+    ].join(" ").toLowerCase();
+    const hintText = [
+      controller?.routeActionHint,
+      controller?.routeHint,
+      controller?.objective,
+      controller?.currentObjective
+    ].join(" ").toLowerCase();
+    const predictions = Math.max(0, Math.floor(Number(controller?.predictions || controller?.autoplayPredictions || 0) || 0));
+    const firstDoorUseScore = Number(controller?.firstDoorUse3x3Score || 0) || 0;
+    const firstDoorVisionRedScore = Number(controller?.firstDoorVision9x9RedScore || controller?.firstDoorRedScore || 0) || 0;
+    const firstDoorVisionScore = Number(controller?.firstDoorVision9x9Score || 0) || 0;
+    const bridgeDoorScore = Number(controller?.bridgeDoorScore || 0) || 0;
+    const earlyAdvanceFirstDoorApproach = predictions < 620
+      && routeMode === "door-approach"
+      && routeText.indexOf("first-door") >= 0
+      && hintText.indexOf("advance-first-door") >= 0
+      && firstDoorUseScore <= 0.04
+      && firstDoorVisionRedScore < 0.06
+      && firstDoorVisionScore >= 0.28
+      && bridgeDoorScore >= 0.18;
+    if (earlyAdvanceFirstDoorApproach) {
+      return action;
+    }
+
+    const safe = normalizeAction(action);
+    return {
+      move: "back",
+      turn: "none",
+      fire: false,
+      strafe: false,
+      use: false,
+      run: false,
+      turnYaw: 0,
+      source: action?.source || "bonsai-supervisor",
+      pipeline: action?.pipeline || "closed-door-first-door-corner-sequence",
+      stage: action?.stage || "closed-door-first-door-corner-backoff",
+      objective: action?.objective || "find-first-door",
+      strategyPriority: Number(action?.strategyPriority || 0),
+      evidenceScore: Number(action?.evidenceScore || 0),
+      semanticScores: action?.semanticScores || {},
+      actionSequenceId: action?.actionSequenceId || "first-door-corner-use",
+      actionSequenceStepId: action?.actionSequenceStepId || "backoff",
+      actionSequenceFrame: Number(action?.actionSequenceFrame || 0),
+      zoeVetoed: Boolean(action?.zoeVetoed),
+      svcEvent: action?.svcEvent || "none",
+      safetyReason: controller.safetyReason || action?.safetyReason || "closed-door-first-door-corner-backoff",
+      previousMove: safe.move,
+      previousTurn: safe.turn
+    };
+  }
+
+  function isClosedDoorFirstDoorBackoffReason(reason) {
+    return String(reason || "").toLowerCase().indexOf("closed-door-first-door-corner-backoff") >= 0;
   }
 
   function requireSemanticCognition(name) {

@@ -91,4 +91,34 @@ const postEnemyObjective = routing.inferObjective({
 
 assert(postEnemyObjective === "cross-bridge", "Enemy defeat should unblock bridge objective instead of stalling at secure-central-hall");
 
-console.log("DOOM_ROUTING_VM_TEST_OK", { landmarkObjective, weakObjective, postEnemyObjective });
+const postDoorPendingPipeline = routing.inferControlPipeline({
+  enabled: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  computerPanelVisible: true
+});
+assert(postDoorPendingPipeline === "ComputerRoom", "Opened first door should not project FirstDoor while ComputerRoom entry is still settling");
+
+const postDoorGracePipeline = routing.inferControlPipeline({
+  enabled: true,
+  doorTransitionGraceActive: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: false
+});
+assert(postDoorGracePipeline === "ComputerRoom", "Door transition grace after a confirmed open door should remain post-door");
+
+const postDoorCrossBridgeObjective = routing.inferObjective({
+  enabled: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  currentRoute: "cross-bridge-route",
+  routeMode: "post-door",
+  bridgeConfidence: 0.60,
+  computerRoomConfidence: 0.91,
+  bridgeDoorScore: 0.27
+});
+assert(postDoorCrossBridgeObjective === "reach-central-hall", "Post-door cross-bridge evidence should not regress to ComputerRoom entry");
+
+console.log("DOOM_ROUTING_VM_TEST_OK", { landmarkObjective, weakObjective, postEnemyObjective, postDoorPendingPipeline, postDoorCrossBridgeObjective });

@@ -20,6 +20,7 @@ public sealed partial record AutoplayPipelineDefinition
     /// </remarks>
     public static AutoplayPipelineDefinition Default { get; } = new()
     {
-        Stages = AutoplayPipelineDefaultStages.Create()
+        Stages = AutoplayPipelineDefaultStages.Create(),
+        PhasePipelines = AutoplayPhasePipelineDefaults.Create()
     };
 }

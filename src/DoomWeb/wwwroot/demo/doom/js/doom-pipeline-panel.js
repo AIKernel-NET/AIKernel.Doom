@@ -74,6 +74,137 @@
     return clamp01(Number(value || 0)).toFixed(2);
   }
 
+  function normalizeLifePhase(value) {
+    const text = String(value || "unknown").toLowerCase();
+    if (text === "healthy"
+      || text === "wounded"
+      || text === "damaged"
+      || text === "critical"
+      || text === "moribund"
+      || text === "dead"
+      || text === "invulnerable") {
+      return text;
+    }
+
+    return "unknown";
+  }
+
+  function firstKnownLifePhase(...values) {
+    for (const value of values) {
+      const phase = normalizeLifePhase(value);
+      if (phase !== "unknown") {
+        return phase;
+      }
+    }
+
+    return "unknown";
+  }
+
+  function firstExplicitBoolean(...values) {
+    for (const value of values) {
+      if (value === true || value === false) {
+        return value;
+      }
+      if (value === 1 || value === 0) {
+        return value === 1;
+      }
+      if (value === "true" || value === "false") {
+        return value === "true";
+      }
+    }
+
+    return false;
+  }
+
+  function resolveLifeLevel(phase, ...values) {
+    for (const value of values) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+
+      const level = Math.max(0, Math.min(5, Math.round(parsed)));
+      if (phase !== "dead" && phase !== "unknown" && level === 0) {
+        continue;
+      }
+
+      return level;
+    }
+
+    return NaN;
+  }
+
+  function resolveLifeGlyph(autoplay = {}, zoe = {}) {
+    const health = autoplay.healthSensor || {};
+    const phase = firstKnownLifePhase(
+      autoplay.healthLikelyDead || health.likelyDead ? "dead" : undefined,
+      autoplay.healthFaceLifePhase,
+      health.healthFaceLifePhase,
+      autoplay.faceLifePhase,
+      health.faceLifePhase,
+      zoe.faceLifePhase,
+      zoe.FaceLifePhase,
+      health.faceLifeTemplatePhase,
+      health.healthFaceLifeTemplatePhase,
+      health.faceLifeQuantizedPhase,
+      health.healthFaceLifeQuantizedPhase);
+    const rawLevel = resolveLifeLevel(
+      phase,
+      autoplay.healthFaceLifeLevel,
+      health.healthFaceLifeLevel,
+      autoplay.faceLifeLevel,
+      health.faceLifeLevel,
+      zoe.faceLifeLevel,
+      zoe.FaceLifeLevel,
+      health.faceLifeTemplateLevel,
+      health.healthFaceLifeTemplateLevel,
+      health.faceLifeQuantizedLevel,
+      health.healthFaceLifeQuantizedLevel);
+    const level = Number.isFinite(rawLevel)
+      ? Math.max(0, Math.min(5, Math.round(rawLevel)))
+      : (phase === "healthy" || phase === "invulnerable" ? 5
+        : (phase === "wounded" ? 4
+          : (phase === "damaged" ? 3
+            : (phase === "critical" ? 2
+              : (phase === "moribund" ? 1 : 0)))));
+    const heartbeatAlive = firstExplicitBoolean(
+      health.faceHeartbeatAlive,
+      health.healthFaceHeartbeatAlive,
+      autoplay.faceHeartbeatAlive,
+      autoplay.healthFaceHeartbeatAlive);
+    const opacity = clamp01(
+      health.faceHeartbeatVisualOpacity
+      ?? health.healthFaceHeartbeatVisualOpacity
+      ?? autoplay.faceHeartbeatVisualOpacity
+      ?? autoplay.healthFaceHeartbeatVisualOpacity
+      ?? health.faceHeartbeatOpacity
+      ?? health.healthFaceHeartbeatOpacity
+      ?? autoplay.faceHeartbeatOpacity
+      ?? autoplay.healthFaceHeartbeatOpacity
+      ?? zoe.faceHeartbeatOpacity
+      ?? zoe.FaceHeartbeatOpacity
+      ?? (heartbeatAlive ? 1 : 0));
+    const heartbeat = heartbeatAlive || phase === "invulnerable"
+      ? "hb"
+      : `fade${opacity.toFixed(2)}`;
+    const symbol = phase === "invulnerable" ? "∞" : (phase === "dead" ? "0" : String(level));
+    const bars = phase === "invulnerable"
+      ? "■■■■■"
+      : "■".repeat(level) + "□".repeat(Math.max(0, 5 - level));
+    return {
+      phase,
+      level,
+      opacity,
+      heartbeat,
+      label: `heart ${symbol}`,
+      short: `heart ${symbol} ${heartbeat}`,
+      detail: `heart ${symbol} ${bars} ${heartbeat}`,
+      warning: phase === "critical" || phase === "moribund",
+      dead: phase === "dead",
+      invulnerable: phase === "invulnerable"
+    };
+  }
+
   function beginThoughtGridSmoothing(node) {
     const now = nowMs();
     let state = thoughtGridSmoothingCache.get(node);
@@ -240,12 +371,12 @@
   function isZoeWarning(pipeline, autoplay) {
     const zoe = resolveZoeStateFromPipeline(pipeline);
     const lethalRisk = Number(zoe.lethalRisk ?? zoe.LethalRisk ?? autoplay?.lethalRisk ?? 0);
-    const health = Number(zoe.health ?? zoe.Health ?? autoplay?.healthEstimatedPercent ?? autoplay?.healthSensor?.value ?? 100);
-    const threshold = Number(zoe.healthThreshold ?? zoe.HealthThreshold ?? 50);
+    const life = resolveLifeGlyph(autoplay, zoe);
     return isZoeVetoed(pipeline, autoplay)
+      || life.dead
+      || life.warning
       || Boolean(zoe.warning ?? zoe.Warning ?? zoe.lowHealth ?? zoe.LowHealth ?? zoe.criticalHealth ?? zoe.CriticalHealth)
-      || lethalRisk >= 0.50
-      || (Number.isFinite(health) && health > 0 && health < threshold);
+      || lethalRisk >= 0.50;
   }
 
   function summarizeDictionary(values, limit = 3) {
@@ -412,8 +543,10 @@
     const vectors = readDictionaryCaseInsensitive(noesis, ["nousVectors", "NousVectors"]);
     const toposVectors = readDictionaryCaseInsensitive(krisis, ["toposVectors", "ToposVectors"]);
     const toposLabels = readObjectCaseInsensitive(krisis, ["toposLabels", "ToposLabels"]) || [];
-    const kairos = readObjectCaseInsensitive(krisis, ["kairos", "Kairos"]) || {};
-    const axis = String(kairos.selectedAxis || kairos.SelectedAxis || "logos").toUpperCase();
+    const kairos = resolveKairosAxisPacket(autoplay)
+      || readObjectCaseInsensitive(krisis, ["kairos", "Kairos"])
+      || {};
+    const axis = String(kairos.selectedAxis || kairos.SelectedAxis || kairos.dominantAxis || kairos.DominantAxis || "logos").toUpperCase();
     const zoe = resolveZoeStateFromPipeline(pipeline);
     const routeEvidence = routePlan.firstDoorRouteEvidence ?? routePlan.FirstDoorRouteEvidence ?? autoplay?.spawnCorridorGapScore ?? 0;
     const routeReady = routePlan.firstDoorRouteEvidenceReady ?? routePlan.FirstDoorRouteEvidenceReady ?? false;
@@ -441,7 +574,7 @@
     const zoeReason = zoe.lastReason || zoe.LastReason || "none";
     const zoeThreshold = zoe.healthThreshold ?? zoe.HealthThreshold ?? 10;
     const zoeOverride = zoe.overrideAction || zoe.OverrideAction || "none";
-    const zoeHealth = zoe.health ?? zoe.Health ?? autoplay?.healthEstimatedPercent ?? autoplay?.healthSensor?.value ?? 100;
+    const lifeGlyph = resolveLifeGlyph(autoplay, zoe);
     const zoeLabel = zoeVetoed ? "ZOE VETO" : (zoeWarning ? "Zoe=warn" : "Zoe=clear");
     const compact = [
       zoeVetoed ? "[CTG SIMPLE] ZOE VETO" : "[CTG SIMPLE]",
@@ -449,7 +582,7 @@
       `  [G] ${gpuPathSummary.shortText}`,
       `  [N] ${summarizeLabels(eventLabels, 2)} ${summarizeTopologyCompact(topology)}`,
       `  [Kr] ${axis} L=${formatScore(kairos.logos ?? kairos.Logos)} P=${formatScore(kairos.pathos ?? kairos.Pathos)} E=${formatScore(kairos.ethos ?? kairos.Ethos)}`,
-      `  [Ki] ${formatPipelineAction(kinesis)} ${zoeLabel} hp=${Number.isFinite(Number(zoeHealth)) ? Math.round(Number(zoeHealth)) : 100} Use=${formatUsePulse(kinesis)}`
+      `  [Ki] ${formatPipelineAction(kinesis)} ${zoeLabel} ${lifeGlyph.short} Use=${formatUsePulse(kinesis)}`
     ];
     const detailSections = [
       "[Aisthesis]",
@@ -479,7 +612,7 @@
       `  Action: ${formatPipelineAction(kinesis)}`,
       `  Use Pulse: ${formatUsePulse(kinesis)}`,
       ...(zoeVetoed ? ["  [ZOE VETO] Safe-control override active"] : (zoeWarning ? ["  [ZOE WARN] Health or risk is elevated"] : [])),
-      `  Zoe: ${zoeVetoed ? "veto" : (zoeWarning ? "warn" : "clear")} hp=${Number.isFinite(Number(zoeHealth)) ? Math.round(Number(zoeHealth)) : 100} risk=${formatScore(zoeRisk)} threshold=${zoeThreshold}`,
+      `  Zoe: ${zoeVetoed ? "veto" : (zoeWarning ? "warn" : "clear")} ${lifeGlyph.detail} risk=${formatScore(zoeRisk)} threshold=${zoeThreshold}`,
       `  Zoe detail: reason=${labelize(zoeReason)} override=${labelize(zoeOverride)}`
     ];
     if (!options.detail) {
@@ -505,7 +638,13 @@
 
     const pipeline = resolvePipelineState(autoplay);
     const krisis = readObjectCaseInsensitive(pipeline, ["krisis", "Krisis"]);
-    return readObjectCaseInsensitive(krisis, ["kairos", "Kairos"]);
+    return readObjectCaseInsensitive(krisis, ["kairos", "Kairos"])
+      || autoplay?.ctgCarrier?.kairos
+      || autoplay?.ctgCarrier?.Kairos
+      || autoplay?.toposDecisionCarrier?.kairos
+      || autoplay?.toposDecisionCarrier?.Kairos
+      || autoplay?.ctgObservedScores
+      || null;
   }
 
   function axisValue(packet, lower, upper) {
@@ -1136,9 +1275,9 @@
     title.textContent = "AIKernel Pipeline";
     const status = documentRef.createElement("span");
     const zoe = resolveZoeStateFromPipeline(pipelineState);
-    const hp = Number(zoe.health ?? zoe.Health ?? autoplay?.healthEstimatedPercent ?? 100);
+    const lifeGlyph = resolveLifeGlyph(autoplay, zoe);
     const objective = autoplay?.objective || autoplay?.semanticMemory?.objective || "objective";
-    status.textContent = `${labelize(objective)} · HP ${Number.isFinite(hp) ? Math.round(hp) : "?"}`;
+    status.textContent = `${labelize(objective)} · ${lifeGlyph.label}`;
     status.style.cssText = "min-width:0;color:#8ee4ff;font:10px/1.15 ui-monospace,Consolas,monospace;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
     header.append(title, status);
     node.appendChild(header);
@@ -1351,10 +1490,7 @@
     const kairosLogosText = smoothThoughtScore(smoothing, "kairosLogos", kairos.logos ?? kairos.Logos, 210);
     const kairosPathosText = smoothThoughtScore(smoothing, "kairosPathos", kairos.pathos ?? kairos.Pathos, 210);
     const kairosEthosText = smoothThoughtScore(smoothing, "kairosEthos", kairos.ethos ?? kairos.Ethos, 210);
-    const zoeHealthRaw = Number(zoe.health ?? zoe.Health);
-    const zoeHealthText = Number.isFinite(zoeHealthRaw)
-      ? Math.round(smoothThoughtGridValue(smoothing, "zoeHealth", zoeHealthRaw, 420))
-      : "?";
+    const lifeGlyph = resolveLifeGlyph(autoplay, zoe);
     const zoeRiskText = smoothThoughtScore(smoothing, "zoeRisk", zoe.lethalRisk ?? zoe.LethalRisk, 280);
 
     clearNode(node);
@@ -1379,7 +1515,7 @@
       { key: "kinesis", title: "Kinesis", column: "4", row: "2", body: formatPipelineAction(kinesis), color: "#ffb48e", border: "rgba(255,180,142,.32)", headerBackground: "rgba(255,180,142,.08)" },
       { key: "route", title: "Route", column: "2", row: "3", body: `${labelize(routeLoopKind)}${routeLoopExceeded ? "!" : ""}\n${routeLoopUsedText}/${Math.round(routeLoopBudget)}`, color: routeLoopExceeded ? "#ff9a8f" : "#ffeaa0", border: routeLoopExceeded ? "rgba(255,73,73,.50)" : "rgba(255,255,255,.14)", headerBackground: routeLoopExceeded ? "rgba(255,73,73,.10)" : "rgba(255,247,192,.06)" },
       { key: "combat", title: "Combat", column: "3", row: "3", body: combatSummary, color: combatActive ? "#ff9a8f" : "#ffeaa0", border: combatActive ? "rgba(255,73,73,.58)" : "rgba(255,255,255,.14)", headerBackground: combatActive ? "rgba(255,73,73,.10)" : "rgba(255,247,192,.06)", background: combatActive ? "rgba(56,5,7,.22)" : "rgba(0,0,0,.20)", zIndex: combatActive ? 2 : 0 },
-      { key: "zoe", title: "Zoe", column: "4", row: "3", body: `${zoeVetoed ? "VETO" : (zoeWarning ? "warn" : "clear")}\nhp=${zoeHealthText} risk=${zoeRiskText}`, color: zoeVetoed ? "#ff5959" : (zoeWarning ? "#ffd36f" : "#ffeaa0"), border: zoeVetoed ? "rgba(255,73,73,.70)" : (zoeWarning ? "rgba(255,189,87,.54)" : "rgba(255,255,255,.14)"), headerBackground: zoeVetoed ? "rgba(255,73,73,.10)" : (zoeWarning ? "rgba(255,189,87,.08)" : "rgba(255,247,192,.06)"), background: zoeVetoed ? "rgba(64,4,7,.24)" : (zoeWarning ? "rgba(48,32,7,.21)" : "rgba(0,0,0,.20)"), zIndex: zoeVetoed ? 4 : (zoeWarning ? 3 : 0) }
+      { key: "zoe", title: "Zoe", column: "4", row: "3", body: `${zoeVetoed ? "VETO" : (zoeWarning ? "warn" : "clear")}\n${lifeGlyph.label} risk=${zoeRiskText}`, color: zoeVetoed ? "#ff5959" : (zoeWarning ? "#ffd36f" : "#ffeaa0"), border: zoeVetoed ? "rgba(255,73,73,.70)" : (zoeWarning ? "rgba(255,189,87,.54)" : "rgba(255,255,255,.14)"), headerBackground: zoeVetoed ? "rgba(255,73,73,.10)" : (zoeWarning ? "rgba(255,189,87,.08)" : "rgba(255,247,192,.06)"), background: zoeVetoed ? "rgba(64,4,7,.24)" : (zoeWarning ? "rgba(48,32,7,.21)" : "rgba(0,0,0,.20)"), zIndex: zoeVetoed ? 4 : (zoeWarning ? 3 : 0) }
     ];
     for (let index = 0; index < cards.length; index += 1) {
       appendThoughtGridCard(documentRef, node, cards[index]);

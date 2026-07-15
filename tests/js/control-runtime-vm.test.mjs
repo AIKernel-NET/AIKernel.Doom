@@ -83,12 +83,81 @@ assert(openSpaceRoute.objective === "find-corridor-to-first-door", "safe open-sp
 assert(openSpaceRoute.reason === "first-door-required", "pre-door unknown objectives should route through the first-door gate");
 
 const bridgeRoute = router.resolveObjectiveRoute({ semanticObjective: "cross-bridge", firstDoorOpened: true });
-assert(bridgeRoute.objective === "reach-bridge", "canonical objective routing should normalize bridge purpose");
-assert(bridgeRoute.means === "canonical-objective", "canonical routing should expose purpose-to-means trace");
+assert(bridgeRoute.objective === "enter-computer-room", "bridge purpose should stay gated behind ComputerRoom entry after the first door opens");
+assert(bridgeRoute.reason === "post-door-room-entry-required", "post-door bridge routing should preserve the ComputerRoom gate reason");
 
-const healthRoute = router.resolveObjectiveRoute({ health: 12, enemyConfidence: 0 });
-assert(healthRoute.objective === "stabilize-safe-zone", "low health should route to a safe-zone objective");
-assert(healthRoute.reason === "low-health", "low health route should preserve reason");
+const centralDoorRoute = router.resolveObjectiveRoute({
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  bridgeConfidence: 0.44,
+  bridgeDoorScore: 0.30,
+  centralHallConfidence: 0.20
+});
+assert(centralDoorRoute.objective === "reach-central-hall", "visible central-hall door evidence should outrank generic bridge routing");
+assert(centralDoorRoute.reason === "central-door-evidence", "central door routing should preserve its evidence reason");
+
+const centralDoorFlickerRoute = router.resolveObjectiveRoute({
+  firstDoorOpened: true,
+  computerRoomEntered: false,
+  computerRoomConfidence: 0.91,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.27,
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  semanticObjective: "enter-computer-control-room",
+  trustedCombatEvidence: false
+});
+assert(centralDoorFlickerRoute.objective === "reach-bridge", "ComputerRoom flag flicker should hold bridge routing before central-door evidence is trusted");
+
+const postDoorStaleFirstDoorRequestRoute = router.resolveObjectiveRoute({
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  semanticObjective: "FirstDoor",
+  currentObjective: "approach-first-door",
+  controlPipeline: "FirstDoor",
+  trustedCombatEvidence: false,
+  enemyStructuralDecoy: true
+});
+assert(postDoorStaleFirstDoorRequestRoute.objective === "reach-central-hall", "Post-door stale FirstDoor requests should not pull TELOS back before the Central Hall route");
+assert(postDoorStaleFirstDoorRequestRoute.reason !== "requested", "Post-door stale FirstDoor requests should be normalized instead of honored directly");
+
+const postDoorStaleMonitorRequestRoute = router.resolveObjectiveRoute({
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  semanticObjective: "Monitor",
+  currentObjective: "Monitor",
+  controlPipeline: "Monitor",
+  trustedCombatEvidence: false
+});
+assert(postDoorStaleMonitorRequestRoute.objective === "reach-central-hall", "Post-door Monitor fallback should keep the post-door route toward Central Hall");
+
+const postDoorStaleMonitorCentralDoorRoute = router.resolveObjectiveRoute({
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  semanticObjective: "Monitor",
+  currentObjective: "Monitor",
+  controlPipeline: "Monitor",
+  bridgeDoorScore: 0.28,
+  centralHallConfidence: 0.20,
+  trustedCombatEvidence: false
+});
+assert(postDoorStaleMonitorCentralDoorRoute.objective === "reach-central-hall", "Visible Central Hall entrance should upgrade stale Monitor fallback to Central Hall routing");
+assert(postDoorStaleMonitorCentralDoorRoute.reason === "visible-central-hall-overrides-stale-request", "Visible Central Hall entrance should explain why stale Monitor/FirstDoor TELOS was suppressed");
+
+const preDoorCriticalHealthRoute = router.resolveObjectiveRoute({ health: 12, enemyConfidence: 0, firstDoorOpened: false });
+assert(preDoorCriticalHealthRoute.objective === "find-corridor-to-first-door", "pre-door critical-looking health should stay on the first-door route");
+assert(preDoorCriticalHealthRoute.reason !== "low-health", "pre-door critical-looking health should not steal the route as low-health recovery");
+
+const staleZeroHealthWithHealthyFaceRoute = router.resolveObjectiveRoute({
+  health: 0,
+  faceLifeQuantizedLevel: 5,
+  faceLifeQuantizedPhase: "healthy",
+  faceTemplateConfidence: 0.86,
+  firstDoorOpened: false,
+  spawnCorridorGapScore: 0.42
+});
+assert(["find-corridor-to-first-door", "locate-first-door-corridor"].includes(staleZeroHealthWithHealthyFaceRoute.objective), "healthy face template should keep stale zero HP on the first-door route");
+assert(staleZeroHealthWithHealthyFaceRoute.reason !== "low-health", "healthy face template should clear the stale low-health route reason");
 
 const postDoorLowHealthRoute = router.resolveObjectiveRoute({ health: 35, firstDoorOpened: true, enemyConfidence: 0.1 });
 assert(postDoorLowHealthRoute.objective === "enter-computer-room", "post-door low health before room evidence should keep moving into the next route");
@@ -123,8 +192,8 @@ const exitRoute = router.resolveObjectiveRoute({
 assert(exitRoute.objective === "press-exit-switch", "final room should route to the exit switch");
 
 const postDoorCriticalHealthRoute = router.resolveObjectiveRoute({ health: 12, firstDoorOpened: true, enemyConfidence: 0.1 });
-assert(postDoorCriticalHealthRoute.objective === "stabilize-safe-zone", "critical health should still use the recovery objective");
-assert(postDoorCriticalHealthRoute.reason === "low-health", "critical health should preserve the emergency low-health reason");
+assert(postDoorCriticalHealthRoute.objective === "enter-computer-room", "critical post-door health should still prioritize the goal route");
+assert(postDoorCriticalHealthRoute.reason === "critical-health-goal-first", "critical post-door health should preserve the goal-first emergency reason");
 
 assert(
   expressionDsl.evaluateWhen({ parameters: { gate: 0.4 }, values: { health: 100, context: "open-space" } }, "health >= 20 && context != 'wall' && $gate >= 0.4"),
@@ -239,7 +308,7 @@ const tieAction = arbitrationRuntime.predict({
   }
 });
 
-assert(tieAction.stage === "alpha-enemy", "same-priority arbitration should be deterministic by stage id");
+assert(tieAction.stage === "alpha-enemy", `same-priority arbitration should be deterministic by stage id (actual=${JSON.stringify(tieAction)})`);
 assert(tieAction.move === "back", "enemy route should request a back movement");
 assert(tieAction.fire === true, "enemy route should request attack");
 const tieStatus = arbitrationRuntime.status();
@@ -341,7 +410,1867 @@ assert(vetoAction.move === "none", "Zoe veto should override movement");
 assert(vetoAction.fire === false, "Zoe veto should override attack");
 assert(vetoRuntime.status().safetyReason === "zoe-veto", "Zoe veto should be visible in runtime status");
 
+const closedDoorUntrustedFireProfile = {
+  strategyName: "UnitClosedDoorFireSuppression",
+  pipeline: {
+    name: "UnitClosedDoorFireSuppression",
+    stages: [
+      {
+        id: "first-door-untrusted-fire",
+        objective: "open-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "false",
+          turnYaw: "0",
+          attackKey: "true"
+        }
+      }
+    ]
+  }
+};
+const closedDoorUntrustedFireRuntime = runtimeFactory.create(closedDoorUntrustedFireProfile);
+const closedDoorUntrustedFireAction = closedDoorUntrustedFireRuntime.predict({
+  health: 100,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false,
+  audioEnemyStrong: false
+});
+assert(closedDoorUntrustedFireAction.stage === "first-door-untrusted-fire", "Closed-door fire suppression should preserve the selected stage for diagnostics");
+assert(closedDoorUntrustedFireAction.fire === false, "Closed-door FirstDoor phase must suppress untrusted Fire output");
+assert(closedDoorUntrustedFireAction.safetyReason === "closed-door-untrusted-fire-suppressed", "Closed-door fire suppression should be visible in status diagnostics");
+
 const publicProfile = JSON.parse(readFileSync(path.join(repoRoot, "src/DoomWeb/wwwroot/demo/doom/autoplay-profile.json"), "utf8"));
+
+const closedFirstDoorRouteInterruptionProfile = {
+  strategyName: "UnitClosedFirstDoorRouteInterruption",
+  pipeline: {
+    name: "UnitClosedFirstDoorRouteInterruption",
+    stages: [
+      {
+        id: "route-dead-end-barrel-trim",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnYaw: "8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const closedFirstDoorRouteInterruptionRuntime = runtimeFactory.create(closedFirstDoorRouteInterruptionProfile);
+closedFirstDoorRouteInterruptionRuntime.predictions = 1510;
+closedFirstDoorRouteInterruptionRuntime.closedDoorCornerSequenceFrames = 18;
+closedFirstDoorRouteInterruptionRuntime.closedDoorCornerSequenceStep = "backoff";
+const closedFirstDoorRouteInterruptionAction = closedFirstDoorRouteInterruptionRuntime.predict({
+  health: 100,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  route: "first-door-route",
+  objective: "find-corridor-to-first-door",
+  doorOpenedCount: 0,
+  predictions: 1510,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  actionRepeatFrames: 22,
+  moveRepeatFrames: 22,
+  turnRepeatFrames: 0,
+  bridgeDoorScore: 0.22,
+  firstDoorVision9x9Score: 0.44,
+  firstDoorVision9x9RedScore: 0.12,
+  firstDoorUse3x3Score: 0.02,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.58,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.22,
+      "computer-room": 0
+    }
+  }
+});
+assert(closedFirstDoorRouteInterruptionAction.stage.indexOf("closed-door-first-door-corner-") === 0, `Closed FirstDoor sequence should own route-dead-end interruptions until the door opens (actual=${closedFirstDoorRouteInterruptionAction.stage})`);
+assert(closedFirstDoorRouteInterruptionAction.move !== "forward", "Closed FirstDoor route interruption should not keep structural forward pressure during the explicit door sequence");
+
+const closedFirstDoorRecentUseInterruptionRuntime = runtimeFactory.create(closedFirstDoorRouteInterruptionProfile);
+closedFirstDoorRecentUseInterruptionRuntime.predictions = 1620;
+closedFirstDoorRecentUseInterruptionRuntime.lastUsePulsePrediction = 1548;
+const closedFirstDoorRecentUseInterruptionAction = closedFirstDoorRecentUseInterruptionRuntime.predict({
+  health: 100,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  route: "first-door-route",
+  objective: "find-corridor-to-first-door",
+  doorOpenedCount: 0,
+  predictions: 1620,
+  motionForwardProgress: 0.06,
+  motionObstacleScore: 0.61,
+  footObstacleScore: 0.61,
+  actionRepeatFrames: 5,
+  moveRepeatFrames: 5,
+  turnRepeatFrames: 0,
+  bridgeDoorScore: 0.12,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0.04,
+  firstDoorUse3x3Score: 0,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.48,
+      corridor: 0.38,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.12,
+      "computer-room": 0
+    }
+  }
+});
+assert(closedFirstDoorRecentUseInterruptionAction.stage === "closed-door-first-door-corner-backoff", `Recent failed FirstDoor Use should restart the explicit door sequence instead of route trim (actual=${closedFirstDoorRecentUseInterruptionAction.stage})`);
+assert(closedFirstDoorRecentUseInterruptionAction.move === "back" && closedFirstDoorRecentUseInterruptionAction.turn === "none", "Recent failed FirstDoor Use should first back straight away from the corner");
+
+const firstDoorPreContactLegacyBackoffProfile = {
+  strategyName: "UnitFirstDoorPreContactLegacyBackoff",
+  pipeline: {
+    name: "UnitFirstDoorPreContactLegacyBackoff",
+    stages: [
+      {
+        id: "legacy-first-door-backoff",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveBackward: "true"
+        }
+      }
+    ]
+  }
+};
+const firstDoorPreContactLegacyBackoffRuntime = runtimeFactory.create(firstDoorPreContactLegacyBackoffProfile);
+firstDoorPreContactLegacyBackoffRuntime.predictions = 980;
+firstDoorPreContactLegacyBackoffRuntime.closedDoorCornerSequenceFrames = 54;
+firstDoorPreContactLegacyBackoffRuntime.closedDoorCornerSequenceStep = "backoff";
+const firstDoorPreContactLiveState = {
+  health: 100,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  doorOpenedCount: 0,
+  predictions: 980,
+  motionForwardProgress: 0.18,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.18,
+  actionRepeatFrames: 54,
+  moveRepeatFrames: 54,
+  turnRepeatFrames: 0,
+  bridgeDoorScore: 0.34,
+  firstDoorVision9x9Score: 0.32,
+  firstDoorVision9x9RedScore: 0.02,
+  firstDoorUse3x3Score: 0,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.18,
+      "computer-room": 0
+    }
+  }
+};
+const firstDoorPreContactLegacyBackoffAction = firstDoorPreContactLegacyBackoffRuntime.predict(firstDoorPreContactLiveState);
+assert(firstDoorPreContactLegacyBackoffAction.stage === "closed-door-first-door-precontact-approach", `Pre-contact FirstDoor should bypass legacy backoff and keep approaching (actual=${firstDoorPreContactLegacyBackoffAction.stage})`);
+assert(firstDoorPreContactLegacyBackoffAction.move === "forward", "Pre-contact FirstDoor legacy backoff should become forward approach");
+assert(firstDoorPreContactLegacyBackoffAction.use !== true, "Pre-contact FirstDoor should not press Use before contact evidence is ready");
+
+const firstDoorPreContactLegacyIdleProfile = {
+  strategyName: "UnitFirstDoorPreContactLegacyIdle",
+  pipeline: {
+    name: "UnitFirstDoorPreContactLegacyIdle",
+    stages: [
+      {
+        id: "legacy-first-door-idle",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {}
+      }
+    ]
+  }
+};
+const firstDoorPreContactLegacyIdleRuntime = runtimeFactory.create(firstDoorPreContactLegacyIdleProfile);
+firstDoorPreContactLegacyIdleRuntime.predictions = 1024;
+firstDoorPreContactLegacyIdleRuntime.closedDoorCornerSequenceFrames = 84;
+firstDoorPreContactLegacyIdleRuntime.closedDoorCornerSequenceStep = "backoff";
+const firstDoorPreContactLegacyIdleAction = firstDoorPreContactLegacyIdleRuntime.predict(Object.assign({}, firstDoorPreContactLiveState, {
+  predictions: 1024,
+  firstDoorVision9x9Score: 0.51,
+  bridgeDoorScore: 0.37,
+  actionRepeatFrames: 84,
+  moveRepeatFrames: 84
+}));
+assert(firstDoorPreContactLegacyIdleAction.stage === "closed-door-first-door-precontact-approach", `Pre-contact FirstDoor should bypass legacy idle corner restoration (actual=${firstDoorPreContactLegacyIdleAction.stage})`);
+assert(firstDoorPreContactLegacyIdleAction.move === "forward", "Pre-contact FirstDoor idle restoration should become forward approach");
+assert(firstDoorPreContactLegacyIdleAction.use !== true, "Pre-contact FirstDoor idle restoration must not press Use");
+
+const stalePostDoorClosedDoorProfile = {
+  strategyName: "UnitClosedDoorCornerSequence",
+  pipeline: {
+    name: "UnitClosedDoorCornerSequence",
+    stages: [
+      {
+        id: "stale-post-door-forward",
+        objective: "enter-computer-room",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const stalePostDoorClosedDoorRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+stalePostDoorClosedDoorRuntime.predictions = 900;
+const closedDoorCornerState = {
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "corridor",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.06,
+  firstDoorUse3x3Score: 0.13,
+  firstDoorUseYaw: 8,
+  footObstacleScore: 0.68,
+  motionObstacleScore: 0.66,
+  motionForwardProgress: 0.04,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+};
+const closedDoorCornerBackoff = stalePostDoorClosedDoorRuntime.predict(closedDoorCornerState);
+assert(closedDoorCornerBackoff.stage === "closed-door-first-door-corner-backoff", `Closed-door corner contact should start with pure backoff (actual=${closedDoorCornerBackoff.stage})`);
+assert(closedDoorCornerBackoff.move === "back", "Closed-door corner backoff should move backward only");
+assert(closedDoorCornerBackoff.turn === "none", "Closed-door corner backoff must not turn while backing up");
+const closedDoorCornerLatched = stalePostDoorClosedDoorRuntime.predict(Object.assign({}, closedDoorCornerState, {
+  routeMode: "door-approach",
+  currentRoute: "first-door-route"
+}));
+assert(closedDoorCornerLatched.stage === "closed-door-first-door-corner-backoff", "Closed-door corner sequence should stay latched instead of accepting another stale action");
+assert(closedDoorCornerLatched.move === "back", "Latched closed-door corner backoff should still move backward");
+for (let i = 0; i < 6; i += 1) {
+  const protectedBackoff = stalePostDoorClosedDoorRuntime.predict(Object.assign({}, closedDoorCornerState, {
+    routeMode: "door-approach",
+    currentRoute: "first-door-route",
+    firstDoorVision9x9Score: i % 2 === 0 ? 0.33 : 0.38,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: i % 2 === 0 ? 0.03 : 0.16,
+    actionRepeatFrames: 1,
+    moveRepeatFrames: 1,
+    predictions: 901 + i
+  }));
+  assert(protectedBackoff.stage === "closed-door-first-door-precontact-approach", `Lost low-identity FirstDoor latch should return to pre-front approach ownership (actual=${protectedBackoff.stage})`);
+  assert(protectedBackoff.move === "forward", "Lost low-identity FirstDoor latch should advance instead of parking in backoff");
+  assert(protectedBackoff.use !== true && protectedBackoff.useKey !== true, "Lost low-identity FirstDoor latch must not press Use before door-front evidence returns");
+}
+
+const hardGateForwardStallUnitRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+hardGateForwardStallUnitRuntime.predictions = 940;
+hardGateForwardStallUnitRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateForwardStallUnitRuntime.closedDoorCornerSequenceFrames = 0;
+hardGateForwardStallUnitRuntime.closedDoorCornerSequenceStep = "";
+hardGateForwardStallUnitRuntime.closedDoorCornerSequenceContactForwardFrames = 0;
+hardGateForwardStallUnitRuntime.actionSignature = "forward:none:-:-:-:-";
+hardGateForwardStallUnitRuntime.actionRepeatFrames = 96;
+hardGateForwardStallUnitRuntime.moveSignature = "forward";
+hardGateForwardStallUnitRuntime.moveRepeatFrames = 96;
+const hardGateForwardStallUnitAction = hardGateForwardStallUnitRuntime.predict(Object.assign({}, closedDoorCornerState, {
+  predictions: 941,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.35,
+  bridgeConfidence: 0.46,
+  postDoorTerminalSurface: 0.76,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+}));
+assert(
+  ["backoff", "align-turn", "pre-use-stop", "stop-use", "post-use-settle"].includes(
+    String(hardGateForwardStallUnitAction?.actionSequenceStepId || "").toLowerCase())
+    && !(hardGateForwardStallUnitAction?.move === "forward" && hardGateForwardStallUnitAction?.use !== true),
+  `Hard-gated forward FirstDoor retry should leave sustained forward and return to bounded retry (actual=${JSON.stringify({
+    pipeline: hardGateForwardStallUnitAction?.pipeline,
+    stage: hardGateForwardStallUnitAction?.stage,
+    safetyReason: hardGateForwardStallUnitAction?.safetyReason,
+    actionSequenceStepId: hardGateForwardStallUnitAction?.actionSequenceStepId,
+    move: hardGateForwardStallUnitAction?.move,
+    turn: hardGateForwardStallUnitAction?.turn,
+    use: hardGateForwardStallUnitAction?.use
+  })})`);
+
+const hardGateBackoffStallUnitRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+hardGateBackoffStallUnitRuntime.predictions = 980;
+hardGateBackoffStallUnitRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateBackoffStallUnitRuntime.closedDoorCornerSequenceFrames = 0;
+hardGateBackoffStallUnitRuntime.closedDoorCornerSequenceStep = "";
+hardGateBackoffStallUnitRuntime.actionSignature = "back:none:-:-:-:-";
+hardGateBackoffStallUnitRuntime.actionRepeatFrames = 48;
+hardGateBackoffStallUnitRuntime.moveSignature = "back";
+hardGateBackoffStallUnitRuntime.moveRepeatFrames = 48;
+const hardGateBackoffStallUnitAction = hardGateBackoffStallUnitRuntime.predict(Object.assign({}, closedDoorCornerState, {
+  predictions: 981,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.34,
+  bridgeConfidence: 0.46,
+  postDoorTerminalSurface: 0.54,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  }
+}));
+assert(
+  String(hardGateBackoffStallUnitAction?.actionSequenceStepId || "").toLowerCase() === "contact-forward"
+    || hardGateBackoffStallUnitAction?.move === "forward"
+    || hardGateBackoffStallUnitAction?.use === true,
+  `Hard-gated backoff FirstDoor retry should reapproach instead of backing up indefinitely (actual=${JSON.stringify({
+    pipeline: hardGateBackoffStallUnitAction?.pipeline,
+    stage: hardGateBackoffStallUnitAction?.stage,
+    safetyReason: hardGateBackoffStallUnitAction?.safetyReason,
+    actionSequenceStepId: hardGateBackoffStallUnitAction?.actionSequenceStepId,
+    move: hardGateBackoffStallUnitAction?.move,
+    turn: hardGateBackoffStallUnitAction?.turn,
+    use: hardGateBackoffStallUnitAction?.use
+  })})`);
+
+const stalePostDoorBackoffProfile = {
+  strategyName: "UnitClosedDoorPostDoorBackoff",
+  pipeline: {
+    name: "UnitClosedDoorPostDoorBackoff",
+    stages: [
+      {
+        id: "stale-post-door-back",
+        objective: "enter-computer-room",
+        priority: 1,
+        when: "true",
+        action: {
+          moveBackward: "true"
+        }
+      }
+    ]
+  }
+};
+const hardGateProgressBackoffRuntime = runtimeFactory.create(stalePostDoorBackoffProfile);
+hardGateProgressBackoffRuntime.predictions = 1100;
+hardGateProgressBackoffRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateProgressBackoffRuntime.closedDoorCornerSequenceFrames = 1;
+hardGateProgressBackoffRuntime.closedDoorCornerSequenceStep = "backoff";
+hardGateProgressBackoffRuntime.closedDoorCornerSequenceContactForwardFrames = 0;
+hardGateProgressBackoffRuntime.actionRepeatFrames = 0;
+hardGateProgressBackoffRuntime.moveRepeatFrames = 0;
+const hardGateProgressBackoffAction = hardGateProgressBackoffRuntime.predict(Object.assign({}, closedDoorCornerState, {
+  predictions: 1101,
+  firstDoorUse3x3Score: 0,
+  firstDoorVision9x9Score: 0.40,
+  bridgeDoorScore: 0.31,
+  bridgeConfidence: 0.52,
+  terminal: 0.42,
+  postDoorTerminalSurface: 0.28,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  }
+}));
+assert(
+  String(hardGateProgressBackoffAction?.actionSequenceStepId || "").toLowerCase() === "contact-forward"
+    || hardGateProgressBackoffAction?.move === "forward"
+    || hardGateProgressBackoffAction?.use === true,
+  `Hard-gate progress alone should break a reset backoff loop (actual=${JSON.stringify({
+    pipeline: hardGateProgressBackoffAction?.pipeline,
+    stage: hardGateProgressBackoffAction?.stage,
+    safetyReason: hardGateProgressBackoffAction?.safetyReason,
+    actionSequenceStepId: hardGateProgressBackoffAction?.actionSequenceStepId,
+    move: hardGateProgressBackoffAction?.move,
+    turn: hardGateProgressBackoffAction?.turn,
+    use: hardGateProgressBackoffAction?.use
+  })})`);
+
+const hardGateBackoffLoopRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+hardGateBackoffLoopRuntime.predictions = 1018;
+hardGateBackoffLoopRuntime.closedDoorCornerHardGateRetryProgressFrames = 1;
+hardGateBackoffLoopRuntime.closedDoorCornerSequenceFrames = 1;
+hardGateBackoffLoopRuntime.closedDoorCornerSequenceStep = "backoff";
+hardGateBackoffLoopRuntime.closedDoorCornerSequenceContactForwardFrames = 0;
+let hardGateBackoffLoopAction = null;
+for (let i = 0; i < 28; i += 1) {
+  hardGateBackoffLoopAction = hardGateBackoffLoopRuntime.predict(Object.assign({}, closedDoorCornerState, {
+    predictions: 1018 + i,
+    firstDoorUse3x3Score: 0,
+    firstDoorVision9x9Score: i % 2 === 0 ? 0.33 : 0.40,
+    bridgeDoorScore: i % 3 === 0 ? 0.31 : 0.34,
+    bridgeConfidence: 0.52,
+    terminal: i % 2 === 0 ? 0.58 : 0.62,
+    postDoorTerminalSurface: i % 2 === 0 ? 0.58 : 0.62,
+    actionRepeatFrames: 0,
+    moveRepeatFrames: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: false,
+      manualUseAudioActive: false,
+      required: true
+    }
+}));
+}
+const hardGateBackoffLoopText = String([
+  hardGateBackoffLoopAction?.pipeline,
+  hardGateBackoffLoopAction?.stage,
+  hardGateBackoffLoopAction?.safetyReason,
+  hardGateBackoffLoopAction?.svcEvent
+].join(" "));
+assert(
+  String(hardGateBackoffLoopAction?.actionSequenceStepId || "").toLowerCase() !== "backoff"
+    && !(hardGateBackoffLoopAction?.move === "back" && hardGateBackoffLoopAction?.use !== true)
+    && hardGateBackoffLoopText.indexOf("raw-source-post-door-hard-gate") < 0,
+  `Repeated hard-gated FirstDoor retry should leave backoff and reapproach/use (actual=${JSON.stringify({
+    pipeline: hardGateBackoffLoopAction?.pipeline,
+    stage: hardGateBackoffLoopAction?.stage,
+    safetyReason: hardGateBackoffLoopAction?.safetyReason,
+    actionSequenceStepId: hardGateBackoffLoopAction?.actionSequenceStepId,
+    move: hardGateBackoffLoopAction?.move,
+    turn: hardGateBackoffLoopAction?.turn,
+    use: hardGateBackoffLoopAction?.use
+  })})`);
+
+const firstDoorStructuralFallbackContactRuntime = runtimeFactory.create(publicProfile);
+firstDoorStructuralFallbackContactRuntime.predictions = 895;
+const firstDoorStructuralFallbackContactState = {
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  objective: "approach-first-door",
+  controlPipeline: "door-approach-structural-fallback",
+  firstDoorVision9x9Score: 0.41,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  bridgeDoorScore: 0.07,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 2,
+  moveRepeatFrames: 144,
+  turnRepeatFrames: 2,
+  predictions: 895,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+};
+const firstDoorStructuralFallbackContactAction = firstDoorStructuralFallbackContactRuntime.predict(firstDoorStructuralFallbackContactState);
+assert(firstDoorStructuralFallbackContactAction.stage === "closed-door-first-door-corner-backoff", `Door-approach structural fallback contact should enter closed-door backoff (actual=${firstDoorStructuralFallbackContactAction.stage})`);
+assert(firstDoorStructuralFallbackContactAction.move === "back", "Door-approach structural fallback contact should back up before turning");
+assert(firstDoorStructuralFallbackContactAction.turn === "none", "Door-approach structural fallback contact must not turn while backing up");
+
+const firstDoorCornerLatchedTurnRuntime = runtimeFactory.create(publicProfile);
+firstDoorCornerLatchedTurnRuntime.predictions = 900;
+const firstDoorCornerLatchedTurnState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorUseYaw: 9,
+  firstDoorVisionYaw: 9,
+  firstDoorApproachYaw: 9,
+  predictions: 900
+});
+const firstDoorCornerLatchedTurnStart = firstDoorCornerLatchedTurnRuntime.predict(firstDoorCornerLatchedTurnState);
+assert(firstDoorCornerLatchedTurnStart.stage === "closed-door-first-door-corner-backoff", "Closed-door corner sequence should start with a stationary backoff");
+let firstDoorCornerLatchedAlignTurns = 0;
+for (let i = 0; i < 18; i += 1) {
+  const noisyYaw = i % 2 === 0 ? -9 : 9;
+  const latchedTurnAction = firstDoorCornerLatchedTurnRuntime.predict(Object.assign({}, firstDoorCornerLatchedTurnState, {
+    firstDoorUseYaw: noisyYaw,
+    firstDoorVisionYaw: noisyYaw,
+    firstDoorApproachYaw: noisyYaw,
+    actionRepeatFrames: 72,
+    moveRepeatFrames: 144,
+    predictions: 901 + i
+  }));
+  if (latchedTurnAction.stage === "closed-door-first-door-corner-align-turn") {
+    firstDoorCornerLatchedAlignTurns += 1;
+    assert(latchedTurnAction.turn === "right", `Closed-door corner sequence should keep the initial right turn despite yaw noise (actual=${latchedTurnAction.turn})`);
+  }
+}
+assert(firstDoorCornerLatchedAlignTurns > 0, "Closed-door corner sequence should expose an align-turn window in the latched-turn test");
+
+const firstDoorSaturatedBackoffRuntime = runtimeFactory.create(publicProfile);
+firstDoorSaturatedBackoffRuntime.predictions = 1040;
+firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceFrames = 240;
+firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceStep = "backoff";
+firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceTurn = "right";
+firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceTurnYaw = 9;
+firstDoorSaturatedBackoffRuntime.activeActionSequenceId = "first-door-corner-use";
+firstDoorSaturatedBackoffRuntime.activeActionSequenceFrame = 1;
+const firstDoorSaturatedBackoffAction = firstDoorSaturatedBackoffRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  currentRoute: "first-door-route",
+  objective: "find-corridor-to-first-door",
+  firstDoorVision9x9Score: 0.33,
+  firstDoorUse3x3Score: 0.00,
+  bridgeDoorScore: 0.16,
+  semanticDoorScore: 0.46,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  motionForwardProgress: 0.03,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  routeFallbackYaw: 9,
+  predictions: 1040
+}));
+const saturatedFirstDoorBackoffRecovered = ["closed-door-first-door-corner-align-turn", "closed-door-first-door-corner-contact-forward"].includes(firstDoorSaturatedBackoffAction.stage)
+  || firstDoorSaturatedBackoffAction.actionSequenceStepId === "contact-forward";
+assert(saturatedFirstDoorBackoffRecovered, `Saturated FirstDoor backoff should leave pure backoff instead of backing up forever (actual=${firstDoorSaturatedBackoffAction.stage}/${firstDoorSaturatedBackoffAction.safetyReason}/${firstDoorSaturatedBackoffAction.actionSequenceStepId}; runtimeStep=${firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceStep}; runtimeFrames=${firstDoorSaturatedBackoffRuntime.closedDoorCornerSequenceFrames})`);
+assert(firstDoorSaturatedBackoffAction.move !== "back", "Saturated FirstDoor backoff recovery must not keep backing up forever");
+if (firstDoorSaturatedBackoffAction.stage === "closed-door-first-door-corner-align-turn") {
+  assert(firstDoorSaturatedBackoffAction.turn === "right", `Saturated FirstDoor backoff recovery should keep the latched right turn (actual=${firstDoorSaturatedBackoffAction.turn})`);
+}
+assert(firstDoorSaturatedBackoffAction.use !== true, "Saturated FirstDoor backoff recovery should not press Use while re-aiming");
+
+const firstDoorBoxOffsetRuntime = runtimeFactory.create(publicProfile);
+firstDoorBoxOffsetRuntime.predictions = 930;
+const firstDoorBoxOffsetState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  routeFallbackYaw: 7,
+  recommendedYaw: 7,
+  firstDoorVision9x9Score: 0.49,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorVision9x9Box: {
+    kind: "first-door-wall-pattern",
+    column: 1,
+    row: 4,
+    columns: 2,
+    rows: 2,
+    score: 0.49,
+    redScore: 0.00,
+    edgeScore: 0.64
+  },
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 144,
+  predictions: 930
+});
+let firstDoorBoxOffsetAction = firstDoorBoxOffsetRuntime.predict(firstDoorBoxOffsetState);
+let firstDoorBoxOffsetAlignedRight = false;
+for (let i = 0; i < 36; i += 1) {
+  firstDoorBoxOffsetAction = firstDoorBoxOffsetRuntime.predict(Object.assign({}, firstDoorBoxOffsetState, {
+    predictions: 931 + i
+  }));
+  if (firstDoorBoxOffsetAction.stage === "closed-door-first-door-corner-align-turn" && firstDoorBoxOffsetAction.turn === "right") {
+    firstDoorBoxOffsetAlignedRight = true;
+    break;
+  }
+}
+assert(firstDoorBoxOffsetAlignedRight, `Route-yaw FirstDoor box recenter should keep positive yaw alignment before use (actual=${firstDoorBoxOffsetAction.stage}/${firstDoorBoxOffsetAction.turn})`);
+assert(firstDoorBoxOffsetAction.use !== true, "Route-yaw FirstDoor box recenter should not press Use before the door box is centered");
+
+const firstDoorRedPanelQuickUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorRedPanelQuickUseRuntime.predictions = 950;
+firstDoorRedPanelQuickUseRuntime.closedDoorCornerSequenceFrames = 20;
+firstDoorRedPanelQuickUseRuntime.closedDoorCornerSequenceStep = "align-turn";
+firstDoorRedPanelQuickUseRuntime.closedDoorCornerSequenceTurn = "left";
+firstDoorRedPanelQuickUseRuntime.closedDoorCornerSequenceTurnYaw = -7;
+const firstDoorRedPanelQuickUseState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorUseYaw: 7,
+  firstDoorVisionYaw: 7,
+  firstDoorApproachYaw: 7,
+  firstDoorVision9x9Score: 0.49,
+  firstDoorVision9x9RedScore: 0.27,
+  firstDoorUse3x3Score: 0.00,
+  currentRoute: "first-door-route",
+  bridgeDoorScore: 0.20,
+  firstDoorVision9x9Box: {
+    kind: "first-door-wall-pattern",
+    column: 3,
+    row: 4,
+    columns: 3,
+    rows: 2,
+    score: 0.49,
+    redScore: 0.27,
+    edgeScore: 0.66
+  },
+  footObstacleScore: 0.68,
+  motionObstacleScore: 0.66,
+  motionForwardProgress: 0.04,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 144,
+  predictions: 950
+});
+let firstDoorRedPanelQuickUseAction = null;
+let firstDoorRedPanelForwardFrames = 0;
+for (let i = 0; i < 12; i += 1) {
+  firstDoorRedPanelQuickUseAction = firstDoorRedPanelQuickUseRuntime.predict(Object.assign({}, firstDoorRedPanelQuickUseState, {
+    predictions: 951 + i
+  }));
+  if (firstDoorRedPanelQuickUseAction.stage === "closed-door-first-door-corner-contact-forward") {
+    firstDoorRedPanelForwardFrames += 1;
+  }
+  if (firstDoorRedPanelQuickUseAction.stage === "closed-door-first-door-corner-stop-use") {
+    break;
+  }
+}
+assert(firstDoorRedPanelQuickUseAction.stage === "closed-door-first-door-corner-stop-use", `Strong red FirstDoor panel should trigger quick stationary Use (actual=${firstDoorRedPanelQuickUseAction.stage})`);
+assert(firstDoorRedPanelQuickUseAction.use === true, "Strong red FirstDoor panel should press Use");
+assert(firstDoorRedPanelQuickUseAction.move === "none", "Strong red FirstDoor panel Use should be stationary");
+assert(firstDoorRedPanelForwardFrames <= 5, `Strong red FirstDoor panel should not overrun into the wall before Use (forwardFrames=${firstDoorRedPanelForwardFrames})`);
+
+const firstDoorFastContactUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorFastContactUseRuntime.predictions = 1620;
+firstDoorFastContactUseRuntime.closedDoorCornerSequenceFrames = 27;
+firstDoorFastContactUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorFastContactUseRuntime.closedDoorCornerSequenceIdentityFrames = 16;
+firstDoorFastContactUseRuntime.closedDoorCornerSequenceTurn = "right";
+firstDoorFastContactUseRuntime.closedDoorCornerSequenceTurnYaw = 7;
+const firstDoorFastContactUseAction = firstDoorFastContactUseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  routeMode: "door-approach",
+  currentRoute: "first-door-route",
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0.09,
+  firstDoorUse3x3Score: 0.08,
+  firstDoorUseYaw: 8,
+  firstDoorVisionYaw: 8,
+  firstDoorApproachYaw: 8,
+  bridgeDoorScore: 0.24,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.59,
+  motionForwardProgress: 0.04,
+  actionRepeatFrames: 48,
+  moveRepeatFrames: 120,
+  usePulseCooldown: 0,
+  predictions: 1620
+}));
+assert(firstDoorFastContactUseAction.stage === "closed-door-first-door-corner-stop-use", `Sustained FirstDoor contact should stop and Use before another forward cycle (actual=${firstDoorFastContactUseAction.stage})`);
+assert(firstDoorFastContactUseAction.use === true, "Sustained FirstDoor contact should emit a bounded Use pulse");
+assert(firstDoorFastContactUseAction.move === "none", "Sustained FirstDoor contact Use should be stationary");
+
+let firstDoorStructuralFallbackLatchedAction = firstDoorStructuralFallbackContactAction;
+for (let i = 0; i < 48; i += 1) {
+  firstDoorStructuralFallbackLatchedAction = firstDoorStructuralFallbackContactRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+    actionRepeatFrames: 72,
+    moveRepeatFrames: 144,
+    motionForwardProgress: 0.02,
+    predictions: 896 + i
+  }));
+  if (firstDoorStructuralFallbackLatchedAction.stage === "closed-door-first-door-corner-stop-use") {
+    break;
+  }
+}
+assert(firstDoorStructuralFallbackLatchedAction.stage === "closed-door-first-door-corner-stop-use", `Stable gray first-door wall-pattern contact should stop and Use once physical contact is sustained (actual=${firstDoorStructuralFallbackLatchedAction.stage})`);
+assert(firstDoorStructuralFallbackLatchedAction.use === true, "Stable gray first-door wall-pattern contact should issue a trusted stationary Use");
+assert(firstDoorStructuralFallbackLatchedAction.move === "none", "Stable gray first-door wall-pattern Use should stop translation before pressing Use");
+const firstDoorStructuralFallbackPostUseSettleAction = firstDoorStructuralFallbackContactRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 144,
+  predictions: 980,
+  usePulseCooldown: 16
+}));
+assert(["closed-door-first-door-corner-post-use-settle", "closed-door-first-door-corner-stop-use"].includes(firstDoorStructuralFallbackPostUseSettleAction.stage), `Gray wall-pattern contact should remain in the trusted door-use lane after a close contact pulse (actual=${firstDoorStructuralFallbackPostUseSettleAction.stage})`);
+
+const firstDoorBridgeContactUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorBridgeContactUseRuntime.predictions = 5422;
+firstDoorBridgeContactUseRuntime.closedDoorCornerSequenceFrames = 108;
+firstDoorBridgeContactUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorBridgeContactUseRuntime.closedDoorCornerSequenceTurn = "none";
+firstDoorBridgeContactUseRuntime.closedDoorCornerSequenceTurnYaw = 0;
+const firstDoorBridgeContactUseAction = firstDoorBridgeContactUseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.41,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.47,
+  bridgeConfidence: 0.57,
+  activeDetections: [],
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.02,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5422
+}));
+assert(firstDoorBridgeContactUseAction.stage === "closed-door-first-door-corner-stop-use", `CPU bridge/door contact should use without red panel evidence once the player is pressed against FirstDoor (actual=${firstDoorBridgeContactUseAction.stage})`);
+assert(firstDoorBridgeContactUseAction.use === true, "CPU bridge/door contact should issue a stationary Use pulse");
+assert(firstDoorBridgeContactUseAction.move === "none", "CPU bridge/door contact Use should stop instead of continuing to push into the wall");
+
+const firstDoorGrayBridgeContactUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorGrayBridgeContactUseRuntime.predictions = 2122;
+firstDoorGrayBridgeContactUseRuntime.closedDoorCornerSequenceFrames = 132;
+firstDoorGrayBridgeContactUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorGrayBridgeContactUseRuntime.closedDoorCornerSequenceContactForwardFrames = 24;
+firstDoorGrayBridgeContactUseRuntime.closedDoorCornerSequenceTurn = "none";
+firstDoorGrayBridgeContactUseRuntime.closedDoorCornerSequenceTurnYaw = 0;
+const firstDoorGrayBridgeContactUseState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  currentRoute: "first-door-route",
+  routeMode: "door-approach",
+  firstDoorVision9x9Score: 0.43,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 7,
+  firstDoorVisionYaw: 7,
+  firstDoorApproachYaw: 7,
+  bridgeDoorScore: 0.20,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  computerRoomScore: 0.13,
+  computerRoomConfidence: 0.00,
+  spawnCorridorGapScore: 0.27,
+  spawnLandmarkRouteEvidence: 0.39,
+  actionRepeatFrames: 132,
+  moveRepeatFrames: 164,
+  predictions: 2122
+});
+let firstDoorGrayBridgeContactUseAction = null;
+for (let i = 0; i < 10; i += 1) {
+  firstDoorGrayBridgeContactUseAction = firstDoorGrayBridgeContactUseRuntime.predict(Object.assign({}, firstDoorGrayBridgeContactUseState, {
+    predictions: 2122 + i,
+    actionRepeatFrames: 132 + i,
+    moveRepeatFrames: 164 + i
+  }));
+  if (firstDoorGrayBridgeContactUseAction.stage === "closed-door-first-door-corner-stop-use") {
+    break;
+  }
+}
+assert(firstDoorGrayBridgeContactUseAction.stage === "closed-door-first-door-corner-stop-use", `Late gray FirstDoor bridge/contact evidence should stop and Use instead of cycling contact/backoff (actual=${firstDoorGrayBridgeContactUseAction.stage})`);
+assert(firstDoorGrayBridgeContactUseAction.use === true, "Late gray FirstDoor bridge/contact evidence should issue a stationary Use pulse");
+assert(firstDoorGrayBridgeContactUseAction.move === "none", "Late gray FirstDoor bridge/contact Use should stop before pressing Use");
+
+const firstDoorBridgeOnlyLowIdentityUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorBridgeOnlyLowIdentityUseRuntime.predictions = 1509;
+firstDoorBridgeOnlyLowIdentityUseRuntime.closedDoorCornerSequenceFrames = 96;
+firstDoorBridgeOnlyLowIdentityUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorBridgeOnlyLowIdentityUseRuntime.closedDoorCornerSequenceContactForwardFrames = 36;
+firstDoorBridgeOnlyLowIdentityUseRuntime.closedDoorCornerSequenceTurn = "none";
+firstDoorBridgeOnlyLowIdentityUseRuntime.closedDoorCornerSequenceTurnYaw = 0;
+const firstDoorBridgeOnlyLowIdentityUseAction = firstDoorBridgeOnlyLowIdentityUseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  currentRoute: "first-door-route",
+  routeMode: "door-approach",
+  objective: "find-corridor-to-first-door",
+  controlPipeline: "closed-door-first-door-corner-sequence",
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.31,
+  bridgeConfidence: 0.00,
+  activeDetections: [],
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.66,
+  wall: 0.493,
+  motionForwardProgress: 0.04,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  spawnCorridorGapScore: 0,
+  spawnLandmarkRouteEvidence: 0,
+  spawnSecretDoorScore: 0,
+  semanticMemory: { symbols: { door: 0.28, corridor: 0.24, bridge: 0.31, "computer-room": 0 } },
+  actionRepeatFrames: 36,
+  moveRepeatFrames: 72,
+  usePulseCooldown: 0,
+  predictions: 1509
+}));
+assert(firstDoorBridgeOnlyLowIdentityUseAction.use !== true, `Bridge-only low-identity FirstDoor pose should not press Use without direct identity evidence (actual=${JSON.stringify(firstDoorBridgeOnlyLowIdentityUseAction)})`);
+assert(firstDoorBridgeOnlyLowIdentityUseAction.stage !== "closed-door-first-door-corner-stop-use", `Bridge-only low-identity FirstDoor pose should re-align or re-contact instead of stop-use (actual=${firstDoorBridgeOnlyLowIdentityUseAction.stage}/${firstDoorBridgeOnlyLowIdentityUseAction.safetyReason})`);
+
+const firstDoorStrongVisionContactRuntime = runtimeFactory.create(publicProfile);
+firstDoorStrongVisionContactRuntime.predictions = 1434;
+firstDoorStrongVisionContactRuntime.closedDoorCornerSequenceFrames = 120;
+firstDoorStrongVisionContactRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorStrongVisionContactRuntime.closedDoorCornerSequenceContactForwardFrames = 3;
+firstDoorStrongVisionContactRuntime.closedDoorCornerSequenceTurn = "none";
+firstDoorStrongVisionContactRuntime.closedDoorCornerSequenceTurnYaw = 0;
+const firstDoorStrongVisionContactState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  currentRoute: "spawn-landmark-route",
+  route: "spawn-landmark-route",
+  objective: "find-corridor-to-first-door",
+  controlPipeline: "closed-door-first-door-corner-sequence",
+  firstDoorVision9x9Score: 0.60,
+  firstDoorVision9x9RedScore: 0.04,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.02,
+  spawnLandmarkRouteEvidence: 0.36,
+  spawnCorridorGapScore: 0.24,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  actionRepeatFrames: 48,
+  moveRepeatFrames: 95,
+  predictions: 1434,
+  routeAbortHint: "none",
+  semanticMemory: {
+    phase: "OpeningHome",
+    objective: "approach-first-door",
+    symbols: {
+      door: 0.42,
+      corridor: 0.32,
+      enemy: 0,
+      "safe-zone": 0.2,
+      "computer-room": 0.08
+    }
+  }
+});
+let firstDoorStrongVisionContactAction = null;
+let firstDoorStrongVisionContactUseFrames = 0;
+for (let i = 0; i < 18; i += 1) {
+  firstDoorStrongVisionContactAction = firstDoorStrongVisionContactRuntime.predict(Object.assign({}, firstDoorStrongVisionContactState, {
+    predictions: 1434 + i,
+    actionRepeatFrames: 48 + i,
+    moveRepeatFrames: 95 + i
+  }));
+  firstDoorStrongVisionContactUseFrames = i + 1;
+  if (firstDoorStrongVisionContactAction.stage === "closed-door-first-door-corner-stop-use") {
+    break;
+  }
+}
+assert(firstDoorStrongVisionContactAction.stage === "closed-door-first-door-corner-stop-use", `Strong FirstDoor visual contact should stop and Use even when 3x3/bridge evidence is weak (actual=${firstDoorStrongVisionContactAction.stage})`);
+assert(firstDoorStrongVisionContactAction.use === true, "Strong FirstDoor visual contact should emit a stationary Use pulse");
+assert(firstDoorStrongVisionContactAction.move === "none", "Strong FirstDoor visual contact Use should stop before pressing Use");
+assert(firstDoorStrongVisionContactUseFrames <= 18, `Strong FirstDoor visual contact should converge to Use quickly (frames=${firstDoorStrongVisionContactUseFrames})`);
+
+const firstDoorBridgeFarAdvanceRuntime = runtimeFactory.create(publicProfile);
+firstDoorBridgeFarAdvanceRuntime.predictions = 5423;
+firstDoorBridgeFarAdvanceRuntime.closedDoorCornerSequenceFrames = 60;
+firstDoorBridgeFarAdvanceRuntime.closedDoorCornerSequenceStep = "contact-forward";
+const firstDoorBridgeFarAdvanceAction = firstDoorBridgeFarAdvanceRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.53,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.43,
+  bridgeConfidence: 0.50,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5423
+}));
+assert(firstDoorBridgeFarAdvanceAction.stage === "closed-door-first-door-corner-contact-forward", `Bridge/door evidence should keep advancing while forward motion is still strong instead of using early (actual=${firstDoorBridgeFarAdvanceAction.stage})`);
+assert(firstDoorBridgeFarAdvanceAction.use !== true, "Far bridge/door evidence should not issue Use before physical contact");
+assert(firstDoorBridgeFarAdvanceAction.move === "forward", "Far bridge/door evidence should continue moving forward toward the door");
+
+const firstDoorSustainedPressNotCloseRuntime = runtimeFactory.create(publicProfile);
+firstDoorSustainedPressNotCloseRuntime.predictions = 5423;
+firstDoorSustainedPressNotCloseRuntime.closedDoorCornerSequenceFrames = 120;
+firstDoorSustainedPressNotCloseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+const firstDoorSustainedPressNotCloseAction = firstDoorSustainedPressNotCloseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.45,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.36,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.08,
+  predictions: 5423
+}));
+assert(firstDoorSustainedPressNotCloseAction.stage === "closed-door-first-door-corner-contact-forward", `Sustained FirstDoor press should keep closing distance until motion stalls or hard contact is reached (actual=${firstDoorSustainedPressNotCloseAction.stage})`);
+assert(firstDoorSustainedPressNotCloseAction.use !== true, "Sustained FirstDoor press should not emit Use while the player is still short of the door face");
+
+const firstDoorLateSequenceUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorLateSequenceUseRuntime.predictions = 5423;
+firstDoorLateSequenceUseRuntime.closedDoorCornerSequenceFrames = 96;
+firstDoorLateSequenceUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorLateSequenceUseRuntime.closedDoorCornerSequenceContactForwardFrames = 18;
+const firstDoorLateSequenceUseAction = firstDoorLateSequenceUseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.20,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  motionForwardProgress: 0.12,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5423
+}));
+assert(firstDoorLateSequenceUseAction.stage === "closed-door-first-door-corner-stop-use", `Sustained closed-door sequence contact should spend a stopped Use before cycling forever (actual=${firstDoorLateSequenceUseAction.stage})`);
+assert(firstDoorLateSequenceUseAction.use === true, "Sustained closed-door sequence contact should issue a Use pulse");
+assert(firstDoorLateSequenceUseAction.move === "none", "Sustained closed-door sequence Use should stop movement first");
+
+const firstDoorGrayPreUseStopRuntime = runtimeFactory.create(publicProfile);
+firstDoorGrayPreUseStopRuntime.predictions = 2292;
+firstDoorGrayPreUseStopRuntime.closedDoorCornerSequenceFrames = 96;
+firstDoorGrayPreUseStopRuntime.closedDoorCornerSequenceStep = "pre-use-stop";
+firstDoorGrayPreUseStopRuntime.closedDoorCornerSequencePreUseStopFrames = 2;
+const firstDoorGrayPreUseStopAction = firstDoorGrayPreUseStopRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  currentRoute: "first-door-route",
+  routeMode: "door-approach",
+  bridgeDoorScore: 0.10,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.57,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 2292
+}));
+assert(firstDoorGrayPreUseStopAction.stage === "closed-door-first-door-corner-stop-use", `Gray close FirstDoor pre-use stop should advance to stationary Use instead of idling forever (actual=${firstDoorGrayPreUseStopAction.stage})`);
+assert(firstDoorGrayPreUseStopAction.use === true, "Gray close FirstDoor pre-use stop should emit Use");
+assert(firstDoorGrayPreUseStopAction.move === "none", "Gray close FirstDoor pre-use stop should remain stationary while using");
+
+const firstDoorLatchedIdentityUseRuntime = runtimeFactory.create(publicProfile);
+firstDoorLatchedIdentityUseRuntime.predictions = 5424;
+firstDoorLatchedIdentityUseRuntime.closedDoorCornerSequenceFrames = 64;
+firstDoorLatchedIdentityUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorLatchedIdentityUseRuntime.closedDoorCornerSequenceContactForwardFrames = 18;
+firstDoorLatchedIdentityUseRuntime.closedDoorCornerSequenceIdentityFrames = 20;
+const firstDoorLatchedIdentityUseAction = firstDoorLatchedIdentityUseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  currentRoute: "spawn-landmark-route",
+  firstDoorVision9x9Score: 0.55,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.02,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5424
+}));
+assert(firstDoorLatchedIdentityUseAction.stage === "closed-door-first-door-corner-stop-use", `Latched FirstDoor identity should still stop and Use after sustained close contact even when bridge score drops (actual=${firstDoorLatchedIdentityUseAction.stage})`);
+assert(firstDoorLatchedIdentityUseAction.use === true, "Latched FirstDoor identity should issue a Use pulse");
+assert(firstDoorLatchedIdentityUseAction.move === "none", "Latched FirstDoor identity Use should stop movement first");
+
+const firstDoorStrongRedPanelCloseRuntime = runtimeFactory.create(publicProfile);
+firstDoorStrongRedPanelCloseRuntime.predictions = 5423;
+firstDoorStrongRedPanelCloseRuntime.closedDoorCornerSequenceFrames = 52;
+firstDoorStrongRedPanelCloseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+const firstDoorStrongRedPanelCloseAction = firstDoorStrongRedPanelCloseRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.50,
+  firstDoorVision9x9RedScore: 0.65,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  currentRoute: "first-door-route",
+  bridgeDoorScore: 0.20,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 15,
+  moveRepeatFrames: 15,
+  predictions: 5423
+}));
+assert(firstDoorStrongRedPanelCloseAction.stage === "closed-door-first-door-corner-stop-use", `Strong close FirstDoor red panel should spend a stationary Use pulse before overrunning the door face (actual=${firstDoorStrongRedPanelCloseAction.stage})`);
+assert(firstDoorStrongRedPanelCloseAction.use === true, "Strong close FirstDoor red panel should issue Use");
+assert(firstDoorStrongRedPanelCloseAction.move === "none", "Strong close FirstDoor red panel Use should stop movement");
+
+const firstDoorFailedEarlyUseForwardRuntime = runtimeFactory.create(publicProfile);
+firstDoorFailedEarlyUseForwardRuntime.predictions = 5424;
+firstDoorFailedEarlyUseForwardRuntime.closedDoorCornerSequenceFrames = 47;
+firstDoorFailedEarlyUseForwardRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+firstDoorFailedEarlyUseForwardRuntime.closedDoorCornerSequenceLastUseFrame = 1;
+const firstDoorFailedEarlyUseForwardAction = firstDoorFailedEarlyUseForwardRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.53,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.30,
+  bridgeConfidence: 0.45,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5424
+}));
+assert(firstDoorFailedEarlyUseForwardAction.stage === "closed-door-first-door-corner-backoff", `Failed early FirstDoor Use should restart the explicit door sequence instead of pressing into a corner (actual=${firstDoorFailedEarlyUseForwardAction.stage})`);
+assert(firstDoorFailedEarlyUseForwardAction.use !== true, "Failed early FirstDoor Use recovery should not immediately re-press Use");
+assert(firstDoorFailedEarlyUseForwardAction.move === "back", "Failed early FirstDoor Use recovery should back off before re-centering the door");
+
+const firstDoorStalePostUseSettleRuntime = runtimeFactory.create(publicProfile);
+firstDoorStalePostUseSettleRuntime.predictions = 5450;
+firstDoorStalePostUseSettleRuntime.closedDoorCornerSequenceFrames = 68;
+firstDoorStalePostUseSettleRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+firstDoorStalePostUseSettleRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+firstDoorStalePostUseSettleRuntime.closedDoorCornerPostUseSettleHoldFrames = 31;
+firstDoorStalePostUseSettleRuntime.usePulseCooldown = 18;
+const firstDoorStalePostUseSettleAction = firstDoorStalePostUseSettleRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.12,
+  bridgeConfidence: 0.20,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  postDoorTerminalSurface: 0,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.04,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 8,
+  usePulseCooldown: 18,
+  doorOpenedCount: 0,
+  currentRoute: "first-door-route",
+  routeMode: "door-approach",
+  predictions: 5450
+}));
+assert(firstDoorStalePostUseSettleAction.stage === "closed-door-first-door-corner-backoff", `Stale closed FirstDoor post-use settle should back off and retry instead of idling forever (actual=${firstDoorStalePostUseSettleAction.stage})`);
+assert(firstDoorStalePostUseSettleAction.move === "back" && firstDoorStalePostUseSettleAction.turn === "none", "Stale post-use settle recovery should step straight back before re-aiming");
+assert(firstDoorStalePostUseSettleRuntime.closedDoorCornerSequenceUseFailures >= 1, "Stale post-use settle recovery should count a failed Use attempt");
+
+const firstDoorLostBridgeCornerLeftRuntime = runtimeFactory.create(publicProfile);
+firstDoorLostBridgeCornerLeftRuntime.predictions = 5425;
+firstDoorLostBridgeCornerLeftRuntime.closedDoorCornerSequenceFrames = 18;
+firstDoorLostBridgeCornerLeftRuntime.closedDoorCornerSequenceStep = "contact-forward";
+firstDoorLostBridgeCornerLeftRuntime.closedDoorCornerSequenceTurn = "right";
+firstDoorLostBridgeCornerLeftRuntime.closedDoorCornerSequenceTurnYaw = 8;
+const firstDoorLostBridgeCornerLeftAction = firstDoorLostBridgeCornerLeftRuntime.predict(Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.18,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  routeFallbackYaw: 7,
+  recommendedYaw: 7,
+  bridgeDoorScore: 0.27,
+  bridgeConfidence: 0.35,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08,
+  activeDetections: [{ kind: "corner" }],
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 156,
+  predictions: 5425
+}));
+assert(firstDoorLostBridgeCornerLeftAction.stage === "closed-door-first-door-corner-align-turn", `Lost FirstDoor with bridge/corner evidence should route-yaw recenter instead of keeping a stale wall turn (actual=${firstDoorLostBridgeCornerLeftAction.stage})`);
+assert(firstDoorLostBridgeCornerLeftAction.turn === "right", `Lost FirstDoor bridge/corner recenter should follow positive route yaw (actual=${firstDoorLostBridgeCornerLeftAction.turn})`);
+assert(firstDoorLostBridgeCornerLeftAction.move === "none", "Lost FirstDoor bridge/corner recenter should pivot without moving forward");
+
+const firstDoorHardLeftReacquireRuntime = runtimeFactory.create(publicProfile);
+firstDoorHardLeftReacquireRuntime.predictions = 990;
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceFrames = 47;
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceLastUseFrame = 1;
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceTurn = "right";
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceTurnYaw = 8;
+firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceUseFailures = 1;
+const firstDoorHardLeftReacquireState = Object.assign({}, firstDoorStructuralFallbackContactState, {
+  firstDoorVision9x9Score: 0.43,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorUseYaw: 0,
+  firstDoorVisionYaw: 0,
+  firstDoorApproachYaw: 0,
+  bridgeDoorScore: 0.05,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.63,
+  motionForwardProgress: 0.04,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 144,
+  predictions: 990
+});
+const firstDoorHardLeftBackoffAction = firstDoorHardLeftReacquireRuntime.predict(firstDoorHardLeftReacquireState);
+assert(firstDoorHardLeftBackoffAction.stage === "closed-door-first-door-corner-backoff", `Repeated failed FirstDoor use should restart with backoff (actual=${firstDoorHardLeftBackoffAction.stage})`);
+assert(firstDoorHardLeftReacquireRuntime.closedDoorCornerSequenceUseFailures >= 2, "Repeated failed FirstDoor use should count as a hard reacquire cycle");
+let firstDoorHardLeftAlignAction = firstDoorHardLeftBackoffAction;
+for (let i = 0; i < 20; i += 1) {
+  firstDoorHardLeftAlignAction = firstDoorHardLeftReacquireRuntime.predict(Object.assign({}, firstDoorHardLeftReacquireState, {
+    predictions: 991 + i
+  }));
+  if (firstDoorHardLeftAlignAction.stage === "closed-door-first-door-corner-align-turn") {
+    break;
+  }
+}
+assert(firstDoorHardLeftAlignAction.stage === "closed-door-first-door-corner-align-turn", `Repeated edge-only FirstDoor false use should enter long reacquire (actual=${firstDoorHardLeftAlignAction.stage})`);
+assert(firstDoorHardLeftAlignAction.turn === "right", `Repeated edge-only FirstDoor false use should keep the latched recenter direction (actual=${firstDoorHardLeftAlignAction.turn})`);
+assert(firstDoorHardLeftAlignAction.turnYaw >= 6, `Repeated edge-only FirstDoor false use should use a bounded recenter yaw (actual=${firstDoorHardLeftAlignAction.turnYaw})`);
+
+const weakFirstDoorVisionReacquireRuntime = runtimeFactory.create(publicProfile);
+weakFirstDoorVisionReacquireRuntime.predictions = 356;
+const weakFirstDoorVisionReacquireAction = weakFirstDoorVisionReacquireRuntime.predict({
+  health: 100,
+  depthSig: 0.92,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  controlPipeline: "closed-door-first-door-corner-sequence",
+  objective: "find-corridor-to-first-door",
+  objective: "find-corridor-to-first-door",
+  controlPipeline: "demo-spawn-map-centerline",
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  firstDoorVision9x9Box: { kind: "first-door-wall-pattern" },
+  bridgeDoorScore: 0.03,
+  bridgeConfidence: 0.30,
+  computerRoomConfidence: 0.00,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.34,
+  computerDarkPanelScore: 0.16,
+  footObstacleScore: 0.35,
+  motionObstacleScore: 0.35,
+  motionForwardProgress: 0.70,
+  spawnCorridorGapScore: 0.16,
+  spawnLandmarkRouteEvidence: 0.38,
+  routeFallbackYaw: 7,
+  recommendedYaw: 7,
+  actionRepeatFrames: 32,
+  moveRepeatFrames: 32,
+  predictions: 356,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(weakFirstDoorVisionReacquireAction.stage === "closed-door-first-door-route-advance-sustain", `Weak FirstDoor vision should override spawn landmark cruise (actual=${weakFirstDoorVisionReacquireAction.stage})`);
+assert(weakFirstDoorVisionReacquireAction.move === "forward" && weakFirstDoorVisionReacquireAction.turn === "right", "Weak FirstDoor vision should advance while correcting toward the door");
+assert(weakFirstDoorVisionReacquireAction.use === false, "Weak FirstDoor vision reacquire should not press Use before close alignment");
+
+const contradictedDoorOpenRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+contradictedDoorOpenRuntime.predictions = 822;
+const contradictedDoorOpenAction = contradictedDoorOpenRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  bridgeDoorScore: 0.00,
+  bridgeConfidence: 0.49,
+  computerRoomConfidence: 0.31,
+  computerRoomScore: 0.11,
+  computerPanelScore: 0.31,
+  computerDarkPanelScore: 0.20,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.00,
+  actionRepeatFrames: 33,
+  moveRepeatFrames: 33,
+  predictions: 822,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(contradictedDoorOpenAction.stage === "closed-door-first-door-corner-backoff", `Contradicted door-open milestone should run the closed-door backoff sequence (actual=${contradictedDoorOpenAction.stage})`);
+assert(contradictedDoorOpenAction.move === "back", "Contradicted door-open milestone should back up before turning");
+assert(contradictedDoorOpenAction.turn === "none", "Contradicted door-open backoff should not rotate while backing up");
+
+const roundedWeakStickyDoorOpenRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+roundedWeakStickyDoorOpenRuntime.predictions = 70;
+const roundedWeakStickyDoorOpenAction = roundedWeakStickyDoorOpenRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "enter-computer-control-room",
+  controlPipeline: "first-door-entry-forward-lock",
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  bridgeDoorScore: 0.00,
+  bridgeConfidence: 0.25,
+  computerRoomConfidence: 0.26,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.25,
+  computerDarkPanelScore: 0.09,
+  spawnCorridorGapScore: 0.26,
+  spawnLandmarkRouteEvidence: 0.42,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 32,
+  moveRepeatFrames: 32,
+  predictions: 70,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(roundedWeakStickyDoorOpenAction.stage !== "first-door-entry-forward-lock", `Rounded weak sticky door-open residue should not keep ComputerRoom entry lock (actual=${roundedWeakStickyDoorOpenAction.stage})`);
+assert(roundedWeakStickyDoorOpenAction.objective !== "enter-computer-control-room", "Rounded weak sticky door-open residue should restore the FirstDoor objective before entering ComputerRoom");
+
+const contradictedFirstDoorEntryPulseRuntime = runtimeFactory.create(publicProfile);
+contradictedFirstDoorEntryPulseRuntime.predictions = 163;
+contradictedFirstDoorEntryPulseRuntime.stagePulseFirstDoorEntryFrames = 72;
+const contradictedFirstDoorEntryPulseAction = contradictedFirstDoorEntryPulseRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "enter-computer-control-room",
+  controlPipeline: "first-door-entry-forward-lock",
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  useSeen: false,
+  bridgeDoorScore: 0.00,
+  bridgeConfidence: 0.21,
+  computerRoomConfidence: 0.26,
+  computerRoomScore: 0.06,
+  computerPanelScore: 0.25,
+  computerDarkPanelScore: 0.07,
+  postDoorTerminalSurface: 0.25,
+  spawnCorridorGapScore: 0.27,
+  spawnLandmarkRouteEvidence: 0.42,
+  routeDeadEndRisk: true,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 60,
+  moveRepeatFrames: 60,
+  predictions: 163,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(contradictedFirstDoorEntryPulseAction.stage === "closed-door-opening-ne-forward-lock", `Unconfirmed early FirstDoor entry pulse should preserve the opening northeast run (actual=${contradictedFirstDoorEntryPulseAction.stage})`);
+assert(contradictedFirstDoorEntryPulseAction.move === "forward", "Unconfirmed early FirstDoor entry pulse should keep advancing instead of backing into the corner sequence");
+assert(contradictedFirstDoorEntryPulseAction.objective === "find-corridor-to-first-door", "Unconfirmed early FirstDoor entry pulse should restore the FirstDoor objective");
+
+const unconfirmedFirstDoorDirectRuntime = runtimeFactory.create(publicProfile);
+unconfirmedFirstDoorDirectRuntime.predictions = 104;
+const unconfirmedFirstDoorDirectAction = unconfirmedFirstDoorDirectRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "enter-computer-control-room",
+  controlPipeline: "first-door-entry-forward-lock",
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  useSeen: false,
+  bridgeDoorScore: 0.00,
+  bridgeConfidence: 0.20,
+  computerRoomConfidence: 0.26,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.26,
+  computerDarkPanelScore: 0.08,
+  postDoorTerminalSurface: 0.26,
+  spawnCorridorGapScore: 0.28,
+  spawnLandmarkRouteEvidence: 0.42,
+  routeDeadEndRisk: false,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  actionRepeatFrames: 1,
+  moveRepeatFrames: 1,
+  predictions: 104,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(unconfirmedFirstDoorDirectAction.stage === "closed-door-opening-ne-forward-lock", `Unconfirmed early FirstDoor direct status should preserve the opening northeast run (actual=${unconfirmedFirstDoorDirectAction.stage})`);
+assert(unconfirmedFirstDoorDirectAction.move === "forward", "Unconfirmed early FirstDoor direct status should keep advancing instead of backing into the corner sequence");
+assert(unconfirmedFirstDoorDirectAction.objective === "find-corridor-to-first-door", "Unconfirmed early FirstDoor direct status should restore the FirstDoor objective");
+
+const stalePostDoorWallPatternRuntime = runtimeFactory.create(stalePostDoorClosedDoorProfile);
+stalePostDoorWallPatternRuntime.predictions = 2948;
+const stalePostDoorWallPatternAction = stalePostDoorWallPatternRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0.00,
+  bridgeDoorScore: 0.09,
+  bridgeConfidence: 0.41,
+  computerRoomConfidence: 0.75,
+  computerRoomScore: 0.17,
+  computerPanelScore: 0.60,
+  computerDarkPanelScore: 0.08,
+  postDoorTerminalSurface: 0.60,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  actionRepeatFrames: 7,
+  moveRepeatFrames: 7,
+  predictions: 2948,
+  usePulseCooldown: 0,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(stalePostDoorWallPatternAction.stage === "closed-door-first-door-corner-backoff", `First-door wall pattern must clear stale post-door ComputerRoom residue (actual=${stalePostDoorWallPatternAction.stage})`);
+assert(stalePostDoorWallPatternAction.objective !== "reach-central-hall", "First-door wall pattern contradiction should not keep stale central-hall objective");
+
+const rewoundPostDoorResidueRuntime = runtimeFactory.create(publicProfile);
+rewoundPostDoorResidueRuntime.predictions = 940;
+const rewoundPostDoorResidueAction = rewoundPostDoorResidueRuntime.predict({
+  predictions: 4,
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  computerRoomConfidence: 0.58,
+  bridgeConfidence: 0.48,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false
+});
+assert(rewoundPostDoorResidueAction.stage !== "first-door-entry-forward-lock", `Rewound retry source must mask stale post-door residue before FirstDoor entry lock (actual=${rewoundPostDoorResidueAction.stage})`);
+assert(rewoundPostDoorResidueAction.objective !== "reach-central-hall", "Rewound retry source should not keep stale central-hall objective");
+
+const earlyRetryStalePostDoorLowHealthRuntime = runtimeFactory.create(publicProfile);
+earlyRetryStalePostDoorLowHealthRuntime.predictions = 117;
+const earlyRetryStalePostDoorLowHealthAction = earlyRetryStalePostDoorLowHealthRuntime.predict({
+  predictions: 117,
+  health: 12,
+  hp: 12,
+  healthSensor: {
+    healthSensorEnabled: true,
+    health: 12,
+    value: 12,
+    estimatedPercent: 12,
+    faceLifePhase: "moribund",
+    faceLifeLevel: 1,
+    faceLifeTemplatePhase: "unknown",
+    faceLifeTemplateLevel: 0,
+    faceLifeTemplateAuthoritative: false,
+    faceLifeTemplateConfidence: 0
+  },
+  depthSig: 0.34,
+  depth: 0.34,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    firstDoorVision9x9Score: 0.44,
+    firstDoorVision9x9RedScore: 0.34,
+    firstDoorUse3x3Score: 0
+  },
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "stabilize-safe-zone",
+  controlPipeline: "low-health-escape",
+  semanticMemory: {
+    phase: "ComputerRoom",
+    objective: "stabilize-safe-zone",
+    symbols: {
+      door: 0.73,
+      corridor: 0.44,
+      "computer-room": 0.59,
+      computerRoom: 0.59,
+      bridge: 0.43,
+      "safe-zone": 0.85
+    }
+  },
+  spawnCorridorGapScore: 0.34,
+  spawnLandmarkRouteEvidence: 0.46,
+  firstDoorVision9x9Score: 0.44,
+  firstDoorVision9x9RedScore: 0.34,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.37,
+  bridgeConfidence: 0.43,
+  computerRoomConfidence: 0.59,
+  computerRoomScore: 0.19,
+  computerDarkPanelScore: 0.59,
+  computerPanelScore: 0.15,
+  footObstacleScore: 0.37,
+  motionObstacleScore: 0.37,
+  motionForwardProgress: 0,
+  activeDetections: ["objective", "motion", "door", "wall", "hud"],
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(earlyRetryStalePostDoorLowHealthAction.stage !== "low-health-escape", `Early retry stale post-door residue must not keep low-health escape before FirstDoor is reopened (actual=${earlyRetryStalePostDoorLowHealthAction.stage})`);
+assert(earlyRetryStalePostDoorLowHealthAction.objective !== "stabilize-safe-zone", "Early retry stale post-door residue should restore the FirstDoor objective instead of safe-zone recovery");
+assert(earlyRetryStalePostDoorLowHealthRuntime.lastStatus.debugRouteValues.routeMode !== "post-door", "Early retry stale post-door status should sanitize the stale post-door route mode");
+
+const firstDoorEntryRuntime = runtimeFactory.create(publicProfile);
+firstDoorEntryRuntime.predictions = 900;
+firstDoorEntryRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "corridor",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  firstDoorVision9x9Score: 0.42,
+  firstDoorUse3x3Score: 0.18,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+});
+const firstDoorEntryAction = firstDoorEntryRuntime.predict({
+  health: 100,
+  depthSig: 0.84,
+  contextDict: "corridor",
+  doorOpenedCount: 1,
+  firstDoorTransitionFrames: 8,
+  routeMode: "post-door",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeDeadEndRisk: true,
+  routeAbortHint: "door-approach-dead-end",
+  computerRoomConfidence: 0.10,
+  motionForwardProgress: 0.02,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+});
+assert(firstDoorEntryAction.stage === "first-door-entry-forward-lock", `FirstDoor open transition should enter the room before local backoff (actual=${firstDoorEntryAction.stage})`);
+assert(firstDoorEntryAction.move === "forward", "FirstDoor open transition must not back away from the open door");
+assert(firstDoorEntryAction.turn === "none", "FirstDoor open transition should not immediately yaw away from the opening");
+
+const firstDoorEntrySettledRuntime = runtimeFactory.create(publicProfile);
+firstDoorEntrySettledRuntime.predictions = 900;
+firstDoorEntrySettledRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "corridor",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false
+});
+firstDoorEntrySettledRuntime.predict({
+  health: 100,
+  depthSig: 0.84,
+  contextDict: "corridor",
+  doorOpenedCount: 1,
+  firstDoorTransitionFrames: 8,
+  routeMode: "post-door",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false
+});
+const firstDoorEntrySettledAction = firstDoorEntrySettledRuntime.predict({
+  health: 100,
+  depthSig: 0.90,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  computerRoomConfidence: 0.18,
+  bridgeConfidence: 0.44,
+  moveRepeatFrames: 72,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false
+});
+assert(firstDoorEntrySettledAction.stage !== "first-door-entry-forward-lock", `Committed post-door route should release the FirstDoor entry pulse (actual=${firstDoorEntrySettledAction.stage})`);
+
+const centralDoorRightCornerRuntime = runtimeFactory.create(publicProfile);
+centralDoorRightCornerRuntime.predictions = 5140;
+const centralDoorRightCornerState = {
+  health: 100,
+  depthSig: 0.54,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.36,
+  postDoorTerminalSurface: 0.50,
+  computerRoomConfidence: 0.44,
+  spawnCorridorGapScore: 0.34,
+  spawnLandmarkRouteEvidence: 0.46,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  wallVector: 0.62,
+  motionForwardProgress: 0.03,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.64,
+  actionRepeatFrames: 36,
+  moveRepeatFrames: 36,
+  recommendedYaw: 8,
+  usePulseCooldown: 0,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.12,
+  trustedCombatEvidence: false,
+  semanticMemory: {
+    symbols: {
+      bridge: 0.42,
+      door: 0.32,
+      "computer-room": 0.44,
+      "central-hall": 0.24
+    }
+  }
+};
+const centralDoorRightCornerBackoff = centralDoorRightCornerRuntime.predict(centralDoorRightCornerState);
+assert(centralDoorRightCornerBackoff.stage === "post-door-central-door-corner-backoff", `Central door right-corner contact should start with pure backoff (actual=${centralDoorRightCornerBackoff.stage})`);
+assert(centralDoorRightCornerBackoff.move === "back", "Central door right-corner sequence should back away before turning");
+assert(centralDoorRightCornerBackoff.turn === "none", "Central door right-corner backoff must not rotate");
+let centralDoorRightCornerAlign = null;
+let centralDoorSequenceUse = null;
+for (let index = 0; index < 92; index += 1) {
+  const action = centralDoorRightCornerRuntime.predict(centralDoorRightCornerState);
+  if (!centralDoorRightCornerAlign && action.stage === "post-door-central-door-corner-align-turn") {
+    centralDoorRightCornerAlign = action;
+  }
+  if (action.stage === "post-door-central-door-corner-stop-use") {
+    centralDoorSequenceUse = action;
+    break;
+  }
+}
+assert(centralDoorRightCornerAlign, "Central door right-corner sequence should include a stationary align-turn");
+assert(centralDoorRightCornerAlign.turn === "left", `Central door right-corner positive yaw should rotate left out of the wall pocket (actual=${centralDoorRightCornerAlign.turn})`);
+assert(centralDoorRightCornerAlign.move === "none", "Central door align-turn must rotate without forward/back pressure");
+assert(centralDoorSequenceUse, "Central door right-corner sequence should reach a stopped Use pulse");
+assert(centralDoorSequenceUse.use === true, "Central door right-corner sequence should press Use only after realignment");
+assert(centralDoorSequenceUse.move === "none" && centralDoorSequenceUse.turn === "none", "Central door Use should be emitted from a stationary aligned state");
+
+const centralDoorWeakUnconfirmedRuntime = runtimeFactory.create(publicProfile);
+centralDoorWeakUnconfirmedRuntime.predictions = 5140;
+const centralDoorWeakUnconfirmedAction = centralDoorWeakUnconfirmedRuntime.predict(Object.assign({}, centralDoorRightCornerState, {
+  currentLandmark: "",
+  currentRoute: "central-hall-route",
+  routeActionHint: "advance-central-hall",
+  bridgeConfidence: 0.36,
+  bridgeDoorScore: 0.28,
+  postDoorTerminalSurface: 0.30,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  spawnCorridorGapScore: 0.14,
+  spawnLandmarkRouteEvidence: 0.20,
+  computerRoomConfidence: 0.52
+}));
+assert(!String(centralDoorWeakUnconfirmedAction.stage || "").startsWith("post-door-central-door-corner"), `Weak unconfirmed central-door evidence must not latch a corner sequence (actual=${centralDoorWeakUnconfirmedAction.stage})`);
+assert(centralDoorWeakUnconfirmedAction.use !== true, "Weak unconfirmed central-door evidence must not press Use");
+
+const postFirstDoorCrossBridgeLaneRuntime = runtimeFactory.create(publicProfile);
+postFirstDoorCrossBridgeLaneRuntime.predictions = 5142;
+const postFirstDoorCrossBridgeLaneState = Object.assign({}, centralDoorRightCornerState, {
+  currentLandmark: "cross-bridge-lane",
+  routeObjective: "reach-central-hall",
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.65,
+  computerRoomConfidence: 0.44,
+  routePostDoorBridgeDoorMemoryFrames: 58,
+  recommendedYaw: 8
+});
+const postFirstDoorCrossBridgeLaneAction = postFirstDoorCrossBridgeLaneRuntime.predict(postFirstDoorCrossBridgeLaneState);
+assert(postFirstDoorCrossBridgeLaneAction.stage !== "post-door-central-door-corner-backoff", `Cross-bridge-lane after FirstDoor must not start central-door corner sequence (actual=${postFirstDoorCrossBridgeLaneAction.stage})`);
+
+const postFirstDoorCrossBridgeLaneWallPocketRuntime = runtimeFactory.create(publicProfile);
+postFirstDoorCrossBridgeLaneWallPocketRuntime.predictions = 5220;
+postFirstDoorCrossBridgeLaneWallPocketRuntime.crossBridgeDeadEndLaneFrames = 5;
+const postFirstDoorCrossBridgeLaneWallPocketAction = postFirstDoorCrossBridgeLaneWallPocketRuntime.predict(Object.assign({}, centralDoorRightCornerState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeObjective: "reach-central-hall",
+  routeActionHint: "advance-cross-bridge",
+  bridgeConfidence: 0.55,
+  bridgeDoorScore: 0.01,
+  postDoorTerminalSurface: 0.26,
+  computerRoomConfidence: 0.55,
+  routeTopologyWallDistanceNormalized: 0.33,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.34,
+  routeDeadEndRisk: true,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  actionRepeatFrames: 28,
+  moveRepeatFrames: 28,
+  turnRepeatFrames: 28,
+  motionForwardProgress: 0.08,
+  recommendedYaw: -6,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+}));
+assert(
+  postFirstDoorCrossBridgeLaneWallPocketAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-backoff",
+  `Cross-bridge-lane dead-end wall pocket should enter wall-unpin backoff (actual=${postFirstDoorCrossBridgeLaneWallPocketAction.stage})`);
+assert(postFirstDoorCrossBridgeLaneWallPocketAction.move === "back", "Cross-bridge-lane dead-end wall pocket should first back away from the wall");
+assert(postFirstDoorCrossBridgeLaneWallPocketAction.turn === "none", "Cross-bridge-lane wall pocket backoff must not rotate while reversing");
+
+const postFirstDoorCrossBridgeRouteOnlyRuntime = runtimeFactory.create(publicProfile);
+postFirstDoorCrossBridgeRouteOnlyRuntime.predictions = 5143;
+const postFirstDoorCrossBridgeRouteOnlyState = Object.assign({}, centralDoorRightCornerState, {
+  currentLandmark: "",
+  routeObjective: "reach-central-hall",
+  routeActionHint: "advance-cross-bridge",
+  bridgeDoorScore: 0.38,
+  postDoorTerminalSurface: 0.54,
+  computerRoomConfidence: 0.48,
+  routePostDoorBridgeDoorMemoryFrames: 64,
+  recommendedYaw: 8
+});
+const postFirstDoorCrossBridgeRouteOnlyAction = postFirstDoorCrossBridgeRouteOnlyRuntime.predict(postFirstDoorCrossBridgeRouteOnlyState);
+assert(
+  String(postFirstDoorCrossBridgeRouteOnlyAction.stage || "").indexOf("post-door-central-door") < 0,
+  `Cross-bridge transit with only reach-central-hall objective must not start a CentralDoor sequence (actual=${postFirstDoorCrossBridgeRouteOnlyAction.stage})`);
+
+const centralDoorRightCornerFlickerRuntime = runtimeFactory.create(publicProfile);
+centralDoorRightCornerFlickerRuntime.predictions = 5141;
+const centralDoorRightCornerFlickerStart = centralDoorRightCornerFlickerRuntime.predict(centralDoorRightCornerState);
+assert(centralDoorRightCornerFlickerStart.stage === "post-door-central-door-corner-backoff", `Central door right-corner contact should start the latched sequence before evidence flicker (actual=${centralDoorRightCornerFlickerStart.stage})`);
+let centralDoorFlickerUse = null;
+let centralDoorFlickerInterrupted = false;
+const centralDoorFlickerState = Object.assign({}, centralDoorRightCornerState, {
+  depthSig: 0.78,
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "",
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  bridgeConfidence: 0.12,
+  bridgeDoorScore: 0.02,
+  postDoorTerminalSurface: 0.04,
+  spawnCorridorGapScore: 0.05,
+  spawnLandmarkRouteEvidence: 0.05,
+  wallVector: 0.18,
+  motionForwardProgress: 0.42,
+  footObstacleScore: 0.08,
+  motionObstacleScore: 0.08,
+  usePulseCooldown: 0
+});
+for (let index = 0; index < 92; index += 1) {
+  const action = centralDoorRightCornerFlickerRuntime.predict(centralDoorFlickerState);
+  if (String(action.stage || "").indexOf("bridge-straight") >= 0
+    || String(action.stage || "").indexOf("wall-unpin") >= 0
+    || String(action.pipeline || "").indexOf("wall-unpin") >= 0) {
+    centralDoorFlickerInterrupted = true;
+    break;
+  }
+  if (action.stage === "post-door-central-door-corner-stop-use") {
+    centralDoorFlickerUse = action;
+    break;
+  }
+}
+assert(!centralDoorFlickerInterrupted, "Central door compound sequence should survive transient bridge-door evidence loss without yielding to cross-bridge recovery");
+assert(!centralDoorFlickerUse, "Central door evidence flicker must hold the sequence but suppress Use until the door pose is visible again");
+
+const centralDoorCrossBridgeRelapseRuntime = runtimeFactory.create(publicProfile);
+centralDoorCrossBridgeRelapseRuntime.predictions = 5142;
+const centralDoorCrossBridgeRelapseStart = centralDoorCrossBridgeRelapseRuntime.predict(centralDoorRightCornerState);
+assert(centralDoorCrossBridgeRelapseStart.stage === "post-door-central-door-corner-backoff", `Central door relapse fixture should enter corner sequence first (actual=${centralDoorCrossBridgeRelapseStart.stage})`);
+let centralDoorCrossBridgeRelapseUse = null;
+let centralDoorCrossBridgeRelapseReleased = false;
+const centralDoorCrossBridgeRelapseState = Object.assign({}, centralDoorRightCornerState, {
+  contextDict: "open-space",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.13,
+  postDoorTerminalSurface: 0.35,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.06,
+  routeTopologyWallDistanceNormalized: 0.33,
+  wallVector: 0.10,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.06,
+  moveRepeatFrames: 8,
+  actionRepeatFrames: 8,
+  recommendedYaw: 7,
+  objective: "reach-central-hall"
+});
+for (let index = 0; index < 92; index += 1) {
+  const action = centralDoorCrossBridgeRelapseRuntime.predict(centralDoorCrossBridgeRelapseState);
+  if (String(action.stage || "").indexOf("bridge-straight") >= 0
+    || String(action.stage || "").indexOf("wall-unpin") >= 0
+    || String(action.pipeline || "").indexOf("wall-unpin") >= 0) {
+    centralDoorCrossBridgeRelapseReleased = true;
+    break;
+  }
+  if (action.stage === "post-door-central-door-corner-stop-use") {
+    centralDoorCrossBridgeRelapseUse = action;
+    break;
+  }
+}
+assert(centralDoorCrossBridgeRelapseReleased, "Central door cross-bridge relapse should release the false Central Hall latch back to the bridge route");
+assert(!centralDoorCrossBridgeRelapseUse, "Central door cross-bridge relapse fixture must not press Use while the current landmark has fallen back to cross-bridge-lane");
+
+const centralDoorCrossBridgeAdvanceLatchRuntime = runtimeFactory.create(publicProfile);
+centralDoorCrossBridgeAdvanceLatchRuntime.predictions = 5144;
+const centralDoorCrossBridgeAdvanceLatchStart = centralDoorCrossBridgeAdvanceLatchRuntime.predict(centralDoorRightCornerState);
+assert(centralDoorCrossBridgeAdvanceLatchStart.stage === "post-door-central-door-corner-backoff", `Central door advance-latch fixture should enter the sequence first (actual=${centralDoorCrossBridgeAdvanceLatchStart.stage})`);
+centralDoorCrossBridgeAdvanceLatchRuntime.centralDoorCornerTrustedLandmarkFrames = 12;
+const centralDoorCrossBridgeAdvanceLatchRelease = centralDoorCrossBridgeAdvanceLatchRuntime.predict(Object.assign({}, centralDoorRightCornerState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.31,
+  postDoorTerminalSurface: 0.34,
+  computerRoomConfidence: 0.66,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 58,
+  routeTopologyWallDistanceNormalized: 0.36,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyCenterCorridorAlignment: -0.06,
+  wallVector: 0.42,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.04,
+  recommendedYaw: 8
+}));
+assert(
+  String(centralDoorCrossBridgeAdvanceLatchRelease.stage || "").indexOf("post-door-central-door") < 0,
+  `Latched central-door sequence must release when live route is explicit cross-bridge advance (actual=${centralDoorCrossBridgeAdvanceLatchRelease.stage})`);
+assert(centralDoorCrossBridgeAdvanceLatchRelease.use === false, "Latched cross-bridge release must not pulse Use");
+
+const centralDoorCrossBridgeStaleSourceRuntime = runtimeFactory.create(publicProfile);
+centralDoorCrossBridgeStaleSourceRuntime.predictions = 5146;
+const centralDoorCrossBridgeStaleSourceStart = centralDoorCrossBridgeStaleSourceRuntime.predict(centralDoorRightCornerState);
+assert(centralDoorCrossBridgeStaleSourceStart.stage === "post-door-central-door-corner-backoff", `Central door stale-source fixture should enter the sequence first (actual=${centralDoorCrossBridgeStaleSourceStart.stage})`);
+centralDoorCrossBridgeStaleSourceRuntime.centralDoorCornerSequenceFrames = 24;
+centralDoorCrossBridgeStaleSourceRuntime.centralDoorCornerTrustedLandmarkFrames = 36;
+centralDoorCrossBridgeStaleSourceRuntime.lastStatus = {
+  debugRouteValues: {
+    currentRoute: "central-hall-route",
+    currentLandmark: "central-hall-door",
+    routeActionHint: "open-central-hall-door",
+    bridgeConfidence: 0.58,
+    bridgeDoorScore: 0.36,
+    postDoorTerminalSurface: 0.52,
+    computerRoomConfidence: 0.72,
+    doorOpenedCount: 1,
+    centralHallEntered: false
+  },
+  autoplayState: {
+    currentRoute: "central-hall-route",
+    currentLandmark: "central-hall-door",
+    routeActionHint: "open-central-hall-door"
+  }
+};
+const centralDoorCrossBridgeStaleSourceRelease = centralDoorCrossBridgeStaleSourceRuntime.predict(Object.assign({}, centralDoorRightCornerState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.24,
+  postDoorTerminalSurface: 0.43,
+  computerRoomConfidence: 0.74,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 64,
+  wallVector: 0.48,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  motionForwardProgress: 0.03,
+  recommendedYaw: 8
+}));
+assert(
+  String(centralDoorCrossBridgeStaleSourceRelease.stage || "").indexOf("post-door-central-door") < 0,
+  `Live cross-bridge advance must beat stale central-door lastStatus/source evidence (actual=${centralDoorCrossBridgeStaleSourceRelease.stage})`);
+assert(centralDoorCrossBridgeStaleSourceRelease.use === false, "Stale central-door release must not pulse Use");
 
 const centralHallOpeningBurstRuntime = runtimeFactory.create(publicProfile);
 centralHallOpeningBurstRuntime.predictions = 5200;
@@ -374,6 +2303,119 @@ assert(centralHallOpeningBurstAction.fire === true, "Central hall opening burst 
 assert(centralHallOpeningBurstAction.turn === "none", "Central hall opening burst should not rotate on noisy yaw");
 assert(centralHallOpeningBurstAction.move === "none", "Central hall opening burst should hold position while firing");
 
+const centralHallOpeningBurstLowHealthRuntime = runtimeFactory.create(publicProfile);
+centralHallOpeningBurstLowHealthRuntime.predictions = 5201;
+const centralHallOpeningBurstLowHealthAction = centralHallOpeningBurstLowHealthRuntime.predict({
+  health: 12,
+  healthSensor: {
+    value: 12,
+    health: 12,
+    lowHealth: true,
+    likelyDead: false,
+    retryRequested: false,
+    faceHeartbeatAlive: true,
+    faceLifeLevel: 1,
+    faceLifePhase: "moribund",
+    faceLifeTemplateLevel: 1,
+    faceLifeTemplatePhase: "moribund",
+    faceLifeTemplateConfidence: 0.78
+  },
+  depthSig: 0.82,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 12,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 0,
+  combatYaw: -30,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      enemy: 0.18,
+      "central-hall": 0.50,
+      "final-room": 0.32
+    }
+  }
+});
+assert(centralHallOpeningBurstLowHealthAction.stage === "central-hall-opening-burst-fire", `Central hall opening should spend its fixed boss burst before low-health routing (actual=${centralHallOpeningBurstLowHealthAction.stage})`);
+assert(centralHallOpeningBurstLowHealthAction.fire === true, "Low-health central hall opening burst should still fire at the boss spawn lane");
+assert(centralHallOpeningBurstLowHealthAction.turn === "none", "Low-health central hall opening burst should not yaw toward noisy wall vectors");
+
+const centralHallCombatBudgetRuntime = runtimeFactory.create(publicProfile);
+centralHallCombatBudgetRuntime.predictions = 5230;
+const centralHallCombatBudgetAction = centralHallCombatBudgetRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: true,
+  centralHallFrames: 120,
+  enemyDefeatedCount: 0,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatFireFrames: 22,
+  combatYaw: 0,
+  visualEnemyVisible: true,
+  visualEnemyCentered: true,
+  visualEnemyFireReady: true,
+  visualEnemyConfidence: 0.38,
+  enemyConfidence: 0.38,
+  trustedCombatEvidence: true,
+  finalRoomConfidence: 0.50,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      enemy: 0.28,
+      "central-hall": 0.55,
+      "final-room": 0.50
+    }
+  }
+});
+assert(centralHallCombatBudgetAction.stage !== "combat-visual-center-fire", "Central hall stale combat evidence should not fire forever after the combat budget is spent");
+assert(centralHallCombatBudgetAction.stage !== "central-hall-enemy-engage", "Central hall stale combat evidence should not re-enter enemy engagement after the combat budget is spent");
+assert(centralHallCombatBudgetAction.fire === false, "Central hall stale combat budget should release Fire for route recovery");
+
+const centralHallNestedCombatBudgetRuntime = runtimeFactory.create(publicProfile);
+centralHallNestedCombatBudgetRuntime.predictions = 5231;
+const centralHallNestedCombatBudgetAction = centralHallNestedCombatBudgetRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  ammoLikelyEmpty: false,
+  enemyStructuralDecoy: false,
+  combatYaw: 0,
+  visualEnemyVisible: true,
+  visualEnemyCentered: true,
+  visualEnemyFireReady: true,
+  visualEnemyConfidence: 0.38,
+  enemyConfidence: 0.38,
+  trustedCombatEvidence: true,
+  usePulseCooldown: 0,
+  autoplayState: {
+    centralHallEntered: true,
+    centralHallFrames: 120,
+    enemyDefeatedCount: 0,
+    combatFireFrames: 22,
+    finalRoomConfidence: 0.50
+  },
+  semanticMemory: {
+    symbols: {
+      enemy: 0.28,
+      "central-hall": 0.55,
+      "final-room": 0.50
+    }
+  }
+});
+assert(centralHallNestedCombatBudgetAction.stage !== "combat-visual-center-fire", "Nested AutoplayState combat budget should suppress stale central-hall firing");
+assert(centralHallNestedCombatBudgetAction.stage !== "central-hall-enemy-engage", "Nested AutoplayState combat budget should suppress stale central-hall engage");
+assert(centralHallNestedCombatBudgetAction.fire === false, "Nested AutoplayState combat budget should release Fire for route recovery");
+
 const centralHallLowHealthRushRuntime = runtimeFactory.create(publicProfile);
 centralHallLowHealthRushRuntime.predictions = 5240;
 const centralHallLowHealthRushAction = centralHallLowHealthRushRuntime.predict({
@@ -386,7 +2428,7 @@ const centralHallLowHealthRushAction = centralHallLowHealthRushRuntime.predict({
   enemyDefeatedCount: 0,
   ammoLikelyEmpty: false,
   enemyStructuralDecoy: false,
-  combatFireFrames: 0,
+  combatFireFrames: 5,
   combatYaw: -28,
   visualEnemyVisible: true,
   visualEnemyConfidence: 0.52,
@@ -417,7 +2459,7 @@ const centralHallLowHealthChargeUseAction = centralHallLowHealthChargeUseRuntime
   enemyDefeatedCount: 0,
   ammoLikelyEmpty: false,
   enemyStructuralDecoy: false,
-  combatFireFrames: 0,
+  combatFireFrames: 5,
   combatYaw: -24,
   visualEnemyVisible: true,
   visualEnemyConfidence: 0.50,
@@ -461,7 +2503,7 @@ const centralHallAliveDamagedFaceUseAction = centralHallAliveDamagedFaceUseRunti
   enemyDefeatedCount: 0,
   ammoLikelyEmpty: false,
   enemyStructuralDecoy: false,
-  combatFireFrames: 2,
+  combatFireFrames: 5,
   combatYaw: 20,
   visualEnemyVisible: true,
   visualEnemyConfidence: 0.54,
@@ -493,7 +2535,7 @@ const centralHallLowHealthUseAction = centralHallLowHealthUseRuntime.predict({
   enemyDefeatedCount: 0,
   ammoLikelyEmpty: false,
   enemyStructuralDecoy: false,
-  combatFireFrames: 0,
+  combatFireFrames: 5,
   combatYaw: 26,
   visualEnemyVisible: true,
   visualEnemyConfidence: 0.48,
@@ -542,9 +2584,43 @@ const postDoorAudioTransitionAction = postDoorAudioTransitionRuntime.predict({
     }
   }
 });
-assert(postDoorAudioTransitionAction.stage === "post-door-audio-transition-advance", `Post-door audio cue should advance into the computer room before FirstDoor route recovery takes over (actual=${postDoorAudioTransitionAction.stage})`);
-assert(postDoorAudioTransitionAction.move === "forward", "Post-door audio transition should keep forward movement");
-assert(postDoorAudioTransitionAction.use === false, "Post-door audio transition must not press Use again while the shutter can close");
+assert(postDoorAudioTransitionAction.stage !== "post-door-audio-transition-advance", `Post-door audio cue alone should not advance into ComputerRoom before visual open evidence (actual=${postDoorAudioTransitionAction.stage})`);
+assert(postDoorAudioTransitionAction.objective !== "enter-computer-room", "Post-door audio cue alone must not promote to the ComputerRoom objective");
+assert(postDoorAudioTransitionAction.objective !== "reach-central-hall", "Post-door audio cue alone must not promote to the central hall route");
+assert(["find-corridor-to-first-door", "locate-first-door-corridor"].includes(postDoorAudioTransitionAction.objective), `Post-door audio cue alone should keep a closed-door objective active (actual=${postDoorAudioTransitionAction.objective}; stage=${postDoorAudioTransitionAction.stage})`);
+assert(postDoorAudioTransitionAction.use === false, "Post-door audio cue alone must not press Use unless the door is visually reacquired");
+
+const firstDoorEntryShoveRuntime = runtimeFactory.create(publicProfile);
+firstDoorEntryShoveRuntime.predictions = 1840;
+firstDoorEntryShoveRuntime.stagePulseComputerRoomEgressFrames = 142;
+const firstDoorEntryShoveAction = firstDoorEntryShoveRuntime.predict({
+  health: 100,
+  depthSig: 0.84,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  objective: "enter-computer-room",
+  currentObjective: "enter-computer-room",
+  routeObjective: "enter-computer-room",
+  computerRoomConfidence: 0.28,
+  postDoorTerminalSurface: 0.18,
+  bridgeConfidence: 0.16,
+  bridgeDoorScore: 0.06,
+  motionForwardProgress: 0.04,
+  wallVector: 0.46,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.48,
+  recommendedYaw: -4,
+  routeFallbackYaw: -8,
+  predictions: 1840
+});
+assert(firstDoorEntryShoveAction.stage === "post-door-computer-room-entry-shove", `Fresh FirstDoor open should push directly into ComputerRoom before egress correction (actual=${firstDoorEntryShoveAction.stage})`);
+assert(firstDoorEntryShoveAction.move === "forward", "Fresh FirstDoor open should keep forward pressure into ComputerRoom");
+assert(firstDoorEntryShoveAction.strafe === false, "Fresh FirstDoor open should avoid side-slip before ComputerRoom entry is confirmed");
+assert(firstDoorEntryShoveAction.objective === "enter-computer-room", "Fresh FirstDoor open should keep the ComputerRoom entry objective");
 
 const postDoorCloseWallRuntime = runtimeFactory.create(publicProfile);
 postDoorCloseWallRuntime.predictions = 1800;
@@ -583,7 +2659,10 @@ const postDoorCloseWallAction = postDoorCloseWallRuntime.predict({
     }
   }
 });
-assert(postDoorCloseWallAction.stage === "post-door-close-wall-forward-release", `Post-door close-wall doorway state should continue through the shutter instead of idling (actual=${postDoorCloseWallAction.stage})`);
+assert(
+  postDoorCloseWallAction.stage === "post-door-close-wall-forward-release"
+    || postDoorCloseWallAction.stage === "first-door-entry-forward-lock",
+  `Post-door close-wall doorway state should continue through the shutter instead of idling (actual=${postDoorCloseWallAction.stage})`);
 assert(postDoorCloseWallAction.move === "forward", "Post-door close-wall release should keep forward movement");
 assert(postDoorCloseWallAction.use === false, "Post-door close-wall release must not press Use again");
 
@@ -611,6 +2690,8 @@ const postDoorLowGapIngressLockAction = postDoorLowGapIngressLockRuntime.predict
   bridgeDoorScore: 0,
   wallVector: 0.34,
   motionForwardProgress: 0.08,
+  moveRepeatFrames: 80,
+  actionRepeatFrames: 80,
   moveRepeatFrames: 0,
   actionRepeatFrames: 1,
   footObstacleScore: 0.65,
@@ -633,7 +2714,10 @@ const postDoorLowGapIngressLockAction = postDoorLowGapIngressLockRuntime.predict
     }
   }
 });
-assert(postDoorLowGapIngressLockAction.stage === "post-door-low-gap-ingress-forward-lock", `Open FirstDoor low-gap ingress should lock straight forward instead of routeFallback yaw (actual=${postDoorLowGapIngressLockAction.stage})`);
+assert(
+  postDoorLowGapIngressLockAction.stage === "post-door-low-gap-ingress-forward-lock"
+    || postDoorLowGapIngressLockAction.stage === "first-door-entry-forward-lock",
+  `Open FirstDoor low-gap ingress should lock straight forward instead of routeFallback yaw (actual=${postDoorLowGapIngressLockAction.stage})`);
 assert(postDoorLowGapIngressLockAction.move === "forward", "Open FirstDoor low-gap ingress lock should keep forward pressure into the room");
 assert(postDoorLowGapIngressLockAction.turn === "none", "Open FirstDoor low-gap ingress lock should not turn away from the doorway");
 
@@ -688,6 +2772,2197 @@ const postDoorWeakAudioBeforeIngressAction = postDoorWeakAudioBeforeIngressRunti
 assert(postDoorWeakAudioBeforeIngressAction.stage === "post-door-terminal-ingress-straight-lock", `Weak post-door audio without trusted combat evidence should preserve straight room ingress instead of audio orient or bridge yaw (actual=${postDoorWeakAudioBeforeIngressAction.stage})`);
 assert(postDoorWeakAudioBeforeIngressAction.move === "forward", "Weak post-door audio before ingress should keep forward movement");
 assert(postDoorWeakAudioBeforeIngressAction.turn === "none", "Weak post-door audio before ingress should not yaw away from the doorway");
+
+const postDoorIngressRightLaneBiasRuntime = runtimeFactory.create(publicProfile);
+postDoorIngressRightLaneBiasRuntime.predictions = 1398;
+const postDoorIngressRightLaneBiasAction = postDoorIngressRightLaneBiasRuntime.predict({
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.10,
+  audioEnemyStrong: false,
+  computerRoomCombatContext: true,
+  computerRoomConfidence: 0.34,
+  computerRoomScore: 0.22,
+  computerPanelScore: 0.38,
+  computerDarkPanelScore: 0.06,
+  postDoorTerminalSurface: 0.38,
+  bridgeConfidence: 0.30,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.20,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 18,
+  actionRepeatFrames: 18,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  spawnCorridorGapScore: 0.31,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.10,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.16,
+      corridor: 0.30,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.30,
+      "computer-room": 0.34
+    }
+  }
+});
+assert(postDoorIngressRightLaneBiasAction.stage === "post-door-computer-room-ingress-right-lane-bias", `ComputerRoom ingress should apply only a gentle right-lane bias to avoid the central enemy pocket (actual=${postDoorIngressRightLaneBiasAction.stage})`);
+assert(postDoorIngressRightLaneBiasAction.move === "forward", "ComputerRoom ingress right-lane bias should keep forward movement");
+assert(postDoorIngressRightLaneBiasAction.turn === "right", "ComputerRoom ingress right-lane bias should yaw right gently");
+assert(postDoorIngressRightLaneBiasAction.strafe === false, "ComputerRoom ingress right-lane bias should not strafe right into the wall");
+
+const postDoorRightWallParallelTrimRuntime = runtimeFactory.create(publicProfile);
+postDoorRightWallParallelTrimRuntime.predictions = 1402;
+const postDoorRightWallParallelTrimAction = postDoorRightWallParallelTrimRuntime.predict({
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  computerRoomCombatContext: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.08,
+  audioEnemyStrong: false,
+  computerRoomConfidence: 0.34,
+  computerRoomScore: 0.22,
+  computerPanelScore: 0.38,
+  computerDarkPanelScore: 0.06,
+  postDoorTerminalSurface: 0.38,
+  bridgeConfidence: 0.30,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.46,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 18,
+  actionRepeatFrames: 18,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  spawnCorridorGapScore: 0.31,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.10,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.16,
+      corridor: 0.30,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.30,
+      "computer-room": 0.34
+    }
+  }
+});
+assert(postDoorRightWallParallelTrimAction.stage === "post-door-computer-room-right-wall-parallel-left-trim", `ComputerRoom ingress should trim left when the right wall gets close instead of over-biasing right (actual=${postDoorRightWallParallelTrimAction.stage})`);
+assert(postDoorRightWallParallelTrimAction.move === "forward", "ComputerRoom right-wall parallel trim should keep forward movement");
+assert(postDoorRightWallParallelTrimAction.turn === "left", "ComputerRoom right-wall parallel trim should yaw left to run parallel to the wall");
+assert(postDoorRightWallParallelTrimAction.strafe === true, "ComputerRoom right-wall parallel trim should strafe left when strafe-run is enabled");
+
+const postDoorLeftTrimRepeatLateralReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorLeftTrimRepeatLateralReleaseRuntime.predictions = 3260;
+const postDoorLeftTrimRepeatLateralReleaseAction = postDoorLeftTrimRepeatLateralReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.04,
+  audioEnemyStrong: false,
+  computerRoomConfidence: 0.51,
+  computerRoomScore: 0.18,
+  computerPanelScore: 0.30,
+  computerDarkPanelScore: 0.08,
+  postDoorTerminalSurface: 0.22,
+  bridgeConfidence: 0.32,
+  bridgeDoorScore: 0.04,
+  wallVector: 0.49,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 128,
+  actionRepeatFrames: 128,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  spawnCorridorGapScore: 0.17,
+  spawnCorridorGapTurn: "none",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "none",
+  spawnSecretDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.20,
+      enemy: 0,
+      "safe-zone": 0.20,
+      bridge: 0.32,
+      "computer-room": 0.51
+    }
+  }
+});
+assert(postDoorLeftTrimRepeatLateralReleaseAction.stage === "post-door-computer-room-left-trim-repeat-lateral-release", `Moderate ComputerRoom left-trim repeats should lateral-release away from the right wall (actual=${postDoorLeftTrimRepeatLateralReleaseAction.stage})`);
+assert(postDoorLeftTrimRepeatLateralReleaseAction.move === "none", "Moderate ComputerRoom trim lateral release should pause forward wall pressure");
+assert(postDoorLeftTrimRepeatLateralReleaseAction.turn === "left", "Moderate ComputerRoom trim lateral release should hold the left key while strafing");
+assert(postDoorLeftTrimRepeatLateralReleaseAction.strafe === true, "Moderate ComputerRoom trim lateral release should keep the strafe modifier");
+
+const postDoorLeftTrimBridgeReacquiredRuntime = runtimeFactory.create(publicProfile);
+postDoorLeftTrimBridgeReacquiredRuntime.predictions = 3262;
+const postDoorLeftTrimBridgeReacquiredAction = postDoorLeftTrimBridgeReacquiredRuntime.predict({
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.04,
+  audioEnemyStrong: false,
+  computerRoomConfidence: 0.51,
+  computerRoomScore: 0.18,
+  computerPanelScore: 0.30,
+  computerDarkPanelScore: 0.08,
+  postDoorTerminalSurface: 0.22,
+  bridgeConfidence: 0.32,
+  bridgeDoorScore: 0.04,
+  wallVector: 0.22,
+  motionForwardProgress: 0.52,
+  moveRepeatFrames: 128,
+  actionRepeatFrames: 128,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  spawnCorridorGapScore: 0.17,
+  spawnCorridorGapTurn: "none",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "none",
+  spawnSecretDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  routeTopologyBarrelZoneEvidence: 0.30,
+  routeTopologyCenterCorridorAlignment: 0.22,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.20,
+      enemy: 0,
+      "safe-zone": 0.20,
+      bridge: 0.32,
+      "computer-room": 0.51
+    }
+  }
+});
+assert(postDoorLeftTrimBridgeReacquiredAction.stage !== "post-door-computer-room-left-trim-repeat-lateral-release", `Strong bridge reacquire should not fall back into ComputerRoom lateral release (actual=${postDoorLeftTrimBridgeReacquiredAction.stage})`);
+
+const postDoorLeftTrimRepeatLateralReleaseCooldownRuntime = runtimeFactory.create(publicProfile);
+postDoorLeftTrimRepeatLateralReleaseCooldownRuntime.predictions = 3261;
+const postDoorLeftTrimRepeatLateralReleaseCooldownState = {
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.04,
+  audioEnemyStrong: false,
+  computerRoomConfidence: 0.51,
+  computerRoomScore: 0.18,
+  computerPanelScore: 0.30,
+  computerDarkPanelScore: 0.08,
+  postDoorTerminalSurface: 0.22,
+  bridgeConfidence: 0.32,
+  bridgeDoorScore: 0.04,
+  wallVector: 0.49,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 128,
+  actionRepeatFrames: 128,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.17,
+  spawnCorridorGapTurn: "none",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "none",
+  spawnSecretDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.20,
+      enemy: 0,
+      "safe-zone": 0.20,
+      bridge: 0.32,
+      "computer-room": 0.51
+    }
+  }
+};
+let postDoorLeftTrimRepeatLateralReleaseCooldownAction = null;
+for (let index = 0; index < 22; index += 1) {
+  postDoorLeftTrimRepeatLateralReleaseCooldownAction =
+    postDoorLeftTrimRepeatLateralReleaseCooldownRuntime.predict(postDoorLeftTrimRepeatLateralReleaseCooldownState);
+}
+assert(postDoorLeftTrimRepeatLateralReleaseCooldownAction.stage === "post-door-computer-room-lateral-release-forward-exit", `ComputerRoom lateral release should exit to forward after its pulse budget (actual=${postDoorLeftTrimRepeatLateralReleaseCooldownAction.stage})`);
+assert(postDoorLeftTrimRepeatLateralReleaseCooldownAction.move === "forward", "ComputerRoom lateral release exit should resume forward travel toward the bridge");
+assert(postDoorLeftTrimRepeatLateralReleaseCooldownAction.turn === "left", "ComputerRoom lateral release exit should keep a gentle left wall-parallel arc until the bridge is visible");
+
+const postDoorForwardExitStallRuntime = runtimeFactory.create(publicProfile);
+postDoorForwardExitStallRuntime.predictions = 3400;
+postDoorForwardExitStallRuntime.stagePulseExitFrames = 48;
+postDoorForwardExitStallRuntime.actionSignature = "forward:none:-:r:-:-";
+postDoorForwardExitStallRuntime.actionRepeatFrames = 120;
+postDoorForwardExitStallRuntime.moveSignature = "forward";
+postDoorForwardExitStallRuntime.moveRepeatFrames = 120;
+const postDoorForwardExitStallAction = postDoorForwardExitStallRuntime.predict(Object.assign({}, postDoorLeftTrimRepeatLateralReleaseCooldownState, {
+  wallVector: 0.62,
+  motionForwardProgress: 0.04,
+  footObstacleScore: 0.68,
+  motionObstacleScore: 0.68
+}));
+assert(postDoorForwardExitStallAction.stage === "post-door-computer-room-bridge-wall-parallel-stall-left-recover", `ComputerRoom forward exit should preserve bridge-side wall-parallel recovery when cross-bridge evidence is alive (actual=${postDoorForwardExitStallAction.stage})`);
+assert(postDoorForwardExitStallAction.move === "forward", "ComputerRoom bridge-biased wall pressure should keep forward pressure instead of reversing into the entry loop");
+assert(postDoorForwardExitStallAction.turn === "left", "ComputerRoom bridge-biased wall pressure should rotate left toward the bridge lane");
+
+const postDoorForwardExitLongStallAction = postDoorForwardExitStallRuntime.predict(Object.assign({}, postDoorLeftTrimRepeatLateralReleaseCooldownState, {
+  wallVector: 0.62,
+  motionForwardProgress: 0.04,
+  footObstacleScore: 0.68,
+  motionObstacleScore: 0.68,
+  moveRepeatFrames: 212,
+  actionRepeatFrames: 212
+}));
+assert(postDoorForwardExitLongStallAction.stage === "post-door-computer-room-bridge-wall-parallel-stall-backoff-left", `ComputerRoom long bridge-wall pressure should briefly back off instead of pushing the same wall forever (actual=${postDoorForwardExitLongStallAction.stage})`);
+assert(postDoorForwardExitLongStallAction.move === "back", "ComputerRoom long bridge-wall pressure should release contact with a pure backoff");
+assert(postDoorForwardExitLongStallAction.turn === "left", "ComputerRoom long bridge-wall pressure should keep the left reacquire bias while backing off");
+
+const postDoorDeadEndRightReacquireRuntime = runtimeFactory.create(publicProfile);
+postDoorDeadEndRightReacquireRuntime.predictions = 3600;
+postDoorDeadEndRightReacquireRuntime.stagePulseExitFrames = 48;
+const postDoorDeadEndRightReacquireState = Object.assign({}, postDoorLeftTrimRepeatLateralReleaseCooldownState, {
+  routeTopologyBarrelZoneEvidence: 0.94,
+  routeTopologyCenterCorridorAlignment: -0.33,
+  routeAbortHint: "door-approach-dead-end",
+  routeLoopKind: "door-approach-dead-end",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  wallVector: 0.61,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.66
+});
+const postDoorDeadEndRightReacquireAction = postDoorDeadEndRightReacquireRuntime.predict(postDoorDeadEndRightReacquireState);
+assert(postDoorDeadEndRightReacquireAction.stage === "post-door-computer-room-bridge-wall-parallel-left", `ComputerRoom bridge-biased dead-end exit should hold left wall-parallel correction (actual=${postDoorDeadEndRightReacquireAction.stage})`);
+assert(postDoorDeadEndRightReacquireAction.move === "forward", "ComputerRoom bridge-biased dead-end reacquire should keep forward pressure toward the bridge side");
+assert(postDoorDeadEndRightReacquireAction.turn === "left", "ComputerRoom bridge-biased dead-end reacquire should turn left to avoid the entry-side U-turn");
+const postDoorDeadEndRightReacquireHeldAction = postDoorDeadEndRightReacquireRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeDeadEndRisk: false,
+  routeTopologyDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.20,
+  routeTopologyCenterCorridorAlignment: 0.10
+}));
+assert(postDoorDeadEndRightReacquireHeldAction.stage === "post-door-computer-room-bridge-wall-parallel-left", "ComputerRoom bridge-biased dead-end correction should persist briefly after the dead-end signal flickers");
+
+const postDoorBridgeReacquiredRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeReacquiredRuntime.predictions = 3700;
+postDoorBridgeReacquiredRuntime.stagePulseRightReacquireFrames = 30;
+const postDoorBridgeReacquiredAction = postDoorBridgeReacquiredRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "",
+  routeLoopKind: "",
+  routeDeadEndRisk: false,
+  routeTopologyDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.28,
+  routeTopologyCenterCorridorAlignment: 0.25,
+  recommendedYaw: 8
+}));
+assert(postDoorBridgeReacquiredAction.stage === "post-door-computer-room-bridge-reacquired-forward", `ComputerRoom bridge reacquired should leave right reacquire and commit forward (actual=${postDoorBridgeReacquiredAction.stage})`);
+assert(postDoorBridgeReacquiredAction.move === "forward", "ComputerRoom bridge reacquired should keep forward motion");
+assert(postDoorBridgeReacquiredAction.turnYaw <= 5, "ComputerRoom bridge reacquired should clamp the heading correction instead of spinning right");
+const postDoorBridgeReacquiredHeldAction = postDoorBridgeReacquiredRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "",
+  routeLoopKind: "",
+  routeDeadEndRisk: false,
+  routeTopologyDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.28,
+  routeTopologyCenterCorridorAlignment: 0.25,
+  recommendedYaw: 8
+}));
+assert(postDoorBridgeReacquiredHeldAction.stage === "post-door-computer-room-bridge-reacquired-forward", "ComputerRoom bridge forward commit should hold across the next arbitration frame");
+
+const postDoorBridgeReacquiredLongLoopProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedBridgeReacquiredForward",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-computer-room-bridge-reacquired-forward",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const postDoorBridgeReacquiredLongLoopRuntime = runtimeFactory.create(postDoorBridgeReacquiredLongLoopProfile);
+postDoorBridgeReacquiredLongLoopRuntime.predictions = 5020;
+postDoorBridgeReacquiredLongLoopRuntime.actionRepeatFrames = 240;
+postDoorBridgeReacquiredLongLoopRuntime.moveRepeatFrames = 240;
+const postDoorBridgeReacquiredLongLoopAction = postDoorBridgeReacquiredLongLoopRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.35,
+  routeTopologyBarrelZoneEvidence: 0.68,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  motionForwardProgress: 0.08,
+  wallVector: 0.51,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(String(postDoorBridgeReacquiredLongLoopAction.stage || "").startsWith("post-door-computer-room-egress-"), `Long bridge reacquired forward loop should return to ComputerRoom egress instead of holding straight forever (actual=${postDoorBridgeReacquiredLongLoopAction.stage})`);
+assert(postDoorBridgeReacquiredLongLoopAction.turn === "left", "Long bridge reacquired forward loop should reintroduce a left egress correction");
+
+const postDoorBridgePulseLongLoopRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgePulseLongLoopRuntime.predictions = 5060;
+postDoorBridgePulseLongLoopRuntime.stagePulseBridgeForwardFrames = 32;
+postDoorBridgePulseLongLoopRuntime.actionRepeatFrames = 240;
+postDoorBridgePulseLongLoopRuntime.moveRepeatFrames = 240;
+const postDoorBridgePulseLongLoopAction = postDoorBridgePulseLongLoopRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.35,
+  routeTopologyBarrelZoneEvidence: 0.41,
+  routeTopologyCenterCorridorAlignment: 0.04,
+  motionForwardProgress: 0.10,
+  wallVector: 0.45,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(String(postDoorBridgePulseLongLoopAction.stage || "").startsWith("post-door-computer-room-egress-"), `Long bridge forward pulse should exit to ComputerRoom egress before it becomes a stable wall loop (actual=${postDoorBridgePulseLongLoopAction.stage})`);
+assert(postDoorBridgePulseLongLoopRuntime.stagePulseBridgeForwardFrames === 0, "Long bridge forward pulse should clear the bridge-forward pulse budget");
+
+const postDoorEgressRightWallUnpinRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressRightWallUnpinRuntime.predictions = 5120;
+postDoorEgressRightWallUnpinRuntime.stagePulseComputerRoomEgressFrames = 150;
+const postDoorEgressRightWallUnpinAction = postDoorEgressRightWallUnpinRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.34,
+  routeTopologyBarrelZoneEvidence: 0.52,
+  routeTopologyCenterCorridorAlignment: 0.04,
+  motionForwardProgress: 0.04,
+  wallVector: 0.62,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62
+});
+assert(postDoorEgressRightWallUnpinAction.stage === "post-door-computer-room-egress-left-parallel-unpin", `Early ComputerRoom egress right-wall pressure should slide left instead of reversing (actual=${postDoorEgressRightWallUnpinAction.stage})`);
+assert(postDoorEgressRightWallUnpinAction.move === "forward", "Early ComputerRoom egress wall unpin should preserve forward pressure");
+assert(postDoorEgressRightWallUnpinAction.turn === "left", "Early ComputerRoom egress wall unpin should yaw left");
+assert(postDoorEgressRightWallUnpinAction.strafe === true, "Early ComputerRoom egress wall unpin should strafe left when bridge-side evidence is alive");
+
+const postDoorEgressCentralHallWeakBridgeRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressCentralHallWeakBridgeRuntime.predictions = 5140;
+postDoorEgressCentralHallWeakBridgeRuntime.stagePulseComputerRoomEgressFrames = 150;
+const postDoorEgressCentralHallWeakBridgeAction = postDoorEgressCentralHallWeakBridgeRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.18,
+  routeTopologyBarrelZoneEvidence: 0.40,
+  routeTopologyWallDistanceNormalized: 0.48,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  motionForwardProgress: 0.04,
+  wallVector: 0.58,
+  footObstacleScore: 0.56,
+  motionObstacleScore: 0.56
+});
+assert(postDoorEgressCentralHallWeakBridgeAction.move === "forward", `Central-hall ComputerRoom egress should keep forward pressure even with weak bridge evidence (actual move=${postDoorEgressCentralHallWeakBridgeAction.move}, stage=${postDoorEgressCentralHallWeakBridgeAction.stage})`);
+assert(postDoorEgressCentralHallWeakBridgeAction.turn === "left", "Central-hall ComputerRoom right-wall egress should yaw left toward wall-parallel travel");
+assert(postDoorEgressCentralHallWeakBridgeAction.stage === "post-door-computer-room-egress-left-parallel-unpin", `Central-hall ComputerRoom right-wall egress should use left-parallel unpin (actual=${postDoorEgressCentralHallWeakBridgeAction.stage})`);
+
+const postDoorEgressBridgeStraightResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressBridgeStraightResumeRuntime.predictions = 5180;
+postDoorEgressBridgeStraightResumeRuntime.stagePulseComputerRoomEgressFrames = 60;
+const postDoorEgressBridgeStraightResumeAction = postDoorEgressBridgeStraightResumeRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.63,
+  computerRoomConfidence: 0.78,
+  postDoorTerminalSurface: 0.42,
+  routeTopologyBarrelZoneEvidence: 0.52,
+  routeTopologyCenterCorridorAlignment: 0.04,
+  motionForwardProgress: 0.10,
+  wallVector: 0.51,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(postDoorEgressBridgeStraightResumeAction.stage === "post-door-computer-room-egress-bridge-straight-resume", `Late ComputerRoom egress with strong bridge evidence should resume straight travel instead of continuing left yaw (actual=${postDoorEgressBridgeStraightResumeAction.stage})`);
+assert(postDoorEgressBridgeStraightResumeAction.turn === "none", "Late ComputerRoom egress bridge resume should stop the left-yaw loop");
+assert(postDoorEgressBridgeStraightResumeAction.move === "forward", "Late ComputerRoom egress bridge resume should keep forward pressure");
+
+const postDoorEgressBridgeStaticWallRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressBridgeStaticWallRuntime.predictions = 5270;
+postDoorEgressBridgeStaticWallRuntime.stagePulseComputerRoomEgressFrames = 82;
+const postDoorEgressBridgeStaticWallAction = postDoorEgressBridgeStaticWallRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  objective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.60,
+  computerRoomConfidence: 0.76,
+  postDoorTerminalSurface: 0.57,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyCenterCorridorAlignment: 0.03,
+  routeTopologyWallDistanceNormalized: 0.555,
+  motionForwardProgress: 0.34,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  actionRepeatFrames: 14,
+  moveRepeatFrames: 240,
+  recommendedYaw: -5
+});
+assert(postDoorEgressBridgeStaticWallAction.stage === "post-door-computer-room-egress-bridge-lane-static-wall-unpin", `Long ComputerRoom bridge lane static wall state should back off instead of repeating straight/sustain forever (actual=${postDoorEgressBridgeStaticWallAction.stage})`);
+assert(postDoorEgressBridgeStaticWallAction.move === "back", "Bridge-lane static wall unpin should back off before reacquiring the bridge lane");
+assert(postDoorEgressBridgeStaticWallAction.turn === "left", "Bridge-lane static wall unpin should peel left away from the wall");
+assert(postDoorEgressBridgeStaticWallAction.run === false, "Bridge-lane static wall unpin should be a controlled non-run pulse");
+
+const postDoorEgressActiveWallUnpinLaneSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressActiveWallUnpinLaneSustainRuntime.predictions = 5290;
+postDoorEgressActiveWallUnpinLaneSustainRuntime.stagePulseComputerRoomWallUnpinFrames = 42;
+postDoorEgressActiveWallUnpinLaneSustainRuntime.stagePulseComputerRoomWallUnpinTotalFrames = 60;
+const postDoorEgressActiveWallUnpinLaneSustainAction = postDoorEgressActiveWallUnpinLaneSustainRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  objective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.51,
+  computerRoomConfidence: 0.59,
+  postDoorTerminalSurface: 0.28,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyCenterCorridorAlignment: -0.07,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.04,
+  wallVector: 0.49,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 120,
+  moveRepeatFrames: 120,
+  recommendedYaw: 5
+});
+assert(postDoorEgressActiveWallUnpinLaneSustainAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `Active wall-unpin with explicit cross-bridge-lane should switch back to bridge-lane sustain (actual=${postDoorEgressActiveWallUnpinLaneSustainAction.stage})`);
+assert(postDoorEgressActiveWallUnpinLaneSustainAction.move === "forward", "Active wall-unpin lane sustain should keep forward pressure toward the bridge lane");
+assert(postDoorEgressActiveWallUnpinLaneSustainAction.turn === "left", "Active wall-unpin lane sustain should peel left instead of reacquiring right");
+assert(postDoorEgressActiveWallUnpinLaneSustainAction.strafe === true, "Active wall-unpin lane sustain should use left strafe to avoid the right-wall pocket");
+
+const postDoorEgressTerminalLanePocketRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressTerminalLanePocketRuntime.predictions = 15800;
+postDoorEgressTerminalLanePocketRuntime.stagePulseComputerRoomEgressFrames = 82;
+const postDoorEgressTerminalLanePocketAction = postDoorEgressTerminalLanePocketRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room wall",
+  bridgeConfidence: 0.49,
+  computerRoomConfidence: 0.62,
+  postDoorTerminalSurface: 0.60,
+  bridgeDoorScore: 0.04,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.6784,
+  routeTopologyWallDistanceNormalized: 0.493,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  motionForwardProgress: 0.00,
+  wallVector: 0.42,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 240,
+  recommendedYaw: -5
+});
+assert(String(postDoorEgressTerminalLanePocketAction.stage || "").indexOf("post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire") === 0, `Terminal cross-bridge lane pocket should back out into the bounded wall-unpin sequence instead of looping left sustain (actual=${postDoorEgressTerminalLanePocketAction.stage})`);
+assert(postDoorEgressTerminalLanePocketAction.move === "back", "Terminal lane pocket should first back away from the wall before rotating");
+assert(postDoorEgressTerminalLanePocketAction.turn === "none", "Terminal lane pocket backoff should not rotate while still in contact");
+
+const postDoorEgressLowPanelLanePocketRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLowPanelLanePocketRuntime.predictions = 15820;
+postDoorEgressLowPanelLanePocketRuntime.stagePulseComputerRoomEgressFrames = 18;
+const postDoorEgressLowPanelLanePocketAction = postDoorEgressLowPanelLanePocketRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room wall",
+  bridgeConfidence: 0.52,
+  computerRoomConfidence: 0.62,
+  postDoorTerminalSurface: 0.28,
+  bridgeDoorScore: 0.00,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyWallDistanceNormalized: 0.555,
+  routeTopologyCenterCorridorAlignment: 0.03,
+  motionForwardProgress: 0.00,
+  wallVector: 0.42,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  actionRepeatFrames: 24,
+  moveRepeatFrames: 24,
+  recommendedYaw: -5
+});
+assert(String(postDoorEgressLowPanelLanePocketAction.stage || "").indexOf("post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire") === 0, `Low-panel cross-bridge lane wall pocket should back out into bounded wall-unpin instead of oscillating bridge-lane sustain (actual=${postDoorEgressLowPanelLanePocketAction.stage})`);
+assert(postDoorEgressLowPanelLanePocketAction.move === "back", "Low-panel lane pocket should first back away from the wall");
+assert(postDoorEgressLowPanelLanePocketAction.turn === "none", "Low-panel lane pocket backoff should not rotate while still pinned");
+
+const postDoorEgressMidPanelLanePocketRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressMidPanelLanePocketRuntime.predictions = 15860;
+postDoorEgressMidPanelLanePocketRuntime.stagePulseComputerRoomEgressFrames = 18;
+const postDoorEgressMidPanelLanePocketAction = postDoorEgressMidPanelLanePocketRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room wall",
+  bridgeConfidence: 0.54,
+  computerRoomConfidence: 0.63,
+  postDoorTerminalSurface: 0.49,
+  bridgeDoorScore: 0.07,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyWallDistanceNormalized: 0.56,
+  routeTopologyCenterCorridorAlignment: 0.03,
+  motionForwardProgress: 0.00,
+  wallVector: 0.40,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  recommendedYaw: -5
+});
+assert(String(postDoorEgressMidPanelLanePocketAction.stage || "").indexOf("post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire") === 0, `Mid-panel cross-bridge lane wall pocket should back out into bounded wall-unpin instead of oscillating bridge-lane sustain (actual=${postDoorEgressMidPanelLanePocketAction.stage})`);
+assert(postDoorEgressMidPanelLanePocketAction.move === "back", "Mid-panel lane pocket should first back away from the wall");
+assert(postDoorEgressMidPanelLanePocketAction.turn === "none", "Mid-panel lane pocket backoff should not rotate while still pinned");
+
+const firstDoorBackoffMotorMismatchProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedFirstDoorBackoffMismatch",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "closed-door-first-door-corner-backoff",
+        objective: "find-corridor-to-first-door",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnRight: "true",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const firstDoorBackoffMotorMismatchRuntime = runtimeFactory.create(firstDoorBackoffMotorMismatchProfile);
+firstDoorBackoffMotorMismatchRuntime.predictions = 980;
+const firstDoorBackoffMotorMismatchAction = firstDoorBackoffMotorMismatchRuntime.predict({
+  health: 100,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  routeActionHint: "clear-foot",
+  routeConfidence: 0.24,
+  firstDoorRouteEvidenceReady: false,
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  contextDict: "door-approach wall",
+  firstDoorVision9x9Score: 0.38,
+  firstDoorUse3x3Score: 0.04,
+  bridgeDoorScore: 0.18,
+  spawnCorridorGapScore: 0.12,
+  spawnLandmarkRouteEvidence: 0.20,
+  computerRoomConfidence: 0.00,
+  bridgeConfidence: 0.00,
+  postDoorTerminalSurface: 0.00,
+  motionForwardProgress: 0.02,
+  footObstacleScore: 0.56,
+  motionObstacleScore: 0.56,
+  actionRepeatFrames: 64,
+  moveRepeatFrames: 64
+});
+assert(firstDoorBackoffMotorMismatchAction.stage === "closed-door-first-door-corner-backoff", `Forced first-door backoff fixture should keep the diagnostic stage (actual=${firstDoorBackoffMotorMismatchAction.stage})`);
+assert(firstDoorBackoffMotorMismatchAction.move === "back", `Final first-door backoff motor normalization should force back instead of forward (actual=${firstDoorBackoffMotorMismatchAction.move})`);
+assert(firstDoorBackoffMotorMismatchAction.turn === "none", `Final first-door backoff motor normalization should release rotation while backing off (actual=${firstDoorBackoffMotorMismatchAction.turn})`);
+assert(firstDoorBackoffMotorMismatchAction.use === false, "Final first-door backoff motor normalization should not emit Use");
+
+const postDoorEgressBridgeLaneSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressBridgeLaneSustainRuntime.predictions = 5200;
+postDoorEgressBridgeLaneSustainRuntime.stagePulseComputerRoomEgressFrames = 82;
+const postDoorEgressBridgeLaneSustainAction = postDoorEgressBridgeLaneSustainRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.63,
+  computerRoomConfidence: 0.79,
+  postDoorTerminalSurface: 0.48,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.62,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  motionForwardProgress: 0.00,
+  wallVector: 0.28,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72
+});
+assert(postDoorEgressBridgeLaneSustainAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `ComputerRoom egress with strong bridge evidence but weak motion should strafe left along the lane instead of yaw-looping (actual=${postDoorEgressBridgeLaneSustainAction.stage})`);
+assert(postDoorEgressBridgeLaneSustainAction.turn === "left", "ComputerRoom bridge lane sustain should mark the strafe side as left");
+assert(postDoorEgressBridgeLaneSustainAction.strafe === true, "ComputerRoom bridge lane sustain should use left strafe to move away from the right wall");
+assert(Math.abs(postDoorEgressBridgeLaneSustainAction.turnYaw) <= 3, "ComputerRoom bridge lane sustain should avoid a large spin while strafing");
+
+const postDoorEgressDeadEndLaneWallUnpinRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressDeadEndLaneWallUnpinRuntime.predictions = 5214;
+postDoorEgressDeadEndLaneWallUnpinRuntime.stagePulseComputerRoomEgressFrames = 82;
+postDoorEgressDeadEndLaneWallUnpinRuntime.crossBridgeDeadEndLaneFrames = 12;
+const postDoorEgressDeadEndLaneWallUnpinAction = postDoorEgressDeadEndLaneWallUnpinRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room wall",
+  bridgeConfidence: 0.56,
+  computerRoomConfidence: 0.58,
+  postDoorTerminalSurface: 0.29,
+  bridgeDoorScore: 0.01,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.32,
+  routeTopologyWallDistanceNormalized: 0.34,
+  motionForwardProgress: 0.00,
+  wallVector: 0.65,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72
+});
+assert(
+  String(postDoorEgressDeadEndLaneWallUnpinAction.stage || "").indexOf("post-door-computer-room-wall-unpin-") === 0
+    && String(postDoorEgressDeadEndLaneWallUnpinAction.stage || "").endsWith("-backoff"),
+  `Dead-end cross-bridge-lane wall contact should back out into bounded wall-unpin instead of sustaining forward/left (actual=${postDoorEgressDeadEndLaneWallUnpinAction.stage})`);
+assert(postDoorEgressDeadEndLaneWallUnpinAction.move === "back", "Dead-end lane wall unpin should release forward pressure first");
+assert(postDoorEgressDeadEndLaneWallUnpinAction.turn === "none", "Dead-end lane wall unpin should not rotate while backing off from hard contact");
+
+const postDoorEgressLongWeakLaneResumeRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLongWeakLaneResumeRuntime.predictions = 5210;
+postDoorEgressLongWeakLaneResumeRuntime.stagePulseComputerRoomEgressFrames = 82;
+const postDoorEgressLongWeakLaneResumeAction = postDoorEgressLongWeakLaneResumeRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.59,
+  computerRoomConfidence: 0.79,
+  postDoorTerminalSurface: 0.46,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.62,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  motionForwardProgress: 0.00,
+  wallVector: 0.28,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(postDoorEgressLongWeakLaneResumeAction.stage === "post-door-computer-room-egress-bridge-straight-resume", `Long weak ComputerRoom lane-sustain should release strafe and resume straight instead of looping left forever (actual=${postDoorEgressLongWeakLaneResumeAction.stage})`);
+assert(postDoorEgressLongWeakLaneResumeAction.turn === "none", "Long weak ComputerRoom lane-sustain timeout should stop yaw correction");
+assert(postDoorEgressLongWeakLaneResumeAction.strafe === false, "Long weak ComputerRoom lane-sustain timeout should release left strafe");
+
+const postDoorEgressLowConfidenceLaneTimeoutRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLowConfidenceLaneTimeoutRuntime.predictions = 11940;
+postDoorEgressLowConfidenceLaneTimeoutRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressLowConfidenceLaneTimeoutRuntime.actionRepeatFrames = 40;
+postDoorEgressLowConfidenceLaneTimeoutRuntime.moveRepeatFrames = 240;
+const postDoorEgressLowConfidenceLaneTimeoutAction = postDoorEgressLowConfidenceLaneTimeoutRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.49,
+  computerRoomConfidence: 0.70,
+  postDoorTerminalSurface: 0.60,
+  bridgeDoorScore: 0.07,
+  routeTopologyBarrelZoneEvidence: 0.68,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  routeTopologyWallDistanceNormalized: 0.49,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  recommendedYaw: -5,
+  actionRepeatFrames: 40,
+  moveRepeatFrames: 240
+});
+assert(String(postDoorEgressLowConfidenceLaneTimeoutAction.stage || "").indexOf("post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire") === 0, `Low-confidence terminal cross-bridge-lane pocket should back out instead of straight-driving into the wall (actual=${postDoorEgressLowConfidenceLaneTimeoutAction.stage})`);
+assert(postDoorEgressLowConfidenceLaneTimeoutAction.move === "back", "Low-confidence terminal cross-bridge-lane pocket should first release forward pressure");
+assert(postDoorEgressLowConfidenceLaneTimeoutAction.turn === "none", "Low-confidence terminal cross-bridge-lane pocket should not rotate until it has backed off");
+assert(postDoorEgressLowConfidenceLaneTimeoutAction.strafe === false, "Low-confidence terminal cross-bridge-lane pocket should release left strafe");
+
+const postDoorEgressDev1027LowConfidenceLaneRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressDev1027LowConfidenceLaneRuntime.predictions = 12020;
+postDoorEgressDev1027LowConfidenceLaneRuntime.stagePulseComputerRoomEgressFrames = 82;
+postDoorEgressDev1027LowConfidenceLaneRuntime.postDoorLowConfidenceCrossBridgeLaneLoopFrames = 8;
+const postDoorEgressDev1027LowConfidenceLaneAction = postDoorEgressDev1027LowConfidenceLaneRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.28,
+  computerRoomConfidence: 0.59,
+  postDoorTerminalSurface: 0.36,
+  bridgeDoorScore: 0.19,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.46,
+  routeTopologyCenterCorridorAlignment: -0.06,
+  routeTopologyWallDistanceNormalized: 0.58,
+  motionForwardProgress: 0.00,
+  wallVector: 0.36,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 24,
+  moveRepeatFrames: 24
+});
+assert(postDoorEgressDev1027LowConfidenceLaneAction.stage === "post-door-computer-room-egress-bridge-lane-low-confidence-right-reacquire", `Dev1027 low-confidence CrossBridge lane loop should yaw right instead of sustaining left (actual=${postDoorEgressDev1027LowConfidenceLaneAction.stage})`);
+assert(postDoorEgressDev1027LowConfidenceLaneAction.turn === "right", "Dev1027 low-confidence CrossBridge lane loop should reacquire right");
+assert(postDoorEgressDev1027LowConfidenceLaneAction.strafe !== true, "Dev1027 low-confidence CrossBridge lane loop should drop left strafe");
+
+const postDoorEgressLiveLeftStrafeWallStallRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLiveLeftStrafeWallStallRuntime.predictions = 10970;
+postDoorEgressLiveLeftStrafeWallStallRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressLiveLeftStrafeWallStallRuntime.actionRepeatFrames = 158;
+postDoorEgressLiveLeftStrafeWallStallRuntime.moveRepeatFrames = 240;
+postDoorEgressLiveLeftStrafeWallStallRuntime.turnRepeatFrames = 158;
+postDoorEgressLiveLeftStrafeWallStallRuntime.actionSignature = "forward:left:-:s:-:r";
+const postDoorEgressLiveLeftStrafeWallStallAction = postDoorEgressLiveLeftStrafeWallStallRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  routeName: "computer-room-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.53,
+  computerRoomConfidence: 0.58,
+  postDoorTerminalSurface: 0.57,
+  bridgeDoorScore: 0.04,
+  routeTopologyBarrelZoneEvidence: 0.6768,
+  routeTopologyCenterCorridorAlignment: -0.0604,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  recommendedYaw: -5,
+  actionRepeatFrames: 158,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 158,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.05,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.42,
+      enemy: 0.05,
+      bridge: 0.53,
+      "computer-room": 0.58
+    }
+  }
+});
+assert(postDoorEgressLiveLeftStrafeWallStallAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-backoff", `Live ComputerRoom left-strafe wall stall should begin with backoff instead of looping left-parallel (actual=${postDoorEgressLiveLeftStrafeWallStallAction.stage})`);
+assert(postDoorEgressLiveLeftStrafeWallStallAction.move === "back", "Live ComputerRoom left-strafe wall stall should first release forward pressure");
+assert(postDoorEgressLiveLeftStrafeWallStallAction.turn === "none", "Live ComputerRoom left-strafe wall stall should back off before rotating");
+assert(postDoorEgressLiveLeftStrafeWallStallAction.strafe === false, "Live ComputerRoom left-strafe wall stall should release strafe");
+
+const postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.predictions = 11120;
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.actionRepeatFrames = 12;
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.moveRepeatFrames = 224;
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.turnRepeatFrames = 0;
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.actionSignature = "forward:left:-:s:-:r";
+postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.lastStatus = {
+  autoplayState: {
+    actionSignature: "forward:left:-:s:-:r",
+    commandSignature: "forward+turn:left+strafe+run",
+    actionRepeatFrames: 12,
+    moveRepeatFrames: 224,
+    turnRepeatFrames: 0
+  }
+};
+const postDoorEgressUnlandmarkedLeftStrafeSaturationAction = postDoorEgressUnlandmarkedLeftStrafeSaturationRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  routeName: "computer-room-route",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  actionSignature: "forward:left:-:s:-:r",
+  commandSignature: "forward+turn:left+strafe+run",
+  contextDict: "computer-room wall",
+  bridgeConfidence: 0.34,
+  computerRoomConfidence: 0.58,
+  postDoorTerminalSurface: 0.45,
+  bridgeDoorScore: 0.04,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyCenterCorridorAlignment: 0.03,
+  routeTopologyWallDistanceNormalized: 0.50,
+  motionForwardProgress: 0.04,
+  wallVector: 0.42,
+  footObstacleScore: 0.55,
+  motionObstacleScore: 0.54,
+  recommendedYaw: 5,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 224,
+  turnRepeatFrames: 0,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.05,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.36,
+      enemy: 0.05,
+      bridge: 0.34,
+      "computer-room": 0.58
+    }
+  }
+});
+assert(
+  postDoorEgressUnlandmarkedLeftStrafeSaturationAction.stage === "post-door-computer-room-egress-left-strafe-wall-saturation-release-right"
+    || postDoorEgressUnlandmarkedLeftStrafeSaturationAction.stage === "post-door-computer-room-egress-bridge-straight-wall-unpin",
+  `Unlandmarked ComputerRoom left-strafe move saturation should leave the repeating left-strafe loop (actual=${postDoorEgressUnlandmarkedLeftStrafeSaturationAction.stage})`);
+assert(postDoorEgressUnlandmarkedLeftStrafeSaturationAction.move !== "forward" || postDoorEgressUnlandmarkedLeftStrafeSaturationAction.turn === "right", "Unlandmarked ComputerRoom left-strafe move saturation should either back off or turn right to reacquire the bridge route");
+assert(postDoorEgressUnlandmarkedLeftStrafeSaturationAction.strafe === false, "Unlandmarked ComputerRoom left-strafe move saturation should release strafe while reacquiring");
+
+const postDoorEgressDeadEndLeftStrafeSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.predictions = 14320;
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.actionRepeatFrames = 240;
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.moveRepeatFrames = 240;
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.turnRepeatFrames = 240;
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.actionSignature = "forward:left:-:s:-:r";
+postDoorEgressDeadEndLeftStrafeSaturationRuntime.lastStatus = {
+  autoplayState: {
+    actionSignature: "forward:left:-:s:-:r",
+    actionRepeatFrames: 240,
+    moveRepeatFrames: 240,
+    turnRepeatFrames: 240
+  }
+};
+const postDoorEgressDeadEndLeftStrafeSaturationAction = postDoorEgressDeadEndLeftStrafeSaturationRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.54,
+  computerRoomConfidence: 0.63,
+  postDoorTerminalSurface: 0.58,
+  bridgeDoorScore: 0.06,
+  routeDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 0.6784,
+  routeTopologyCenterCorridorAlignment: -0.0766,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  recommendedYaw: -5,
+  actionSignature: "forward:left:-:s:-:r",
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 240,
+  kinesisActionRepeatFrames: 240,
+  kinesisMoveRepeatFrames: 240,
+  kinesisTurnRepeatFrames: 240,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.05,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.42,
+      enemy: 0.05,
+      bridge: 0.54,
+      "computer-room": 0.63
+    }
+  }
+});
+assert(postDoorEgressDeadEndLeftStrafeSaturationAction.stage === "post-door-computer-room-egress-left-strafe-wall-saturation-release-right", `Dead-end-flavored ComputerRoom left-strafe saturation should still release right instead of looping at rep=240 (actual=${postDoorEgressDeadEndLeftStrafeSaturationAction.stage})`);
+assert(postDoorEgressDeadEndLeftStrafeSaturationAction.move === "forward", "Dead-end-flavored ComputerRoom saturation release should keep forward pressure toward central hall");
+assert(postDoorEgressDeadEndLeftStrafeSaturationAction.turn === "right", "Dead-end-flavored ComputerRoom saturation release should pivot right");
+assert(postDoorEgressDeadEndLeftStrafeSaturationAction.strafe === false, "Dead-end-flavored ComputerRoom saturation release should drop strafe");
+
+const postDoorEgressLivePlusSignatureSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLivePlusSignatureSaturationRuntime.predictions = 14380;
+postDoorEgressLivePlusSignatureSaturationRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressLivePlusSignatureSaturationRuntime.actionRepeatFrames = 240;
+postDoorEgressLivePlusSignatureSaturationRuntime.moveRepeatFrames = 240;
+postDoorEgressLivePlusSignatureSaturationRuntime.turnRepeatFrames = 0;
+postDoorEgressLivePlusSignatureSaturationRuntime.actionSignature = "forward+turn:left+strafe+run";
+postDoorEgressLivePlusSignatureSaturationRuntime.lastStatus = {
+  autoplayState: {
+    commandSignature: "forward+turn:left+strafe+run",
+    actionRepeatFrames: 240,
+    moveRepeatFrames: 240,
+    turnRepeatFrames: 0
+  }
+};
+const postDoorEgressLivePlusSignatureSaturationAction = postDoorEgressLivePlusSignatureSaturationRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.54,
+  computerRoomConfidence: 0.63,
+  postDoorTerminalSurface: 0.58,
+  bridgeDoorScore: 0.06,
+  routeDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.62,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  routeTopologyWallDistanceNormalized: 0.56,
+  motionForwardProgress: 0.02,
+  footObstacleScore: 0.54,
+  motionObstacleScore: 0.54,
+  recommendedYaw: -5,
+  commandSignature: "forward+turn:left+strafe+run",
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.42,
+      enemy: 0.05,
+      bridge: 0.54,
+      "computer-room": 0.63
+    }
+  }
+});
+assert(postDoorEgressLivePlusSignatureSaturationAction.stage === "post-door-computer-room-egress-left-strafe-wall-saturation-release-right", `Live plus-signature ComputerRoom left-strafe saturation should release right at rep=240 (actual=${postDoorEgressLivePlusSignatureSaturationAction.stage})`);
+assert(postDoorEgressLivePlusSignatureSaturationAction.turn === "right", "Live plus-signature saturation should pivot right");
+assert(postDoorEgressLivePlusSignatureSaturationAction.strafe === false, "Live plus-signature saturation should drop strafe");
+
+const postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.predictions = 15840;
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.actionRepeatFrames = 96;
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.moveRepeatFrames = 96;
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.turnRepeatFrames = 96;
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.actionSignature = "forward+turn:left+strafe+run";
+postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.lastStatus = {
+  autoplayState: {
+    commandSignature: "forward+turn:left+strafe+run",
+    actionRepeatFrames: 96,
+    moveRepeatFrames: 96,
+    turnRepeatFrames: 96
+  }
+};
+const postDoorEgressLiveLowPanelLeftStrafeSaturationAction = postDoorEgressLiveLowPanelLeftStrafeSaturationRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.50,
+  computerRoomConfidence: 0.56,
+  postDoorTerminalSurface: 0.26,
+  bridgeDoorScore: 0.00,
+  routeDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.312,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.04,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  recommendedYaw: -4,
+  commandSignature: "forward+turn:left+strafe+run",
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  turnRepeatFrames: 96,
+  semanticMemory: {
+    symbols: {
+      door: 0.18,
+      corridor: 0.42,
+      enemy: 0.05,
+      bridge: 0.50,
+      "computer-room": 0.56,
+      terminal: 0.26
+    }
+  }
+});
+assert(postDoorEgressLiveLowPanelLeftStrafeSaturationAction.stage === "post-door-computer-room-egress-low-panel-left-strafe-saturation-release-right", `Live low-panel ComputerRoom left-strafe saturation should release right before the cross-bridge-lane loop persists (actual=${postDoorEgressLiveLowPanelLeftStrafeSaturationAction.stage})`);
+assert(postDoorEgressLiveLowPanelLeftStrafeSaturationAction.move === "forward", "Live low-panel ComputerRoom release should preserve forward pressure toward cross bridge");
+assert(postDoorEgressLiveLowPanelLeftStrafeSaturationAction.turn === "right", "Live low-panel ComputerRoom release should pivot gently right");
+assert(postDoorEgressLiveLowPanelLeftStrafeSaturationAction.turnYaw >= 4 && postDoorEgressLiveLowPanelLeftStrafeSaturationAction.turnYaw <= 5, "Live low-panel ComputerRoom release should use a bounded right yaw");
+assert(postDoorEgressLiveLowPanelLeftStrafeSaturationAction.strafe === false, "Live low-panel ComputerRoom release should drop left strafe");
+
+const postDoorEgressCrossBridgeLaneCentralLeakRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressCrossBridgeLaneCentralLeakRuntime.predictions = 2442;
+postDoorEgressCrossBridgeLaneCentralLeakRuntime.centralDoorCornerSequenceFrames = 8;
+postDoorEgressCrossBridgeLaneCentralLeakRuntime.centralDoorCornerSequenceStep = "align-turn";
+postDoorEgressCrossBridgeLaneCentralLeakRuntime.actionSignature = "forward+turn:left+strafe+run";
+const postDoorEgressCrossBridgeLaneCentralLeakAction = postDoorEgressCrossBridgeLaneCentralLeakRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room open-space",
+  bridgeConfidence: 0.49,
+  computerRoomConfidence: 0.70,
+  postDoorTerminalSurface: 0.49,
+  bridgeDoorScore: 0.32,
+  routeTopologyBarrelZoneEvidence: 0.47,
+  routeTopologyCenterCorridorAlignment: -0.04,
+  routeTopologyWallDistanceNormalized: 0.49,
+  motionForwardProgress: 0.02,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  recommendedYaw: -6,
+  actionRepeatFrames: 48,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 48,
+  semanticMemory: {
+    symbols: {
+      bridge: 0.49,
+      "computer-room": 0.70,
+      terminal: 0.49,
+      door: 0.20
+    }
+  }
+});
+assert(!String(postDoorEgressCrossBridgeLaneCentralLeakAction.stage || "").startsWith("post-door-central-door"), `Live cross-bridge-lane advance must clear stale CentralDoor latch before it leaks (actual=${postDoorEgressCrossBridgeLaneCentralLeakAction.stage})`);
+assert(postDoorEgressCrossBridgeLaneCentralLeakAction.use !== true, "Live cross-bridge-lane advance must not pulse Use from a stale CentralDoor latch");
+
+const postDoorEgressLongLaneStraightCommitRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressLongLaneStraightCommitRuntime.predictions = 6220;
+postDoorEgressLongLaneStraightCommitRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressLongLaneStraightCommitRuntime.actionRepeatFrames = 240;
+postDoorEgressLongLaneStraightCommitRuntime.moveRepeatFrames = 240;
+const postDoorEgressLongLaneStraightCommitAction = postDoorEgressLongLaneStraightCommitRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.66,
+  computerRoomConfidence: 0.86,
+  postDoorTerminalSurface: 0.63,
+  bridgeDoorScore: 0.22,
+  usePulseCooldown: 0,
+  routeTopologyBarrelZoneEvidence: 0.65,
+  routeTopologyCenterCorridorAlignment: -0.06,
+  routeTopologyWallDistanceNormalized: 0.53,
+  motionForwardProgress: 0.70,
+  wallVector: 0.49,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(postDoorEgressLongLaneStraightCommitAction.stage === "post-door-computer-room-egress-bridge-straight-resume", `Long moving ComputerRoom bridge-lane sustain should commit straight toward central hall (actual=${postDoorEgressLongLaneStraightCommitAction.stage})`);
+assert(postDoorEgressLongLaneStraightCommitAction.turn === "none", "Long moving ComputerRoom bridge-lane commit should stop the left-right correction");
+assert(postDoorEgressLongLaneStraightCommitAction.strafe === false, "Long moving ComputerRoom bridge-lane commit should stop strafe scraping once forward progress is strong");
+
+const postDoorEgressCentralHallTerminalWallDecoyRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressCentralHallTerminalWallDecoyRuntime.predictions = 6360;
+postDoorEgressCentralHallTerminalWallDecoyRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressCentralHallTerminalWallDecoyRuntime.actionRepeatFrames = 96;
+postDoorEgressCentralHallTerminalWallDecoyRuntime.moveRepeatFrames = 96;
+const postDoorEgressCentralHallTerminalWallDecoyAction = postDoorEgressCentralHallTerminalWallDecoyRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  contextDict: "computer-room terminal-wall",
+  bridgeConfidence: 0.62,
+  computerRoomConfidence: 0.86,
+  postDoorTerminalSurface: 0.58,
+  bridgeDoorScore: 0.25,
+  computerPanelScore: 0.58,
+  computerDarkPanelScore: 0.07,
+  depthEstimate: 1,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  routeTopologyCenterCorridorAlignment: -0.006,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.02,
+  gameplayLuma: 90.55,
+  darkAreaScore: 0.02,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96
+});
+assert(postDoorEgressCentralHallTerminalWallDecoyAction.stage === "post-door-computer-room-terminal-wall-decoy-release", `Live terminal-wall frame must not become central-hall straight proof (actual=${postDoorEgressCentralHallTerminalWallDecoyAction.stage})`);
+assert(postDoorEgressCentralHallTerminalWallDecoyAction.turn === "left", "Live terminal-wall decoy recovery should release left instead of driving straight into the panel");
+assert(postDoorEgressCentralHallTerminalWallDecoyAction.safetyReason === "computer-room-terminal-wall-decoy-release", "Live terminal-wall decoy recovery should publish the terminal-wall safety reason");
+
+const postDoorEgressStrongBridgePinnedWallRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressStrongBridgePinnedWallRuntime.predictions = 8642;
+postDoorEgressStrongBridgePinnedWallRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressStrongBridgePinnedWallRuntime.actionRepeatFrames = 240;
+postDoorEgressStrongBridgePinnedWallRuntime.moveRepeatFrames = 240;
+const postDoorEgressStrongBridgePinnedWallAction = postDoorEgressStrongBridgePinnedWallRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.67,
+  computerRoomConfidence: 0.87,
+  postDoorTerminalSurface: 0.55,
+  bridgeDoorScore: 0.22,
+  routeTopologyBarrelZoneEvidence: 0.49,
+  routeTopologyCenterCorridorAlignment: -0.01,
+  routeTopologyWallDistanceNormalized: 0.493,
+  motionForwardProgress: 0.70,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(postDoorEgressStrongBridgePinnedWallAction.stage === "post-door-computer-room-egress-bridge-straight-wall-unpin", `Strong bridge straight lock pinned into a wall should release before looping forever (actual=${postDoorEgressStrongBridgePinnedWallAction.stage})`);
+assert(postDoorEgressStrongBridgePinnedWallAction.move === "back", "Strong bridge pinned wall recovery should back off briefly");
+assert(postDoorEgressStrongBridgePinnedWallAction.turn === "left", "Strong bridge pinned wall recovery should peel left toward the bridge lane");
+
+const postDoorEgressWeakBridgeWallLoopRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressWeakBridgeWallLoopRuntime.predictions = 11780;
+postDoorEgressWeakBridgeWallLoopRuntime.stagePulseComputerRoomEgressFrames = 1;
+postDoorEgressWeakBridgeWallLoopRuntime.actionRepeatFrames = 240;
+postDoorEgressWeakBridgeWallLoopRuntime.moveRepeatFrames = 240;
+const postDoorEgressWeakBridgeWallLoopAction = postDoorEgressWeakBridgeWallLoopRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.36,
+  computerRoomConfidence: 0.80,
+  postDoorTerminalSurface: 0.34,
+  bridgeDoorScore: 0.08,
+  usePulseCooldown: 0,
+  routeTopologyBarrelZoneEvidence: 0.64,
+  routeTopologyCenterCorridorAlignment: -0.05,
+  routeTopologyWallDistanceNormalized: 0.56,
+  motionForwardProgress: 0.70,
+  wallVector: 0.56,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240
+});
+assert(postDoorEgressWeakBridgeWallLoopAction.stage === "post-door-computer-room-egress-weak-bridge-wall-unpin", `Weak bridge evidence should not straight-resume forever against the ComputerRoom wall (actual=${postDoorEgressWeakBridgeWallLoopAction.stage})`);
+assert(postDoorEgressWeakBridgeWallLoopAction.move === "back", "Weak bridge wall loop should briefly back off before reacquiring the lane");
+assert(postDoorEgressWeakBridgeWallLoopAction.turn === "left", "Weak bridge wall loop should peel left away from the right-side wall");
+assert(postDoorEgressWeakBridgeWallLoopAction.run === false, "Weak bridge wall loop backoff should be a controlled non-run pulse");
+
+const postDoorEgressBridgeLaneBarrelSpikeRuntime = runtimeFactory.create(publicProfile);
+postDoorEgressBridgeLaneBarrelSpikeRuntime.predictions = 5260;
+postDoorEgressBridgeLaneBarrelSpikeRuntime.stagePulseComputerRoomEgressFrames = 82;
+const postDoorEgressBridgeLaneBarrelSpikeAction = postDoorEgressBridgeLaneBarrelSpikeRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.63,
+  computerRoomConfidence: 0.79,
+  postDoorTerminalSurface: 0.46,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.98,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  motionForwardProgress: 0.06,
+  wallVector: 0.48,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  actionRepeatFrames: 260,
+  moveRepeatFrames: 260
+});
+assert(postDoorEgressBridgeLaneBarrelSpikeAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `ComputerRoom bridge-lane evidence should override a transient barrel spike instead of re-entering a yaw loop (actual=${postDoorEgressBridgeLaneBarrelSpikeAction.stage})`);
+assert(postDoorEgressBridgeLaneBarrelSpikeAction.move === "forward", "ComputerRoom bridge-lane barrel spike should keep forward pressure");
+assert(postDoorEgressBridgeLaneBarrelSpikeAction.strafe === true, "ComputerRoom bridge-lane barrel spike should slide left rather than yawing in place");
+
+const postDoorBridgeForwardLaneRecoveryRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeForwardLaneRecoveryRuntime.predictions = 5320;
+postDoorBridgeForwardLaneRecoveryRuntime.stagePulseBridgeForwardFrames = 40;
+postDoorBridgeForwardLaneRecoveryRuntime.actionRepeatFrames = 104;
+postDoorBridgeForwardLaneRecoveryRuntime.moveRepeatFrames = 104;
+const postDoorBridgeForwardLaneRecoveryAction = postDoorBridgeForwardLaneRecoveryRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.56,
+  computerRoomConfidence: 0.78,
+  postDoorTerminalSurface: 0.55,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.98,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  motionForwardProgress: 0.06,
+  wallVector: 0.48,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.40,
+  actionRepeatFrames: 104,
+  moveRepeatFrames: 104
+});
+assert(postDoorBridgeForwardLaneRecoveryAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `Long ComputerRoom bridge-forward pulse with bridge-panel evidence should recover into lane sustain (actual=${postDoorBridgeForwardLaneRecoveryAction.stage})`);
+assert(postDoorBridgeForwardLaneRecoveryAction.strafe === true, "Long ComputerRoom bridge-forward recovery should slide left toward the bridge lane");
+
+const postDoorBridgeForwardMemoryLaneRecoveryRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeForwardMemoryLaneRecoveryRuntime.predictions = 5360;
+postDoorBridgeForwardMemoryLaneRecoveryRuntime.stagePulseBridgeForwardFrames = 40;
+postDoorBridgeForwardMemoryLaneRecoveryRuntime.actionRepeatFrames = 104;
+postDoorBridgeForwardMemoryLaneRecoveryRuntime.moveRepeatFrames = 104;
+const postDoorBridgeForwardMemoryLaneRecoveryAction = postDoorBridgeForwardMemoryLaneRecoveryRuntime.predict({
+  health: 100,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "computer-room",
+  bridgeConfidence: 0.49,
+  computerRoomConfidence: 0.56,
+  postDoorTerminalSurface: 0.42,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 17,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.46,
+  routeTopologyCenterCorridorAlignment: 0.01,
+  motionForwardProgress: 0.70,
+  wallVector: 0.49,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  actionRepeatFrames: 104,
+  moveRepeatFrames: 104
+});
+assert(postDoorBridgeForwardMemoryLaneRecoveryAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `Memory-backed ComputerRoom bridge evidence should recover into lane sustain before a long forward loop forms (actual=${postDoorBridgeForwardMemoryLaneRecoveryAction.stage})`);
+assert(postDoorBridgeForwardMemoryLaneRecoveryAction.strafe === true, "Memory-backed ComputerRoom bridge recovery should keep a visible left lane correction");
+
+const postDoorBridgeForwardStallRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeForwardStallRuntime.predictions = 3820;
+postDoorBridgeForwardStallRuntime.stagePulseBridgeForwardFrames = 32;
+const postDoorBridgeForwardStallAction = postDoorBridgeForwardStallRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "door-approach-dead-end",
+  routeLoopKind: "door-approach-dead-end",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.44,
+  wallVector: 0.74,
+  motionForwardProgress: 0.04
+}));
+assert(postDoorBridgeForwardStallAction.stage === "post-door-computer-room-bridge-forward-stall-left-recover", `ComputerRoom bridge forward wall stall should recover left while keeping forward pressure (actual=${postDoorBridgeForwardStallAction.stage})`);
+assert(postDoorBridgeForwardStallAction.move === "forward", "ComputerRoom bridge forward wall stall should keep forward pressure instead of reversing into the entry loop");
+assert(postDoorBridgeForwardStallAction.turn === "left", "ComputerRoom bridge forward wall stall should turn left toward the bridge lane");
+
+const postDoorBridgeForwardLeftPocketRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeForwardLeftPocketRuntime.predictions = 3826;
+postDoorBridgeForwardLeftPocketRuntime.stagePulseBridgeForwardFrames = 32;
+const postDoorBridgeForwardLeftPocketAction = postDoorBridgeForwardLeftPocketRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.37,
+  routeTopologyBarrelZoneEvidence: 0.99,
+  routeTopologyCenterCorridorAlignment: -0.35,
+  wallVector: 0.39,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.66,
+  motionForwardProgress: 0.24,
+  routeTopologyWallDistanceNormalized: undefined,
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  recommendedYaw: 6,
+  usePulseCooldown: 36
+}));
+assert(postDoorBridgeForwardLeftPocketAction.stage === "post-door-computer-room-bridge-forward-stall-right-lane-escape", `Mobile cross-bridge left pocket should escape right when wall distance is not observed (actual=${postDoorBridgeForwardLeftPocketAction.stage})`);
+assert(postDoorBridgeForwardLeftPocketAction.move === "forward" && postDoorBridgeForwardLeftPocketAction.turn === "right", "Mobile cross-bridge left pocket should keep forward pressure and yaw right");
+
+const postDoorBridgeForwardHardWallRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeForwardHardWallRuntime.predictions = 3830;
+postDoorBridgeForwardHardWallRuntime.stagePulseBridgeForwardFrames = 32;
+const postDoorBridgeForwardHardWallAction = postDoorBridgeForwardHardWallRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "",
+  routeLoopKind: "",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.36,
+  wallVector: 0.54,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.03,
+  moveRepeatFrames: 31,
+  actionRepeatFrames: 3,
+  usePulseCooldown: 36
+}));
+assert(postDoorBridgeForwardHardWallAction.stage === "post-door-computer-room-bridge-forward-stall-hard-wall-unpin", `ComputerRoom bridge hard wall face should back-left unpin instead of continuing forward-left (actual=${postDoorBridgeForwardHardWallAction.stage})`);
+assert(postDoorBridgeForwardHardWallAction.move === "back", "ComputerRoom bridge hard wall face should reverse briefly");
+assert(postDoorBridgeForwardHardWallAction.turn === "left", "ComputerRoom bridge hard wall face should still pivot left toward the exit lane");
+
+postDoorBridgeForwardStallRuntime.stagePulseBridgeStallEscapeFrames = 1;
+const postDoorBridgeWallParallelRecoverAction = postDoorBridgeForwardStallRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "door-approach-dead-end",
+  routeLoopKind: "door-approach-dead-end",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.44,
+  wallVector: 0.74,
+  motionForwardProgress: 0.04
+}));
+assert(postDoorBridgeWallParallelRecoverAction.stage === "post-door-computer-room-bridge-forward-stall-left-recover", "ComputerRoom bridge stall should finish the forward-left recover pulse before resuming travel");
+const postDoorBridgeWallParallelRecoverHeldAction = postDoorBridgeForwardStallRuntime.predict(Object.assign({}, postDoorDeadEndRightReacquireState, {
+  routeAbortHint: "door-approach-dead-end",
+  routeLoopKind: "door-approach-dead-end",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.44,
+  wallVector: 0.74,
+  motionForwardProgress: 0.04
+}));
+assert(postDoorBridgeWallParallelRecoverHeldAction.stage === "post-door-computer-room-bridge-wall-parallel-left-recover", `ComputerRoom bridge stall recovery should slide left parallel to the right wall before re-entering bridge forward (actual=${postDoorBridgeWallParallelRecoverHeldAction.stage})`);
+assert(postDoorBridgeWallParallelRecoverHeldAction.move === "forward", "ComputerRoom bridge wall-parallel recovery should preserve forward pressure when bridge route evidence is alive");
+assert(postDoorBridgeWallParallelRecoverHeldAction.turn === "left", "ComputerRoom bridge wall-parallel recovery should bias left away from the right wall");
+assert(postDoorBridgeWallParallelRecoverHeldAction.strafe === false, "ComputerRoom bridge wall-parallel recovery should avoid strafe-scraping the right wall");
+
+const stalePostDoorRightWallParallelTrimRuntime = runtimeFactory.create(publicProfile);
+stalePostDoorRightWallParallelTrimRuntime.predictions = 1402;
+const stalePostDoorRightWallParallelTrimAction = stalePostDoorRightWallParallelTrimRuntime.predict({
+  health: 100,
+  depthSig: 0.94,
+  contextDict: "computer-room",
+  doorOpenedCount: 0,
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 0
+  },
+  autoplayState: {
+    routeMode: "post-door",
+    milestones: {
+      doorOpened: 1,
+      doorOpenedCount: 0
+    }
+  },
+  computerRoomEntered: false,
+  computerRoomCombatContext: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0.08,
+  audioEnemyStrong: false,
+  computerRoomConfidence: 0.76,
+  computerRoomScore: 0.22,
+  computerPanelScore: 0.70,
+  computerDarkPanelScore: 0.06,
+  postDoorTerminalSurface: 0.38,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.46,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 18,
+  actionRepeatFrames: 18,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  spawnCorridorGapScore: 0.31,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.10,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    phase: "OpeningHome",
+    objective: "approach-first-door",
+    symbols: {
+      door: 0.16,
+      corridor: 0.30,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.52,
+      "computer-room": 0.76
+    }
+  }
+});
+assert(stalePostDoorRightWallParallelTrimAction.stage !== "post-door-computer-room-right-wall-parallel-left-trim", "Closed-door reset states must not select post-door ComputerRoom trim from stale route mode");
+assert(!String(stalePostDoorRightWallParallelTrimAction.stage || "").startsWith("post-door"), `Closed-door stale post-door actions should fall back to a pre-door stage after opening sweep (actual=${stalePostDoorRightWallParallelTrimAction.stage})`);
+assert(stalePostDoorRightWallParallelTrimAction.move === "forward", `Closed-door stale post-door fallback should keep moving toward FirstDoor after opening sweep (actual=${stalePostDoorRightWallParallelTrimAction.stage}/${stalePostDoorRightWallParallelTrimAction.move})`);
+assert(stalePostDoorRightWallParallelTrimAction.objective !== "reach-central-hall", "Closed-door reset states should keep the route objective before the first door");
+const stalePostDoorRightWallParallelTrimStatus = stalePostDoorRightWallParallelTrimRuntime.status();
+assert(stalePostDoorRightWallParallelTrimStatus.controlPipeline !== "post-door-computer-room-right-wall-parallel-left-trim", "Closed-door reset status must not expose stale post-door ComputerRoom trim");
+assert(stalePostDoorRightWallParallelTrimStatus.objective !== "reach-central-hall", "Closed-door reset status should not expose a stale central-hall objective");
+assert(stalePostDoorRightWallParallelTrimStatus.debugRouteValues.doorOpenedCount === 0, "Closed-door reset status should keep doorOpenedCount at zero");
+assert(stalePostDoorRightWallParallelTrimStatus.debugRouteValues.routeMode !== "post-door", "Closed-door reset status should sanitize stale post-door route mode");
+
+const staleClosedDoorCentralSequenceRuntime = runtimeFactory.create(publicProfile);
+staleClosedDoorCentralSequenceRuntime.predictions = 1520;
+staleClosedDoorCentralSequenceRuntime.centralDoorCornerSequenceFrames = 16;
+const staleClosedDoorCentralSequenceAction = staleClosedDoorCentralSequenceRuntime.predict(Object.assign({}, stalePostDoorRightWallParallelTrimAction.debugRouteValues || {}, {
+  health: 100,
+  depthSig: 0.82,
+  contextDict: "corridor first-door",
+  doorOpenedCount: 0,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.04,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.16,
+  bridgeConfidence: 0.40,
+  computerRoomConfidence: 0.18,
+  computerRoomScore: 0.02,
+  computerPanelScore: 0.02,
+  computerDarkPanelScore: 0.02,
+  postDoorTerminalSurface: 0.02,
+  spawnCorridorGapScore: 0.31,
+  spawnLandmarkRouteEvidence: 0.46,
+  wallVector: 0.42,
+  motionForwardProgress: 0.04,
+  semanticMemory: {
+    phase: "OpeningHome",
+    objective: "approach-first-door",
+    symbols: {
+      door: 0.52,
+      corridor: 0.34,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.40,
+      "computer-room": 0.18
+    }
+  }
+}));
+assert(!String(staleClosedDoorCentralSequenceAction.stage || "").startsWith("post-door-central-door"), `Closed-door stale central-door sequence pulse must be cleared before the first door opens (actual=${staleClosedDoorCentralSequenceAction.stage})`);
+assert(staleClosedDoorCentralSequenceAction.objective !== "reach-central-hall", "Closed-door stale central-door sequence should not keep the central-hall objective");
+
+const staleClosedDoorCentralPostUseRuntime = runtimeFactory.create(publicProfile);
+staleClosedDoorCentralPostUseRuntime.predictions = 1530;
+staleClosedDoorCentralPostUseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 92;
+const staleClosedDoorCentralPostUseAction = staleClosedDoorCentralPostUseRuntime.predict(Object.assign({}, staleClosedDoorCentralSequenceAction.debugRouteValues || {}, {
+  health: 100,
+  depthSig: 0.84,
+  contextDict: "corridor first-door",
+  doorOpenedCount: 0,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.04,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.16,
+  bridgeConfidence: 0.40,
+  computerRoomConfidence: 0.18,
+  computerRoomScore: 0.02,
+  computerPanelScore: 0.02,
+  computerDarkPanelScore: 0.02,
+  postDoorTerminalSurface: 0.02,
+  spawnCorridorGapScore: 0.31,
+  spawnLandmarkRouteEvidence: 0.46,
+  wallVector: 0.42,
+  motionForwardProgress: 0.04,
+  semanticMemory: {
+    phase: "OpeningHome",
+    objective: "approach-first-door",
+    symbols: {
+      door: 0.52,
+      corridor: 0.34,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.40,
+      "computer-room": 0.18
+    }
+  }
+}));
+assert(staleClosedDoorCentralPostUseAction.stage !== "post-door-central-door-post-use-advance", "Closed-door stale central-door post-use pulse must not push forward before FirstDoor opens");
+assert(staleClosedDoorCentralPostUseAction.objective !== "reach-central-hall", "Closed-door stale central-door post-use pulse should not keep central-hall objective");
+
+const stalePostDoorOpeningSweepRuntime = runtimeFactory.create(publicProfile);
+stalePostDoorOpeningSweepRuntime.predictions = 24;
+const stalePostDoorOpeningSweepAction = stalePostDoorOpeningSweepRuntime.predict({
+  health: 100,
+  depthSig: 0.96,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  computerRoomConfidence: 0.76,
+  computerRoomScore: 0.22,
+  computerPanelScore: 0.70,
+  computerDarkPanelScore: 0.06,
+  bridgeConfidence: 0.52,
+  firstDoorVision9x9Score: 0.38,
+  spawnCorridorGapScore: 0.31,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  semanticMemory: {
+    phase: "OpeningHome",
+    objective: "approach-first-door",
+    symbols: {
+      door: 0.16,
+      corridor: 0.30,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.52,
+      "computer-room": 0.76
+    }
+  }
+});
+assert(String(stalePostDoorOpeningSweepAction.stage || "").includes("sense-settle-right"), `Closed-door stale post-door state should restore the opening return sweep before moving (actual=${stalePostDoorOpeningSweepAction.stage})`);
+assert(stalePostDoorOpeningSweepAction.move === "none", "Opening sense-settle should not move forward");
+assert(stalePostDoorOpeningSweepAction.turn === "right", "Opening sense-settle should recover heading before the forward route");
+
+const staleRetryPostDoorRuntime = runtimeFactory.create(publicProfile);
+staleRetryPostDoorRuntime.predictions = 2780;
+staleRetryPostDoorRuntime.lastDoorOpenedCount = 1;
+staleRetryPostDoorRuntime.seenClosedFirstDoor = true;
+staleRetryPostDoorRuntime.stagePulseBridgeStraightLockFrames = 80;
+const staleRetryPostDoorAction = staleRetryPostDoorRuntime.predict({
+  health: 100,
+  predictions: 0,
+  retrySettleActive: true,
+  retryReason: "health-face-blood-death",
+  healthRetryReason: "health-face-blood-death",
+  doorOpenedCount: 1,
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false
+  },
+  autoplayState: {
+    routeMode: "post-door",
+    objective: "reach-central-hall",
+    controlPipeline: "ComputerRoom",
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    milestones: {
+      doorOpened: 1,
+      doorOpenedCount: 1,
+      computerRoomEntered: true
+    }
+  },
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  objective: "reach-central-hall",
+  controlPipeline: "ComputerRoom",
+  contextDict: "computer-room post-door",
+  computerRoomConfidence: 0.82,
+  bridgeConfidence: 0.56,
+  semanticMemory: {
+    symbols: {
+      bridge: 0.56,
+      "computer-room": 0.82,
+      "central-hall": 0.12
+    }
+  }
+});
+assert(!String(staleRetryPostDoorAction.stage || "").startsWith("post-door"), `Retry settle should mask stale post-door actions after death (actual=${staleRetryPostDoorAction.stage})`);
+assert(staleRetryPostDoorAction.objective === "find-corridor-to-first-door", `Retry settle should restore the FirstDoor objective (actual=${staleRetryPostDoorAction.objective})`);
+assert(staleRetryPostDoorRuntime.stagePulseBridgeStraightLockFrames === 0, "Retry settle should clear post-door bridge straight-lock pulses");
+const staleRetryPostDoorStatus = staleRetryPostDoorRuntime.status();
+assert(staleRetryPostDoorStatus.debugRouteValues.doorOpenedCount === 0, "Retry settle status should mask stale doorOpenedCount");
+assert(staleRetryPostDoorStatus.debugRouteValues.routeMode !== "post-door", "Retry settle status should not expose stale post-door route mode");
+
+const staleRewoundPostDoorRuntime = runtimeFactory.create(publicProfile);
+staleRewoundPostDoorRuntime.predictions = 3240;
+staleRewoundPostDoorRuntime.lastDoorOpenedCount = 1;
+staleRewoundPostDoorRuntime.seenClosedFirstDoor = true;
+staleRewoundPostDoorRuntime.stagePulseBridgeForwardFrames = 54;
+staleRewoundPostDoorRuntime.stagePulseComputerRoomEgressFrames = 84;
+staleRewoundPostDoorRuntime.stagePulseRightWallStraightFrames = 32;
+const staleRewoundPostDoorAction = staleRewoundPostDoorRuntime.predict({
+  health: 100,
+  predictions: 0,
+  doorOpenedCount: 0,
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 0,
+    computerRoomEntered: true,
+    centralHallEntered: false
+  },
+  autoplayState: {
+    routeMode: "post-door",
+    objective: "reach-central-hall",
+    controlPipeline: "ComputerRoom",
+    doorOpenedCount: 0,
+    computerRoomEntered: true,
+    routePostDoorBridgeDoorMemoryFrames: 12
+  },
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  objective: "reach-central-hall",
+  controlPipeline: "ComputerRoom",
+  contextDict: "computer-room post-door",
+  computerRoomConfidence: 0.82,
+  bridgeConfidence: 0.56,
+  semanticMemory: {
+    phase: "ComputerRoom",
+    objective: "reach-central-hall",
+    symbols: {
+      bridge: 0.56,
+      "computer-room": 0.82
+    }
+  }
+});
+assert(String(staleRewoundPostDoorAction.stage || "").includes("sense-settle-left"), `Rewound closed-door post-door state should restart the opening left sweep (actual=${staleRewoundPostDoorAction.stage})`);
+assert(staleRewoundPostDoorAction.move === "none", "Rewound closed-door post-door reset should not move before sensors settle");
+assert(staleRewoundPostDoorRuntime.stagePulseBridgeForwardFrames === 0, "Rewound opening reset should clear stale bridge-forward pulses");
+assert(staleRewoundPostDoorRuntime.stagePulseComputerRoomEgressFrames === 0, "Rewound opening reset should clear stale ComputerRoom egress pulses");
+assert(staleRewoundPostDoorRuntime.stagePulseRightWallStraightFrames === 0, "Rewound opening reset should clear stale right-wall straight pulses");
+const staleRewoundPostDoorStatus = staleRewoundPostDoorRuntime.status();
+assert(staleRewoundPostDoorStatus.debugRouteValues.doorOpenedCount === 0, "Rewound opening reset status should keep doorOpenedCount at zero");
+assert(staleRewoundPostDoorStatus.debugRouteValues.routeMode !== "post-door", "Rewound opening reset status should not expose stale post-door route mode");
+
+const forcedClosedDoorForwardLockProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedClosedDoorForwardLock",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-forced-route",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnYaw: "7",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const forcedClosedDoorForwardLockRuntime = runtimeFactory.create(forcedClosedDoorForwardLockProfile);
+forcedClosedDoorForwardLockRuntime.predictions = 160;
+const forcedClosedDoorForwardLockAction = forcedClosedDoorForwardLockRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  actionRepeatFrames: 20,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVisionYaw: 7,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none"
+});
+const forcedClosedDoorForwardLockStage = String(forcedClosedDoorForwardLockAction.stage || "");
+assert(forcedClosedDoorForwardLockStage === "closed-door-opening-ne-forward-lock"
+  || forcedClosedDoorForwardLockStage === "closed-door-opening-far-pillar-straight-hold", `Closed-door stale post-door route should preserve the opening northeast run after the sweep (actual=${forcedClosedDoorForwardLockAction.stage})`);
+assert(forcedClosedDoorForwardLockAction.move === "forward", "Opening northeast lock should keep moving forward");
+assert(forcedClosedDoorForwardLockAction.turn === "right", "Opening northeast lock should keep a light right yaw toward the FirstDoor route");
+assert(forcedClosedDoorForwardLockAction.strafe === true, "Opening northeast lock should strafe right while advancing to cut across the blue-floor lane");
+assert(forcedClosedDoorForwardLockAction.turnYaw > 0 && forcedClosedDoorForwardLockAction.turnYaw <= 6, "Opening northeast yaw should stay bounded so it does not oversteer into the wall");
+assert(forcedClosedDoorForwardLockAction.objective === "find-corridor-to-first-door", "Opening northeast lock should restore the FirstDoor objective");
+
+const forcedClosedDoorLongForwardLockRuntime = runtimeFactory.create(forcedClosedDoorForwardLockProfile);
+forcedClosedDoorLongForwardLockRuntime.predictions = 240;
+const forcedClosedDoorLongForwardLockAction = forcedClosedDoorLongForwardLockRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  actionRepeatFrames: 90,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVisionYaw: 7,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none"
+});
+const forcedClosedDoorLongForwardLockStage = String(forcedClosedDoorLongForwardLockAction.stage || "");
+assert(forcedClosedDoorLongForwardLockStage === "closed-door-opening-ne-forward-lock"
+  || forcedClosedDoorLongForwardLockStage === "closed-door-opening-far-pillar-straight-hold", `Opening northeast lock should persist long enough to cross the blue-floor route (actual=${forcedClosedDoorLongForwardLockAction.stage})`);
+assert(forcedClosedDoorLongForwardLockAction.move === "forward", "Long opening northeast lock should keep moving forward");
+assert(forcedClosedDoorLongForwardLockAction.turn === "right", "Long opening northeast lock should keep the gentle right cut");
+assert(forcedClosedDoorLongForwardLockAction.strafe === true, "Long opening northeast lock should preserve forward-right strafe instead of a pure yaw arc");
+
+const forcedClosedDoorTransitLatchedRuntime = runtimeFactory.create(forcedClosedDoorForwardLockProfile);
+forcedClosedDoorTransitLatchedRuntime.predictions = 760;
+forcedClosedDoorTransitLatchedRuntime.closedDoorCornerSequenceFrames = 20;
+forcedClosedDoorTransitLatchedRuntime.closedDoorCornerSequenceStep = "backoff";
+const forcedClosedDoorTransitLatchedAction = forcedClosedDoorTransitLatchedRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  doorOpenedCount: 0,
+  predictions: 760,
+  actionRepeatFrames: 56,
+  moveRepeatFrames: 56,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.52,
+  firstDoorVision9x9RedScore: 0.14,
+  firstDoorVisionYaw: 7,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.03,
+  spawnCorridorGapScore: 0.30,
+  spawnLandmarkRouteEvidence: 0.52,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.12
+});
+assert(["closed-door-opening-post-pillar-right-cut", "closed-door-opening-ne-forward-lock"].includes(forcedClosedDoorTransitLatchedAction.stage), `Opening transit should clear premature closed-door latch and enter the post-pillar right cut (actual=${forcedClosedDoorTransitLatchedAction.stage})`);
+assert(forcedClosedDoorTransitLatchedAction.move === "forward" && forcedClosedDoorTransitLatchedAction.run === true, "Opening transit latch guard should keep running toward FirstDoor");
+assert(forcedClosedDoorTransitLatchedAction.turn === "right", "Opening transit latch guard should apply the post-pillar right cut");
+assert(forcedClosedDoorTransitLatchedAction.strafe === true, "Opening transit latch guard should strafe during the post-pillar right cut");
+
+const openingLongTransitBackLoopRuntime = runtimeFactory.create(forcedClosedDoorForwardLockProfile);
+openingLongTransitBackLoopRuntime.predictions = 871;
+const openingLongTransitBackLoopAction = openingLongTransitBackLoopRuntime.predict({
+  health: 100,
+  depthSig: 0.82,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "open-space-low-gap-scan",
+  doorOpenedCount: 0,
+  predictions: 871,
+  actionRepeatFrames: 92,
+  moveRepeatFrames: 92,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorVisionYaw: 5,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.11,
+  spawnCorridorGapScore: 0.17,
+  spawnLandmarkRouteEvidence: 0.33,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08
+});
+assert(openingLongTransitBackLoopAction.stage === "closed-door-opening-ne-forward-lock", `Opening long transit should suppress early open-space back loops while FirstDoor weak vision remains (actual=${openingLongTransitBackLoopAction.stage})`);
+assert(openingLongTransitBackLoopAction.move === "forward", "Opening long transit should continue forward instead of backing away before FirstDoor");
+assert(openingLongTransitBackLoopAction.turn === "right", `Opening long transit should apply the post-pillar right bias (actual=${openingLongTransitBackLoopAction.turn}/${openingLongTransitBackLoopAction.stage})`);
+assert(openingLongTransitBackLoopAction.strafe === true, "Opening long transit should enable strafe assist after the far pillar is passed");
+
+const closedDoorEarlyDeadEndReleaseRuntime = runtimeFactory.create(forcedClosedDoorForwardLockProfile);
+closedDoorEarlyDeadEndReleaseRuntime.predictions = 1005;
+closedDoorEarlyDeadEndReleaseRuntime.actionRepeatFrames = 240;
+closedDoorEarlyDeadEndReleaseRuntime.moveRepeatFrames = 240;
+const closedDoorEarlyDeadEndReleaseAction = closedDoorEarlyDeadEndReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.74,
+  contextDict: "corridor wall door",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeAbortHint: "door-approach-dead-end",
+  routeLoopKind: "door-approach-dead-end",
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  doorOpenedCount: 0,
+  predictions: 1005,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.20,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorVisionYaw: -6,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.08,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.10,
+  spawnCorridorGapScore: 0.12,
+  spawnLandmarkRouteEvidence: 0.18,
+  footObstacleScore: 0.70,
+  motionObstacleScore: 0.70,
+  motionForwardProgress: 0.03
+});
+assert(String(closedDoorEarlyDeadEndReleaseAction.stage || "").indexOf("backoff") >= 0, `Opening dead-end repeat should release before forward lock timeout (actual=${closedDoorEarlyDeadEndReleaseAction.stage})`);
+assert(closedDoorEarlyDeadEndReleaseAction.move === "back", "Opening dead-end repeat should back out before the door approach loop grows");
+assert(closedDoorEarlyDeadEndReleaseAction.run === false, "Opening dead-end backoff should be a controlled unpin, not a running reverse");
+
+const openingRightBiasDroppedProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "OpeningRightBiasDropped",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "wall-follow-fallback",
+        objective: "find-corridor-to-first-door",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnYaw: "0",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const openingRightBiasDroppedRuntime = runtimeFactory.create(openingRightBiasDroppedProfile);
+openingRightBiasDroppedRuntime.predictions = 927;
+const openingRightBiasDroppedAction = openingRightBiasDroppedRuntime.predict({
+  health: 100,
+  depthSig: 0.83,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "wall-follow-fallback",
+  doorOpenedCount: 0,
+  predictions: 927,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.45,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorVisionYaw: 4,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.19,
+  spawnCorridorGapScore: 0.29,
+  spawnLandmarkRouteEvidence: 0.42,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  motionForwardProgress: 0.18
+});
+assert(["closed-door-opening-ne-forward-lock", "closed-door-opening-right-bias-restored", "closed-door-opening-pillar-transit-hold", "closed-door-opening-post-pillar-right-cut"].includes(openingRightBiasDroppedAction.stage), `Opening transit should restore right-bias when fallback keeps only forward motion (actual=${JSON.stringify(openingRightBiasDroppedAction)})`);
+assert(openingRightBiasDroppedAction.move === "forward", "Opening right-bias restore should keep moving forward");
+assert(openingRightBiasDroppedAction.turn === "right", `Opening right-bias restore should reapply the gentle right turn (actual=${openingRightBiasDroppedAction.turn})`);
+assert(openingRightBiasDroppedAction.strafe === true, "Opening right-bias restore should preserve the diagonal cut");
+
+const openingPillarTransitBackProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "OpeningPillarTransitBack",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "spawn-landmark-route",
+        objective: "find-corridor-to-first-door",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveBack: "true",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const openingPillarTransitBackRuntime = runtimeFactory.create(openingPillarTransitBackProfile);
+openingPillarTransitBackRuntime.predictions = 1244;
+const openingPillarTransitBackAction = openingPillarTransitBackRuntime.predict({
+  health: 100,
+  depthSig: 0.78,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  doorOpenedCount: 0,
+  predictions: 1244,
+  actionRepeatFrames: 116,
+  moveRepeatFrames: 116,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorVisionYaw: 4,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.02,
+  spawnCorridorGapScore: 0.25,
+  spawnLandmarkRouteEvidence: 0.48,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.02,
+  recommendedYaw: -7
+});
+assert(["closed-door-opening-ne-forward-lock", "closed-door-opening-pillar-transit-hold", "closed-door-opening-post-pillar-right-cut"].includes(openingPillarTransitBackAction.stage), `Opening pillar transit should suppress premature back before the far pillar is cleared (actual=${JSON.stringify(openingPillarTransitBackAction)})`);
+assert(openingPillarTransitBackAction.move === "forward", "Opening pillar transit should keep forward pressure");
+assert(openingPillarTransitBackAction.turn === "right", "Opening pillar transit should keep the first-door right cut even if transient yaw flips left");
+assert(openingPillarTransitBackAction.strafe === true, "Opening pillar transit should keep diagonal strafe until the far pillar is passed");
+
+const forcedClosedDoorPostDoorProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedClosedDoorPostDoor",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-forced-route",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnYaw: "7",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const forcedClosedDoorPostDoorRuntime = runtimeFactory.create(forcedClosedDoorPostDoorProfile);
+forcedClosedDoorPostDoorRuntime.predictions = 1900;
+const forcedClosedDoorPostDoorAction = forcedClosedDoorPostDoorRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "corridor",
+  doorOpenedCount: 0,
+  actionRepeatFrames: 40,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVisionYaw: 7,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none"
+});
+assert(forcedClosedDoorPostDoorAction.stage === "closed-door-first-door-visual-reacquire", `Closed-door post-door action should reacquire instead of pulsing Use from gray-only FirstDoor vision (actual=${forcedClosedDoorPostDoorAction.stage})`);
+assert(forcedClosedDoorPostDoorAction.move === "forward", "Closed-door post-door visual reacquire should close distance before using the door");
+assert(forcedClosedDoorPostDoorAction.use !== true, "Closed-door post-door visual reacquire must not request Use without red/bridge/3x3 identity evidence");
+assert(forcedClosedDoorPostDoorAction.objective === "find-corridor-to-first-door", "Closed-door post-door visual reacquire should restore the FirstDoor objective");
 
 const postDoorTerminalAdvanceRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalAdvanceRuntime.predictions = 2502;
@@ -829,7 +5104,7 @@ const postDoorMonitorRouteResumeAction = postDoorMonitorRouteResumeRuntime.predi
   firstDoorVision9x9RedScore: 0.16,
   firstDoorUse3x3Score: 0,
   moveRepeatFrames: 8,
-  recommendedYaw: -5,
+  recommendedYaw: 9,
   semanticMemory: {
     symbols: {
       door: 0.78,
@@ -843,7 +5118,46 @@ const postDoorMonitorRouteResumeAction = postDoorMonitorRouteResumeRuntime.predi
 });
 assert(postDoorMonitorRouteResumeAction.stage === "post-door-monitor-route-resume", `Strong semantic computer-room/bridge evidence should resume route instead of idling at monitor face (actual=${postDoorMonitorRouteResumeAction.stage})`);
 assert(postDoorMonitorRouteResumeAction.move === "forward", "Post-door monitor route resume should restore forward movement");
+assert(postDoorMonitorRouteResumeAction.turn === "left", "Post-door monitor route resume should ignore noisy right recommendedYaw and keep a gentle left bridge bias");
 assert(postDoorMonitorRouteResumeAction.use === false, "Post-door monitor route resume must not pulse Use");
+
+const postDoorIdleReconnectProfile = {
+  strategyName: "PostDoorIdleReconnectUnit",
+  pipeline: {
+    name: "PostDoorIdleReconnectUnit",
+    arbitration: { defaultThreshold: 0.4 },
+    stages: []
+  }
+};
+const postDoorIdleReconnectRuntime = runtimeFactory.create(postDoorIdleReconnectProfile);
+postDoorIdleReconnectRuntime.predictions = 1540;
+const postDoorIdleReconnectAction = postDoorIdleReconnectRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  computerRoomConfidence: 0.58,
+  bridgeConfidence: 0.38,
+  bridgeDoorScore: 0,
+  routeTopologyBarrelZoneEvidence: 0.42,
+  routeTopologyCenterCorridorAlignment: 0.04,
+  motionForwardProgress: 0.10,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  spawnCorridorGapScore: 0.30,
+  spawnLandmarkRouteEvidence: 0.30
+});
+assert(String(postDoorIdleReconnectAction.stage || "").startsWith("post-door-computer-room-egress-"), `Post-door idle/Monitor gap should reconnect to ComputerRoom egress instead of returning none (actual=${postDoorIdleReconnectAction.stage})`);
+assert(postDoorIdleReconnectAction.move === "forward", "Post-door idle reconnect should keep route pressure toward the cross-bridge side");
+assert(postDoorIdleReconnectAction.fire === false, "Post-door idle reconnect must not invent combat fire");
 
 const postDoorComputerRoomForwardCommitRuntime = runtimeFactory.create(publicProfile);
 postDoorComputerRoomForwardCommitRuntime.predictions = 3225;
@@ -959,7 +5273,11 @@ const postDoorMonitorIdleForwardResumeAction = postDoorMonitorIdleForwardResumeR
     }
   }
 });
-assert(postDoorMonitorIdleForwardResumeAction.stage === "post-door-monitor-idle-forward-resume", `Monitor idle with strong computer/bridge semantics should resume forward instead of falling to none (actual=${postDoorMonitorIdleForwardResumeAction.stage})`);
+assert(
+  postDoorMonitorIdleForwardResumeAction.stage === "post-door-monitor-idle-forward-resume"
+    || postDoorMonitorIdleForwardResumeAction.stage === "post-door-cross-bridge-route-lock",
+  `Monitor idle with strong computer/bridge semantics should resume forward instead of falling to none (actual=${postDoorMonitorIdleForwardResumeAction.stage})`
+);
 assert(postDoorMonitorIdleForwardResumeAction.move === "forward", "Post-door monitor idle resume should restore forward movement");
 assert(postDoorMonitorIdleForwardResumeAction.turn === "none", "Post-door monitor idle resume should not re-enter a right turn loop");
 
@@ -1019,9 +5337,9 @@ const postDoorGrayWallRouteReacquireAction = postDoorGrayWallRouteReacquireRunti
     }
   }
 });
-assert(postDoorGrayWallRouteReacquireAction.stage === "post-door-gray-wall-route-reacquire-right", `Post-door gray wall should stop forward pressure and reacquire the bridge route to the right (actual=${postDoorGrayWallRouteReacquireAction.stage})`);
-assert(postDoorGrayWallRouteReacquireAction.move === "none", "Post-door gray wall reacquire should stop forward movement");
-assert(postDoorGrayWallRouteReacquireAction.turn === "right", "Post-door gray wall reacquire should turn right toward the cross-bridge route");
+assert(String(postDoorGrayWallRouteReacquireAction.stage || "").startsWith("post-door-computer-room-egress-"), `Post-door gray wall with strong ComputerRoom evidence should enter egress instead of reacquiring right (actual=${postDoorGrayWallRouteReacquireAction.stage})`);
+assert(postDoorGrayWallRouteReacquireAction.move === "forward", "Strong ComputerRoom gray-wall egress should keep forward pressure toward the bridge lane");
+assert(postDoorGrayWallRouteReacquireAction.turn === "left", "Strong ComputerRoom gray-wall egress should correct left instead of returning to the right wall loop");
 
 const postDoorMonitorWeakBridgeIdleResumeRuntime = runtimeFactory.create(publicProfile);
 postDoorMonitorWeakBridgeIdleResumeRuntime.predictions = 2442;
@@ -1109,11 +5427,13 @@ const postDoorMonitorStraightReleaseAction = postDoorMonitorStraightReleaseRunti
   postDoorTerminalSurface: 0.35,
   bridgeConfidence: 0.53,
   bridgeDoorScore: 0,
+  wallVector: 0.10,
+  routeTopologyWallDistanceNormalized: 0.80,
   routeTopologyBarrelZoneEvidence: 0.24,
   routeTopologyCenterCorridorAlignment: 0.29,
   motionForwardProgress: 0.08,
-  footObstacleScore: 0.65,
-  motionObstacleScore: 0.65,
+  footObstacleScore: 0.44,
+  motionObstacleScore: 0.44,
   spawnCorridorGapScore: 0.41,
   spawnCorridorGapTurn: "right",
   spawnLandmarkRouteEvidence: 0.53,
@@ -1139,6 +5459,430 @@ const postDoorMonitorStraightReleaseAction = postDoorMonitorStraightReleaseRunti
 assert(postDoorMonitorStraightReleaseAction.stage === "post-door-monitor-route-straight-release", `Long monitor route yaw should release to straight forward instead of continuing a right loop (actual=${postDoorMonitorStraightReleaseAction.stage})`);
 assert(postDoorMonitorStraightReleaseAction.move === "forward", "Post-door monitor straight release should preserve forward movement");
 assert(postDoorMonitorStraightReleaseAction.turn === "none", "Post-door monitor straight release should stop the repeated right yaw");
+
+const postDoorMonitorLongWeakBridgeStraightReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorLongWeakBridgeStraightReleaseRuntime.predictions = 4134;
+const postDoorMonitorLongWeakBridgeStraightReleaseAction = postDoorMonitorLongWeakBridgeStraightReleaseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.58,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.30,
+  computerDarkPanelScore: 0.09,
+  postDoorTerminalSurface: 0.27,
+  bridgeConfidence: 0.38,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0,
+  wallVector: 0.10,
+  routeTopologyWallDistanceNormalized: 0.80,
+  routeTopologyBarrelZoneEvidence: 0.44,
+  routeTopologyCenterCorridorAlignment: 0.05,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.46,
+  motionObstacleScore: 0.46,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.34,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0.16,
+  firstDoorUse3x3Score: 0,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 240,
+  recommendedYaw: -6,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.38,
+      "computer-room": 0.58
+    }
+  }
+});
+assert(postDoorMonitorLongWeakBridgeStraightReleaseAction.stage === "post-door-monitor-route-straight-release", `Long weak bridge monitor route should keep straight instead of following oscillating recommended yaw (actual=${postDoorMonitorLongWeakBridgeStraightReleaseAction.stage})`);
+assert(postDoorMonitorLongWeakBridgeStraightReleaseAction.move === "forward", "Long weak bridge monitor straight release should preserve forward movement");
+assert(postDoorMonitorLongWeakBridgeStraightReleaseAction.turn === "none", "Long weak bridge monitor straight release should neutralize yaw");
+
+const postDoorMonitorLongDirtyRouteStraightReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorLongDirtyRouteStraightReleaseRuntime.predictions = 2240;
+const postDoorMonitorLongDirtyRouteStraightReleaseAction = postDoorMonitorLongDirtyRouteStraightReleaseRuntime.predict({
+  health: 100,
+  predictions: 900,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.56,
+  computerRoomScore: 0.08,
+  computerPanelScore: 0.22,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.22,
+  bridgeConfidence: 0.52,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.33,
+  wallVector: 0.10,
+  routeTopologyWallDistanceNormalized: 0.82,
+  routeTopologyBarrelZoneEvidence: 0.56,
+  routeTopologyCenterCorridorAlignment: -0.18,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.66,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.34,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 240,
+  recommendedYaw: 12,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.52,
+      "computer-room": 0.56
+    }
+  }
+});
+assert(
+  postDoorMonitorLongDirtyRouteStraightReleaseAction.stage === "post-door-monitor-wall-left-trim"
+    || postDoorMonitorLongDirtyRouteStraightReleaseAction.stage.indexOf("post-door-computer-room-egress-left") === 0,
+  `Long dirty monitor route should trim left instead of pressing straight into wall pressure (actual=${postDoorMonitorLongDirtyRouteStraightReleaseAction.stage})`);
+assert(postDoorMonitorLongDirtyRouteStraightReleaseAction.move === "forward", "Long dirty monitor trim should preserve forward movement");
+assert(postDoorMonitorLongDirtyRouteStraightReleaseAction.turn === "left", "Long dirty monitor trim should yaw away from right-side pressure");
+
+const postDoorMonitorWallLeftTrimRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorWallLeftTrimRuntime.predictions = 3831;
+const postDoorMonitorWallLeftTrimAction = postDoorMonitorWallLeftTrimRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.62,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.22,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.50,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.51,
+  routeTopologyBarrelZoneEvidence: 0.45,
+  routeTopologyCenterCorridorAlignment: 0.33,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.44,
+  motionObstacleScore: 0.44,
+  spawnCorridorGapScore: 0.77,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.37,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  recommendedYaw: 0.1,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.50,
+      "computer-room": 0.62
+    }
+  }
+});
+assert(
+  postDoorMonitorWallLeftTrimAction.stage === "post-door-monitor-wall-left-trim"
+    || postDoorMonitorWallLeftTrimAction.stage === "post-door-computer-room-bridge-wall-parallel-left-recover",
+  `Long monitor wall pressure should trim left instead of pressing straight into the wall (actual=${postDoorMonitorWallLeftTrimAction.stage})`);
+assert(postDoorMonitorWallLeftTrimAction.move === "forward", "Monitor wall trim should preserve forward pressure");
+assert(postDoorMonitorWallLeftTrimAction.strafe === true, "Monitor wall trim should use strafe to become wall-parallel");
+assert(postDoorMonitorWallLeftTrimAction.turn === "left", "Monitor wall trim should yaw gently left away from the right wall");
+
+const postDoorMonitorLowBridgeWallLeftTrimRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorLowBridgeWallLeftTrimRuntime.predictions = 2890;
+const postDoorMonitorLowBridgeWallLeftTrimAction = postDoorMonitorLowBridgeWallLeftTrimRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.62,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.22,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.32,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.51,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: 0.00,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  spawnCorridorGapScore: 0.18,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  recommendedYaw: -4,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.32,
+      "computer-room": 0.62
+    }
+  }
+});
+assert(
+  postDoorMonitorLowBridgeWallLeftTrimAction.stage === "post-door-monitor-wall-left-trim"
+    || postDoorMonitorLowBridgeWallLeftTrimAction.stage.indexOf("post-door-computer-room-egress-left") === 0,
+  `Low bridge confidence with high wall pressure should still trim left instead of holding straight (actual=${postDoorMonitorLowBridgeWallLeftTrimAction.stage})`);
+assert(postDoorMonitorLowBridgeWallLeftTrimAction.move === "forward", "Low bridge wall trim should preserve forward pressure");
+assert(postDoorMonitorLowBridgeWallLeftTrimAction.turn === "left", "Low bridge wall trim should yaw away from the wall");
+
+const postDoorMonitorTopologyWallLeftTrimRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorTopologyWallLeftTrimRuntime.predictions = 4310;
+const postDoorMonitorTopologyWallLeftTrimAction = postDoorMonitorTopologyWallLeftTrimRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.58,
+  computerRoomScore: 0.08,
+  computerPanelScore: 0.22,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.32,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.10,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  routeTopologyCenterCorridorAlignment: 0.00,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  spawnCorridorGapScore: 0.18,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  recommendedYaw: -4,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.32,
+      "computer-room": 0.58
+    }
+  }
+});
+assert(
+  postDoorMonitorTopologyWallLeftTrimAction.stage === "post-door-monitor-wall-left-trim"
+    || postDoorMonitorTopologyWallLeftTrimAction.stage.indexOf("post-door-computer-room-egress-left") === 0,
+  `Topology wall pressure should trim left even when raw wallVector is weak (actual=${postDoorMonitorTopologyWallLeftTrimAction.stage})`);
+assert(postDoorMonitorTopologyWallLeftTrimAction.move === "forward", "Topology wall trim should keep moving toward cross bridge");
+assert(postDoorMonitorTopologyWallLeftTrimAction.strafe === true, "Topology wall trim should strafe into a wall-parallel line");
+assert(postDoorMonitorTopologyWallLeftTrimAction.turn === "left", "Topology wall trim should yaw left away from the right-side pressure");
+
+const postDoorMonitorStaleLeftTrimBackoffRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorStaleLeftTrimBackoffRuntime.predictions = 4550;
+const postDoorMonitorStaleLeftTrimBackoffAction = postDoorMonitorStaleLeftTrimBackoffRuntime.predict({
+  health: 100,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.61,
+  computerRoomScore: 0.08,
+  computerPanelScore: 0.22,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.58,
+  bridgeConfidence: 0.49,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.18,
+  wallVector: 0.10,
+  routeTopologyWallDistanceNormalized: 0.53,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  routeTopologyCenterCorridorAlignment: 0.00,
+  motionForwardProgress: 0.04,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  spawnCorridorGapScore: 0.16,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.32,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  recommendedYaw: -5,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.49,
+      "computer-room": 0.61
+    }
+  }
+});
+assert(String(postDoorMonitorStaleLeftTrimBackoffAction.stage || "").startsWith("post-door-computer-room-egress-"), `Stale post-door left-trim with strong ComputerRoom evidence should enter egress instead of reacquiring right (actual=${postDoorMonitorStaleLeftTrimBackoffAction.stage})`);
+assert(postDoorMonitorStaleLeftTrimBackoffAction.move === "forward", "Strong ComputerRoom stale trim should continue forward along the egress path");
+assert(postDoorMonitorStaleLeftTrimBackoffAction.turn === "left", "Strong ComputerRoom stale trim should correct left toward the cross-bridge lane");
+
+const postDoorMonitorGapStallLeftWallCommitRuntime = runtimeFactory.create(publicProfile);
+postDoorMonitorGapStallLeftWallCommitRuntime.predictions = 900;
+const postDoorMonitorGapStallLeftWallCommitAction = postDoorMonitorGapStallLeftWallCommitRuntime.predict({
+  health: 100,
+  predictions: 900,
+  depthSig: 0.86,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.61,
+  computerRoomScore: 0.08,
+  computerPanelScore: 0.20,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.27,
+  bridgeConfidence: 0.49,
+  bridgeLaneVisible: false,
+  bridgeDoorScore: 0.16,
+  wallVector: 0.12,
+  routeTopologyWallDistanceNormalized: 0.56,
+  routeTopologyBarrelZoneEvidence: 0.48,
+  routeTopologyCenterCorridorAlignment: 0.00,
+  motionForwardProgress: 0.04,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  spawnCorridorGapScore: 0.22,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.36,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  actionRepeatFrames: 7,
+  moveRepeatFrames: 8,
+  recommendedYaw: 5,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.49,
+      "computer-room": 0.61
+    }
+  }
+});
+assert(postDoorMonitorGapStallLeftWallCommitAction.stage === "post-door-monitor-gap-stall-left-wall-commit", `Stable post-door monitor gap-stall should commit to the left wall-parallel route instead of pulsing backoff forever (actual=${postDoorMonitorGapStallLeftWallCommitAction.stage})`);
+assert(postDoorMonitorGapStallLeftWallCommitAction.move === "forward", "Stable post-door monitor gap-stall should keep forward pressure toward cross bridge");
+assert(postDoorMonitorGapStallLeftWallCommitAction.strafe === true, "Stable post-door monitor gap-stall should use left strafe to become wall-parallel");
+assert(postDoorMonitorGapStallLeftWallCommitAction.turn === "left", "Stable post-door monitor gap-stall should yaw left away from the right-side wall");
 
 const postDoorTerminalWallRouteReacquireRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalWallRouteReacquireRuntime.predictions = 3580;
@@ -1195,9 +5939,9 @@ const postDoorTerminalWallRouteReacquireAction = postDoorTerminalWallRouteReacqu
     }
   }
 });
-assert(postDoorTerminalWallRouteReacquireAction.stage === "post-door-terminal-long-forward-release-right", `Long terminal-wall forward pressure should stop and reacquire the bridge route (actual=${postDoorTerminalWallRouteReacquireAction.stage})`);
-assert(postDoorTerminalWallRouteReacquireAction.move === "none", "Terminal wall reacquire should stop forward movement");
-assert(postDoorTerminalWallRouteReacquireAction.turn === "right", "Terminal wall reacquire should pivot right toward the bridge route");
+assert(String(postDoorTerminalWallRouteReacquireAction.stage || "").startsWith("post-door-computer-room-egress-"), `Long terminal-wall forward pressure with ComputerRoom evidence should enter egress instead of right reacquire (actual=${postDoorTerminalWallRouteReacquireAction.stage})`);
+assert(postDoorTerminalWallRouteReacquireAction.move === "forward", "ComputerRoom terminal-wall egress should keep forward pressure");
+assert(postDoorTerminalWallRouteReacquireAction.turn === "left", "ComputerRoom terminal-wall egress should correct left toward the bridge lane");
 
 const postDoorTerminalSurfaceFalseEnemyRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalSurfaceFalseEnemyRuntime.predictions = 1917;
@@ -1719,11 +6463,258 @@ const postDoorTerminalForwardRepeatReleaseAction = postDoorTerminalForwardRepeat
   }
 });
 assert(
-  postDoorTerminalForwardRepeatReleaseAction.stage === "post-door-terminal-forward-repeat-release-right"
+  postDoorTerminalForwardRepeatReleaseAction.stage === "post-door-terminal-forward-repeat-release-left"
     || postDoorTerminalForwardRepeatReleaseAction.stage === "post-door-terminal-dead-end-release-right",
-  `Repeated terminal/wall forward pressure should release right before terminal straight advance (actual=${postDoorTerminalForwardRepeatReleaseAction.stage})`);
-assert(postDoorTerminalForwardRepeatReleaseAction.move === "none", "Repeated terminal/wall release should stop forward pressure");
-assert(postDoorTerminalForwardRepeatReleaseAction.turn === "right", "Repeated terminal/wall release should yaw right toward the bridge route");
+  `Repeated terminal/wall forward pressure should release left before terminal straight advance (actual=${postDoorTerminalForwardRepeatReleaseAction.stage})`);
+assert(postDoorTerminalForwardRepeatReleaseAction.move === "forward", "Repeated terminal/wall release should keep controlled forward pressure");
+assert(postDoorTerminalForwardRepeatReleaseAction.turn === "left", "Repeated terminal/wall release should yaw left to avoid right-corner reattachment");
+
+const postDoorTerminalForwardRepeatCentralRuntime = runtimeFactory.create({
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedTerminalLeftCentralRoute",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-terminal-forward-repeat-release-left",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          strafeLeft: "$enableStrafeRun",
+          turnYaw: "-8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+});
+postDoorTerminalForwardRepeatCentralRuntime.predictions = 3920;
+postDoorTerminalForwardRepeatCentralRuntime.actionRepeatFrames = 26;
+postDoorTerminalForwardRepeatCentralRuntime.moveRepeatFrames = 36;
+const postDoorTerminalForwardRepeatCentralAction = postDoorTerminalForwardRepeatCentralRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "computer-room open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemySuppressed: true,
+  audioEnemyConfidence: 0,
+  trustedCombatEvidence: false,
+  soundEvent: false,
+  computerRoomConfidence: 0.46,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.45,
+  computerDarkPanelScore: 0.32,
+  postDoorTerminalSurface: 0.51,
+  bridgeConfidence: 0.57,
+  wallVector: 0.49,
+  routeTopologyWallDistanceNormalized: 0.64,
+  routeTopologyBarrelZoneEvidence: 0.52,
+  routeTopologyCenterCorridorAlignment: 0.12,
+  motionForwardProgress: 0.42,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 26,
+  routeDeadEndRisk: false,
+  footObstacleScore: 0.48,
+  motionObstacleScore: 0.48,
+  recommendedYaw: 5,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.39,
+  spawnLandmarkRouteTurn: "right",
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.05,
+  bridgeDoorScore: 0.08,
+  semanticMemory: {
+    objective: "reach-central-hall",
+    symbols: {
+      door: 0.12,
+      corridor: 0.2,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.57,
+      "computer-room": 0.46
+    }
+  }
+});
+assert(postDoorTerminalForwardRepeatCentralAction.stage === "post-door-terminal-forward-repeat-central-right-release", `Central route terminal repeat should stop the left-release loop and reacquire right (actual=${postDoorTerminalForwardRepeatCentralAction.stage})`);
+assert(postDoorTerminalForwardRepeatCentralAction.move === "forward", "Central route terminal repeat should keep forward pressure");
+assert(postDoorTerminalForwardRepeatCentralAction.turn === "right", "Central route terminal repeat should bias back toward the cross-bridge route");
+
+const postDoorTerminalForwardRepeatCentralDoorPocketRuntime = runtimeFactory.create({
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedTerminalLeftCentralDoorPocket",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-terminal-forward-repeat-release-left",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          strafeLeft: "$enableStrafeRun",
+          turnYaw: "-8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+});
+postDoorTerminalForwardRepeatCentralDoorPocketRuntime.predictions = 5270;
+postDoorTerminalForwardRepeatCentralDoorPocketRuntime.actionRepeatFrames = 38;
+postDoorTerminalForwardRepeatCentralDoorPocketRuntime.moveRepeatFrames = 240;
+const postDoorTerminalForwardRepeatCentralDoorPocketAction = postDoorTerminalForwardRepeatCentralDoorPocketRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "computer-room open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemySuppressed: true,
+  audioEnemyConfidence: 0,
+  trustedCombatEvidence: false,
+  soundEvent: false,
+  computerRoomConfidence: 0.45,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.45,
+  computerDarkPanelScore: 0.32,
+  postDoorTerminalSurface: 0.46,
+  bridgeConfidence: 0.55,
+  wallVector: 0.49,
+  routeTopologyWallDistanceNormalized: 0.33,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.31,
+  motionForwardProgress: 0.42,
+  moveRepeatFrames: 240,
+  actionRepeatFrames: 38,
+  routeDeadEndRisk: false,
+  footObstacleScore: 0.48,
+  motionObstacleScore: 0.48,
+  recommendedYaw: 0,
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.05,
+  bridgeDoorScore: 0.30,
+  semanticMemory: {
+    objective: "reach-central-hall",
+    symbols: {
+      door: 0.24,
+      corridor: 0.2,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.55,
+      "computer-room": 0.45
+    }
+  }
+});
+assert(postDoorTerminalForwardRepeatCentralDoorPocketAction.stage === "post-door-central-door-corner-backoff", `Central door pocket should yield terminal left release into the named door sequence (actual=${postDoorTerminalForwardRepeatCentralDoorPocketAction.stage})`);
+assert(postDoorTerminalForwardRepeatCentralDoorPocketAction.move === "back", "Central door pocket sequence should begin with a pure backoff");
+assert(postDoorTerminalForwardRepeatCentralDoorPocketAction.turn === "none", "Central door pocket backoff should not rotate while unpinning");
+
+const postDoorTerminalForwardRepeatCrossBridgeWallRuntime = runtimeFactory.create({
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedTerminalLeftCrossBridgeWallPocket",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-terminal-forward-repeat-release-left",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          strafeLeft: "$enableStrafeRun",
+          turnYaw: "-8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+});
+postDoorTerminalForwardRepeatCrossBridgeWallRuntime.predictions = 5360;
+postDoorTerminalForwardRepeatCrossBridgeWallRuntime.actionRepeatFrames = 120;
+postDoorTerminalForwardRepeatCrossBridgeWallRuntime.moveRepeatFrames = 240;
+const postDoorTerminalForwardRepeatCrossBridgeWallAction = postDoorTerminalForwardRepeatCrossBridgeWallRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "computer-room open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  visualEnemySuppressed: true,
+  audioEnemyConfidence: 0,
+  trustedCombatEvidence: false,
+  soundEvent: false,
+  computerRoomConfidence: 0.55,
+  computerRoomScore: 0.10,
+  computerPanelScore: 0.45,
+  computerDarkPanelScore: 0.32,
+  postDoorTerminalSurface: 0.44,
+  bridgeConfidence: 0.55,
+  wallVector: 0.49,
+  routeTopologyWallDistanceNormalized: 0.33,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.31,
+  motionForwardProgress: 0.42,
+  moveRepeatFrames: 240,
+  actionRepeatFrames: 120,
+  routeDeadEndRisk: false,
+  footObstacleScore: 0.48,
+  motionObstacleScore: 0.48,
+  recommendedYaw: 0,
+  firstDoorVision9x9Score: 0.00,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.05,
+  bridgeDoorScore: 0.18,
+  semanticMemory: {
+    objective: "reach-central-hall",
+    symbols: {
+      door: 0.18,
+      corridor: 0.2,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.55,
+      "computer-room": 0.55
+    }
+  }
+});
+assert(postDoorTerminalForwardRepeatCrossBridgeWallAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-backoff", `Cross-bridge wall pocket should yield terminal left release into wall-unpin backoff (actual=${postDoorTerminalForwardRepeatCrossBridgeWallAction.stage})`);
+assert(postDoorTerminalForwardRepeatCrossBridgeWallAction.move === "back", "Cross-bridge wall pocket unpin should start with a pure backoff");
+assert(postDoorTerminalForwardRepeatCrossBridgeWallAction.turn === "none", "Cross-bridge wall pocket backoff should not rotate");
 
 const postDoorTerminalLongForwardLowObstacleRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalLongForwardLowObstacleRuntime.predictions = 4310;
@@ -1779,10 +6770,10 @@ const postDoorTerminalLongForwardLowObstacleAction = postDoorTerminalLongForward
   }
 });
 assert(
-  postDoorTerminalLongForwardLowObstacleAction.stage === "post-door-terminal-long-forward-release-right",
-  `Long terminal forward repeat should release right even when obstacle sensors stay weak (actual=${postDoorTerminalLongForwardLowObstacleAction.stage})`);
-assert(postDoorTerminalLongForwardLowObstacleAction.move === "none", "Long terminal forward repeat release should stop forward pressure");
-assert(postDoorTerminalLongForwardLowObstacleAction.turn === "right", "Long terminal forward repeat release should yaw right toward cross-bridge");
+  String(postDoorTerminalLongForwardLowObstacleAction.stage || "").startsWith("post-door-computer-room-egress-"),
+  `Long terminal forward repeat with ComputerRoom evidence should enter egress instead of right release (actual=${postDoorTerminalLongForwardLowObstacleAction.stage})`);
+assert(postDoorTerminalLongForwardLowObstacleAction.move === "forward", "Long terminal ComputerRoom egress should keep forward pressure");
+assert(postDoorTerminalLongForwardLowObstacleAction.turn === "left", "Long terminal ComputerRoom egress should keep a left guard before bridge commit");
 
 const postDoorTerminalReleaseRightHoldRuntime = runtimeFactory.create(publicProfile);
 postDoorTerminalReleaseRightHoldRuntime.predictions = 3904;
@@ -2103,7 +7094,7 @@ const postDoorBridgeGapWeakSustainAction = postDoorBridgeGapWeakSustainRuntime.p
   motionObstacleScore: 0.65,
   spawnCorridorGapScore: 0.23,
   spawnCorridorGapTurn: "right",
-  spawnLandmarkRouteEvidence: 0.38,
+  spawnLandmarkRouteEvidence: 0.31,
   spawnLandmarkRouteTurn: "right",
   spawnSecretDoorScore: 0.04,
   firstDoorVision9x9Score: 0.00,
@@ -2367,6 +7358,111 @@ assert(postDoorCentralDoorCorridorUseAction.stage === "post-door-central-door-co
 assert(postDoorCentralDoorCorridorUseAction.move === "none", "Post-door central door use should stop before using");
 assert(postDoorCentralDoorCorridorUseAction.use === true, "Post-door central door use should pulse Use");
 
+const postDoorCentralDoorApproachRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorApproachRuntime.predictions = 4860;
+postDoorCentralDoorApproachRuntime.moveRepeatFrames = 28;
+const postDoorCentralDoorApproachAction = postDoorCentralDoorApproachRuntime.predict({
+  health: 100,
+  depthSig: 0.98,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  objective: "reach-central-hall",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.12,
+  visualEnemySuppressed: true,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  usePulseCooldown: 0,
+  computerRoomConfidence: 0.52,
+  postDoorTerminalSurface: 0.46,
+  bridgeConfidence: 0.51,
+  bridgeLaneTurn: "left",
+  bridgeDoorScore: 0.32,
+  wallVector: 0.36,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 28,
+  actionRepeatFrames: 28,
+  turnRepeatFrames: 0,
+  routeDeadEndRisk: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  routeTopologyBarrelZoneEvidence: 0.30,
+  footObstacleScore: 0.37,
+  motionObstacleScore: 0.37,
+  recommendedYaw: 7,
+  routeFallbackYaw: 7,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.32,
+      corridor: 0.28,
+      enemy: 0,
+      bridge: 0.51,
+      "computer-room": 0.52
+    }
+  }
+});
+assert(!String(postDoorCentralDoorApproachAction.stage || "").startsWith("post-door-central-door-corner"), `Weak central-door approach evidence should continue seeking bridge/door confirmation before latching (actual=${postDoorCentralDoorApproachAction.stage})`);
+assert(postDoorCentralDoorApproachAction.use === false, "Weak central-door approach evidence must not pulse Use");
+
+const postDoorCentralDoorLiveLandmarkApproachRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorLiveLandmarkApproachRuntime.predictions = 4884;
+postDoorCentralDoorLiveLandmarkApproachRuntime.stagePulseComputerRoomEgressFrames = 36;
+const postDoorCentralDoorLiveLandmarkApproachAction = postDoorCentralDoorLiveLandmarkApproachRuntime.predict({
+  health: 100,
+  depthSig: 0.98,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.12,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  usePulseCooldown: 0,
+  computerRoomConfidence: 0.69,
+  postDoorTerminalSurface: 0.53,
+  bridgeConfidence: 0.54,
+  bridgeLaneTurn: "left",
+  bridgeDoorScore: 0.24,
+  wallVector: 0.49,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 30,
+  actionRepeatFrames: 30,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  routeTopologyCenterCorridorAlignment: -0.006,
+  footObstacleScore: 0.49,
+  motionObstacleScore: 0.49,
+  recommendedYaw: 5,
+  routeFallbackYaw: 5,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.24,
+      corridor: 0.32,
+      enemy: 0,
+      bridge: 0.54,
+      "computer-room": 0.69
+    }
+  }
+});
+assert(postDoorCentralDoorLiveLandmarkApproachAction.stage === "post-door-central-door-corner-backoff", `Live Central Hall door landmark with weak panel score should enter the bounded corner sequence instead of bridge-lane sustain (actual=${postDoorCentralDoorLiveLandmarkApproachAction.stage}; debug=${JSON.stringify(postDoorCentralDoorLiveLandmarkApproachRuntime.lastStatus?.debugRouteValues || {})})`);
+assert(postDoorCentralDoorLiveLandmarkApproachAction.move === "back", "Live Central Hall door approach should first back away before rotating");
+assert(postDoorCentralDoorLiveLandmarkApproachAction.use !== true, "Live Central Hall door approach must not press Use on the first backoff frame");
+
 const postDoorCentralDoorBridgeUseRuntime = runtimeFactory.create(publicProfile);
 postDoorCentralDoorBridgeUseRuntime.predictions = 4910;
 const postDoorCentralDoorBridgeUseAction = postDoorCentralDoorBridgeUseRuntime.predict({
@@ -2424,6 +7520,75 @@ const postDoorCentralDoorBridgeUseAction = postDoorCentralDoorBridgeUseRuntime.p
 assert(postDoorCentralDoorBridgeUseAction.stage === "post-door-central-door-bridge-use", `Post-door bridge-door evidence should Use even when context and enemy chips are noisy (actual=${postDoorCentralDoorBridgeUseAction.stage})`);
 assert(postDoorCentralDoorBridgeUseAction.move === "none", "Post-door bridge-door Use should stop before using");
 assert(postDoorCentralDoorBridgeUseAction.use === true, "Post-door bridge-door evidence should pulse Use");
+
+const postDoorCentralDoorRouteOverridesStaleCombatRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRouteOverridesStaleCombatRuntime.predictions = 4922;
+postDoorCentralDoorRouteOverridesStaleCombatRuntime.moveRepeatFrames = 24;
+postDoorCentralDoorRouteOverridesStaleCombatRuntime.actionRepeatFrames = 24;
+const postDoorCentralDoorRouteOverridesStaleCombatAction = postDoorCentralDoorRouteOverridesStaleCombatRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.70,
+  visualEnemyCentered: true,
+  visualEnemyFireReady: true,
+  trustedEnemyThreat: 0.34,
+  trustedCombatEvidence: true,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  healthThreatEvidenceTrusted: false,
+  soundEvent: false,
+  usePulseCooldown: 0,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.79,
+  computerRoomScore: 0.16,
+  computerPanelScore: 0.33,
+  computerDarkPanelScore: 0.32,
+  postDoorTerminalSurface: 0.33,
+  bridgeConfidence: 0.61,
+  bridgeLaneVisible: false,
+  bridgeLaneTurn: "none",
+  bridgeDoorScore: 0.32,
+  wallVector: 0.60,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 24,
+  actionRepeatFrames: 24,
+  turnRepeatFrames: 0,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.38,
+  spawnLandmarkRouteEvidence: 0.50,
+  firstDoorVision9x9Score: 0.42,
+  firstDoorUse3x3Score: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.79,
+      corridor: 0.51,
+      enemy: 0.70,
+      "safe-zone": 0.85,
+      bridge: 0.61,
+      "computer-room": 0.79,
+      "central-hall": 0
+    },
+    route: {
+      objective: "reach-central-hall",
+      currentRoute: "central-hall-route",
+      currentLandmark: "central-hall-door",
+      routeActionHint: "advance-central-hall"
+    }
+  }
+});
+assert(String(postDoorCentralDoorRouteOverridesStaleCombatAction.stage || "").startsWith("post-door-central-door-corner-"), `Central-door route evidence should override stale post-door combat memory (actual=${postDoorCentralDoorRouteOverridesStaleCombatAction.stage})`);
+assert(postDoorCentralDoorRouteOverridesStaleCombatAction.fire === false, "Central-door override must suppress stale combat fire while rebuilding the door sequence");
+assert(postDoorCentralDoorRouteOverridesStaleCombatAction.move === "back", "Central-door override should begin with a pure backoff before realigning");
 
 const postDoorCentralDoorBridgeMemoryUseRuntime = runtimeFactory.create(publicProfile);
 postDoorCentralDoorBridgeMemoryUseRuntime.predictions = 4938;
@@ -4344,7 +9509,7 @@ assert(postDoorBridgeStraightAction.move === "forward", "Bridge evidence should 
 
 const postDoorBridgeThreatBypassRuntime = runtimeFactory.create(publicProfile);
 postDoorBridgeThreatBypassRuntime.predictions = 2630;
-const postDoorBridgeThreatBypassAction = postDoorBridgeThreatBypassRuntime.predict({
+const postDoorBridgeThreatBypassInput = {
   health: 100,
   depthSig: 0.86,
   contextDict: "open-space",
@@ -4392,12 +9557,45 @@ const postDoorBridgeThreatBypassAction = postDoorBridgeThreatBypassRuntime.predi
       "computer-room": 0.42
     }
   }
+};
+const postDoorBridgeThreatBypassAction = postDoorBridgeThreatBypassRuntime.predict(postDoorBridgeThreatBypassInput);
+assert(postDoorBridgeThreatBypassAction.stage === "combat-visual-center-fire", `Trusted visible enemy on a bridge lane should preempt the route lock (actual=${postDoorBridgeThreatBypassAction.stage})`);
+assert(postDoorBridgeThreatBypassAction.objective === "engage-front-enemy", "Trusted bridge threat should switch to the combat objective");
+assert(postDoorBridgeThreatBypassAction.move === "none", "Off-center bridge threat should stop route advance while centering");
+assert(postDoorBridgeThreatBypassAction.turn === "right", "Off-center bridge threat should turn toward the visual enemy vector");
+assert(postDoorBridgeThreatBypassAction.fire === false, "Off-center bridge threat should not fire before centering");
+
+const postDoorBridgeCenteredThreatRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeCenteredThreatRuntime.predictions = 2630;
+const postDoorBridgeCenteredThreatAction = postDoorBridgeCenteredThreatRuntime.predict({
+  ...postDoorBridgeThreatBypassInput,
+  enemyConfidence: 0.52,
+  visualEnemyConfidence: 0.52,
+  faceSig: 0.03,
+  visualEnemyCentered: true,
+  visualEnemyFireReady: true,
+  visualEnemyYaw: 0
 });
-assert(postDoorBridgeThreatBypassAction.stage === "bridge-poison-threat-bypass-lock", `Weak combat evidence on a visible bridge lane should bypass combat and preserve the central-hall route (actual=${postDoorBridgeThreatBypassAction.stage})`);
-assert(postDoorBridgeThreatBypassAction.objective === "reach-central-hall", "Bridge threat bypass should keep the route objective on central hall");
-assert(postDoorBridgeThreatBypassAction.move === "forward", "Bridge threat bypass should keep forward pressure");
-assert(postDoorBridgeThreatBypassAction.turn === "none", "Bridge threat bypass should suppress over-rotation");
-assert(postDoorBridgeThreatBypassAction.fire === false, "Bridge threat bypass should not fire on weak uncentered evidence");
+assert(postDoorBridgeCenteredThreatAction.stage === "combat-visual-center-fire", "Centered trusted bridge threat should remain under combat ownership");
+assert(postDoorBridgeCenteredThreatAction.fire === true, `Centered fire-ready bridge threat should fire (actual=${JSON.stringify(postDoorBridgeCenteredThreatAction)})`);
+
+const postDoorBridgeStructuralDecoyRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeStructuralDecoyRuntime.predictions = 2630;
+const postDoorBridgeStructuralDecoyAction = postDoorBridgeStructuralDecoyRuntime.predict({
+  ...postDoorBridgeThreatBypassInput,
+  enemyStructuralDecoy: true,
+  trustedCombatEvidence: false,
+  visualEnemyCentered: true,
+  visualEnemyFireReady: true,
+  visualEnemyYaw: 0
+});
+assert(
+  postDoorBridgeStructuralDecoyAction.stage === "bridge-poison-threat-bypass-lock"
+    || postDoorBridgeStructuralDecoyAction.stage === "post-door-bridge-straight-advance",
+  `Untrusted structural bridge decoy should remain route-owned (actual=${postDoorBridgeStructuralDecoyAction.stage})`);
+assert(postDoorBridgeStructuralDecoyAction.objective === "reach-central-hall", "Structural bridge decoy should preserve the route objective");
+assert(postDoorBridgeStructuralDecoyAction.move === "forward", "Structural bridge decoy should keep forward route pressure");
+assert(postDoorBridgeStructuralDecoyAction.fire === false, "Structural bridge decoy must not fire");
 
 const postDoorBridgeRouteThreatYieldRuntime = runtimeFactory.create(publicProfile);
 postDoorBridgeRouteThreatYieldRuntime.predictions = 1770;
@@ -4456,11 +9654,11 @@ const postDoorBridgeRouteThreatYieldAction = postDoorBridgeRouteThreatYieldRunti
     }
   }
 });
-assert(postDoorBridgeRouteThreatYieldAction.stage === "post-door-bridge-route-threat-yield", `Uncentered side enemy with route evidence should yield combat to the cross-bridge route (actual=${postDoorBridgeRouteThreatYieldAction.stage})`);
-assert(postDoorBridgeRouteThreatYieldAction.objective === "reach-central-hall", "Bridge route threat yield should keep the route objective on central hall");
-assert(postDoorBridgeRouteThreatYieldAction.move === "forward", "Bridge route threat yield should keep moving toward the route");
-assert(postDoorBridgeRouteThreatYieldAction.turn === "left", "Bridge route threat yield should use the route yaw instead of audio over-rotation");
-assert(postDoorBridgeRouteThreatYieldAction.fire === false, "Bridge route threat yield should not waste shots on uncentered weak evidence");
+assert(postDoorBridgeRouteThreatYieldAction.stage === "combat-visual-center-fire", `Trusted uncentered side enemy should preempt the post-door route yield (actual=${postDoorBridgeRouteThreatYieldAction.stage})`);
+assert(postDoorBridgeRouteThreatYieldAction.objective === "engage-front-enemy", "Trusted side enemy should switch to the combat objective");
+assert(postDoorBridgeRouteThreatYieldAction.move === "none", "Trusted side enemy should stop route advance while centering");
+assert(postDoorBridgeRouteThreatYieldAction.turn === "right", "Trusted side enemy should turn toward the visual enemy vector");
+assert(postDoorBridgeRouteThreatYieldAction.fire === false, "Trusted side enemy should not fire before centering");
 
 const postDoorBridgeCornerRouteYieldRuntime = runtimeFactory.create(publicProfile);
 postDoorBridgeCornerRouteYieldRuntime.predictions = 3650;
@@ -4547,7 +9745,7 @@ const postDoorCornerStallBridgeCommitAction = postDoorCornerStallBridgeCommitRun
   audioEnemyConfidence: 0.22,
   computerRoomConfidence: 0.54,
   bridgeConfidence: 0.34,
-  bridgeLaneVisible: false,
+  bridgeLaneVisible: true,
   wallVector: -0.62,
   motionForwardProgress: 0.06,
   moveRepeatFrames: 5,
@@ -4628,9 +9826,10 @@ const postDoorDeadEndRealignAction = postDoorDeadEndRealignRuntime.predict({
     }
   }
 });
-assert(postDoorDeadEndRealignAction.stage === "post-door-computer-room-dead-end-right-realign", `Post-door dead-end topology should stop forward pressure and yaw right toward the room route (actual=${postDoorDeadEndRealignAction.stage})`);
-assert(postDoorDeadEndRealignAction.move === "none", "Post-door dead-end realign should release forward movement before turning");
-assert(postDoorDeadEndRealignAction.turn === "right", "Post-door dead-end realign should turn right toward the bridge side");
+assert(String(postDoorDeadEndRealignAction.stage || "").startsWith("post-door-computer-room-egress-"), `Post-door dead-end topology with ComputerRoom/bridge evidence should enter egress instead of yawing right (actual=${postDoorDeadEndRealignAction.stage})`);
+assert(postDoorDeadEndRealignAction.stage === "post-door-computer-room-egress-hard-wall-unpin", `Bridge-biased ComputerRoom hard dead-end should use a bounded back-left unpin (actual=${postDoorDeadEndRealignAction.stage})`);
+assert(postDoorDeadEndRealignAction.move === "back", "Bridge-biased ComputerRoom hard dead-end should reverse briefly before the left pivot");
+assert(postDoorDeadEndRealignAction.turn === "left", "Bridge-biased ComputerRoom dead-end egress should correct left away from the right wall loop");
 assert(postDoorDeadEndRealignAction.use === false, "Post-door dead-end realign must not pulse Use again");
 
 const postDoorWallHugRealignRuntime = runtimeFactory.create(publicProfile);
@@ -4676,9 +9875,3527 @@ const postDoorWallHugRealignAction = postDoorWallHugRealignRuntime.predict({
     }
   }
 });
-assert(postDoorWallHugRealignAction.stage === "post-door-computer-room-wall-hug-right-realign", `Post-door wall-hug topology should release straight advance before forward pressure continues (actual=${postDoorWallHugRealignAction.stage})`);
-assert(postDoorWallHugRealignAction.move === "none", "Post-door wall-hug realign should stop forward pressure before turning");
-assert(postDoorWallHugRealignAction.turn === "right", "Post-door wall-hug realign should turn right toward the bridge side");
+assert(String(postDoorWallHugRealignAction.stage || "").startsWith("post-door-computer-room-egress-"), `Post-door wall-hug topology with ComputerRoom evidence should enter egress instead of right realign (actual=${postDoorWallHugRealignAction.stage})`);
+assert(postDoorWallHugRealignAction.move === "forward", "ComputerRoom wall-hug egress should keep forward pressure");
+assert(postDoorWallHugRealignAction.turn === "left", "ComputerRoom wall-hug egress should steer left toward the cross-bridge lane");
+
+const postDoorComputerRoomRightWallLeftReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomRightWallLeftReleaseRuntime.predictions = 2600;
+const postDoorComputerRoomRightWallLeftReleaseAction = postDoorComputerRoomRightWallLeftReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.92,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.66,
+  bridgeConfidence: 0.36,
+  wallVector: 0.54,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 88,
+  actionRepeatFrames: 88,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.66,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.36,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.07,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.03,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.25,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.36,
+      "computer-room": 0.66
+    }
+  }
+});
+assert(postDoorComputerRoomRightWallLeftReleaseAction.stage === "post-door-computer-room-right-wall-left-release", `ComputerRoom right-wall contact should slide left toward the cross-bridge lane instead of reacquiring right (actual=${postDoorComputerRoomRightWallLeftReleaseAction.stage})`);
+assert(postDoorComputerRoomRightWallLeftReleaseAction.move === "forward", "ComputerRoom right-wall release should keep forward pressure along the wall");
+assert(postDoorComputerRoomRightWallLeftReleaseAction.turn === "left", "ComputerRoom right-wall release should yaw left instead of rotating into the corner");
+assert(postDoorComputerRoomRightWallLeftReleaseAction.strafe === true, "ComputerRoom right-wall release should strafe left when strafe-run is enabled");
+
+const postDoorComputerRoomContextRightWallLeftReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomContextRightWallLeftReleaseRuntime.predictions = 2601;
+const postDoorComputerRoomContextRightWallLeftReleaseAction = postDoorComputerRoomContextRightWallLeftReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.90,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  computerRoomCombatContext: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.06,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.31,
+  bridgeConfidence: 0.34,
+  wallVector: 0.44,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  spawnCorridorGapScore: 0.18,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.34,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.03,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.34,
+      "computer-room": 0.31
+    }
+  }
+});
+assert(postDoorComputerRoomContextRightWallLeftReleaseAction.stage === "post-door-computer-room-right-wall-left-release", `ComputerRoom context should be enough to release left from the right wall before the milestone latch catches up (actual=${postDoorComputerRoomContextRightWallLeftReleaseAction.stage})`);
+assert(postDoorComputerRoomContextRightWallLeftReleaseAction.turn === "left", "ComputerRoom context right-wall release should turn left");
+
+const postDoorComputerRoomRightWallStraightRecoverRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomRightWallStraightRecoverRuntime.predictions = 2620;
+let postDoorComputerRoomRightWallStraightRecoverAction = null;
+postDoorComputerRoomRightWallStraightRecoverAction = postDoorComputerRoomRightWallStraightRecoverRuntime.predict({
+  health: 100,
+  depthSig: 0.92,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.66,
+  bridgeConfidence: 0.36,
+  wallVector: 0.54,
+  motionForwardProgress: 0.12,
+  moveRepeatFrames: 196,
+  actionRepeatFrames: 196,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  spawnCorridorGapScore: 0.19,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.36,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.07,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  bridgeLaneVisible: false,
+  bridgeGreenHazard: 0.03,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.25,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.36,
+      "computer-room": 0.66
+    }
+  }
+});
+assert(postDoorComputerRoomRightWallStraightRecoverAction.stage === "post-door-computer-room-egress-left-parallel", `Long ComputerRoom right-wall left trim should promote into the egress phase instead of clamping at repeat=240 (actual=${postDoorComputerRoomRightWallStraightRecoverAction.stage})`);
+assert(postDoorComputerRoomRightWallStraightRecoverAction.move === "forward", "ComputerRoom egress should keep forward travel");
+assert(postDoorComputerRoomRightWallStraightRecoverAction.turn === "left", "ComputerRoom egress should favor a left wall-parallel guard instead of reattaching to the right wall");
+assert(postDoorComputerRoomRightWallStraightRecoverAction.strafe === false, "ComputerRoom egress should release strafe");
+
+const postDoorComputerRoomBridgeRightOpeningRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomBridgeRightOpeningRuntime.predictions = 2660;
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseBridgeStallEscapeFrames = 1;
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseBridgeStallCycles = 2;
+const postDoorComputerRoomBridgeRightOpeningState = {
+  health: 100,
+  depthSig: 1,
+  contextDict: "computer-room",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.08,
+  visualEnemySuppressed: true,
+  trustedCombatEvidence: false,
+  audioEnemyConfidence: 0,
+  soundEvent: false,
+  computerRoomConfidence: 0.62,
+  bridgeConfidence: 0.34,
+  wallVector: 0.49,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 44,
+  actionRepeatFrames: 44,
+  footObstacleScore: 0.54,
+  motionObstacleScore: 0.54,
+  routeDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.68,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  bridgeLaneVisible: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.25,
+      enemy: 0,
+      bridge: 0.34,
+      "computer-room": 0.62
+    }
+  }
+};
+postDoorComputerRoomBridgeRightOpeningRuntime.predict(postDoorComputerRoomBridgeRightOpeningState);
+const postDoorComputerRoomBridgeRightOpeningAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(postDoorComputerRoomBridgeRightOpeningState);
+assert(String(postDoorComputerRoomBridgeRightOpeningAction.stage || "").startsWith("post-door-computer-room-egress-"), `Repeated bridge stalls should promote into a durable ComputerRoom egress phase instead of another local loop (actual=${postDoorComputerRoomBridgeRightOpeningAction.stage})`);
+assert(postDoorComputerRoomBridgeRightOpeningAction.move === "back" || postDoorComputerRoomBridgeRightOpeningAction.move === "forward", "ComputerRoom egress should either unpin or advance toward the cross-bridge lane");
+assert(postDoorComputerRoomBridgeRightOpeningAction.turn === "left", "ComputerRoom egress should start with a left wall-parallel guard toward the room exit");
+assert(postDoorComputerRoomBridgeRightOpeningAction.strafe === false, "ComputerRoom egress should avoid hard side slip into the wall");
+
+const postDoorComputerRoomBridgeReacquiredForwardStallRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomBridgeReacquiredForwardStallRuntime.predictions = 2730;
+postDoorComputerRoomBridgeReacquiredForwardStallRuntime.stagePulseComputerRoomEgressFrames = 96;
+postDoorComputerRoomBridgeReacquiredForwardStallRuntime.actionRepeatFrames = 107;
+postDoorComputerRoomBridgeReacquiredForwardStallRuntime.moveRepeatFrames = 107;
+postDoorComputerRoomBridgeReacquiredForwardStallRuntime.lastStatus = {
+  autoplayState: {
+    stage: "post-door-computer-room-bridge-reacquired-forward",
+    pipeline: "post-door-computer-room-bridge-reacquired-forward",
+    actionSignature: "forward:none:-:-:-:r",
+    commandSignature: "forward+run",
+    actionRepeatFrames: 107,
+    moveRepeatFrames: 107
+  }
+};
+const postDoorComputerRoomBridgeReacquiredForwardStallAction = postDoorComputerRoomBridgeReacquiredForwardStallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.00,
+  postDoorTerminalSurface: 0.26,
+  wallVector: 0.57,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 107,
+  actionRepeatFrames: 107
+}));
+assert(String(postDoorComputerRoomBridgeReacquiredForwardStallAction.stage || "").indexOf("post-door-computer-room-bridge-reacquired-forward") < 0, `Long bridge-reacquired forward stall should release into an explicit unpin/reacquire action instead of holding forward forever (actual=${postDoorComputerRoomBridgeReacquiredForwardStallAction.stage})`);
+assert(postDoorComputerRoomBridgeReacquiredForwardStallAction.turn !== "left" || postDoorComputerRoomBridgeReacquiredForwardStallAction.move !== "forward", "Bridge reacquired forward stall should not keep the same forward-left wall pressure");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 112;
+const postDoorComputerRoomBridgeEgressUnpinAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  wallVector: 0.62,
+  routeTopologyBarrelZoneEvidence: 0.74
+}));
+assert(postDoorComputerRoomBridgeEgressUnpinAction.stage === "post-door-computer-room-egress-left-parallel-unpin", `ComputerRoom egress should unpin left/forward when bridge-side evidence is alive (actual=${postDoorComputerRoomBridgeEgressUnpinAction.stage})`);
+assert(postDoorComputerRoomBridgeEgressUnpinAction.move === "forward", "ComputerRoom egress bridge-side unpin should avoid reversing into the entry loop");
+assert(postDoorComputerRoomBridgeEgressUnpinAction.turn === "left", "ComputerRoom egress bridge-side unpin should rotate left away from the right wall");
+
+const postDoorComputerRoomRouteTurnStallRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomRouteTurnStallRuntime.predictions = 3392;
+postDoorComputerRoomRouteTurnStallRuntime.stagePulseComputerRoomEgressFrames = 128;
+const postDoorComputerRoomRouteTurnStallAction = postDoorComputerRoomRouteTurnStallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  computerRoomConfidence: 0.74,
+  bridgeConfidence: 0.39,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeAbortHint: "turn-stall",
+  routeLoopKind: "turn-stall",
+  routeLoopBudgetExceeded: true,
+  wallVector: 0.49,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 3,
+  actionRepeatFrames: 3
+}));
+assert(String(postDoorComputerRoomRouteTurnStallAction.stage || "").startsWith("post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire"), `ComputerRoom route turn-stall should peel off the wall instead of sustaining left strafe (actual=${postDoorComputerRoomRouteTurnStallAction.stage})`);
+assert(postDoorComputerRoomRouteTurnStallAction.move === "back", "ComputerRoom route turn-stall should start with a short backoff");
+assert(postDoorComputerRoomRouteTurnStallAction.turn === "none", "ComputerRoom route turn-stall backoff should not keep turning into the wall");
+
+const postDoorComputerRoomCentralDoorStutterRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomCentralDoorStutterRuntime.predictions = 3590;
+postDoorComputerRoomCentralDoorStutterRuntime.stagePulseComputerRoomEgressFrames = 70;
+const postDoorComputerRoomCentralDoorStutterAction = postDoorComputerRoomCentralDoorStutterRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.30,
+  postDoorTerminalSurface: 0.39,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyWallDistanceNormalized: 0.493,
+  routeTopologyBarrelZoneEvidence: 0.466,
+  routeTopologyCenterCorridorAlignment: 0.006,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 1,
+  actionRepeatFrames: 1,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorComputerRoomCentralDoorStutterAction.stage || "").startsWith("post-door-central-door"), `Weak ComputerRoom central-door stutter must keep egress until door evidence is stronger (actual=${postDoorComputerRoomCentralDoorStutterAction.stage})`);
+assert(postDoorComputerRoomCentralDoorStutterAction.use !== true, "Weak ComputerRoom central-door stutter must not pulse Use");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 128;
+const postDoorComputerRoomHardWallFaceUnpinAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  bridgeConfidence: 0.61,
+  bridgeDoorScore: 0.08,
+  computerRoomConfidence: 0.75,
+  postDoorTerminalSurface: 0.70,
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.33,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0,
+  moveRepeatFrames: 221,
+  actionRepeatFrames: 8,
+  spawnCorridorGapScore: 0.16,
+  spawnLandmarkRouteEvidence: 0.41
+}));
+assert(postDoorComputerRoomHardWallFaceUnpinAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-backoff", `ComputerRoom hard wall face on the cross-bridge lane should enter bounded wall-unpin backoff (actual=${postDoorComputerRoomHardWallFaceUnpinAction.stage})`);
+assert(postDoorComputerRoomHardWallFaceUnpinAction.move === "back", "ComputerRoom hard wall face should reverse briefly before the bridge-lane reacquire turn");
+assert(postDoorComputerRoomHardWallFaceUnpinAction.turn === "none", "ComputerRoom hard wall face should not rotate while backing away from the wall pocket");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 128;
+const postDoorComputerRoomRightOpeningHardWallUnpinAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.33,
+  computerRoomConfidence: 0.77,
+  postDoorTerminalSurface: 0.38,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  recommendedYaw: 6,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.98,
+  routeTopologyCenterCorridorAlignment: -0.34,
+  footObstacleScore: 0.63,
+  motionObstacleScore: 0.63,
+  motionForwardProgress: 0,
+  moveRepeatFrames: 221,
+  actionRepeatFrames: 8
+}));
+assert(postDoorComputerRoomRightOpeningHardWallUnpinAction.stage === "post-door-computer-room-egress-bridge-opening-right-unpin", `ComputerRoom hard wall with strong right bridge memory should back-right unpin toward the opening (actual=${postDoorComputerRoomRightOpeningHardWallUnpinAction.stage})`);
+assert(postDoorComputerRoomRightOpeningHardWallUnpinAction.move === "back", "Right-opening hard wall recovery should reverse briefly before realigning");
+assert(postDoorComputerRoomRightOpeningHardWallUnpinAction.turn === "right", "Right-opening hard wall recovery should turn right toward the bridge opening");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 86;
+const postDoorComputerRoomBridgeEgressParallelAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  wallVector: 0.62,
+  routeTopologyBarrelZoneEvidence: 0.74,
+  motionForwardProgress: 0.22
+}));
+assert(postDoorComputerRoomBridgeEgressParallelAction.stage === "post-door-computer-room-egress-left-parallel", `ComputerRoom egress should correct left when the right wall is close (actual=${postDoorComputerRoomBridgeEgressParallelAction.stage})`);
+assert(postDoorComputerRoomBridgeEgressParallelAction.turn === "left", "ComputerRoom egress should lean left after the opening arc when the right wall is close");
+
+const postDoorComputerRoomWeakBridgeEgressHoldRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomWeakBridgeEgressHoldRuntime.predictions = 8680;
+postDoorComputerRoomWeakBridgeEgressHoldRuntime.stagePulseComputerRoomEgressFrames = 120;
+const postDoorComputerRoomWeakBridgeEgressHoldAction = postDoorComputerRoomWeakBridgeEgressHoldRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.40,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.52,
+  routeTopologyBarrelZoneEvidence: 0.32,
+  routeTopologyCenterCorridorAlignment: 0.16,
+  wallVector: 0.42,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70
+}));
+assert(postDoorComputerRoomWeakBridgeEgressHoldAction.stage === "post-door-computer-room-egress-left-parallel", `Weak cross-bridge evidence with high obstacle pressure should keep the ComputerRoom egress guard instead of snapping into straight lock (actual=${postDoorComputerRoomWeakBridgeEgressHoldAction.stage})`);
+assert(postDoorComputerRoomWeakBridgeEgressHoldAction.turn === "left", "Weak bridge egress hold should continue the left wall-parallel correction");
+
+const postDoorComputerRoomBridgeOpeningRightAlignRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomBridgeOpeningRightAlignRuntime.predictions = 8682;
+postDoorComputerRoomBridgeOpeningRightAlignRuntime.stagePulseComputerRoomEgressFrames = 110;
+const postDoorComputerRoomBridgeOpeningRightAlignAction = postDoorComputerRoomBridgeOpeningRightAlignRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.65,
+  bridgeDoorScore: 0.41,
+  recommendedYaw: 8,
+  postDoorTerminalSurface: 0.75,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.43,
+  routeTopologyCenterCorridorAlignment: 0.05,
+  wallVector: 0.53,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.04
+}));
+assert(postDoorComputerRoomBridgeOpeningRightAlignAction.stage === "post-door-computer-room-egress-bridge-opening-right-align", `Visible right bridge opening should override left egress and align right (actual=${postDoorComputerRoomBridgeOpeningRightAlignAction.stage})`);
+assert(postDoorComputerRoomBridgeOpeningRightAlignAction.turn === "right", "Visible bridge opening should steer right toward the route target");
+
+const postDoorComputerRoomPersistentRightTargetRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomPersistentRightTargetRuntime.predictions = 86821;
+postDoorComputerRoomPersistentRightTargetRuntime.stagePulseComputerRoomEgressFrames = 122;
+postDoorComputerRoomPersistentRightTargetRuntime.moveRepeatFrames = 240;
+postDoorComputerRoomPersistentRightTargetRuntime.actionRepeatFrames = 240;
+const postDoorComputerRoomPersistentRightTargetAction = postDoorComputerRoomPersistentRightTargetRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.07,
+  recommendedYaw: 5,
+  postDoorTerminalSurface: 0.42,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  computerRoomConfidence: 0.73,
+  routeTopologyBarrelZoneEvidence: 0.54,
+  routeTopologyCenterCorridorAlignment: 0.01,
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  motionForwardProgress: 0.40,
+  moveRepeatFrames: 240,
+  actionRepeatFrames: 240,
+  usePulseCooldown: 36
+}));
+assert(postDoorComputerRoomPersistentRightTargetAction.stage === "post-door-computer-room-egress-bridge-opening-right-align", `Persistent right bridge target should realign right instead of repeating straight resume (actual=${postDoorComputerRoomPersistentRightTargetAction.stage})`);
+assert(postDoorComputerRoomPersistentRightTargetAction.turn === "right", "Persistent right bridge target should turn right toward the cross-bridge opening");
+
+const postDoorOpenSpaceWeakIngressRuntime = runtimeFactory.create(publicProfile);
+postDoorOpenSpaceWeakIngressRuntime.predictions = 86823;
+postDoorOpenSpaceWeakIngressRuntime.stagePulseComputerRoomEgressFrames = 120;
+postDoorOpenSpaceWeakIngressRuntime.actionRepeatFrames = 13;
+const postDoorOpenSpaceWeakIngressAction = postDoorOpenSpaceWeakIngressRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "open-space",
+  bridgeConfidence: 0.38,
+  bridgeDoorScore: 0.02,
+  computerRoomConfidence: 0.47,
+  postDoorTerminalSurface: 0.46,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyCenterCorridorAlignment: -0.07,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  recommendedYaw: 5,
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+}));
+assert(postDoorOpenSpaceWeakIngressAction.stage === "post-door-computer-room-egress-weak-open-space-ingress-right-reacquire", `Post-door weak open-space evidence should reacquire the ComputerRoom ingress instead of left-paralleling back to the plaza (actual=${postDoorOpenSpaceWeakIngressAction.stage})`);
+assert(postDoorOpenSpaceWeakIngressAction.move === "forward", "Weak open-space ingress reacquire should keep forward pressure through the doorway");
+assert(postDoorOpenSpaceWeakIngressAction.turn === "right", "Weak open-space ingress reacquire should bias right toward the ComputerRoom entry");
+assert(postDoorOpenSpaceWeakIngressAction.use === false, "Weak open-space ingress reacquire should not emit a stale Use pulse");
+
+const postDoorOpenSpaceStaleSemanticBridgeRuntime = runtimeFactory.create(publicProfile);
+postDoorOpenSpaceStaleSemanticBridgeRuntime.predictions = 918;
+postDoorOpenSpaceStaleSemanticBridgeRuntime.stagePulseComputerRoomEgressFrames = 150;
+postDoorOpenSpaceStaleSemanticBridgeRuntime.actionRepeatFrames = 4;
+const postDoorOpenSpaceStaleSemanticBridgeAction = postDoorOpenSpaceStaleSemanticBridgeRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  routeActionHint: "cruise",
+  routeCorridorBridgeEvidence: 0.1718,
+  routeCorridorBridgeLock: false,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyWallDistanceNormalized: 0.493,
+  routeTopologyBarrelZoneEvidence: 0.6672,
+  routeTopologyCenterCorridorAlignment: -0.07355136,
+  postDoorTerminalSurface: 0.28,
+  computerRoomConfidence: 0.57,
+  computerRoomScore: 0.07,
+  computerPanelScore: 0.28,
+  computerDarkPanelScore: 0.08,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.01,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  spawnCorridorGapScore: 0.23,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.366,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.11,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  trustedCombatEvidence: false,
+  enemyStructuralDecoy: false,
+  terminalVisualCombatDecoy: true,
+  semanticMemory: {
+    symbols: {
+      door: 0.61,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.51,
+      "computer-room": 0.57,
+      "central-hall": 0
+    }
+  },
+  usePulseCooldown: 0
+}));
+assert(postDoorOpenSpaceStaleSemanticBridgeAction.stage === "post-door-computer-room-egress-weak-open-space-ingress-right-reacquire", `Stale semantic bridge evidence should reacquire the ComputerRoom ingress instead of left-paralleling back to the plaza (actual=${postDoorOpenSpaceStaleSemanticBridgeAction.stage})`);
+assert(postDoorOpenSpaceStaleSemanticBridgeAction.move === "forward", "Stale semantic bridge reacquire should keep forward pressure through the door");
+assert(postDoorOpenSpaceStaleSemanticBridgeAction.turn === "right", "Stale semantic bridge reacquire should bias right toward the ComputerRoom interior");
+
+const postDoorOpenSpaceBridgeForwardDriftRuntime = runtimeFactory.create(publicProfile);
+postDoorOpenSpaceBridgeForwardDriftRuntime.predictions = 86824;
+postDoorOpenSpaceBridgeForwardDriftRuntime.stagePulseBridgeForwardFrames = 96;
+postDoorOpenSpaceBridgeForwardDriftRuntime.actionRepeatFrames = 22;
+const postDoorOpenSpaceBridgeForwardDriftAction = postDoorOpenSpaceBridgeForwardDriftRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "open-space",
+  bridgeConfidence: 0.28,
+  bridgeDoorScore: 0.02,
+  computerRoomConfidence: 0.44,
+  postDoorTerminalSurface: 0.51,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.53,
+  routeTopologyCenterCorridorAlignment: 0.20,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.70,
+  recommendedYaw: -5,
+  spawnCorridorGapTurn: "right",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+}));
+assert(postDoorOpenSpaceBridgeForwardDriftAction.stage === "post-door-computer-room-egress-weak-open-space-ingress-right-reacquire", `Weak open-space bridge-forward drift should break the straight commit instead of returning to the plaza (actual=${postDoorOpenSpaceBridgeForwardDriftAction.stage})`);
+assert(postDoorOpenSpaceBridgeForwardDriftAction.move === "forward", "Weak bridge-forward drift should keep forward pressure through the first-door threshold");
+assert(postDoorOpenSpaceBridgeForwardDriftAction.turn === "right", "Weak bridge-forward drift should bias right toward the ComputerRoom interior");
+assert(postDoorOpenSpaceBridgeForwardDriftRuntime.stagePulseBridgeForwardFrames === 0, "Weak open-space bridge drift should clear stale bridge-forward pulse state");
+
+const postDoorOpenSpaceTerminalDriftProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedPostDoorTerminalDrift",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-terminal-forward-repeat-release-left",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          strafeLeft: "$enableStrafeRun",
+          turnYaw: "-8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const postDoorOpenSpaceTerminalDriftRuntime = runtimeFactory.create(postDoorOpenSpaceTerminalDriftProfile);
+postDoorOpenSpaceTerminalDriftRuntime.predictions = 86825;
+postDoorOpenSpaceTerminalDriftRuntime.actionRepeatFrames = 24;
+postDoorOpenSpaceTerminalDriftRuntime.moveRepeatFrames = 120;
+const postDoorOpenSpaceTerminalDriftAction = postDoorOpenSpaceTerminalDriftRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "open-space",
+  bridgeConfidence: 0.28,
+  bridgeDoorScore: 0.02,
+  computerRoomConfidence: 0.44,
+  postDoorTerminalSurface: 0.51,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.53,
+  routeTopologyCenterCorridorAlignment: 0.20,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.70,
+  recommendedYaw: -5,
+  spawnCorridorGapTurn: "right",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+}));
+assert(postDoorOpenSpaceTerminalDriftAction.stage === "post-door-computer-room-egress-weak-open-space-ingress-right-reacquire", `Weak open-space terminal left release should yield to ComputerRoom ingress reacquire instead of returning to the plaza (actual=${postDoorOpenSpaceTerminalDriftAction.stage})`);
+assert(postDoorOpenSpaceTerminalDriftAction.turn === "right", "Weak terminal drift should bias right toward the ComputerRoom interior");
+
+const postDoorOpenSpaceMonitorDriftProfile = {
+  parameters: publicProfile.parameters,
+  pipeline: {
+    name: "ForcedPostDoorMonitorDrift",
+    arbitration: { defaultThreshold: 0 },
+    stages: [
+      {
+        id: "post-door-monitor-wall-left-trim",
+        objective: "reach-central-hall",
+        priority: 100,
+        threshold: 0,
+        when: "true",
+        action: {
+          moveForward: "true",
+          strafeLeft: "$enableStrafeRun",
+          turnYaw: "-4",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const postDoorOpenSpaceMonitorDriftRuntime = runtimeFactory.create(postDoorOpenSpaceMonitorDriftProfile);
+postDoorOpenSpaceMonitorDriftRuntime.predictions = 86826;
+postDoorOpenSpaceMonitorDriftRuntime.actionRepeatFrames = 18;
+postDoorOpenSpaceMonitorDriftRuntime.moveRepeatFrames = 144;
+const postDoorOpenSpaceMonitorDriftAction = postDoorOpenSpaceMonitorDriftRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  contextDict: "open-space",
+  bridgeConfidence: 0.30,
+  bridgeDoorScore: 0.02,
+  computerRoomConfidence: 0.46,
+  postDoorTerminalSurface: 0.50,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyBarrelZoneEvidence: 0.48,
+  routeTopologyCenterCorridorAlignment: 0.12,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.64,
+  recommendedYaw: -3,
+  spawnCorridorGapTurn: "right",
+  visualEnemyVisible: false,
+  trustedCombatEvidence: false,
+  usePulseCooldown: 0
+}));
+assert(postDoorOpenSpaceMonitorDriftAction.stage === "post-door-computer-room-egress-weak-open-space-ingress-right-reacquire", `Weak open-space monitor left trim should yield to ComputerRoom ingress reacquire instead of drifting back outside (actual=${postDoorOpenSpaceMonitorDriftAction.stage})`);
+assert(postDoorOpenSpaceMonitorDriftAction.turn === "right", "Weak monitor drift should bias right toward the ComputerRoom interior");
+
+const postDoorComputerRoomBridgeForwardStallRightAlignRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomBridgeForwardStallRightAlignRuntime.predictions = 86825;
+postDoorComputerRoomBridgeForwardStallRightAlignRuntime.stagePulseBridgeForwardFrames = 32;
+const postDoorComputerRoomBridgeForwardStallRightAlignAction = postDoorComputerRoomBridgeForwardStallRightAlignRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.65,
+  bridgeDoorScore: 0.41,
+  recommendedYaw: 8,
+  postDoorTerminalSurface: 0.75,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  usePulseCooldown: 36,
+  routeTopologyBarrelZoneEvidence: 0.43,
+  routeTopologyCenterCorridorAlignment: 0.05,
+  wallVector: 0.65,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 80,
+  actionRepeatFrames: 80
+}));
+assert(postDoorComputerRoomBridgeForwardStallRightAlignAction.stage === "post-door-computer-room-bridge-opening-right-align", `Bridge-forward stall with a visible right opening should align right instead of another left recover (actual=${postDoorComputerRoomBridgeForwardStallRightAlignAction.stage})`);
+assert(postDoorComputerRoomBridgeForwardStallRightAlignAction.turn === "right", "Bridge-forward stall right-opening recovery should steer toward the visible bridge door");
+
+const postDoorComputerRoomStraightLockDriftRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomStraightLockDriftRuntime.predictions = 8681;
+postDoorComputerRoomStraightLockDriftRuntime.stagePulseBridgeStraightLockFrames = 32;
+const postDoorComputerRoomStraightLockDriftAction = postDoorComputerRoomStraightLockDriftRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.40,
+  bridgeDoorScore: 0.14,
+  postDoorTerminalSurface: 0.55,
+  routeTopologyBarrelZoneEvidence: 0.30,
+  routeTopologyCenterCorridorAlignment: 0.12,
+  wallVector: 0.42,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.70
+}));
+assert(postDoorComputerRoomStraightLockDriftAction.stage === "post-door-computer-room-egress-left-parallel", `ComputerRoom straight lock should release back to egress when it drifts into terminal/wall obstacle pressure (actual=${postDoorComputerRoomStraightLockDriftAction.stage})`);
+assert(postDoorComputerRoomStraightLockDriftAction.turn === "left", "Straight-lock drift release should steer left toward the cross-bridge approach instead of continuing the U-turn loop");
+
+const postDoorComputerRoomStraightLockLaneSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomStraightLockLaneSustainRuntime.predictions = 8683;
+postDoorComputerRoomStraightLockLaneSustainRuntime.stagePulseBridgeStraightLockFrames = 52;
+const postDoorComputerRoomStraightLockLaneSustainAction = postDoorComputerRoomStraightLockLaneSustainRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.08,
+  computerRoomConfidence: 0.75,
+  postDoorTerminalSurface: 0.65,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 41,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  wallVector: 0.49,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 10,
+  actionRepeatFrames: 10
+}));
+assert(postDoorComputerRoomStraightLockLaneSustainAction.stage === "post-door-computer-room-egress-bridge-lane-sustain", `ComputerRoom straight lock with bridge-lane pressure should release into lane sustain instead of holding straight (actual=${postDoorComputerRoomStraightLockLaneSustainAction.stage})`);
+assert(postDoorComputerRoomStraightLockLaneSustainAction.strafe === true, "ComputerRoom straight-lock lane release should strafe left toward the cross-bridge lane");
+
+const postDoorComputerRoomStraightLockHardWallRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomStraightLockHardWallRuntime.predictions = 8685;
+postDoorComputerRoomStraightLockHardWallRuntime.stagePulseBridgeStraightLockFrames = 52;
+postDoorComputerRoomStraightLockHardWallRuntime.moveRepeatFrames = 30;
+postDoorComputerRoomStraightLockHardWallRuntime.actionRepeatFrames = 5;
+const postDoorComputerRoomStraightLockHardWallAction = postDoorComputerRoomStraightLockHardWallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  bridgeConfidence: 0.61,
+  bridgeDoorScore: 0.29,
+  postDoorTerminalSurface: 0.37,
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeTopologyBarrelZoneEvidence: 0.96,
+  routeTopologyCenterCorridorAlignment: -0.34,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0,
+  moveRepeatFrames: 30,
+  actionRepeatFrames: 5,
+  usePulseCooldown: 36
+}));
+assert(postDoorComputerRoomStraightLockHardWallAction.stage === "post-door-computer-room-egress-hard-wall-unpin", `ComputerRoom straight lock should drop hard wall faces into back-left egress unpin (actual=${postDoorComputerRoomStraightLockHardWallAction.stage})`);
+assert(postDoorComputerRoomStraightLockHardWallAction.move === "back", "ComputerRoom straight lock hard wall recovery should reverse briefly");
+
+const postDoorComputerRoomTerminalWallDecoyRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomTerminalWallDecoyRuntime.predictions = 8668;
+postDoorComputerRoomTerminalWallDecoyRuntime.stagePulseComputerRoomEgressFrames = 126;
+postDoorComputerRoomTerminalWallDecoyRuntime.moveRepeatFrames = 196;
+const postDoorComputerRoomTerminalWallDecoyAction = postDoorComputerRoomTerminalWallDecoyRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeMode: "post-door",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.91,
+  bridgeConfidence: 0.62,
+  bridgeDoorScore: 0.45,
+  postDoorTerminalSurface: 0.45,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: -0.07,
+  wallVector: 0.61,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 196,
+  actionRepeatFrames: 196,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.08
+}));
+assert(!String(postDoorComputerRoomTerminalWallDecoyAction.stage || "").startsWith("post-door-central-door"), `ComputerRoom terminal-wall decoy must not start the Central Hall door sequence (actual=${postDoorComputerRoomTerminalWallDecoyAction.stage})`);
+assert(postDoorComputerRoomTerminalWallDecoyAction.use !== true, "ComputerRoom terminal-wall decoy must not emit Use as if it were the Central Hall door");
+
+const postDoorComputerRoomTerminalWallLatchedDecoyRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomTerminalWallLatchedDecoyRuntime.predictions = 8669;
+postDoorComputerRoomTerminalWallLatchedDecoyRuntime.centralDoorCornerSequenceFrames = 18;
+postDoorComputerRoomTerminalWallLatchedDecoyRuntime.centralDoorCornerSequenceStep = "align-turn";
+const postDoorComputerRoomTerminalWallLatchedDecoyAction = postDoorComputerRoomTerminalWallLatchedDecoyRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeMode: "post-door",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.91,
+  bridgeConfidence: 0.62,
+  bridgeDoorScore: 0.45,
+  postDoorTerminalSurface: 0.67,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: -0.07,
+  wallVector: 0.57,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0,
+  moveRepeatFrames: 48,
+  actionRepeatFrames: 48,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.10
+}));
+assert(!String(postDoorComputerRoomTerminalWallLatchedDecoyAction.stage || "").startsWith("post-door-central-door"), `Latched terminal-wall decoy must release Central Hall door sequence (actual=${postDoorComputerRoomTerminalWallLatchedDecoyAction.stage})`);
+assert(postDoorComputerRoomTerminalWallLatchedDecoyAction.stage === "post-door-computer-room-bridge-straight-lock", `Latched terminal-wall decoy should return to bridge straight lock (actual=${postDoorComputerRoomTerminalWallLatchedDecoyAction.stage})`);
+
+const postDoorCrossBridgeAdvanceLatchedDecoyRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeAdvanceLatchedDecoyRuntime.predictions = 86701;
+postDoorCrossBridgeAdvanceLatchedDecoyRuntime.centralDoorCornerSequenceFrames = 22;
+postDoorCrossBridgeAdvanceLatchedDecoyRuntime.centralDoorCornerSequenceStep = "contact-forward";
+const postDoorCrossBridgeAdvanceLatchedDecoyAction = postDoorCrossBridgeAdvanceLatchedDecoyRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeMode: "post-door",
+  objective: "reach-central-hall",
+  routeActionHint: "advance-cross-bridge",
+  currentLandmark: "cross-bridge-lane",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.62,
+  bridgeDoorScore: 0.09,
+  postDoorTerminalSurface: 0.48,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: -0.31,
+  routeTopologyWallDistanceNormalized: 0.33,
+  footObstacleScore: 0.39,
+  motionObstacleScore: 0.39,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 24,
+  actionRepeatFrames: 24,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.09
+}));
+assert(!String(postDoorCrossBridgeAdvanceLatchedDecoyAction.stage || "").startsWith("post-door-central-door"), `CrossBridge advance landmark must release premature Central Hall door sequence (actual=${postDoorCrossBridgeAdvanceLatchedDecoyAction.stage})`);
+assert(postDoorCrossBridgeAdvanceLatchedDecoyAction.stage === "post-door-computer-room-bridge-straight-lock", `CrossBridge advance landmark should return to bridge straight lock (actual=${postDoorCrossBridgeAdvanceLatchedDecoyAction.stage})`);
+
+const postDoorCrossBridgeDeadEndLaneSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeDeadEndLaneSustainRuntime.predictions = 8749;
+postDoorCrossBridgeDeadEndLaneSustainRuntime.stagePulseComputerRoomEgressFrames = 112;
+const postDoorCrossBridgeDeadEndLaneSustainAction = postDoorCrossBridgeDeadEndLaneSustainRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeMode: "post-door",
+  objective: "reach-central-hall",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.65,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.04,
+  postDoorTerminalSurface: 0.26,
+  routeDeadEndRisk: true,
+  routeTopologyDeadEndRisk: true,
+  routeDeadEndTrimRequired: true,
+  routeTopologyBarrelZoneEvidence: 0.986,
+  routeTopologyCenterCorridorAlignment: -0.372,
+  routeTopologyWallDistanceNormalized: 0.392,
+  wallVector: 0.39,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  motionForwardProgress: 0.06,
+  moveRepeatFrames: 82,
+  actionRepeatFrames: 82,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  visualEnemyConfidence: 0.08,
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.30,
+      enemy: 0.08,
+      bridge: 0.51,
+      "computer-room": 0.65
+    }
+  }
+}));
+assert(
+  postDoorCrossBridgeDeadEndLaneSustainAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-backoff",
+  `Live cross-bridge-lane dead-end trim should leave sustained forward-left and start bounded wall-unpin (actual=${postDoorCrossBridgeDeadEndLaneSustainAction.stage})`);
+assert(postDoorCrossBridgeDeadEndLaneSustainAction.move === "back", "Live cross-bridge-lane dead-end trim should first release wall pressure by backing up");
+assert(postDoorCrossBridgeDeadEndLaneSustainAction.turn === "none", "Live cross-bridge-lane wall-unpin backoff must not rotate while reversing");
+assert(postDoorCrossBridgeDeadEndLaneSustainAction.strafe === false, "Live cross-bridge-lane wall-unpin backoff should not keep left strafe pressure");
+
+const postDoorCrossBridgeDeadEndLaneReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeDeadEndLaneReleaseRuntime.predictions = 8840;
+postDoorCrossBridgeDeadEndLaneReleaseRuntime.stagePulseComputerRoomEgressFrames = 112;
+let postDoorCrossBridgeDeadEndLaneReleaseAction = null;
+for (let index = 0; index < 22; index += 1) {
+  postDoorCrossBridgeDeadEndLaneReleaseAction = postDoorCrossBridgeDeadEndLaneReleaseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+    currentRoute: "cross-bridge-route",
+    routeMode: "post-door",
+    objective: "reach-central-hall",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge",
+    computerRoomEntered: true,
+    computerRoomConfidence: 0.66,
+    bridgeConfidence: 0.50,
+    bridgeDoorScore: 0.01,
+    postDoorTerminalSurface: 0.28,
+    routeDeadEndRisk: true,
+    routeTopologyDeadEndRisk: true,
+    routeDeadEndTrimRequired: true,
+    routeTopologyBarrelZoneEvidence: 1,
+    routeTopologyCenterCorridorAlignment: -0.33,
+    routeTopologyWallDistanceNormalized: 0.3292,
+    wallVector: 0.3292,
+    footObstacleScore: 0.65,
+    motionObstacleScore: 0.65,
+    motionForwardProgress: 0.08,
+    moveRepeatFrames: index + 1,
+    actionRepeatFrames: index + 1,
+    trustedCombatEvidence: false,
+    trustedEnemyThreat: 0,
+    visualEnemyConfidence: 0.08,
+    semanticMemory: {
+      symbols: {
+        door: 0.08,
+        corridor: 0.28,
+        enemy: 0.08,
+        bridge: 0.50,
+        "computer-room": 0.66
+      }
+    }
+  }));
+}
+assert(postDoorCrossBridgeDeadEndLaneReleaseAction.stage === "post-door-computer-room-wall-unpin-bridge-lane-left-strafe-wall-reacquire-rotate-right", `Persistent cross-bridge-lane dead-end trim should rotate right inside bounded wall-unpin instead of turning left forever (actual=${postDoorCrossBridgeDeadEndLaneReleaseAction.stage})`);
+assert(postDoorCrossBridgeDeadEndLaneReleaseAction.move === "none", "Persistent cross-bridge-lane wall-unpin should rotate from a stationary state after backing off");
+assert(postDoorCrossBridgeDeadEndLaneReleaseAction.turn === "right", "Persistent cross-bridge-lane wall-unpin should yaw right to escape the left-sustain loop");
+assert(postDoorCrossBridgeDeadEndLaneReleaseAction.strafe !== true, "Persistent cross-bridge-lane release should drop strafe while realigning");
+
+const postDoorComputerRoomEgressCentralDoorUseRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomEgressCentralDoorUseRuntime.predictions = 8670;
+postDoorComputerRoomEgressCentralDoorUseRuntime.stagePulseComputerRoomEgressFrames = 92;
+postDoorComputerRoomEgressCentralDoorUseRuntime.moveRepeatFrames = 180;
+const postDoorComputerRoomEgressCentralDoorUseAction = postDoorComputerRoomEgressCentralDoorUseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  depthSig: 0.40,
+  wallVector: 0.62,
+  motionForwardProgress: 0.03,
+  moveRepeatFrames: 180,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.40,
+  postDoorTerminalSurface: 0.59,
+  spawnCorridorGapScore: 0.40,
+  spawnLandmarkRouteEvidence: 0.52,
+  visualEnemyConfidence: 0.20
+}));
+assert(postDoorComputerRoomEgressCentralDoorUseAction.stage === "post-door-central-door-corner-backoff", `Long ComputerRoom egress with right-corner bridge-door contact should back out before Use (actual=${postDoorComputerRoomEgressCentralDoorUseAction.stage})`);
+assert(postDoorComputerRoomEgressCentralDoorUseAction.move === "back", "ComputerRoom egress central-door right-corner recovery should start with pure backoff");
+let postDoorComputerRoomEgressCentralDoorUsePulse = null;
+for (let index = 0; index < 92; index += 1) {
+  const action = postDoorComputerRoomEgressCentralDoorUseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+    currentLandmark: "central-hall-door",
+    routeObjective: "reach-central-hall",
+    depthSig: 0.40,
+    wallVector: 0.62,
+    motionForwardProgress: 0.03,
+    moveRepeatFrames: 180,
+    bridgeConfidence: 0.58,
+    bridgeDoorScore: 0.40,
+    postDoorTerminalSurface: 0.59,
+    spawnCorridorGapScore: 0.40,
+    spawnLandmarkRouteEvidence: 0.52,
+    visualEnemyConfidence: 0.20
+  }));
+  if (action.stage === "post-door-central-door-corner-stop-use") {
+    postDoorComputerRoomEgressCentralDoorUsePulse = action;
+    break;
+  }
+}
+assert(postDoorComputerRoomEgressCentralDoorUsePulse, "Central-door right-corner sequence should still reach a stopped Use pulse");
+assert(postDoorComputerRoomEgressCentralDoorUsePulse.move === "none", "ComputerRoom egress central-door Use should stop before using");
+assert(postDoorComputerRoomEgressCentralDoorUsePulse.use === true, "ComputerRoom egress central-door evidence should emit a bounded Use pulse");
+assert(postDoorComputerRoomEgressCentralDoorUseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames > 0, "Central-door contact Use should arm a post-use forward advance pulse");
+
+const postDoorComputerRoomEgressWeakCentralDoorRepeatRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomEgressWeakCentralDoorRepeatRuntime.predictions = 9210;
+postDoorComputerRoomEgressWeakCentralDoorRepeatRuntime.stagePulseComputerRoomEgressFrames = 0;
+postDoorComputerRoomEgressWeakCentralDoorRepeatRuntime.moveRepeatFrames = 240;
+const postDoorComputerRoomEgressWeakCentralDoorRepeatAction = postDoorComputerRoomEgressWeakCentralDoorRepeatRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  doorOpenedCount: 1,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.65,
+  bridgeDoorScore: 0.25,
+  postDoorTerminalSurface: 0.60,
+  computerRoomConfidence: 0.75,
+  routeTopologyBarrelZoneEvidence: 0.49,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyCenterCorridorAlignment: -0.01,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  moveRepeatFrames: 240,
+  actionRepeatFrames: 24,
+  visualEnemyConfidence: 0.08
+}));
+assert(postDoorComputerRoomEgressWeakCentralDoorRepeatAction.stage === "post-door-central-door-corner-backoff", `Weak but repeated Central Hall door contact should enter the explicit door sequence instead of egress strafing forever (actual=${postDoorComputerRoomEgressWeakCentralDoorRepeatAction.stage})`);
+assert(postDoorComputerRoomEgressWeakCentralDoorRepeatAction.move === "back", "Weak repeated Central Hall door contact should release wall pressure with pure backoff first");
+
+const postDoorComputerRoomLiveCentralDoorPocketRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomLiveCentralDoorPocketRuntime.predictions = 9340;
+postDoorComputerRoomLiveCentralDoorPocketRuntime.stagePulseComputerRoomEgressFrames = 0;
+postDoorComputerRoomLiveCentralDoorPocketRuntime.moveRepeatFrames = 18;
+const postDoorComputerRoomLiveCentralDoorPocketAction = postDoorComputerRoomLiveCentralDoorPocketRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeObjective: "reach-central-hall",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  doorOpenedCount: 1,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.30,
+  postDoorTerminalSurface: 0.62,
+  computerRoomConfidence: 0.66,
+  routeTopologyWallDistanceNormalized: 0.39,
+  routeTopologyBarrelZoneEvidence: 0.95,
+  routeTopologyCenterCorridorAlignment: -0.36,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 18,
+  actionRepeatFrames: 18,
+  visualEnemyConfidence: 0.08
+}));
+assert(postDoorComputerRoomLiveCentralDoorPocketAction.stage === "post-door-central-door-corner-backoff", `Live Central Hall door wall-pocket contact should enter the explicit door sequence before long repeat counters accrue (actual=${postDoorComputerRoomLiveCentralDoorPocketAction.stage})`);
+assert(postDoorComputerRoomLiveCentralDoorPocketAction.move === "back", "Live Central Hall door wall-pocket contact should start with pure backoff");
+assert(postDoorComputerRoomLiveCentralDoorPocketAction.turn === "none", "Live Central Hall door wall-pocket backoff must not keep right-turn pressure");
+
+const postDoorComputerRoomDev1028OpenCentralDoorPocketRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomDev1028OpenCentralDoorPocketRuntime.predictions = 9360;
+postDoorComputerRoomDev1028OpenCentralDoorPocketRuntime.stagePulseComputerRoomEgressFrames = 24;
+const postDoorComputerRoomDev1028OpenCentralDoorPocketAction = postDoorComputerRoomDev1028OpenCentralDoorPocketRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  routeObjective: "reach-central-hall",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  doorOpenedCount: 1,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.03,
+  postDoorTerminalSurface: 0.49,
+  computerRoomConfidence: 0.66,
+  routePostDoorBridgeDoorMemoryFrames: 19,
+  routeTopologyBarrelZoneEvidence: 1.00,
+  routeTopologyCenterCorridorAlignment: -0.312,
+  wallVector: 0.3292,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 1,
+  actionRepeatFrames: 1,
+  visualEnemyConfidence: 0.08,
+  usePulseCooldown: 0
+}));
+assert(postDoorComputerRoomDev1028OpenCentralDoorPocketAction.stage === "post-door-central-door-corner-backoff", `Dev1028 explicit open Central Hall door wall-pocket cue should enter the bounded door sequence instead of returning to cross-bridge sustain (actual=${postDoorComputerRoomDev1028OpenCentralDoorPocketAction.stage})`);
+assert(postDoorComputerRoomDev1028OpenCentralDoorPocketAction.move === "back", "Dev1028 explicit open Central Hall door wall-pocket cue should start with pure backoff");
+assert(postDoorComputerRoomDev1028OpenCentralDoorPocketAction.use !== true, "Dev1028 explicit open Central Hall door wall-pocket cue must not pulse Use on the first backoff frame");
+
+const postDoorCentralHallArrivalLatchRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralHallArrivalLatchRuntime.predictions = 9380;
+postDoorCentralHallArrivalLatchRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 12;
+postDoorCentralHallArrivalLatchRuntime.lastCentralDoorUsePrediction = 9340;
+postDoorCentralHallArrivalLatchRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralHallArrivalLatchRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralHallArrivalLatchRuntime.lastCentralDoorUseRoute = "central-hall-route";
+const postDoorCentralHallArrivalLatchConfirmedAction = postDoorCentralHallArrivalLatchRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeObjective: "reach-central-hall",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  doorOpenedCount: 1,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.28,
+  postDoorTerminalSurface: 0.40,
+  computerRoomConfidence: 0.57,
+  routePostDoorBridgeDoorMemoryFrames: 52,
+  routeTopologyBarrelZoneEvidence: 0.43,
+  routeTopologyCenterCorridorAlignment: 0.05,
+  wallVector: 0.5554,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 1,
+  actionRepeatFrames: 1,
+  visualEnemyConfidence: 0.08,
+  visualEnemyVisible: false
+}));
+assert(postDoorCentralHallArrivalLatchConfirmedAction.pipeline === "CentralHall", `Trusted CentralHall arrival should publish CentralHall ownership before latching (actual=${postDoorCentralHallArrivalLatchConfirmedAction.pipeline}; stage=${postDoorCentralHallArrivalLatchConfirmedAction.stage}; safety=${postDoorCentralHallArrivalLatchConfirmedAction.safetyReason})`);
+assert(postDoorCentralHallArrivalLatchConfirmedAction.centralHallEntered === true, "Trusted CentralHall arrival should stamp the CentralHall milestone");
+assert(postDoorCentralHallArrivalLatchRuntime.trustedCentralHallArrivalLatchFrames > 0, "Trusted CentralHall arrival should arm a short anti-flicker ownership latch");
+const postDoorCentralHallArrivalLatchFlickerAction = postDoorCentralHallArrivalLatchRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  routeObjective: "reach-central-hall",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  doorOpenedCount: 1,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.02,
+  postDoorTerminalSurface: 0.27,
+  computerRoomConfidence: 0.66,
+  routePostDoorBridgeDoorMemoryFrames: 11,
+  routeTopologyBarrelZoneEvidence: 0.53,
+  routeTopologyCenterCorridorAlignment: 0.016,
+  wallVector: 0.6646,
+  footObstacleScore: 0.43,
+  motionObstacleScore: 0.43,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 1,
+  actionRepeatFrames: 1,
+  visualEnemyConfidence: 0.08,
+  visualEnemyVisible: false
+}));
+assert(postDoorCentralHallArrivalLatchFlickerAction.pipeline === "CentralHall", `Recent trusted CentralHall arrival should retain CentralHall ownership through one cross-bridge/ComputerRoom flicker (actual=${postDoorCentralHallArrivalLatchFlickerAction.pipeline}; stage=${postDoorCentralHallArrivalLatchFlickerAction.stage}; safety=${postDoorCentralHallArrivalLatchFlickerAction.safetyReason})`);
+assert(postDoorCentralHallArrivalLatchFlickerAction.centralHallEntered === true, "CentralHall anti-flicker latch should keep the milestone published");
+
+const postDoorCrossBridgeWeakCentralDoorContactRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeWeakCentralDoorContactRuntime.predictions = 1960;
+const postDoorCrossBridgeWeakCentralDoorContactAction = postDoorCrossBridgeWeakCentralDoorContactRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  contextDict: "open-space",
+  currentRoute: "cross-bridge-route",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.28,
+  bridgeConfidence: 0.26,
+  bridgeDoorScore: 0.21,
+  postDoorTerminalSurface: 0.38,
+  computerRoomScore: 0.09,
+  computerPanelScore: 0.38,
+  computerDarkPanelScore: 0.25,
+  spawnCorridorGapScore: 0.39,
+  spawnLandmarkRouteEvidence: 0.51,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 1,
+  actionRepeatFrames: 1,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.07,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeWeakCentralDoorContactAction.stage || "").startsWith("post-door-central-door"), `Weak cross-bridge door-like evidence should keep advancing instead of starting a premature Central Hall door sequence (actual=${postDoorCrossBridgeWeakCentralDoorContactAction.stage})`);
+assert(postDoorCrossBridgeWeakCentralDoorContactAction.use !== true, "Weak cross-bridge door-like evidence must not pulse Use before a stronger Central Hall door cue");
+
+const postDoorCrossBridgeRouteNameWeakCentralDoorRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeRouteNameWeakCentralDoorRuntime.predictions = 1961;
+const postDoorCrossBridgeRouteNameWeakCentralDoorAction = postDoorCrossBridgeRouteNameWeakCentralDoorRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  contextDict: "open-space",
+  currentRoute: "",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.42,
+  bridgeConfidence: 0.50,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.40,
+  computerRoomScore: 0.18,
+  computerPanelScore: 0.40,
+  computerDarkPanelScore: 0.28,
+  spawnCorridorGapScore: 0.39,
+  spawnLandmarkRouteEvidence: 0.51,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 9,
+  actionRepeatFrames: 9,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeRouteNameWeakCentralDoorAction.stage || "").startsWith("post-door-central-door"), `routeName-only cross-bridge evidence must suppress premature CentralDoor sequence (actual=${postDoorCrossBridgeRouteNameWeakCentralDoorAction.stage})`);
+assert(postDoorCrossBridgeRouteNameWeakCentralDoorAction.use !== true, "routeName-only cross-bridge evidence must not pulse Use before a Central Hall door landmark is live");
+
+const postDoorCrossBridgeLastStatusCentralLeakRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLastStatusCentralLeakRuntime.predictions = 1962;
+postDoorCrossBridgeLastStatusCentralLeakRuntime.centralDoorCornerSequenceFrames = 24;
+postDoorCrossBridgeLastStatusCentralLeakRuntime.centralDoorCornerSequenceStep = "align-turn";
+postDoorCrossBridgeLastStatusCentralLeakRuntime.lastStatus = {
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge",
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    computerRoomConfidence: 0.77,
+    bridgeConfidence: 0.57,
+    bridgeDoorScore: 0.44,
+    postDoorTerminalSurface: 0.70
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    routeMode: "post-door"
+  }
+};
+const postDoorCrossBridgeLastStatusCentralLeakAction = postDoorCrossBridgeLastStatusCentralLeakRuntime.predict({
+  health: 100,
+  depthSig: 0.45,
+  contextDict: "computer room bridge terminal",
+  wallVector: 0.44,
+  motionForwardProgress: 0.02,
+  motionObstacleScore: 0.43,
+  footObstacleScore: 0.43,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 12,
+  turnRepeatFrames: 8,
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  bridgeDoorScore: 0.44,
+  bridgeConfidence: 0.57,
+  postDoorTerminalSurface: 0.70,
+  computerRoomConfidence: 0.77,
+  computerRoomEntered: true,
+  terminalVisualCombatDecoy: true,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false
+});
+assert(!String(postDoorCrossBridgeLastStatusCentralLeakAction.stage || "").startsWith("post-door-central-door"), `lastStatus cross-bridge-lane evidence must clear stale CentralDoor latch (actual=${postDoorCrossBridgeLastStatusCentralLeakAction.stage})`);
+assert(postDoorCrossBridgeLastStatusCentralLeakAction.use !== true, "lastStatus cross-bridge-lane suppression must not pulse Use without a live Central Hall door landmark");
+
+const postDoorCrossBridgeLiveStrongPanelRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLiveStrongPanelRuntime.predictions = 1963;
+postDoorCrossBridgeLiveStrongPanelRuntime.centralDoorCornerSequenceFrames = 31;
+postDoorCrossBridgeLiveStrongPanelRuntime.centralDoorCornerSequenceStep = "backoff";
+const postDoorCrossBridgeLiveStrongPanelAction = postDoorCrossBridgeLiveStrongPanelRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.80,
+  centralHallEntered: false,
+  bridgeConfidence: 0.63,
+  bridgeDoorScore: 0.43,
+  postDoorTerminalSurface: 0.67,
+  routeTopologyWallDistanceNormalized: 0.493,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeLiveStrongPanelAction.stage || "").startsWith("post-door-central-door"), `Live cross-bridge-lane with strong terminal panel must keep bridge transit instead of central-door backoff (actual=${postDoorCrossBridgeLiveStrongPanelAction.stage})`);
+assert(postDoorCrossBridgeLiveStrongPanelAction.use !== true, "Live cross-bridge-lane strong panel suppression must not pulse Use before a central-door landmark is live");
+
+const postDoorCrossBridgeLiveDepthWallContactRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLiveDepthWallContactRuntime.predictions = 1964;
+postDoorCrossBridgeLiveDepthWallContactRuntime.centralDoorCornerSequenceFrames = 37;
+postDoorCrossBridgeLiveDepthWallContactRuntime.centralDoorCornerSequenceStep = "backoff";
+const postDoorCrossBridgeLiveDepthWallContactAction = postDoorCrossBridgeLiveDepthWallContactRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.68,
+  centralHallEntered: false,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.48,
+  depthSig: 0,
+  recommendedYaw: 8,
+  routeTopologyWallDistanceNormalized: 0.50,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeLiveDepthWallContactAction.stage || "").startsWith("post-door-central-door"), `Depth-wall contact while still on cross-bridge-lane must clear stale CentralDoor corner latch (actual=${postDoorCrossBridgeLiveDepthWallContactAction.stage})`);
+assert(postDoorCrossBridgeLiveDepthWallContactAction.use !== true, "Depth-wall contact on cross-bridge-lane must not pulse Use without central-hall-door evidence");
+
+const postDoorCrossBridgeLiveDoorlikeLaneRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLiveDoorlikeLaneRuntime.predictions = 1966;
+postDoorCrossBridgeLiveDoorlikeLaneRuntime.centralDoorCornerSequenceFrames = 37;
+postDoorCrossBridgeLiveDoorlikeLaneRuntime.centralDoorCornerSequenceStep = "backoff";
+const postDoorCrossBridgeLiveDoorlikeLaneAction = postDoorCrossBridgeLiveDoorlikeLaneRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.57,
+  centralHallEntered: false,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.30,
+  postDoorTerminalSurface: 0.47,
+  depthSig: 1,
+  recommendedYaw: 7,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeLiveDoorlikeLaneAction.stage || "").startsWith("post-door-central-door"), `Door-like cross-bridge-lane live evidence must not start CentralDoor while route hint is advance-cross-bridge (actual=${postDoorCrossBridgeLiveDoorlikeLaneAction.stage})`);
+assert(postDoorCrossBridgeLiveDoorlikeLaneAction.use !== true, "Door-like cross-bridge-lane live evidence must not pulse Use without a central-hall-door cue");
+
+const postDoorCrossBridgeLivePostUseLatchRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLivePostUseLatchRuntime.predictions = 1965;
+postDoorCrossBridgeLivePostUseLatchRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 24;
+postDoorCrossBridgeLivePostUseLatchRuntime.centralDoorCornerSequenceFrames = 18;
+postDoorCrossBridgeLivePostUseLatchRuntime.centralDoorCornerSequenceStep = "post-use-settle";
+const postDoorCrossBridgeLivePostUseLatchAction = postDoorCrossBridgeLivePostUseLatchRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.70,
+  centralHallEntered: false,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.32,
+  postDoorTerminalSurface: 0.42,
+  depthSig: 1,
+  recommendedYaw: 6,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeLivePostUseLatchAction.stage || "").startsWith("post-door-central-door"), `Post-use CentralDoor latch must be cleared while live route is still cross-bridge-lane (actual=${postDoorCrossBridgeLivePostUseLatchAction.stage})`);
+assert(postDoorCrossBridgeLivePostUseLatchAction.use !== true, "Post-use CentralDoor latch must not emit another Use while live route is cross-bridge-lane");
+
+const postDoorCrossBridgeLiveStalePostUsePulseRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLiveStalePostUsePulseRuntime.predictions = 3520;
+postDoorCrossBridgeLiveStalePostUsePulseRuntime.lastCentralDoorUsePrediction = 3484;
+postDoorCrossBridgeLiveStalePostUsePulseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 80;
+const postDoorCrossBridgeLiveStalePostUsePulseAction = postDoorCrossBridgeLiveStalePostUsePulseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  route: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.68,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.68,
+  routePostDoorBridgeDoorMemoryFrames: 28,
+  routeTopologyBarrelZoneEvidence: 0.99,
+  routeTopologyCenterCorridorAlignment: -0.36,
+  routeTopologyDeadEndRisk: true,
+  recommendedYaw: 8,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  wallVector: 0.39,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 51,
+  actionRepeatFrames: 51,
+  turnRepeatFrames: 12,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorCrossBridgeLiveStalePostUsePulseAction.stage || "").startsWith("post-door-central-door-post-use"), `Live cross-bridge lane must cancel stale CentralDoor post-use pulse (actual=${postDoorCrossBridgeLiveStalePostUsePulseAction.stage})`);
+assert(!String(postDoorCrossBridgeLiveStalePostUsePulseAction.stage || "").startsWith("post-door-central-door-corner"), `Live cross-bridge lane must not fall back into CentralDoor corner retry (actual=${postDoorCrossBridgeLiveStalePostUsePulseAction.stage})`);
+assert(postDoorCrossBridgeLiveStalePostUsePulseAction.use !== true, "Live cross-bridge lane stale post-use release must not pulse Use");
+
+const postDoorTerminalWallFalseCentralDoorRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalWallFalseCentralDoorRuntime.predictions = 8628;
+postDoorTerminalWallFalseCentralDoorRuntime.stagePulseComputerRoomEgressFrames = 88;
+const postDoorTerminalWallFalseCentralDoorAction = postDoorTerminalWallFalseCentralDoorRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.36,
+  postDoorTerminalSurface: 0.60,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.06,
+  recommendedYaw: 5,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 80,
+  actionRepeatFrames: 80,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorTerminalWallFalseCentralDoorAction.stage || "").startsWith("post-door-central-door"), `ComputerRoom terminal wall must not be treated as the Central Hall door before bridge travel matures (actual=${postDoorTerminalWallFalseCentralDoorAction.stage})`);
+assert(postDoorTerminalWallFalseCentralDoorAction.use !== true, "ComputerRoom terminal wall false CentralDoor evidence must not pulse Use");
+
+const postDoorImmatureCentralHallRouteRuntime = runtimeFactory.create(publicProfile);
+postDoorImmatureCentralHallRouteRuntime.predictions = 8612;
+postDoorImmatureCentralHallRouteRuntime.stagePulseComputerRoomEgressFrames = 78;
+const postDoorImmatureCentralHallRouteAction = postDoorImmatureCentralHallRouteRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.26,
+  postDoorTerminalSurface: 0.42,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 30,
+  routeTopologyCenterCorridorAlignment: -0.04,
+  recommendedYaw: 7,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.63,
+  wallVector: 0.42,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 44,
+  actionRepeatFrames: 44,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorImmatureCentralHallRouteAction.stage || "").startsWith("post-door-central-door"), `Immature ComputerRoom central-hall route hint must not start CentralDoor handling before bridge travel matures (actual=${postDoorImmatureCentralHallRouteAction.stage}; reason=${postDoorImmatureCentralHallRouteAction.safetyReason}; pipeline=${postDoorImmatureCentralHallRouteAction.pipeline})`);
+assert(postDoorImmatureCentralHallRouteAction.use !== true, "Immature ComputerRoom central-hall route hint must not pulse Use");
+
+const postDoorComputerRoomBrightWallRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomBrightWallRuntime.predictions = 8688;
+postDoorComputerRoomBrightWallRuntime.stagePulseComputerRoomEgressFrames = 98;
+postDoorComputerRoomBrightWallRuntime.moveRepeatFrames = 160;
+postDoorComputerRoomBrightWallRuntime.actionRepeatFrames = 160;
+const postDoorComputerRoomBrightWallAction = postDoorComputerRoomBrightWallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.37,
+  postDoorTerminalSurface: 0.47,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 96,
+  routeTopologyCenterCorridorAlignment: 0.01,
+  routeTopologyWallDistanceNormalized: 0.49,
+  recommendedYaw: 5,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.64,
+  wallVector: 0.49,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 160,
+  actionRepeatFrames: 160,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorComputerRoomBrightWallAction.stage || "").startsWith("post-door-central-door"), `ComputerRoom bright wall must not mature into CentralDoor handling without strong door surface evidence (actual=${postDoorComputerRoomBrightWallAction.stage}; reason=${postDoorComputerRoomBrightWallAction.safetyReason}; pipeline=${postDoorComputerRoomBrightWallAction.pipeline})`);
+assert(postDoorComputerRoomBrightWallAction.use !== true, "ComputerRoom bright wall false CentralDoor evidence must not pulse Use");
+
+const postDoorComputerRoomAdvanceOnlyTerminalWallRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomAdvanceOnlyTerminalWallRuntime.predictions = 8698;
+postDoorComputerRoomAdvanceOnlyTerminalWallRuntime.stagePulseComputerRoomEgressFrames = 98;
+postDoorComputerRoomAdvanceOnlyTerminalWallRuntime.moveRepeatFrames = 160;
+postDoorComputerRoomAdvanceOnlyTerminalWallRuntime.actionRepeatFrames = 160;
+const postDoorComputerRoomAdvanceOnlyTerminalWallAction = postDoorComputerRoomAdvanceOnlyTerminalWallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.63,
+  bridgeDoorScore: 0.42,
+  postDoorTerminalSurface: 0.66,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 96,
+  routeTopologyCenterCorridorAlignment: 0.20,
+  routeTopologyWallDistanceNormalized: 0.71,
+  routeTopologyBarrelZoneEvidence: 0.30,
+  recommendedYaw: 5,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.64,
+  wallVector: 0.49,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 160,
+  actionRepeatFrames: 160,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(!String(postDoorComputerRoomAdvanceOnlyTerminalWallAction.stage || "").startsWith("post-door-central-door"), `Advance-only ComputerRoom terminal wall must not enter CentralDoor handling (actual=${postDoorComputerRoomAdvanceOnlyTerminalWallAction.stage}; reason=${postDoorComputerRoomAdvanceOnlyTerminalWallAction.safetyReason}; pipeline=${postDoorComputerRoomAdvanceOnlyTerminalWallAction.pipeline})`);
+assert(postDoorComputerRoomAdvanceOnlyTerminalWallAction.use !== true, "Advance-only ComputerRoom terminal wall must not pulse Use");
+
+const postDoorComputerRoomCentralRouteParallelLoopRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomCentralRouteParallelLoopRuntime.predictions = 8740;
+postDoorComputerRoomCentralRouteParallelLoopRuntime.stagePulseComputerRoomEgressFrames = 60;
+postDoorComputerRoomCentralRouteParallelLoopRuntime.moveRepeatFrames = 140;
+postDoorComputerRoomCentralRouteParallelLoopRuntime.actionRepeatFrames = 140;
+const postDoorComputerRoomCentralRouteParallelLoopAction = postDoorComputerRoomCentralRouteParallelLoopRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.57,
+  bridgeDoorScore: 0.25,
+  postDoorTerminalSurface: 0.52,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 120,
+  routeTopologyCenterCorridorAlignment: 0.03,
+  routeTopologyWallDistanceNormalized: 0.55,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  recommendedYaw: 5,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  wallVector: 0.42,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 140,
+  actionRepeatFrames: 140,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(postDoorComputerRoomCentralRouteParallelLoopAction.stage === "post-door-computer-room-egress-central-route-parallel-loop-right-reacquire", `Central route parallel loop should reacquire to the right instead of left/straight oscillation (actual=${postDoorComputerRoomCentralRouteParallelLoopAction.stage})`);
+assert(postDoorComputerRoomCentralRouteParallelLoopAction.move === "forward" && postDoorComputerRoomCentralRouteParallelLoopAction.turn === "right", "Central route parallel loop release should preserve forward pressure while yawing right");
+
+const postDoorComputerRoomCentralRouteLowYawLoopRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomCentralRouteLowYawLoopRuntime.predictions = 8790;
+postDoorComputerRoomCentralRouteLowYawLoopRuntime.stagePulseComputerRoomEgressFrames = 60;
+postDoorComputerRoomCentralRouteLowYawLoopRuntime.moveRepeatFrames = 18;
+postDoorComputerRoomCentralRouteLowYawLoopRuntime.actionRepeatFrames = 18;
+const postDoorComputerRoomCentralRouteLowYawLoopAction = postDoorComputerRoomCentralRouteLowYawLoopRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.25,
+  postDoorTerminalSurface: 0.47,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 60,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  recommendedYaw: 0,
+  footObstacleScore: 0.46,
+  motionObstacleScore: 0.44,
+  wallVector: 0.40,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 18,
+  actionRepeatFrames: 18,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(postDoorComputerRoomCentralRouteLowYawLoopAction.stage === "post-door-computer-room-egress-central-route-low-yaw-loop-right-reacquire", `Central route low-yaw COMPUTERROOM loop should reacquire to the right instead of alternating left/straight (actual=${postDoorComputerRoomCentralRouteLowYawLoopAction.stage}; debug=${JSON.stringify({
+  currentRoute: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.currentRoute,
+  routeMode: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.routeMode,
+  currentLandmark: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.currentLandmark,
+  doorOpenedCount: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.doorOpenedCount,
+  computerRoomEntered: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.computerRoomEntered,
+  centralHallEntered: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.centralHallEntered,
+  bridgeConfidence: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.bridgeConfidence,
+  bridgeDoorScore: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.bridgeDoorScore,
+  postDoorTerminalSurface: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.postDoorTerminalSurface,
+  barrel: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.routeTopologyBarrelZoneEvidence,
+  wallDistance: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.routeTopologyWallDistanceNormalized,
+  align: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.routeTopologyCenterCorridorAlignment,
+  recommendedYaw: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.recommendedYaw,
+  routeFallbackYaw: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.routeFallbackYaw,
+  motionForwardProgress: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.motionForwardProgress,
+  actionRepeatFrames: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.actionRepeatFrames,
+  moveRepeatFrames: postDoorComputerRoomCentralRouteLowYawLoopRuntime.lastStatus?.debugRouteValues?.moveRepeatFrames,
+  stagePulseComputerRoomEgressFrames: postDoorComputerRoomCentralRouteLowYawLoopRuntime.stagePulseComputerRoomEgressFrames
+})})`);
+assert(postDoorComputerRoomCentralRouteLowYawLoopAction.move === "forward" && postDoorComputerRoomCentralRouteLowYawLoopAction.turn === "right", "Central route low-yaw loop release should preserve forward pressure while yawing right");
+
+const postDoorComputerRoomCentralRouteSideWallGlideRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomCentralRouteSideWallGlideRuntime.predictions = 8820;
+postDoorComputerRoomCentralRouteSideWallGlideRuntime.stagePulseComputerRoomEgressFrames = 40;
+postDoorComputerRoomCentralRouteSideWallGlideRuntime.moveRepeatFrames = 48;
+postDoorComputerRoomCentralRouteSideWallGlideRuntime.actionRepeatFrames = 48;
+const postDoorComputerRoomCentralRouteSideWallGlideAction = postDoorComputerRoomCentralRouteSideWallGlideRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.57,
+  bridgeDoorScore: 0.38,
+  postDoorTerminalSurface: 0.33,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  routeTopologyCenterCorridorAlignment: -0.05,
+  routeTopologyWallDistanceNormalized: 0.36,
+  routeTopologyBarrelZoneEvidence: 0.46,
+  recommendedYaw: 5,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.57,
+  wallVector: 0.36,
+  motionForwardProgress: 0.65,
+  moveRepeatFrames: 48,
+  actionRepeatFrames: 48,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(postDoorComputerRoomCentralRouteSideWallGlideAction.stage === "post-door-computer-room-egress-central-route-side-wall-glide-right-reacquire", `Central route side-wall glide should yaw right instead of holding a long straight wall glide (actual=${postDoorComputerRoomCentralRouteSideWallGlideAction.stage})`);
+assert(postDoorComputerRoomCentralRouteSideWallGlideAction.move === "forward" && postDoorComputerRoomCentralRouteSideWallGlideAction.turn === "right", "Central route side-wall glide release should keep forward pressure while yawing right");
+
+const postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime.predictions = 8840;
+postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime.stagePulseComputerRoomEgressFrames = 36;
+postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime.moveRepeatFrames = 24;
+postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime.actionRepeatFrames = 24;
+const postDoorCrossBridgeLaneLeftDeadEndRightEscapeAction = postDoorCrossBridgeLaneLeftDeadEndRightEscapeRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.14,
+  postDoorTerminalSurface: 0.33,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  routeTopologyCenterCorridorAlignment: -0.37,
+  routeTopologyWallDistanceNormalized: 0.39,
+  routeTopologyBarrelZoneEvidence: 0.99,
+  routeDeadEndRisk: true,
+  recommendedYaw: 6,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  wallVector: 0.39,
+  motionForwardProgress: 0.65,
+  moveRepeatFrames: 24,
+  actionRepeatFrames: 24,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(postDoorCrossBridgeLaneLeftDeadEndRightEscapeAction.stage === "post-door-computer-room-egress-bridge-lane-left-dead-end-right-escape", `CrossBridge left dead-end band should escape right instead of sustaining forward-left (actual=${postDoorCrossBridgeLaneLeftDeadEndRightEscapeAction.stage})`);
+assert(postDoorCrossBridgeLaneLeftDeadEndRightEscapeAction.move === "forward" && postDoorCrossBridgeLaneLeftDeadEndRightEscapeAction.turn === "right", "CrossBridge left dead-end escape should preserve forward pressure while yawing right");
+
+const postDoorCrossBridgeLowDoorLeftLoopRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLowDoorLeftLoopRuntime.predictions = 8860;
+postDoorCrossBridgeLowDoorLeftLoopRuntime.stagePulseComputerRoomEgressFrames = 34;
+postDoorCrossBridgeLowDoorLeftLoopRuntime.crossBridgeLowDoorLaneLoopFrames = 6;
+postDoorCrossBridgeLowDoorLeftLoopRuntime.actionRepeatFrames = 96;
+postDoorCrossBridgeLowDoorLeftLoopRuntime.moveRepeatFrames = 96;
+const postDoorCrossBridgeLowDoorLeftLoopAction = postDoorCrossBridgeLowDoorLeftLoopRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.01,
+  postDoorTerminalSurface: 0.35,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyWallDistanceNormalized: 0.60,
+  routeTopologyBarrelZoneEvidence: 0.52,
+  recommendedYaw: -4,
+  footObstacleScore: 0.46,
+  motionObstacleScore: 0.44,
+  wallVector: 0.42,
+  motionForwardProgress: 0.20,
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(postDoorCrossBridgeLowDoorLeftLoopAction.stage === "post-door-computer-room-egress-bridge-lane-low-door-right-reacquire", `Low-door CrossBridge lane loop should reacquire right instead of repeating left yaw (actual=${postDoorCrossBridgeLowDoorLeftLoopAction.stage})`);
+assert(postDoorCrossBridgeLowDoorLeftLoopAction.move === "forward" && postDoorCrossBridgeLowDoorLeftLoopAction.turn === "right", "Low-door CrossBridge lane loop should keep forward pressure while yawing right");
+assert(postDoorCrossBridgeLowDoorLeftLoopAction.strafe !== true, "Low-door CrossBridge lane loop should drop left strafe during right reacquire");
+
+const postDoorCrossBridgeStraightProofOwnershipRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeStraightProofOwnershipRuntime.predictions = 8920;
+postDoorCrossBridgeStraightProofOwnershipRuntime.stagePulseComputerRoomEgressFrames = 46;
+postDoorCrossBridgeStraightProofOwnershipRuntime.actionSignature = "forward+run";
+postDoorCrossBridgeStraightProofOwnershipRuntime.moveRepeatFrames = 96;
+postDoorCrossBridgeStraightProofOwnershipRuntime.actionRepeatFrames = 96;
+const postDoorCrossBridgeStraightProofOwnershipAction = postDoorCrossBridgeStraightProofOwnershipRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.53,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyWallDistanceNormalized: 0.55,
+  routeTopologyBarrelZoneEvidence: 0.20,
+  recommendedYaw: 0,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  wallVector: 0.49,
+  motionForwardProgress: 0.04,
+  actionSignature: "forward+run",
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(
+  postDoorCrossBridgeStraightProofOwnershipAction.stage === "post-door-computer-room-egress-bridge-lane-sustain",
+  `Live CrossBridge lane should remain owned by bridge-lane sustain instead of Central Hall straight proof (actual=${postDoorCrossBridgeStraightProofOwnershipAction.stage}; reason=${postDoorCrossBridgeStraightProofOwnershipAction.safetyReason})`);
+assert(postDoorCrossBridgeStraightProofOwnershipAction.turn === "left", "CrossBridge lane sustain should bias left instead of holding central-hall straight proof");
+
+const postDoorCentralHallDoorCueRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralHallDoorCueRuntime.predictions = 8930;
+postDoorCentralHallDoorCueRuntime.stagePulseComputerRoomEgressFrames = 48;
+postDoorCentralHallDoorCueRuntime.actionSignature = "forward+turn:left+strafe+run";
+postDoorCentralHallDoorCueRuntime.actionRepeatFrames = 2;
+postDoorCentralHallDoorCueRuntime.moveRepeatFrames = 2;
+const postDoorCentralHallDoorCueAction = postDoorCentralHallDoorCueRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.29,
+  postDoorTerminalSurface: 0.50,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 28,
+  routeTopologyCenterCorridorAlignment: 0.22,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.50,
+  recommendedYaw: 0,
+  footObstacleScore: 0.44,
+  motionObstacleScore: 0.44,
+  wallVector: 0.49,
+  motionForwardProgress: 0.08,
+  actionSignature: "forward+turn:left+strafe+run",
+  actionRepeatFrames: 2,
+  moveRepeatFrames: 2,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(
+  postDoorCentralHallDoorCueAction.stage !== "post-door-computer-room-egress-bridge-lane-sustain",
+  `CentralHall door cue should not be reclaimed by bridge-lane sustain after route ownership switches to central hall (actual=${postDoorCentralHallDoorCueAction.stage}; reason=${postDoorCentralHallDoorCueAction.safetyReason})`);
+assert(
+  !(postDoorCentralHallDoorCueAction.turn === "left" && postDoorCentralHallDoorCueAction.strafe === true),
+  "CentralHall door cue should drop left-strafe lane sustain ownership");
+
+const postDoorCentralDoorPostUseAdvanceRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUseAdvanceRuntime.predictions = 8671;
+postDoorCentralDoorPostUseAdvanceRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 119;
+const postDoorCentralDoorPostUseAdvanceAction = postDoorCentralDoorPostUseAdvanceRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 2,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.05,
+  postDoorTerminalSurface: 0.61,
+  routePostDoorBridgeDoorMemoryFrames: 11,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  usePulseCooldown: 36
+}));
+assert(postDoorCentralDoorPostUseAdvanceAction.stage === "post-door-central-door-post-use-advance", `Central-door post-use pulse should push forward instead of dropping back to ComputerRoom egress (actual=${postDoorCentralDoorPostUseAdvanceAction.stage})`);
+assert(postDoorCentralDoorPostUseAdvanceAction.move === "forward" && postDoorCentralDoorPostUseAdvanceAction.turn === "none", "Central-door post-use pulse should prioritize a straight push through the doorway");
+
+const postDoorCentralDoorCrossBridgeLeakRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorCrossBridgeLeakRuntime.predictions = 8940;
+postDoorCentralDoorCrossBridgeLeakRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 64;
+postDoorCentralDoorCrossBridgeLeakRuntime.centralDoorCornerSequenceFrames = 24;
+postDoorCentralDoorCrossBridgeLeakRuntime.centralDoorCornerSequenceStep = "contact-forward";
+postDoorCentralDoorCrossBridgeLeakRuntime.centralDoorCornerTrustedLandmarkFrames = 48;
+postDoorCentralDoorCrossBridgeLeakRuntime.lastCentralDoorUsePrediction = 8904;
+postDoorCentralDoorCrossBridgeLeakRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorCrossBridgeLeakRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorCrossBridgeLeakRuntime.lastCentralDoorUseHint = "advance-central-hall";
+const postDoorCentralDoorCrossBridgeLeakAction = postDoorCentralDoorCrossBridgeLeakRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  routeHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.12,
+  postDoorTerminalSurface: 0.35,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.04,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.32,
+  recommendedYaw: 0,
+  footObstacleScore: 0.42,
+  motionObstacleScore: 0.42,
+  wallVector: 0.42,
+  motionForwardProgress: 0.08,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 42,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(
+  String(postDoorCentralDoorCrossBridgeLeakAction.stage || "").indexOf("post-door-central-door") < 0
+    && String(postDoorCentralDoorCrossBridgeLeakAction.pipeline || "").indexOf("post-door-central-door") < 0,
+  `Live CrossBridge lane evidence should suppress stale central-door post-use ownership (actual=${postDoorCentralDoorCrossBridgeLeakAction.pipeline}/${postDoorCentralDoorCrossBridgeLeakAction.stage}; reason=${postDoorCentralDoorCrossBridgeLeakAction.safetyReason})`);
+assert(postDoorCentralDoorCrossBridgeLeakAction.use !== true, "CrossBridge lane suppression should not spend Use while leaving stale central-door ownership");
+
+const postDoorCentralDoorAdvanceOnlyDirectUseGuardRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorAdvanceOnlyDirectUseGuardRuntime.predictions = 8650;
+const postDoorCentralDoorAdvanceOnlyDirectUseGuardAction = postDoorCentralDoorAdvanceOnlyDirectUseGuardRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeLaneVisible: true,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.42,
+  postDoorTerminalSurface: 0.56,
+  depthSig: 0.50,
+  spawnLandmarkRouteEvidence: 0.52,
+  routePostDoorBridgeDoorMemoryFrames: 48,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  wallVector: 0.42,
+  motionForwardProgress: 0.04,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorAdvanceOnlyDirectUseGuardAction.stage === "post-door-central-door-corner-backoff", `Advance-only central-door cue should start the explicit backoff/align/contact/use sequence instead of direct Use (actual=${postDoorCentralDoorAdvanceOnlyDirectUseGuardAction.stage})`);
+assert(postDoorCentralDoorAdvanceOnlyDirectUseGuardAction.use !== true, "Advance-only central-door cue must not spend Use before the explicit sequence reaches stop-use");
+
+const postDoorCentralDoorRecentUseContactRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRecentUseContactRuntime.predictions = 8720;
+postDoorCentralDoorRecentUseContactRuntime.lastCentralDoorUsePrediction = 8668;
+postDoorCentralDoorRecentUseContactRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 306;
+const postDoorCentralDoorRecentUseContactAction = postDoorCentralDoorRecentUseContactRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.50,
+  postDoorTerminalSurface: 0.44,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.61,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 44,
+  actionRepeatFrames: 44,
+  usePulseCooldown: 34
+}));
+assert(postDoorCentralDoorRecentUseContactAction.stage === "post-door-central-door-post-use-initial-shove", `Recent central-door Use with contact should keep the opening shove before retrying backoff (actual=${postDoorCentralDoorRecentUseContactAction.stage})`);
+assert(postDoorCentralDoorRecentUseContactAction.move === "forward" && postDoorCentralDoorRecentUseContactAction.turn === "none", "Recent central-door contact shove should keep forward pressure through the door opening delay");
+
+const postDoorCentralDoorRecentUseOpeningSettleRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRecentUseOpeningSettleRuntime.predictions = 8728;
+postDoorCentralDoorRecentUseOpeningSettleRuntime.lastCentralDoorUsePrediction = 8700;
+postDoorCentralDoorRecentUseOpeningSettleRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorRecentUseOpeningSettleRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorRecentUseOpeningSettleRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorRecentUseOpeningSettleRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorRecentUseOpeningSettleRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 250;
+const postDoorCentralDoorRecentUseOpeningSettleAction = postDoorCentralDoorRecentUseOpeningSettleRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.48,
+  routePostDoorBridgeDoorMemoryFrames: 18,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.61,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 28,
+  actionRepeatFrames: 28,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorRecentUseOpeningSettleAction.stage === "post-door-central-door-post-use-initial-shove", `Recent central-door Use must keep opening-settle shove before retry counters mature (actual=${postDoorCentralDoorRecentUseOpeningSettleAction.stage})`);
+assert(postDoorCentralDoorRecentUseOpeningSettleAction.move === "forward" && postDoorCentralDoorRecentUseOpeningSettleAction.turn === "none", "Recent central-door opening settle should continue straight forward");
+
+const postDoorCentralDoorExpiredUseContactRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorExpiredUseContactRuntime.predictions = 8742;
+postDoorCentralDoorExpiredUseContactRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorExpiredUseContactRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorExpiredUseContactRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorExpiredUseContactRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorExpiredUseContactRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorExpiredUseContactRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 306;
+const postDoorCentralDoorExpiredUseContactAction = postDoorCentralDoorExpiredUseContactRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.50,
+  postDoorTerminalSurface: 0.44,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.61,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 72,
+  actionRepeatFrames: 72,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorExpiredUseContactAction.stage === "post-door-central-door-corner-backoff", `Expired central-door Use pulse with contact should retry the explicit sequence (actual=${postDoorCentralDoorExpiredUseContactAction.stage})`);
+assert(postDoorCentralDoorExpiredUseContactAction.move === "back", "Expired central-door Use pulse should release contact with pure backoff");
+assert(postDoorCentralDoorExpiredUseContactRuntime.centralDoorPostUseRetryCount >= 1, "Expired central-door Use retry should mark a deliberate retry sequence");
+
+const postDoorCentralDoorRetryBackoffHoldRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRetryBackoffHoldRuntime.predictions = 8760;
+postDoorCentralDoorRetryBackoffHoldRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorRetryBackoffHoldRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorRetryBackoffHoldRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorRetryBackoffHoldRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorRetryBackoffHoldRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorRetryBackoffHoldRuntime.centralDoorPostUseRetryCount = 1;
+postDoorCentralDoorRetryBackoffHoldRuntime.centralDoorCornerSequenceFrames = 14;
+postDoorCentralDoorRetryBackoffHoldRuntime.centralDoorCornerSequenceStep = "backoff";
+postDoorCentralDoorRetryBackoffHoldRuntime.centralDoorCornerTrustedLandmarkFrames = 96;
+const postDoorCentralDoorRetryBackoffHoldAction = postDoorCentralDoorRetryBackoffHoldRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.50,
+  postDoorTerminalSurface: 0.44,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.61,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 72,
+  actionRepeatFrames: 72,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorRetryBackoffHoldAction.stage === "post-door-central-door-corner-backoff", `Deliberate central-door retry should hold pure backoff longer before turning (actual=${postDoorCentralDoorRetryBackoffHoldAction.stage})`);
+assert(postDoorCentralDoorRetryBackoffHoldAction.move === "back" && postDoorCentralDoorRetryBackoffHoldAction.turn === "none", "Deliberate central-door retry backoff must remain pure backoff");
+
+const postDoorCentralDoorEgressOwnerProgressRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorEgressOwnerProgressRuntime.predictions = 8780;
+postDoorCentralDoorEgressOwnerProgressRuntime.stagePulseComputerRoomEgressFrames = 118;
+postDoorCentralDoorEgressOwnerProgressRuntime.centralDoorPostUseRetryCount = 1;
+postDoorCentralDoorEgressOwnerProgressRuntime.centralDoorCornerSequenceFrames = 19;
+postDoorCentralDoorEgressOwnerProgressRuntime.centralDoorCornerSequenceStep = "backoff";
+postDoorCentralDoorEgressOwnerProgressRuntime.centralDoorCornerTrustedLandmarkFrames = 96;
+const postDoorCentralDoorEgressOwnerProgressAction = postDoorCentralDoorEgressOwnerProgressRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.50,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.30,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  routeTopologyWallDistanceNormalized: 0.48,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyBarrelZoneEvidence: 0.42,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.58,
+  wallVector: 0.58,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 128,
+  actionRepeatFrames: 128,
+  recommendedYaw: 8,
+  routeFallbackYaw: 8,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorEgressOwnerProgressAction.stage === "post-door-central-door-corner-align-turn", `Active central-door retry stolen by ComputerRoom egress should continue into align-turn instead of restarting backoff (actual=${postDoorCentralDoorEgressOwnerProgressAction.stage}; safety=${postDoorCentralDoorEgressOwnerProgressAction.safetyReason})`);
+assert(postDoorCentralDoorEgressOwnerProgressAction.actionSequenceId === "central-door-corner-use", "Central-door retry action should publish semantic sequence ownership");
+assert(postDoorCentralDoorEgressOwnerProgressRuntime.centralDoorCornerSequenceFrames > 19, "Central-door retry owner should preserve and advance sequence frames under egress pressure");
+
+const postDoorFirstDoorPublishedOwnerLeakRuntime = runtimeFactory.create(publicProfile);
+postDoorFirstDoorPublishedOwnerLeakRuntime.predictions = 1000;
+postDoorFirstDoorPublishedOwnerLeakRuntime.lastDoorOpenedCount = 1;
+postDoorFirstDoorPublishedOwnerLeakRuntime.lastStatus = {
+  debugRouteValues: {
+    routeMode: "post-door",
+    previousRouteMode: "post-door",
+    currentRoute: "central-hall-route",
+    routeName: "central-hall-route",
+    route: "central-hall-route",
+    currentLandmark: "central-hall-door",
+    routeLandmark: "central-hall-door",
+    routeActionHint: "open-central-hall-door",
+    routeHint: "open-central-hall-door",
+    objective: "reach-central-hall",
+    currentObjective: "reach-central-hall",
+    routeObjective: "reach-central-hall",
+    doorOpenedCount: 1,
+    firstDoorOpened: true,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    bridgeDoorScore: 0.30,
+    bridgeConfidence: 0.58,
+    postDoorTerminalSurface: 0.50
+  },
+  autoplayState: {
+    routeMode: "post-door",
+    currentRoute: "central-hall-route",
+    currentLandmark: "central-hall-door",
+    routeActionHint: "open-central-hall-door",
+    objective: "reach-central-hall",
+    doorOpenedCount: 1,
+    firstDoorOpened: true,
+    computerRoomEntered: true,
+    centralHallEntered: false
+  }
+};
+const postDoorFirstDoorPublishedOwnerLeakAction = postDoorFirstDoorPublishedOwnerLeakRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  routeName: "computer-room-route",
+  route: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  pipeline: "ComputerRoom",
+  controlPipeline: "ComputerRoom",
+  stage: "",
+  safetyReason: "closed-door-first-door-status-owner-corrected",
+  debugRouteValues: {
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    routeName: "first-door-route",
+    route: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    routeHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    currentObjective: "find-corridor-to-first-door",
+    routeObjective: "find-corridor-to-first-door",
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false
+  },
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  computerRoomConfidence: 0.52,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.04,
+  postDoorTerminalSurface: 0.42,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorUse3x3Score: 0,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96
+}));
+const postDoorFirstDoorPublishedOwnerLeakText = [
+  postDoorFirstDoorPublishedOwnerLeakAction.pipeline,
+  postDoorFirstDoorPublishedOwnerLeakAction.stage,
+  postDoorFirstDoorPublishedOwnerLeakAction.safetyReason,
+  postDoorFirstDoorPublishedOwnerLeakAction.objective,
+  postDoorFirstDoorPublishedOwnerLeakAction.routeObjective
+].join(" ").toLowerCase();
+assert(!postDoorFirstDoorPublishedOwnerLeakText.includes("find-corridor-to-first-door"), `Trusted post-door owner leak should not return to first-door objective (actual=${postDoorFirstDoorPublishedOwnerLeakText})`);
+assert(postDoorFirstDoorPublishedOwnerLeakText.includes("reach-central-hall") || postDoorFirstDoorPublishedOwnerLeakText.includes("post-door"), `Trusted post-door owner leak should stay on the post-door route (actual=${postDoorFirstDoorPublishedOwnerLeakText})`);
+const postDoorFirstDoorPublishedOwnerLeakStatus = postDoorFirstDoorPublishedOwnerLeakRuntime.lastStatus || {};
+const postDoorFirstDoorPublishedOwnerLeakStatusText = [
+  postDoorFirstDoorPublishedOwnerLeakText,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.currentRoute,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.routeName,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.route,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.currentLandmark,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.routeLandmark,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.routeActionHint,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.routeHint,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.objective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.currentObjective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.debugRouteValues?.routeObjective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.currentRoute,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.routeName,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.route,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.currentLandmark,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.routeLandmark,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.routeActionHint,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.routeHint,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.objective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.currentObjective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplayState?.routeObjective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.controlPipeline,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.stage,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.safetyReason,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.objective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.currentObjective,
+  postDoorFirstDoorPublishedOwnerLeakStatus.autoplay?.routeObjective
+].join(" ").toLowerCase();
+[
+  "closed-door-first-door",
+  "closed-door-stage-rerouted",
+  "opening-forward-runtime",
+  "first-door-approach",
+  "advance-first-door",
+  "find-corridor-to-first-door"
+].forEach(token => {
+  assert(
+    !postDoorFirstDoorPublishedOwnerLeakStatusText.includes(token),
+    `Trusted post-door owner leak should clear stale FirstDoor status token ${token} (actual=${postDoorFirstDoorPublishedOwnerLeakStatusText})`);
+});
+assert(postDoorFirstDoorPublishedOwnerLeakStatusText.includes("central-hall") || postDoorFirstDoorPublishedOwnerLeakStatusText.includes("cross-bridge"), `Trusted post-door owner leak should publish a post-door route/status (actual=${postDoorFirstDoorPublishedOwnerLeakStatusText})`);
+
+const postDoorCentralDoorStaleFrameRestartRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorStaleFrameRestartRuntime.predictions = 8774;
+postDoorCentralDoorStaleFrameRestartRuntime.centralDoorCornerSequenceFrames = 82;
+postDoorCentralDoorStaleFrameRestartRuntime.centralDoorCornerSequenceStep = "backoff";
+postDoorCentralDoorStaleFrameRestartRuntime.centralDoorCornerTrustedLandmarkFrames = 0;
+const postDoorCentralDoorStaleFrameRestartAction = postDoorCentralDoorStaleFrameRestartRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.44,
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.36,
+  postDoorTerminalSurface: 0.50,
+  spawnCorridorGapScore: 0.34,
+  spawnLandmarkRouteEvidence: 0.46,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.66,
+  motionObstacleScore: 0.64,
+  wallVector: 0.62,
+  motionForwardProgress: 0.03,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  recommendedYaw: 8,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorStaleFrameRestartAction.stage === "post-door-central-door-corner-backoff", `Stale central-door frame cache should restart the explicit sequence at backoff instead of jumping to Use (actual=${postDoorCentralDoorStaleFrameRestartAction.stage})`);
+assert(postDoorCentralDoorStaleFrameRestartAction.use !== true, "Stale central-door frame restart must not pulse Use on the first recovered frame");
+assert(postDoorCentralDoorStaleFrameRestartRuntime.centralDoorCornerSequenceFrames <= 2, `Stale central-door frame restart should reset progress near the beginning (actual=${postDoorCentralDoorStaleFrameRestartRuntime.centralDoorCornerSequenceFrames})`);
+
+const postDoorCentralDoorAdvanceOnlyFailedUseRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.predictions = 8792;
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.lastCentralDoorUseHint = "advance-central-hall";
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.lastCentralDoorUseAdvanceOnly = true;
+postDoorCentralDoorAdvanceOnlyFailedUseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 242;
+const postDoorCentralDoorAdvanceOnlyFailedUseAction = postDoorCentralDoorAdvanceOnlyFailedUseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.38,
+  postDoorTerminalSurface: 0.65,
+  routePostDoorBridgeDoorMemoryFrames: 24,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.49,
+  routeTopologyBarrelZoneEvidence: 0.47,
+  routeTopologyCenterCorridorAlignment: 0.01,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.61,
+  motionForwardProgress: 0.04,
+  moveRepeatFrames: 80,
+  actionRepeatFrames: 80,
+  usePulseCooldown: 24
+}));
+assert(postDoorCentralDoorAdvanceOnlyFailedUseAction.stage === "post-door-central-door-corner-backoff", `Advance-only central-door post-use contact should retry the explicit sequence instead of wall-shoving forever (actual=${postDoorCentralDoorAdvanceOnlyFailedUseAction.stage}; reason=${postDoorCentralDoorAdvanceOnlyFailedUseAction.safetyReason})`);
+assert(postDoorCentralDoorAdvanceOnlyFailedUseAction.move === "back", "Advance-only failed central-door Use should start with pure backoff");
+
+const postDoorCentralDoorExtendedShoveRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorExtendedShoveRuntime.predictions = 8800;
+postDoorCentralDoorExtendedShoveRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorExtendedShoveRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 232;
+const postDoorCentralDoorExtendedShoveAction = postDoorCentralDoorExtendedShoveRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.74,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.26,
+  postDoorTerminalSurface: 0.46,
+  routePostDoorBridgeDoorMemoryFrames: 24,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.38,
+  footObstacleScore: 0.61,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 54,
+  actionRepeatFrames: 54,
+  usePulseCooldown: 28
+}));
+assert(postDoorCentralDoorExtendedShoveAction.stage === "post-door-central-door-post-use-initial-shove", `Recent central-door Use should preserve a longer opening shove while the door cue is still live (actual=${postDoorCentralDoorExtendedShoveAction.stage})`);
+assert(postDoorCentralDoorExtendedShoveAction.move === "forward" && postDoorCentralDoorExtendedShoveAction.turn === "none", "Extended central-door opening shove should remain a straight forward push");
+
+const postDoorCentralDoorProgressingFinalShoveRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorProgressingFinalShoveRuntime.predictions = 8810;
+postDoorCentralDoorProgressingFinalShoveRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorProgressingFinalShoveRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorProgressingFinalShoveRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorProgressingFinalShoveRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorProgressingFinalShoveRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorProgressingFinalShoveRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 260;
+postDoorCentralDoorProgressingFinalShoveRuntime.centralDoorPostUseFinalShoveFrames = 73;
+const postDoorCentralDoorProgressingFinalShoveAction = postDoorCentralDoorProgressingFinalShoveRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.74,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.24,
+  postDoorTerminalSurface: 0.46,
+  routePostDoorBridgeDoorMemoryFrames: 24,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.24,
+  routeTopologyWallDistanceNormalized: 0.48,
+  footObstacleScore: 0.44,
+  motionObstacleScore: 0.44,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 16,
+  actionRepeatFrames: 16,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorProgressingFinalShoveAction.stage === "post-door-central-door-post-use-initial-shove", `Progressing central-door final shove should keep the post-use push instead of retrying too early (actual=${postDoorCentralDoorProgressingFinalShoveAction.stage})`);
+assert(postDoorCentralDoorProgressingFinalShoveAction.move === "forward" && postDoorCentralDoorProgressingFinalShoveAction.turn === "none", "Progressing central-door final shove should remain straight forward");
+
+const postDoorCentralDoorLongProgressNoEntryRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorLongProgressNoEntryRuntime.predictions = 8898;
+postDoorCentralDoorLongProgressNoEntryRuntime.lastCentralDoorUsePrediction = 8768;
+postDoorCentralDoorLongProgressNoEntryRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorLongProgressNoEntryRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorLongProgressNoEntryRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorLongProgressNoEntryRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorLongProgressNoEntryRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 220;
+postDoorCentralDoorLongProgressNoEntryRuntime.centralDoorPostUseFinalShoveFrames = 54;
+postDoorCentralDoorLongProgressNoEntryRuntime.actionRepeatFrames = 112;
+postDoorCentralDoorLongProgressNoEntryRuntime.moveRepeatFrames = 112;
+postDoorCentralDoorLongProgressNoEntryRuntime.lastAction = {
+  stage: "post-door-central-door-post-use-initial-shove",
+  pipeline: "post-door-central-door-post-use-advance",
+  safetyReason: "central-door-post-use-final-shove"
+};
+const postDoorCentralDoorLongProgressNoEntryAction = postDoorCentralDoorLongProgressNoEntryRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.77,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.64,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.43,
+  motionObstacleScore: 0.43,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 112,
+  actionRepeatFrames: 112,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorLongProgressNoEntryAction.stage === "post-door-central-door-corner-backoff", `Long unconfirmed central-door forward shove must retry even when visual progress looks high (actual=${postDoorCentralDoorLongProgressNoEntryAction.stage}; safety=${postDoorCentralDoorLongProgressNoEntryAction.safetyReason}; event=${postDoorCentralDoorLongProgressNoEntryAction.svcEvent})`);
+assert(postDoorCentralDoorLongProgressNoEntryAction.move === "back", "Long unconfirmed central-door forward shove should release pressure before a fresh align/contact/use sequence");
+
+const postDoorCentralDoorAdvanceOnlyProgressRetryRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.predictions = 8858;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastCentralDoorUsePrediction = 8768;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastCentralDoorUseHint = "advance-central-hall";
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastCentralDoorUseAdvanceOnly = true;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 246;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.centralDoorPostUseFinalShoveFrames = 50;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.actionRepeatFrames = 84;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.moveRepeatFrames = 84;
+postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.lastAction = {
+  stage: "post-door-central-door-post-use-initial-shove",
+  pipeline: "post-door-central-door-post-use-advance",
+  safetyReason: "central-door-post-use-final-shove"
+};
+const postDoorCentralDoorAdvanceOnlyProgressRetryAction = postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.77,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.64,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.43,
+  motionObstacleScore: 0.43,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 84,
+  actionRepeatFrames: 84,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorAdvanceOnlyProgressRetryAction.stage === "post-door-central-door-corner-backoff", `Advance-only central-door final shove must retry before the 96-frame timeout even when visual progress looks high (actual=${postDoorCentralDoorAdvanceOnlyProgressRetryAction.stage}; safety=${postDoorCentralDoorAdvanceOnlyProgressRetryAction.safetyReason})`);
+assert(postDoorCentralDoorAdvanceOnlyProgressRetryAction.move === "back", "Advance-only central-door retry should release pressure with pure backoff");
+assert(postDoorCentralDoorAdvanceOnlyProgressRetryRuntime.centralDoorPostUseRetryCount >= 1, "Advance-only central-door retry should mark a deliberate retry sequence");
+
+const postDoorCentralDoorBridgeReacquiredArrivalRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorBridgeReacquiredArrivalRuntime.predictions = 9050;
+postDoorCentralDoorBridgeReacquiredArrivalRuntime.centralDoorPostUseRetryCount = 2;
+postDoorCentralDoorBridgeReacquiredArrivalRuntime.lastAction = {
+  stage: "post-door-central-door-post-use-initial-shove",
+  pipeline: "post-door-central-door-post-use-advance",
+  safetyReason: "central-door-post-use-final-shove"
+};
+const postDoorCentralDoorBridgeReacquiredArrivalAction = postDoorCentralDoorBridgeReacquiredArrivalRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.73,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.34,
+  postDoorTerminalSurface: 0.47,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.34,
+  routeTopologyCenterCorridorAlignment: 0.15,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.43,
+  motionObstacleScore: 0.43,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 40,
+  actionRepeatFrames: 40,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorBridgeReacquiredArrivalAction.pipeline === "CentralHall", `Bridge-reacquired central-door arrival should latch CentralHall instead of continuing unlatched (actual=${postDoorCentralDoorBridgeReacquiredArrivalAction.pipeline}; stage=${postDoorCentralDoorBridgeReacquiredArrivalAction.stage})`);
+assert(postDoorCentralDoorBridgeReacquiredArrivalAction.centralHallEntered === true, "Bridge-reacquired central-door arrival should publish centralHallEntered");
+assert(postDoorCentralDoorBridgeReacquiredArrivalAction.safetyReason === "post-door-central-hall-bridge-reacquired-confirmed", "Bridge-reacquired central-door arrival should publish the trusted handoff reason");
+
+const postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime.predictions = 9056;
+postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime.centralDoorPostUseRetryCount = 2;
+postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime.postDoorBridgeReacquiredCentralHallFrames = 5;
+const postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction = postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.73,
+  bridgeConfidence: 0.63,
+  bridgeDoorScore: 0.31,
+  postDoorTerminalSurface: 0.34,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.34,
+  routeTopologyCenterCorridorAlignment: 0.15,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.43,
+  motionObstacleScore: 0.43,
+  motionForwardProgress: 0.18,
+  moveRepeatFrames: 40,
+  actionRepeatFrames: 40,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction.pipeline === "CentralHall", `Live low-memory bridge-reacquired central-door evidence should latch after sustained retry context (actual=${postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction.pipeline}; stage=${postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction.stage}; safety=${postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction.safetyReason})`);
+assert(postDoorCentralDoorBridgeReacquiredLiveLowMemoryAction.safetyReason === "post-door-central-hall-bridge-reacquired-confirmed", "Live low-memory bridge-reacquired latch should use the bridge-reacquired confirmation reason");
+const postDoorCentralDoorBridgeReacquiredLiveLowMemoryStatus = postDoorCentralDoorBridgeReacquiredLiveLowMemoryRuntime.status();
+assert(postDoorCentralDoorBridgeReacquiredLiveLowMemoryStatus.centralHallEntered === true, "Bridge-reacquired CentralHall latch should publish centralHallEntered in runtime status");
+assert(postDoorCentralDoorBridgeReacquiredLiveLowMemoryStatus.autoplayState?.centralHallEntered === true, "Bridge-reacquired CentralHall latch should carry centralHallEntered into autoplayState");
+
+const postDoorComputerRoomEgressCentralHallArrivalRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomEgressCentralHallArrivalRuntime.predictions = 9068;
+postDoorComputerRoomEgressCentralHallArrivalRuntime.centralDoorPostUseRetryCount = 1;
+postDoorComputerRoomEgressCentralHallArrivalRuntime.stagePulseComputerRoomEgressFrames = 60;
+postDoorComputerRoomEgressCentralHallArrivalRuntime.postDoorEgressCentralHallArrivalFrames = 2;
+postDoorComputerRoomEgressCentralHallArrivalRuntime.lastAction = {
+  stage: "post-door-computer-room-egress-bridge-straight-resume",
+  pipeline: "post-door-computer-room-egress",
+  safetyReason: "computer-room-egress-bridge-straight-resume"
+};
+const postDoorComputerRoomEgressCentralHallArrivalAction = postDoorComputerRoomEgressCentralHallArrivalRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  route: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.73,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.31,
+  postDoorTerminalSurface: 0.33,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false,
+  routeAbortHint: "",
+  routeLoopKind: "",
+  routeDeadEndRisk: false,
+  routeTopologyDeadEndRisk: false,
+  routeTopologyBarrelZoneEvidence: 0.32,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  motionForwardProgress: 0.20,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0
+}));
+assert(postDoorComputerRoomEgressCentralHallArrivalAction.pipeline === "CentralHall", `Egress central-hall-route arrival should hand off to CentralHall before ComputerRoom owner can reclaim it (actual=${postDoorComputerRoomEgressCentralHallArrivalAction.pipeline}; stage=${postDoorComputerRoomEgressCentralHallArrivalAction.stage}; safety=${postDoorComputerRoomEgressCentralHallArrivalAction.safetyReason})`);
+assert(postDoorComputerRoomEgressCentralHallArrivalAction.safetyReason === "post-door-central-hall-egress-confirmed", "Egress CentralHall handoff should use the egress confirmation reason");
+const postDoorComputerRoomEgressCentralHallArrivalStatus = postDoorComputerRoomEgressCentralHallArrivalRuntime.status();
+assert(postDoorComputerRoomEgressCentralHallArrivalStatus.centralHallEntered === true, "Egress CentralHall handoff should publish centralHallEntered in runtime status");
+assert(postDoorComputerRoomEgressCentralHallArrivalStatus.autoplayState?.centralHallEntered === true, "Egress CentralHall handoff should carry centralHallEntered into autoplayState");
+
+const postDoorTerminalDecoyCentralHallArrivalRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalDecoyCentralHallArrivalRuntime.predictions = 9084;
+postDoorTerminalDecoyCentralHallArrivalRuntime.lastCentralDoorUsePrediction = 9040;
+postDoorTerminalDecoyCentralHallArrivalRuntime.lastCentralDoorUseHint = "advance-central-hall";
+postDoorTerminalDecoyCentralHallArrivalRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorTerminalDecoyCentralHallArrivalRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorTerminalDecoyCentralHallArrivalRuntime.postDoorFinalCentralHallArrivalFrames = 2;
+postDoorTerminalDecoyCentralHallArrivalRuntime.lastAction = {
+  stage: "post-door-terminal-decoy-forward-resume",
+  pipeline: "post-door-terminal-decoy-forward-resume",
+  safetyReason: "none"
+};
+const postDoorTerminalDecoyCentralHallArrivalAction = postDoorTerminalDecoyCentralHallArrivalRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  route: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  routeHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.57,
+  bridgeConfidence: 0.51,
+  bridgeDoorScore: 0.30,
+  postDoorTerminalSurface: 0.36,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  trustedCombatEvidence: false,
+  visualEnemyVisible: false,
+  routeTopologyBarrelZoneEvidence: 0.32,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyWallDistanceNormalized: 0.66,
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  motionForwardProgress: 0.20,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0
+}));
+assert(postDoorTerminalDecoyCentralHallArrivalAction.pipeline === "CentralHall", `Terminal-decoy central-hall-route evidence should hand off to CentralHall through final repair (actual=${postDoorTerminalDecoyCentralHallArrivalAction.pipeline}; stage=${postDoorTerminalDecoyCentralHallArrivalAction.stage}; safety=${postDoorTerminalDecoyCentralHallArrivalAction.safetyReason})`);
+assert(postDoorTerminalDecoyCentralHallArrivalAction.safetyReason === "post-door-final-central-hall-arrival-confirmed", "Terminal-decoy CentralHall handoff should use the final arrival confirmation reason");
+const postDoorTerminalDecoyCentralHallArrivalStatus = postDoorTerminalDecoyCentralHallArrivalRuntime.status();
+assert(postDoorTerminalDecoyCentralHallArrivalStatus.centralHallEntered === true, "Terminal-decoy CentralHall handoff should publish centralHallEntered in runtime status");
+assert(postDoorTerminalDecoyCentralHallArrivalStatus.autoplayState?.centralHallEntered === true, "Terminal-decoy CentralHall handoff should carry centralHallEntered into autoplayState");
+
+const postDoorCentralDoorAdvanceOnlyHoldRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorAdvanceOnlyHoldRuntime.predictions = 9008;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.lastCentralDoorUsePrediction = 8950;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.lastCentralDoorUseHint = "advance-central-hall";
+postDoorCentralDoorAdvanceOnlyHoldRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorAdvanceOnlyHoldRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorAdvanceOnlyHoldRuntime.lastCentralDoorUseAdvanceOnly = true;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorPostUseRetryCount = 1;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorCornerSequenceFrames = 76;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorCornerSequenceStep = "pre-use-stop";
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorCornerTrustedLandmarkFrames = 96;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorPostUseRetryMinSequenceFrames = 84;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorPostUseRetryStartedPrediction = 9000;
+postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorImmediateUseCandidateFrames = 12;
+const postDoorCentralDoorAdvanceOnlyHoldAction = postDoorCentralDoorAdvanceOnlyHoldRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.40,
+  postDoorTerminalSurface: 0.64,
+  spawnCorridorGapScore: 0.40,
+  spawnLandmarkRouteEvidence: 0.50,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  recommendedYaw: 0,
+  routeFallbackYaw: 0,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.04,
+  usePulseCooldown: 0
+}));
+assert(
+  postDoorCentralDoorAdvanceOnlyHoldAction.stage === "post-door-central-door-corner-contact-forward"
+    || postDoorCentralDoorAdvanceOnlyHoldAction.stage === "post-door-central-door-corner-pre-use-stop",
+  `Advance-only central-door retry hold must block premature Use and preserve sequence ownership (actual=${postDoorCentralDoorAdvanceOnlyHoldAction.stage}; safety=${postDoorCentralDoorAdvanceOnlyHoldAction.safetyReason})`);
+assert(!postDoorCentralDoorAdvanceOnlyHoldAction.use && !postDoorCentralDoorAdvanceOnlyHoldAction.useKey, "Advance-only central-door retry hold should not press Use before the minimum sequence age");
+assert(postDoorCentralDoorAdvanceOnlyHoldRuntime.centralDoorPostUseRetryMinSequenceFrames >= 84, "Advance-only central-door retry hold should stay armed before the minimum sequence age expires");
+
+const postDoorCentralDoorAdvanceOnlyReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.predictions = 9100;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.lastCentralDoorUsePrediction = 8950;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.lastCentralDoorUseHint = "advance-central-hall";
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.lastCentralDoorUseAdvanceOnly = true;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorPostUseRetryCount = 1;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorCornerSequenceFrames = 86;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorCornerSequenceStep = "pre-use-stop";
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorCornerTrustedLandmarkFrames = 96;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorPostUseRetryMinSequenceFrames = 84;
+postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorPostUseRetryStartedPrediction = 9000;
+const postDoorCentralDoorAdvanceOnlyReleaseAction = postDoorCentralDoorAdvanceOnlyReleaseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  bridgeConfidence: 0.59,
+  bridgeDoorScore: 0.40,
+  postDoorTerminalSurface: 0.64,
+  spawnCorridorGapScore: 0.40,
+  spawnLandmarkRouteEvidence: 0.50,
+  routePostDoorBridgeDoorMemory: true,
+  routePostDoorBridgeDoorMemoryFrames: 54,
+  centralHallEntered: false,
+  recommendedYaw: 0,
+  routeFallbackYaw: 0,
+  footObstacleScore: 0.62,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.04,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorAdvanceOnlyReleaseAction.stage === "post-door-central-door-corner-stop-use", `Advance-only central-door retry should allow stationary Use after the minimum sequence age (actual=${postDoorCentralDoorAdvanceOnlyReleaseAction.stage}; safety=${postDoorCentralDoorAdvanceOnlyReleaseAction.safetyReason})`);
+assert(postDoorCentralDoorAdvanceOnlyReleaseAction.use && postDoorCentralDoorAdvanceOnlyReleaseAction.useKey, "Advance-only central-door retry should press Use after the hold expires");
+assert(postDoorCentralDoorAdvanceOnlyReleaseRuntime.centralDoorPostUseRetryMinSequenceFrames === 0, "Advance-only central-door retry hold should clear after the allowed Use");
+
+const postDoorCentralDoorStaleFinalShoveRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorStaleFinalShoveRuntime.predictions = 8810;
+postDoorCentralDoorStaleFinalShoveRuntime.lastCentralDoorUsePrediction = 8688;
+postDoorCentralDoorStaleFinalShoveRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorStaleFinalShoveRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorStaleFinalShoveRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorStaleFinalShoveRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorStaleFinalShoveRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 260;
+postDoorCentralDoorStaleFinalShoveRuntime.centralDoorPostUseFinalShoveFrames = 73;
+const postDoorCentralDoorStaleFinalShoveAction = postDoorCentralDoorStaleFinalShoveRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.74,
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.24,
+  postDoorTerminalSurface: 0.46,
+  routePostDoorBridgeDoorMemoryFrames: 24,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.40,
+  footObstacleScore: 0.64,
+  motionObstacleScore: 0.64,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 16,
+  actionRepeatFrames: 16,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorStaleFinalShoveAction.stage === "post-door-central-door-corner-backoff", `Long unconfirmed central-door final shove should retry the explicit sequence (actual=${postDoorCentralDoorStaleFinalShoveAction.stage})`);
+assert(postDoorCentralDoorStaleFinalShoveAction.move === "back", "Long unconfirmed central-door final shove should release the wall with pure backoff");
+
+const postDoorCentralDoorConfirmedButStalledRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorConfirmedButStalledRuntime.predictions = 8940;
+postDoorCentralDoorConfirmedButStalledRuntime.lastCentralDoorUsePrediction = 8795;
+postDoorCentralDoorConfirmedButStalledRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorConfirmedButStalledRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorConfirmedButStalledRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorConfirmedButStalledRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorConfirmedButStalledRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 240;
+postDoorCentralDoorConfirmedButStalledRuntime.centralDoorPostUseFinalShoveFrames = 121;
+const postDoorCentralDoorConfirmedButStalledAction = postDoorCentralDoorConfirmedButStalledRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 2,
+  centralDoorOpened: true,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.25,
+  postDoorTerminalSurface: 0.46,
+  routePostDoorBridgeDoorMemoryFrames: 30,
+  centralHallEntered: false,
+  footObstacleScore: 0.52,
+  motionObstacleScore: 0.50,
+  motionForwardProgress: 0.10,
+  actionRepeatFrames: 128,
+  moveRepeatFrames: 128,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorConfirmedButStalledAction.stage === "post-door-central-door-corner-backoff", `Confirmed central-door open without central-hall entry should still retry after a stale final shove (actual=${postDoorCentralDoorConfirmedButStalledAction.stage})`);
+assert(postDoorCentralDoorConfirmedButStalledAction.move === "back", "Confirmed-but-stalled central-door final shove should release the wall with pure backoff");
+
+const postDoorCentralDoorExpiredMemoryFinalShoveRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorExpiredMemoryFinalShoveRuntime.predictions = 9300;
+postDoorCentralDoorExpiredMemoryFinalShoveRuntime.lastCentralDoorUsePrediction = 8800;
+postDoorCentralDoorExpiredMemoryFinalShoveRuntime.centralDoorPostUseFinalShoveFrames = 37;
+const postDoorCentralDoorExpiredMemoryFinalShoveAction = postDoorCentralDoorExpiredMemoryFinalShoveRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 2,
+  centralDoorOpened: true,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.25,
+  postDoorTerminalSurface: 0.46,
+  footObstacleScore: 0.52,
+  motionForwardProgress: 0.10,
+  actionRepeatFrames: 180,
+  moveRepeatFrames: 180,
+  usePulseCooldown: 0,
+  lastActionStage: "post-door-central-door-post-use-initial-shove"
+}));
+assert(postDoorCentralDoorExpiredMemoryFinalShoveAction.stage === "post-door-central-door-corner-backoff", `Expired central-door Use memory must not leave stale final-shove latched (actual=${postDoorCentralDoorExpiredMemoryFinalShoveAction.stage})`);
+assert(postDoorCentralDoorExpiredMemoryFinalShoveAction.move === "back", "Expired central-door final-shove latch should release with pure backoff");
+
+const postDoorCentralDoorUseNormalizedToEgressRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorUseNormalizedToEgressRuntime.predictions = 8341;
+postDoorCentralDoorUseNormalizedToEgressRuntime.lastCentralDoorUsePrediction = 8339;
+postDoorCentralDoorUseNormalizedToEgressRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 356;
+const postDoorCentralDoorUseNormalizedToEgressAction = postDoorCentralDoorUseNormalizedToEgressRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.06,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.38,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 86,
+  actionRepeatFrames: 86,
+  usePulseCooldown: 34
+}));
+assert(postDoorCentralDoorUseNormalizedToEgressAction.stage === "post-door-central-door-post-use-initial-shove", `Recent central-door Use must suppress egress back/turn during the short opening shove (actual=${postDoorCentralDoorUseNormalizedToEgressAction.stage})`);
+assert(postDoorCentralDoorUseNormalizedToEgressAction.move === "forward" && postDoorCentralDoorUseNormalizedToEgressAction.turn === "none", "Recent central-door Use normalized to egress should still push straight through the doorway");
+
+const postDoorCentralDoorRecentUseEgressRestoreRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRecentUseEgressRestoreRuntime.predictions = 8420;
+postDoorCentralDoorRecentUseEgressRestoreRuntime.lastCentralDoorUsePrediction = 8378;
+postDoorCentralDoorRecentUseEgressRestoreRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 318;
+postDoorCentralDoorRecentUseEgressRestoreRuntime.stagePulseComputerRoomEgressFrames = 128;
+postDoorCentralDoorRecentUseEgressRestoreRuntime.centralDoorCornerSequenceFrames = 2;
+postDoorCentralDoorRecentUseEgressRestoreRuntime.centralDoorCornerSequenceStep = "forward";
+const postDoorCentralDoorRecentUseEgressRestoreAction = postDoorCentralDoorRecentUseEgressRestoreRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.28,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 22,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.38,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.64,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96,
+  usePulseCooldown: 30
+}));
+assert(postDoorCentralDoorRecentUseEgressRestoreAction.stage === "post-door-central-door-post-use-initial-shove", `Recent central-door Use must restore from ComputerRoom egress during the opening pulse (actual=${postDoorCentralDoorRecentUseEgressRestoreAction.stage})`);
+assert(postDoorCentralDoorRecentUseEgressRestoreAction.move === "forward" && postDoorCentralDoorRecentUseEgressRestoreAction.turn === "none", "Recent central-door egress restore should keep a straight post-use shove");
+
+const postDoorCentralDoorLateRememberedUseRetryRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorLateRememberedUseRetryRuntime.predictions = 8610;
+postDoorCentralDoorLateRememberedUseRetryRuntime.lastCentralDoorUsePrediction = 8378;
+postDoorCentralDoorLateRememberedUseRetryRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorLateRememberedUseRetryRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorLateRememberedUseRetryRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorLateRememberedUseRetryRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorLateRememberedUseRetryRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 118;
+postDoorCentralDoorLateRememberedUseRetryRuntime.stagePulseComputerRoomEgressFrames = 76;
+const postDoorCentralDoorLateRememberedUseRetryAction = postDoorCentralDoorLateRememberedUseRetryRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.10,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.37,
+  routeTopologyBarrelZoneEvidence: 0.86,
+  footObstacleScore: 0.63,
+  motionObstacleScore: 0.62,
+  motionForwardProgress: 0.06,
+  moveRepeatFrames: 122,
+  actionRepeatFrames: 122,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorLateRememberedUseRetryAction.stage === "post-door-central-door-corner-backoff", `Late remembered central-door Use should retry the explicit sequence instead of falling back to ComputerRoom egress (actual=${postDoorCentralDoorLateRememberedUseRetryAction.stage})`);
+assert(postDoorCentralDoorLateRememberedUseRetryAction.move === "back", "Late remembered central-door Use retry should start with pure backoff");
+
+const postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.predictions = 8408;
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.lastCentralDoorUsePrediction = 8339;
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 290;
+const postDoorCentralDoorRecentUseCrossBridgeReleaseAction = postDoorCentralDoorRecentUseCrossBridgeReleaseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 31,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.39,
+  routeTopologyBarrelZoneEvidence: 0.99,
+  routeDeadEndRisk: true,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 68,
+  actionRepeatFrames: 68,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorRecentUseCrossBridgeReleaseAction.stage || "").startsWith("post-door-central-door-post-use"), `Recent failed central-door Use should release the post-use shove once live evidence returns to cross-bridge lane (actual=${postDoorCentralDoorRecentUseCrossBridgeReleaseAction.stage})`);
+assert(postDoorCentralDoorRecentUseCrossBridgeReleaseAction.use !== true, "Recent failed central-door Use release should not pulse Use on cross-bridge lane evidence");
+
+const postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.predictions = 8460;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastCentralDoorUsePrediction = 8339;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 260;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.centralDoorPostUseFinalShoveFrames = 55;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.actionRepeatFrames = 58;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.moveRepeatFrames = 58;
+postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.lastAction = {
+  stage: "post-door-central-door-post-use-initial-shove",
+  pipeline: "post-door-central-door-post-use-advance",
+  safetyReason: "central-door-post-use-final-shove"
+};
+const postDoorCentralDoorCrossBridgeBoundaryReleaseAction = postDoorCentralDoorCrossBridgeBoundaryReleaseRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.78,
+  bridgeConfidence: 0.55,
+  bridgeDoorScore: 0.18,
+  postDoorTerminalSurface: 0.45,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.33,
+  routeTopologyBarrelZoneEvidence: 1.0,
+  routeTopologyCenterCorridorAlignment: -0.32,
+  routeDeadEndRisk: true,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 58,
+  actionRepeatFrames: 58,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorCrossBridgeBoundaryReleaseAction.stage || "").startsWith("post-door-central-door-post-use"), `CrossBridge boundary evidence should release stale central-door post-use shove (actual=${postDoorCentralDoorCrossBridgeBoundaryReleaseAction.stage})`);
+assert(postDoorCentralDoorCrossBridgeBoundaryReleaseAction.use !== true, "CrossBridge boundary release should not pulse Use while the route is no longer a central-door cue");
+
+const postDoorCentralDoorStaleUseCrossBridgeRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorStaleUseCrossBridgeRuntime.predictions = 8560;
+postDoorCentralDoorStaleUseCrossBridgeRuntime.lastCentralDoorUsePrediction = 8339;
+postDoorCentralDoorStaleUseCrossBridgeRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 138;
+const postDoorCentralDoorStaleUseCrossBridgeAction = postDoorCentralDoorStaleUseCrossBridgeRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.58,
+  routePostDoorBridgeDoorMemoryFrames: 31,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.39,
+  routeTopologyBarrelZoneEvidence: 0.99,
+  routeDeadEndRisk: true,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.05,
+  moveRepeatFrames: 120,
+  actionRepeatFrames: 120,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorStaleUseCrossBridgeAction.stage || "").startsWith("post-door-central-door-post-use"), `Stale failed central-door Use should release the straight shove after cross-bridge evidence returns (actual=${postDoorCentralDoorStaleUseCrossBridgeAction.stage})`);
+assert(postDoorCentralDoorStaleUseCrossBridgeAction.use !== true, "Stale failed central-door Use should not keep pulsing Use while the route is back on cross-bridge lane");
+
+const postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.predictions = 8490;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastCentralDoorUsePrediction = 8418;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 248;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.actionRepeatFrames = 132;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.moveRepeatFrames = 132;
+postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.lastAction = {
+  stage: "post-door-central-door-post-use-initial-shove",
+  pipeline: "post-door-central-door-post-use-advance",
+  safetyReason: "central-door-post-use-final-shove"
+};
+const postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagAction = postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: false,
+  computerRoomConfidence: 0.58,
+  bridgeConfidence: 0.55,
+  bridgeDoorScore: 0.21,
+  postDoorTerminalSurface: 0.43,
+  routePostDoorBridgeDoorMemoryFrames: 12,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.38,
+  routeTopologyBarrelZoneEvidence: 0.76,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  wallVector: 0.57,
+  motionForwardProgress: 0.00,
+  moveRepeatFrames: 132,
+  actionRepeatFrames: 132,
+  usePulseCooldown: 0
+}));
+assert(postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagAction.stage === "post-door-central-door-corner-backoff", `Central-door post-use shove must retry even when phase memory temporarily loses computerRoomEntered (actual=${postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagAction.stage})`);
+assert(postDoorCentralDoorCrossBridgeRetryWithoutComputerFlagAction.move === "back", "Central-door post-use cross-bridge retry should release wall pressure with pure backoff");
+
+const postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.predictions = 8510;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastCentralDoorUsePrediction = 8418;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastCentralDoorUseHint = "open-central-hall-door";
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastCentralDoorUseLandmark = "central-hall-door";
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastCentralDoorUseRoute = "central-hall-route";
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastCentralDoorUseOpenIntent = true;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.centralDoorCornerSequenceFrames = 24;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.centralDoorCornerSequenceStep = "align-turn";
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.centralDoorCornerTrustedLandmarkFrames = 72;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.centralDoorPostUseRetryCount = 1;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 0;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.actionRepeatFrames = 24;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.moveRepeatFrames = 24;
+postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.lastAction = {
+  stage: "post-door-central-door-corner-align-turn",
+  pipeline: "post-door-central-door-corner-sequence",
+  safetyReason: "post-door-central-door-corner-align-turn"
+};
+const postDoorCentralDoorActiveRetryCrossBridgeFlickerAction = postDoorCentralDoorActiveRetryCrossBridgeFlickerRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  routeObjective: "reach-central-hall",
+  routeMode: "post-door",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.58,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.21,
+  postDoorTerminalSurface: 0.43,
+  routePostDoorBridgeDoorMemoryFrames: 12,
+  centralHallEntered: false,
+  routeTopologyWallDistanceNormalized: 0.38,
+  routeTopologyBarrelZoneEvidence: 0.76,
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  wallVector: 0.57,
+  motionForwardProgress: 0.06,
+  moveRepeatFrames: 24,
+  actionRepeatFrames: 24,
+  usePulseCooldown: 0
+}));
+assert(String(postDoorCentralDoorActiveRetryCrossBridgeFlickerAction.stage || "").startsWith("post-door-central-door-corner-"), `Trusted active central-door retry should survive one cross-bridge flicker (actual=${postDoorCentralDoorActiveRetryCrossBridgeFlickerAction.stage}; safety=${postDoorCentralDoorActiveRetryCrossBridgeFlickerAction.safetyReason})`);
+assert(postDoorCentralDoorActiveRetryCrossBridgeFlickerAction.stage !== "post-door-computer-room-bridge-straight-lock", "Trusted active central-door retry should not yield to bridge-straight lock on one flicker");
+
+const postDoorCentralDoorPostUseStraightRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUseStraightRuntime.predictions = 8672;
+postDoorCentralDoorPostUseStraightRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 62;
+const postDoorCentralDoorPostUseStraightAction = postDoorCentralDoorPostUseStraightRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 2,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.05,
+  postDoorTerminalSurface: 0.61,
+  routePostDoorBridgeDoorMemoryFrames: 11,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.70,
+  usePulseCooldown: 36
+}));
+assert(postDoorCentralDoorPostUseStraightAction.stage === "post-door-central-door-post-use-advance", `Central-door post-use later pulse should still own the route (actual=${postDoorCentralDoorPostUseStraightAction.stage})`);
+assert(postDoorCentralDoorPostUseStraightAction.move === "forward" && postDoorCentralDoorPostUseStraightAction.turn === "none", "Central-door post-use pulse should return to straight advance after the short left guard");
+
+const postDoorCentralDoorPostUseUnconfirmedRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUseUnconfirmedRuntime.predictions = 86725;
+postDoorCentralDoorPostUseUnconfirmedRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 30;
+const postDoorCentralDoorPostUseUnconfirmedAction = postDoorCentralDoorPostUseUnconfirmedRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.05,
+  postDoorTerminalSurface: 0.61,
+  routePostDoorBridgeDoorMemoryFrames: 11,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyCenterCorridorAlignment: -0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08,
+  usePulseCooldown: 36
+}));
+assert(!String(postDoorCentralDoorPostUseUnconfirmedAction.stage || "").startsWith("post-door-central-door"), `Weak unconfirmed central-door post-use should return to ComputerRoom egress instead of retrying a false Use sequence (actual=${postDoorCentralDoorPostUseUnconfirmedAction.stage})`);
+assert(postDoorCentralDoorPostUseUnconfirmedAction.use !== true, "Weak unconfirmed central-door post-use must not keep pulsing Use while the bridge-door signature is absent");
+
+const postDoorCentralDoorPostUseLostEvidenceRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUseLostEvidenceRuntime.predictions = 86726;
+postDoorCentralDoorPostUseLostEvidenceRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 292;
+const postDoorCentralDoorPostUseLostEvidenceAction = postDoorCentralDoorPostUseLostEvidenceRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "central-hall-door",
+  routeObjective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.61,
+  bridgeDoorScore: 0.01,
+  postDoorTerminalSurface: 0.28,
+  routePostDoorBridgeDoorMemoryFrames: 29,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.67,
+  routeTopologyWallDistanceNormalized: 0.49,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.08,
+  moveRepeatFrames: 16,
+  actionRepeatFrames: 16,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorPostUseLostEvidenceAction.stage || "").startsWith("post-door-central-door"), `Central-door post-use with lost door evidence should leave the failed wall push (actual=${postDoorCentralDoorPostUseLostEvidenceAction.stage})`);
+assert(postDoorCentralDoorPostUseLostEvidenceAction.use === false, "Lost central-door evidence recovery should not keep pulsing Use while the door signature is gone");
+
+const postDoorCentralDoorPostUsePinnedRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUsePinnedRuntime.predictions = 86727;
+postDoorCentralDoorPostUsePinnedRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 254;
+const postDoorCentralDoorPostUsePinnedAction = postDoorCentralDoorPostUsePinnedRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  objective: "reach-central-hall",
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.75,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.23,
+  postDoorTerminalSurface: 0.54,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.31,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.60,
+  motionObstacleScore: 0.60,
+  motionForwardProgress: 0,
+  moveRepeatFrames: 36,
+  actionRepeatFrames: 36,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorPostUsePinnedAction.stage || "").startsWith("post-door-central-door"), `Pinned weak central-door post-use should leave the false terminal-wall sequence (actual=${postDoorCentralDoorPostUsePinnedAction.stage})`);
+assert(postDoorCentralDoorPostUsePinnedAction.use !== true, "Pinned weak central-door post-use should not pulse Use against the terminal wall");
+
+const postDoorCentralDoorPostUseRetryRuntime = runtimeFactory.create(publicProfile);
+postDoorCentralDoorPostUseRetryRuntime.predictions = 8673;
+postDoorCentralDoorPostUseRetryRuntime.stagePulsePostDoorCentralDoorAdvanceFrames = 62;
+const postDoorCentralDoorPostUseRetryAction = postDoorCentralDoorPostUseRetryRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "central-hall-route",
+  objective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.58,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.32,
+  postDoorTerminalSurface: 0.45,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  centralHallEntered: false,
+  routeTopologyBarrelZoneEvidence: 0.31,
+  routeTopologyWallDistanceNormalized: 0.36,
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  motionForwardProgress: 0.70,
+  moveRepeatFrames: 72,
+  actionRepeatFrames: 72,
+  usePulseCooldown: 0
+}));
+assert(!String(postDoorCentralDoorPostUseRetryAction.stage || "").startsWith("post-door-central-door"), `Weak central-door post-use retry should seek stronger bridge-door evidence before relatching (actual=${postDoorCentralDoorPostUseRetryAction.stage})`);
+assert(postDoorCentralDoorPostUseRetryAction.use !== true, "Weak central-door post-use retry must not pulse Use");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 32;
+const postDoorComputerRoomBridgeEgressCommitAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(postDoorComputerRoomBridgeRightOpeningState);
+assert(postDoorComputerRoomBridgeEgressCommitAction.stage === "post-door-computer-room-egress-left-forward-guard", `ComputerRoom egress should keep a left guard while right-wall progress is weak (actual=${postDoorComputerRoomBridgeEgressCommitAction.stage})`);
+assert(postDoorComputerRoomBridgeEgressCommitAction.turn === "left", "ComputerRoom egress should not drop the left guard while still near the right wall");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 32;
+postDoorComputerRoomBridgeRightOpeningRuntime.actionSignature = "forward:left:strafe:run";
+postDoorComputerRoomBridgeRightOpeningRuntime.actionRepeatFrames = 220;
+postDoorComputerRoomBridgeRightOpeningRuntime.moveRepeatFrames = 220;
+const postDoorComputerRoomLeftStrafeSaturationAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  bridgeConfidence: 0.34,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.36,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyWallDistanceNormalized: 0.50,
+  routeTopologyCenterCorridorAlignment: 0.00,
+  wallVector: 0.53,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.54,
+  motionObstacleScore: 0.52,
+  actionRepeatFrames: 220,
+  moveRepeatFrames: 220
+}));
+assert(postDoorComputerRoomLeftStrafeSaturationAction.stage === "post-door-computer-room-egress-left-strafe-wall-saturation-release-right", `Long ComputerRoom left-strafe wall saturation should release right instead of sliding forever (actual=${postDoorComputerRoomLeftStrafeSaturationAction.stage})`);
+assert(postDoorComputerRoomLeftStrafeSaturationAction.move === "forward", "Left-strafe saturation release should preserve forward pressure");
+assert(postDoorComputerRoomLeftStrafeSaturationAction.turn === "right", "Left-strafe saturation release should yaw right back toward wall-parallel travel");
+assert(postDoorComputerRoomLeftStrafeSaturationAction.strafe !== true, "Left-strafe saturation release should drop strafe while realigning");
+
+const postDoorComputerRoomLongForwardSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomLongForwardSaturationRuntime.predictions = 2990;
+postDoorComputerRoomLongForwardSaturationRuntime.stagePulseComputerRoomEgressFrames = 26;
+postDoorComputerRoomLongForwardSaturationRuntime.actionSignature = "forward:none:run";
+postDoorComputerRoomLongForwardSaturationRuntime.actionRepeatFrames = 28;
+postDoorComputerRoomLongForwardSaturationRuntime.moveRepeatFrames = 240;
+const postDoorComputerRoomLongForwardSaturationAction = postDoorComputerRoomLongForwardSaturationRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  bridgeConfidence: 0.42,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.42,
+  routeTopologyBarrelZoneEvidence: 0.60,
+  routeTopologyWallDistanceNormalized: 0.56,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  wallVector: 0.44,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  actionRepeatFrames: 28,
+  moveRepeatFrames: 240
+}));
+assert(postDoorComputerRoomLongForwardSaturationAction.stage === "post-door-computer-room-egress-long-central-egress-forward-saturation-back-left", `Long ComputerRoom forward saturation should back-left unpin instead of running forever (actual=${postDoorComputerRoomLongForwardSaturationAction.stage})`);
+assert(postDoorComputerRoomLongForwardSaturationAction.move === "back", "Long ComputerRoom forward saturation should briefly reverse");
+assert(postDoorComputerRoomLongForwardSaturationAction.turn === "left", "Long ComputerRoom forward saturation should yaw left to reacquire the cross-bridge lane");
+
+const postDoorComputerRoomForwardRunSaturationRuntime = runtimeFactory.create(publicProfile);
+postDoorComputerRoomForwardRunSaturationRuntime.predictions = 3010;
+postDoorComputerRoomForwardRunSaturationRuntime.stagePulseComputerRoomEgressFrames = 26;
+postDoorComputerRoomForwardRunSaturationRuntime.actionSignature = "forward+run";
+postDoorComputerRoomForwardRunSaturationRuntime.actionRepeatFrames = 3;
+postDoorComputerRoomForwardRunSaturationRuntime.moveRepeatFrames = 240;
+const postDoorComputerRoomForwardRunSaturationAction = postDoorComputerRoomForwardRunSaturationRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  currentRoute: "cross-bridge-route",
+  objective: "reach-central-hall",
+  bridgeConfidence: 0.42,
+  bridgeDoorScore: 0.08,
+  postDoorTerminalSurface: 0.42,
+  routeTopologyBarrelZoneEvidence: 0.60,
+  routeTopologyWallDistanceNormalized: 0.56,
+  routeTopologyCenterCorridorAlignment: -0.02,
+  wallVector: 0.44,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.50,
+  motionObstacleScore: 0.50,
+  actionSignature: "forward+run",
+  actionRepeatFrames: 3,
+  moveRepeatFrames: 240
+}));
+assert(postDoorComputerRoomForwardRunSaturationAction.stage === "post-door-computer-room-egress-long-central-egress-forward-saturation-back-left", `Long ComputerRoom forward+run saturation should back-left unpin instead of running forever (actual=${postDoorComputerRoomForwardRunSaturationAction.stage})`);
+assert(postDoorComputerRoomForwardRunSaturationAction.move === "back", "Long ComputerRoom forward+run saturation should briefly reverse");
+assert(postDoorComputerRoomForwardRunSaturationAction.turn === "left", "Long ComputerRoom forward+run saturation should yaw left to reacquire the cross-bridge lane");
+
+postDoorComputerRoomBridgeRightOpeningRuntime.stagePulseComputerRoomEgressFrames = 112;
+const postDoorComputerRoomBridgeReacquiredDuringEgressAction = postDoorComputerRoomBridgeRightOpeningRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  bridgeConfidence: 0.52,
+  bridgeDoorScore: 0.24,
+  routeTopologyBarrelZoneEvidence: 0.30,
+  routeTopologyCenterCorridorAlignment: 0.22,
+  wallVector: 0.18,
+  motionForwardProgress: 0.48
+}));
+assert(postDoorComputerRoomBridgeReacquiredDuringEgressAction.stage === "post-door-computer-room-bridge-reacquired-forward", `Bridge reacquire with forward progress should cancel ComputerRoom egress instead of restarting left correction (actual=${postDoorComputerRoomBridgeReacquiredDuringEgressAction.stage})`);
+assert(postDoorComputerRoomBridgeReacquiredDuringEgressAction.turn === "none", "Bridge reacquire with forward progress should preserve straight commit");
+
+const postDoorBridgeReacquiredMoveLoopWallStallRuntime = runtimeFactory.create(publicProfile);
+postDoorBridgeReacquiredMoveLoopWallStallRuntime.predictions = 8890;
+postDoorBridgeReacquiredMoveLoopWallStallRuntime.stagePulseRightReacquireFrames = 48;
+postDoorBridgeReacquiredMoveLoopWallStallRuntime.actionSignature = "forward+run";
+postDoorBridgeReacquiredMoveLoopWallStallRuntime.actionRepeatFrames = 1;
+postDoorBridgeReacquiredMoveLoopWallStallRuntime.moveRepeatFrames = 129;
+const postDoorBridgeReacquiredMoveLoopWallStallAction = postDoorBridgeReacquiredMoveLoopWallStallRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.17,
+  postDoorTerminalSurface: 0.45,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.12,
+  routeTopologyWallDistanceNormalized: 0.55,
+  routeTopologyBarrelZoneEvidence: 0.20,
+  recommendedYaw: 0,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  wallVector: 0.70,
+  motionForwardProgress: 0.04,
+  actionSignature: "forward+run",
+  actionRepeatFrames: 1,
+  moveRepeatFrames: 129,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(
+  postDoorBridgeReacquiredMoveLoopWallStallAction.pipeline === "post-door-computer-room-wall-unpin"
+    && String(postDoorBridgeReacquiredMoveLoopWallStallAction.safetyReason || "").indexOf("bridge-reacquired-forward-stall") >= 0,
+  `Bridge reacquired forward with a long move loop against a wall should arm wall-unpin despite action-repeat resets (actual=${postDoorBridgeReacquiredMoveLoopWallStallAction.stage}; reason=${postDoorBridgeReacquiredMoveLoopWallStallAction.safetyReason})`);
+assert(postDoorBridgeReacquiredMoveLoopWallStallAction.use !== true, "Bridge reacquired move-loop wall stall must not pulse Use while escaping the cross-bridge wall");
+
+const postDoorCrossBridgeLongWallGlideRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLongWallGlideRuntime.predictions = 8910;
+postDoorCrossBridgeLongWallGlideRuntime.stagePulseComputerRoomEgressFrames = 48;
+postDoorCrossBridgeLongWallGlideRuntime.actionSignature = "forward+turn:right+run";
+postDoorCrossBridgeLongWallGlideRuntime.actionRepeatFrames = 3;
+postDoorCrossBridgeLongWallGlideRuntime.moveRepeatFrames = 108;
+const postDoorCrossBridgeLongWallGlideAction = postDoorCrossBridgeLongWallGlideRuntime.predict(Object.assign({}, postDoorComputerRoomBridgeRightOpeningState, {
+  doorOpenedCount: 1,
+  routeMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeName: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  routeHint: "advance-cross-bridge",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.72,
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.20,
+  postDoorTerminalSurface: 0.35,
+  routePostDoorBridgeDoorMemory: false,
+  routePostDoorBridgeDoorMemoryFrames: 0,
+  routeTopologyCenterCorridorAlignment: 0.12,
+  routeTopologyWallDistanceNormalized: 0.55,
+  routeTopologyBarrelZoneEvidence: 0.20,
+  recommendedYaw: 6,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  wallVector: 0.71,
+  motionForwardProgress: 0.08,
+  actionSignature: "forward+turn:right+run",
+  actionRepeatFrames: 3,
+  moveRepeatFrames: 108,
+  usePulseCooldown: 0,
+  visualEnemyConfidence: 0.05,
+  visualEnemyVisible: false
+}));
+assert(
+  postDoorCrossBridgeLongWallGlideAction.pipeline === "post-door-computer-room-wall-unpin"
+    && String(postDoorCrossBridgeLongWallGlideAction.stage || "").indexOf("bridge-lane-left-strafe-wall-reacquire") >= 0,
+  `Cross-bridge lane long wall glide should use the bounded bridge-lane wall-unpin sequence instead of continuing right-align/left-sustain loops (actual=${postDoorCrossBridgeLongWallGlideAction.stage}; reason=${postDoorCrossBridgeLongWallGlideAction.safetyReason})`);
+assert(postDoorCrossBridgeLongWallGlideAction.move === "back", "Cross-bridge lane long wall glide should first detach from the wall");
+assert(postDoorCrossBridgeLongWallGlideAction.use !== true, "Cross-bridge lane long wall glide must not pulse Use while still in cross-bridge transit");
 
 const postDoorCornerRealignRuntime = runtimeFactory.create(publicProfile);
 postDoorCornerRealignRuntime.predictions = 5200;
@@ -4726,9 +13443,9 @@ const postDoorCornerRealignAction = postDoorCornerRealignRuntime.predict({
     }
   }
 });
-assert(postDoorCornerRealignAction.stage === "post-door-long-wallface-reacquire-right", `Post-door moderate corner pressure should release long forward repeats before straight advance (actual=${postDoorCornerRealignAction.stage})`);
-assert(postDoorCornerRealignAction.move === "none", "Post-door moderate corner realign should release forward movement before turning");
-assert(postDoorCornerRealignAction.turn === "right", "Post-door moderate corner realign should yaw right toward the bridge side");
+assert(String(postDoorCornerRealignAction.stage || "").startsWith("post-door-computer-room-egress-"), `Post-door moderate corner pressure with ComputerRoom evidence should enter egress instead of right realign (actual=${postDoorCornerRealignAction.stage})`);
+assert(postDoorCornerRealignAction.move === "forward", "ComputerRoom corner egress should keep forward pressure");
+assert(postDoorCornerRealignAction.turn === "left", "ComputerRoom corner egress should steer left toward the bridge side");
 
 const postDoorAudioCombatRuntime = runtimeFactory.create(publicProfile);
 postDoorAudioCombatRuntime.predictions = 3900;
@@ -4760,8 +13477,41 @@ const postDoorAudioCombatAction = postDoorAudioCombatRuntime.predict({
     }
   }
 });
-assert(postDoorAudioCombatAction.stage === "post-door-audio-combat-fallback", `Post-door damage plus audio should switch to combat fallback (actual=${postDoorAudioCombatAction.stage})`);
-assert(postDoorAudioCombatAction.fire === true, "Post-door audio combat fallback should allow a defensive shot");
+assert(postDoorAudioCombatAction.stage !== "post-door-audio-combat-fallback", `Closed first-door audio cue must not steal control before the door is confirmed open (actual=${postDoorAudioCombatAction.stage})`);
+assert(postDoorAudioCombatAction.fire !== true, "Closed first-door audio cue must not fire while the door sequence is unresolved");
+
+const confirmedPostDoorAudioCombatRuntime = runtimeFactory.create(publicProfile);
+confirmedPostDoorAudioCombatRuntime.predictions = 3900;
+const confirmedPostDoorAudioCombatAction = confirmedPostDoorAudioCombatRuntime.predict({
+  health: 60,
+  depthSig: 0.95,
+  contextDict: "open-space",
+  wallVector: 0,
+  faceSig: 0.08,
+  soundEvent: true,
+  postDoorAudioCue: true,
+  doorOpenedCount: 1,
+  predictions: 3900,
+  spawnCorridorGapScore: 0.38,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.50,
+  spawnLandmarkRouteTurn: "right",
+  computerRoomConfidence: 0.20,
+  firstDoorVision9x9Score: 0.05,
+  firstDoorUse3x3Score: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.4,
+      corridor: 0.35,
+      enemy: 0.25,
+      "safe-zone": 0.2,
+      bridge: 0,
+      "computer-room": 0.2
+    }
+  }
+});
+assert(confirmedPostDoorAudioCombatAction.stage === "post-door-audio-combat-fallback", `Confirmed post-door damage plus audio should switch to combat fallback (actual=${confirmedPostDoorAudioCombatAction.stage})`);
+assert(confirmedPostDoorAudioCombatAction.fire === true, "Confirmed post-door audio combat fallback should allow a defensive shot");
 
 const computerRoomAudioOrientRuntime = runtimeFactory.create(publicProfile);
 computerRoomAudioOrientRuntime.predictions = 4300;
@@ -4978,6 +13728,54 @@ const combatVisualMediumFalsePositiveAction = combatVisualMediumFalsePositiveRun
 assert(combatVisualMediumFalsePositiveAction.stage !== "combat-visual-center-fire", "Medium visual-only red/brown post-door false positives should not fire without audio or face evidence");
 assert(combatVisualMediumFalsePositiveAction.fire === false, "Medium visual-only post-door false positives must not fire");
 
+const postDoorWeakStaleCombatReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorWeakStaleCombatReleaseRuntime.predictions = 4390;
+const postDoorWeakStaleCombatReleaseAction = postDoorWeakStaleCombatReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.70,
+  contextDict: "computer-room",
+  wallVector: 0.62,
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  computerRoomConfidence: 0.37,
+  bridgeConfidence: 0.21,
+  terminalSurface: 0.37,
+  postDoorTerminalSurface: 0.37,
+  enemyConfidence: 0.37,
+  visualEnemyConfidence: 0.37,
+  enemyStructuralDecoy: false,
+  trustedEnemyThreat: 0,
+  trustedCombatEvidence: true,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  visualEnemyVisible: true,
+  visualEnemyCentered: true,
+  visualEnemyYaw: 0,
+  visualEnemyFireReady: true,
+  enemyCombatYaw: 0,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.2,
+      corridor: 0.35,
+      enemy: 0.37,
+      "safe-zone": 0.2,
+      bridge: 0.21,
+      "computer-room": 0.37
+    }
+  }
+});
+assert(postDoorWeakStaleCombatReleaseAction.stage !== "combat-visual-center-fire", `Weak stale post-door visual evidence should resume routing instead of fire-looping (actual=${postDoorWeakStaleCombatReleaseAction.stage})`);
+assert(postDoorWeakStaleCombatReleaseAction.fire === false, "Weak stale post-door visual evidence must not fire");
+
 const postDoorMonitorVisualDecoyRouteResumeRuntime = runtimeFactory.create(publicProfile);
 postDoorMonitorVisualDecoyRouteResumeRuntime.predictions = 2521;
 const postDoorMonitorVisualDecoyRouteResumeAction = postDoorMonitorVisualDecoyRouteResumeRuntime.predict({
@@ -5034,7 +13832,10 @@ const postDoorMonitorVisualDecoyRouteResumeAction = postDoorMonitorVisualDecoyRo
     }
   }
 });
-assert(postDoorMonitorVisualDecoyRouteResumeAction.stage === "post-door-monitor-visual-decoy-route-resume", `Medium visual-only terminal/monitor decoy should resume route instead of selecting empty combat (actual=${postDoorMonitorVisualDecoyRouteResumeAction.stage})`);
+assert(
+  postDoorMonitorVisualDecoyRouteResumeAction.stage === "post-door-monitor-visual-decoy-route-resume"
+    || postDoorMonitorVisualDecoyRouteResumeAction.stage === "post-door-terminal-decoy-forward-resume",
+  `Medium visual-only terminal/monitor decoy should resume route instead of selecting empty combat (actual=${postDoorMonitorVisualDecoyRouteResumeAction.stage})`);
 assert(postDoorMonitorVisualDecoyRouteResumeAction.move === "forward", "Visual decoy route resume should move forward");
 assert(postDoorMonitorVisualDecoyRouteResumeAction.fire === false, "Visual decoy route resume must not fire");
 
@@ -5096,9 +13897,483 @@ assert(postDoorTerminalDecoyForwardAction.move === "forward", "Terminal decoy fo
 assert(postDoorTerminalDecoyForwardAction.turn === "none", "Terminal decoy forward resume should neutralize right-loop yaw");
 assert(postDoorTerminalDecoyForwardAction.fire === false, "Terminal decoy forward resume must not fire");
 
+const postDoorCrossBridgeLaneWallReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorCrossBridgeLaneWallReleaseRuntime.predictions = 2700;
+const postDoorCrossBridgeLaneWallReleaseAction = postDoorCrossBridgeLaneWallReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.13,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  terminalVisualCombatDecoy: true,
+  enemyConfidence: 0.10,
+  enemyConfidencePeak: 0.70,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.72,
+  computerRoomScore: 0.34,
+  computerPanelScore: 0.18,
+  computerDarkPanelScore: 0.22,
+  postDoorTerminalSurface: 0.34,
+  bridgeConfidence: 0.53,
+  bridgeDoorScore: 0.20,
+  routeTopologyWallDistanceNormalized: 0.36,
+  routeTopologyBarrelZoneEvidence: 0.31,
+  routeTopologyCenterCorridorAlignment: 0.17,
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  spawnCorridorGapScore: 0.44,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.56,
+  spawnLandmarkRouteTurn: "right",
+  actionRepeatFrames: 49,
+  moveRepeatFrames: 49,
+  turnRepeatFrames: 0,
+  recommendedYaw: 8,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.53,
+      "computer-room": 0.72
+    }
+  }
+});
+assert(String(postDoorCrossBridgeLaneWallReleaseAction.stage || "").indexOf("post-door-computer-room-wall-unpin-cross-bridge-static-wall") === 0, `Cross-bridge lane with terminal decoy and right wall pressure should promote to the wall-unpin sequence (actual=${postDoorCrossBridgeLaneWallReleaseAction.stage})`);
+assert(postDoorCrossBridgeLaneWallReleaseAction.move === "back", "Cross-bridge lane wall-unpin should first back out of the right-wall pocket");
+assert(postDoorCrossBridgeLaneWallReleaseAction.turn === "none", "Cross-bridge lane wall-unpin backoff must not rotate under wall pressure");
+assert(postDoorCrossBridgeLaneWallReleaseAction.fire === false, "Cross-bridge lane wall release must not fire");
+
+const postDoorTerminalDecoySuppressesStaleCombatRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalDecoySuppressesStaleCombatRuntime.predictions = 10400;
+const postDoorTerminalDecoySuppressesStaleCombatAction = postDoorTerminalDecoySuppressesStaleCombatRuntime.predict({
+  health: 100,
+  depthSig: 0.62,
+  contextDict: "wall",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeActionHint: "cruise",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: true,
+  visualEnemyConfidence: 0.34,
+  terminalVisualCombatDecoy: true,
+  enemyConfidence: 0.34,
+  enemyConfidencePeak: 0.77,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: true,
+  trustedEnemyThreat: 0.34,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.84,
+  computerRoomScore: 0.58,
+  computerPanelScore: 0.34,
+  computerDarkPanelScore: 0.46,
+  postDoorTerminalSurface: 0.46,
+  bridgeConfidence: 0.62,
+  bridgeDoorScore: 0.31,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyCenterCorridorAlignment: 0.17,
+  motionForwardProgress: 0.08,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.32,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 20,
+  turnRepeatFrames: 0,
+  recommendedYaw: -7,
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.44,
+      enemy: 0.34,
+      "safe-zone": 0.85,
+      bridge: 0.62,
+      "computer-room": 0.84
+    }
+  }
+});
+assert(postDoorTerminalDecoySuppressesStaleCombatAction.stage === "post-door-terminal-decoy-forward-resume", `Terminal visual decoy should suppress stale combat memory and keep the central-hall route alive (actual=${postDoorTerminalDecoySuppressesStaleCombatAction.stage})`);
+assert(postDoorTerminalDecoySuppressesStaleCombatAction.fire === false, "Terminal visual decoy suppression must not fire");
+
+const postDoorTerminalDecoyBridgeReleaseRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalDecoyBridgeReleaseRuntime.predictions = 1180;
+const postDoorTerminalDecoyBridgeReleaseAction = postDoorTerminalDecoyBridgeReleaseRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.0,
+  terminalVisualCombatDecoy: true,
+  enemyConfidence: 0,
+  enemyConfidencePeak: 0.18,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.68,
+  computerRoomScore: 0.20,
+  computerPanelScore: 0.10,
+  computerDarkPanelScore: 0.26,
+  postDoorTerminalSurface: 0.26,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.08,
+  spawnSecretDoorScore: 0.68,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyCenterCorridorAlignment: 0.17,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.27,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.49,
+  spawnLandmarkRouteTurn: "right",
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.68,
+      "computer-room": 0.68
+    }
+  }
+});
+assert(postDoorTerminalDecoyBridgeReleaseAction.stage === "post-door-terminal-decoy-bridge-left-release", `Terminal decoy with strong bridge/secret evidence and obstacle pressure should release left instead of blinking idle (actual=${postDoorTerminalDecoyBridgeReleaseAction.stage})`);
+assert(postDoorTerminalDecoyBridgeReleaseAction.move === "forward", "Terminal bridge release should keep forward pressure");
+assert(postDoorTerminalDecoyBridgeReleaseAction.turn === "left", "Terminal bridge release should steer left toward the cross-bridge lane");
+
+const postDoorSecretAnchorBridgeSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorSecretAnchorBridgeSustainRuntime.predictions = 1280;
+const postDoorSecretAnchorBridgeSustainAction = postDoorSecretAnchorBridgeSustainRuntime.predict({
+  health: 100,
+  depthSig: 1.00,
+  contextDict: "open-space",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.0,
+  terminalVisualCombatDecoy: false,
+  enemyConfidence: 0,
+  enemyConfidencePeak: 0.22,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0,
+  audioEnemyStrong: false,
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.76,
+  computerRoomScore: 0.11,
+  computerPanelScore: 0.09,
+  computerDarkPanelScore: 0.10,
+  postDoorTerminalSurface: 0.10,
+  bridgeConfidence: 0.60,
+  bridgeDoorScore: 0.12,
+  spawnSecretDoorScore: 0.68,
+  routeTopologyBarrelZoneEvidence: 0.65,
+  routeTopologyCenterCorridorAlignment: 0.08,
+  motionForwardProgress: 0.00,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.34,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.60,
+      "computer-room": 0.76
+    }
+  }
+});
+assert(postDoorSecretAnchorBridgeSustainAction.stage === "post-door-secret-anchor-bridge-left-sustain", `Secret anchor with weak right gap should sustain left toward the bridge instead of weak right loop (actual=${postDoorSecretAnchorBridgeSustainAction.stage})`);
+assert(postDoorSecretAnchorBridgeSustainAction.move === "forward", "Secret anchor bridge sustain should keep forward pressure");
+assert(postDoorSecretAnchorBridgeSustainAction.turn === "left", "Secret anchor bridge sustain should steer left");
+
+const postDoorTerminalGapLeftSustainRuntime = runtimeFactory.create(publicProfile);
+postDoorTerminalGapLeftSustainRuntime.predictions = 2820;
+const postDoorTerminalGapLeftSustainAction = postDoorTerminalGapLeftSustainRuntime.predict({
+  health: 100,
+  depthSig: 0.43,
+  contextDict: "corridor",
+  doorOpenedCount: 1,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeDeadEndRisk: false,
+  visualEnemyVisible: false,
+  visualEnemyConfidence: 0.10,
+  terminalVisualCombatDecoy: true,
+  enemyConfidence: 0.14,
+  enemyConfidencePeak: 0.58,
+  enemyStructuralDecoy: false,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  audioEnemyConfidence: 0.04,
+  audioEnemyStrong: false,
+  audioEnemyDirection: "center",
+  soundEvent: false,
+  faceSig: 0.0,
+  computerRoomConfidence: 0.45,
+  computerRoomScore: 0.20,
+  computerPanelScore: 0.63,
+  computerDarkPanelScore: 0.13,
+  postDoorTerminalSurface: 0.63,
+  bridgeConfidence: 0.37,
+  bridgeDoorScore: 0.39,
+  spawnSecretDoorScore: 0.00,
+  routeTopologyBarrelZoneEvidence: 0.66,
+  routeTopologyCenterCorridorAlignment: -0.17,
+  motionForwardProgress: -0.04,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  spawnCorridorGapScore: 0.29,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.20,
+      corridor: 0.44,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.37,
+      "computer-room": 0.45
+    }
+  }
+});
+assert(postDoorTerminalGapLeftSustainAction.stage === "post-door-terminal-gap-left-sustain", `Terminal gap/no-idle state should sustain left toward bridge instead of stopping in ComputerRoom (actual=${postDoorTerminalGapLeftSustainAction.stage})`);
+assert(postDoorTerminalGapLeftSustainAction.move === "forward", "Terminal gap sustain should keep moving");
+assert(postDoorTerminalGapLeftSustainAction.turn === "left", "Terminal gap sustain should correct left");
+
 const lowHealthGoalFirstRuntime = runtimeFactory.create(publicProfile);
 lowHealthGoalFirstRuntime.predictions = 4200;
-const lowHealthGoalFirstAction = lowHealthGoalFirstRuntime.predict({
+const staleMoribundFaceWithHealthyHpAction = lowHealthGoalFirstRuntime.predict({
+  healthSensor: {
+    value: 100,
+    health: 100,
+    faceLifePhase: "healthy",
+    faceLifeLevel: 5,
+    faceLifeQuantizedPhase: "moribund",
+    faceLifeQuantizedLevel: 1,
+    faceTemplateConfidence: 0.78,
+    faceLifeTemplateAuthoritative: false,
+    lowHealth: true
+  },
+  health: 100,
+  depthSig: 0.76,
+  contextDict: "open-space",
+  wallVector: 0.10,
+  doorOpenedCount: 0,
+  spawnCorridorGapScore: 0.42,
+  spawnCorridorGapTurn: "right",
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.46,
+      enemy: 0.1,
+      "safe-zone": 0.8,
+      bridge: 0.05,
+      "computer-room": 0.05
+    }
+  }
+});
+assert(staleMoribundFaceWithHealthyHpAction.stage !== "low-health-escape", `Non-authoritative moribund face quantization must not force emergency escape with HP 100 (actual=${staleMoribundFaceWithHealthyHpAction.stage})`);
+assert(staleMoribundFaceWithHealthyHpAction.stage !== "low-health-goal-first", `Non-authoritative moribund face quantization must not force low-health goal-first with HP 100 (actual=${staleMoribundFaceWithHealthyHpAction.stage})`);
+assert(staleMoribundFaceWithHealthyHpAction.zoeVetoed !== true, "Non-authoritative moribund face quantization must not trigger Zoe veto with HP 100");
+
+const semanticHealthyFaceWithoutNumericHpRuntime = runtimeFactory.create(publicProfile);
+semanticHealthyFaceWithoutNumericHpRuntime.predictions = 4200;
+const semanticHealthyFaceWithoutNumericHpAction = semanticHealthyFaceWithoutNumericHpRuntime.predict({
+  healthSensor: {
+    faceLifePhase: "healthy",
+    faceLifeLevel: 5,
+    faceLifeQuantizedPhase: "critical",
+    faceLifeQuantizedLevel: 2,
+    faceTemplateConfidence: 0.66,
+    faceLifeTemplateAuthoritative: false,
+    lowHealth: true
+  },
+  depthSig: 0.76,
+  contextDict: "open-space",
+  wallVector: 0.10,
+  doorOpenedCount: 0,
+  spawnCorridorGapScore: 0.42,
+  spawnCorridorGapTurn: "right",
+  semanticMemory: {
+    symbols: {
+      door: 0.35,
+      corridor: 0.46,
+      enemy: 0.1,
+      "safe-zone": 0.8,
+      bridge: 0.05,
+      "computer-room": 0.05
+    }
+  }
+});
+assert(semanticHealthyFaceWithoutNumericHpAction.stage !== "low-health-escape", `Stable healthy face semantics must outrank transient critical quantization without numeric HP (actual=${semanticHealthyFaceWithoutNumericHpAction.stage})`);
+assert(semanticHealthyFaceWithoutNumericHpAction.stage !== "low-health-goal-first", `Stable healthy face semantics must not force low-health goal-first without numeric HP (actual=${semanticHealthyFaceWithoutNumericHpAction.stage})`);
+assert(semanticHealthyFaceWithoutNumericHpAction.zoeVetoed !== true, "Stable healthy face semantics must not trigger Zoe veto without numeric HP");
+
+const staleRecoveryObjectiveWithHealthyFaceRuntime = runtimeFactory.create(publicProfile);
+staleRecoveryObjectiveWithHealthyFaceRuntime.predictions = 4200;
+const staleRecoveryObjectiveWithHealthyFaceAction = staleRecoveryObjectiveWithHealthyFaceRuntime.predict({
+  healthSensor: {
+    value: 100,
+    health: 100,
+    estimatedPercent: 100,
+    faceLifePhase: "healthy",
+    faceLifeLevel: 5,
+    faceHeartbeatAlive: true,
+    faceLifeTemplateAuthoritative: false,
+    lowHealth: false,
+    criticalBloodAlive: false,
+    retryRequested: false,
+    likelyDead: false,
+    lowHealthThreshold: 50
+  },
+  health: 100,
+  currentObjective: "stabilize-safe-zone",
+  semanticObjective: "stabilize-safe-zone",
+  controlPipeline: "low-health-escape",
+  depthSig: 0.86,
+  contextDict: "computer-room",
+  wallVector: 0.08,
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.68,
+  bridgeConfidence: 0.42,
+  enemyConfidence: 0.18,
+  visualEnemyConfidence: 0.12,
+  trustedCombatEvidence: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.2,
+      corridor: 0.35,
+      enemy: 0.18,
+      "safe-zone": 0.70,
+      bridge: 0.42,
+      "computer-room": 0.68
+    }
+  }
+});
+assert(staleRecoveryObjectiveWithHealthyFaceAction.objective !== "stabilize-safe-zone", `Recovered healthy face must clear stale recovery objective (actual=${staleRecoveryObjectiveWithHealthyFaceAction.objective})`);
+assert(staleRecoveryObjectiveWithHealthyFaceAction.stage !== "low-health-escape", `Recovered healthy face must not keep low-health escape stage (actual=${staleRecoveryObjectiveWithHealthyFaceAction.stage})`);
+assert(staleRecoveryObjectiveWithHealthyFaceAction.stage !== "low-health-goal-first", `Recovered healthy face must not keep low-health goal-first stage (actual=${staleRecoveryObjectiveWithHealthyFaceAction.stage})`);
+
+const postDoorStaleMoribundRiskRuntime = runtimeFactory.create(publicProfile);
+postDoorStaleMoribundRiskRuntime.predictions = 4210;
+const postDoorStaleMoribundRiskAction = postDoorStaleMoribundRiskRuntime.predict({
+  healthSensor: {
+    value: 100,
+    health: 100,
+    estimatedPercent: 100,
+    healthFaceLifeLevel: 1,
+    healthFaceLifePhase: "moribund",
+    faceLifeTemplateConfidence: 0.80,
+    faceLifeTemplateAuthoritative: false,
+    healthSensorEnabled: false,
+    faceVitalEnabled: false,
+    faceHeartbeatAlive: false,
+    facePoseDiversity: 0,
+    lowHealth: false,
+    criticalBloodAlive: false,
+    retryRequested: false,
+    likelyDead: false,
+    lowHealthThreshold: 50
+  },
+  health: 100,
+  lethalRisk: 0.76,
+  currentObjective: "stabilize-safe-zone",
+  semanticObjective: "enter-computer-room",
+  controlPipeline: "low-health-escape",
+  depthSig: 0.84,
+  contextDict: "computer-room",
+  wallVector: 0.10,
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  computerRoomConfidence: 0.76,
+  bridgeConfidence: 0.61,
+  postDoorTerminalSurface: 0.25,
+  bridgeDoorScore: 0.05,
+  spawnCorridorGapScore: 0.36,
+  spawnLandmarkRouteEvidence: 0.48,
+  enemyConfidence: 0.24,
+  visualEnemyConfidence: 0.09,
+  audioEnemyConfidence: 0.24,
+  trustedCombatEvidence: false,
+  trustedEnemyThreat: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.85,
+      corridor: 0.46,
+      enemy: 0.24,
+      "safe-zone": 0.85,
+      bridge: 0.61,
+      "computer-room": 0.76
+    }
+  }
+});
+assert(postDoorStaleMoribundRiskAction.stage !== "low-health-escape", `Post-door stale non-authoritative moribund face must not enter critical escape with HP 100 (actual=${postDoorStaleMoribundRiskAction.stage})`);
+assert(postDoorStaleMoribundRiskAction.stage !== "low-health-goal-first", `Post-door stale non-authoritative moribund face must not enter low-health goal-first with HP 100 (actual=${postDoorStaleMoribundRiskAction.stage})`);
+assert(postDoorStaleMoribundRiskAction.objective !== "stabilize-safe-zone", `Post-door stale lethal risk must not keep safe-zone objective without trusted health evidence (actual=${postDoorStaleMoribundRiskAction.objective})`);
+
+const lowHealthGoalFirstRuntime2 = runtimeFactory.create(publicProfile);
+lowHealthGoalFirstRuntime2.predictions = 4200;
+const lowHealthGoalFirstAction = lowHealthGoalFirstRuntime2.predict({
   healthSensor: { value: 42, health: 42, lowHealth: true, lowHealthThreshold: 50 },
   health: 100,
   depthSig: 0.86,
@@ -5182,6 +14457,45 @@ const criticalHealthAction = criticalHealthRuntime.predict({
   }
 });
 assert(criticalHealthAction.stage === "low-health-escape", `Critical HP should still use emergency escape instead of goal-first (actual=${criticalHealthAction.stage})`);
+
+const preDoorCriticalFaceNoiseRuntime = runtimeFactory.create(publicProfile);
+preDoorCriticalFaceNoiseRuntime.predictions = 4200;
+const preDoorCriticalFaceNoiseAction = preDoorCriticalFaceNoiseRuntime.predict({
+  healthSensor: {
+    value: 12,
+    health: 12,
+    lowHealth: true,
+    lowHealthThreshold: 50,
+    faceLifePhase: "moribund",
+    faceLifeLevel: 1,
+    faceHeartbeatAlive: true,
+    retryRequested: false,
+    likelyDead: false
+  },
+  health: 100,
+  depthSig: 0.90,
+  contextDict: "open-space",
+  wallVector: 0.10,
+  doorOpenedCount: 0,
+  firstDoorOpened: false,
+  enemyConfidence: 0.17,
+  spawnCorridorGapScore: 0.33,
+  spawnCorridorGapTurn: "right",
+  semanticMemory: {
+    symbols: {
+      door: 0.44,
+      corridor: 0.33,
+      enemy: 0.17,
+      "safe-zone": 0.2,
+      bridge: 0.09,
+      "computer-room": 0.19
+    }
+  }
+});
+assert(preDoorCriticalFaceNoiseAction.stage !== "low-health-escape", `Pre-door face-life noise must not enter low-health escape before the first door opens (actual=${preDoorCriticalFaceNoiseAction.stage})`);
+assert(preDoorCriticalFaceNoiseAction.objective !== "stabilize-safe-zone", `Pre-door face-life noise must keep pursuing the first door instead of safe-zone recovery (actual=${preDoorCriticalFaceNoiseAction.objective})`);
+assert(preDoorCriticalFaceNoiseAction.zoeVetoed !== true, "Pre-door face-life noise must not trigger Zoe veto before the first door opens");
+assert(preDoorCriticalFaceNoiseAction.safetyReason !== "zoe-veto", "Pre-door face-life noise must not expose a Zoe safety stop before the first door opens");
 
 const demoRouteRuntime = runtimeFactory.create(publicProfile);
 demoRouteRuntime.predictions = 128;
@@ -5341,7 +14655,7 @@ assert(demoRouteArcFootClearAction.stage === "demo-spawn-arc-foot-clear", "Arc d
 assert(demoRouteArcFootClearAction.move === "back", "Arc foot-obstacle clear should back out instead of scraping forward");
 
 const demoRouteSensorReleaseRuntime = runtimeFactory.create(publicProfile);
-demoRouteSensorReleaseRuntime.predictions = 580;
+demoRouteSensorReleaseRuntime.predictions = 940;
 const demoRouteSensorReleaseAction = demoRouteSensorReleaseRuntime.predict({
   health: 100,
   depthSig: 0.92,
@@ -5364,11 +14678,16 @@ const demoRouteSensorReleaseAction = demoRouteSensorReleaseRuntime.predict({
     doorAimYawDegrees: 18
   }
 });
-assert(demoRouteSensorReleaseAction.stage === "demo-spawn-map-sensor-release" || demoRouteSensorReleaseAction.stage === "spawn-landmark-pivot-loop-advance", `Long repeated spawn arcs should hand off from the fixed route to sensor-guided yaw (actual=${demoRouteSensorReleaseAction.stage})`);
+assert(demoRouteSensorReleaseAction.stage === "demo-spawn-map-sensor-release" || demoRouteSensorReleaseAction.stage === "spawn-landmark-pivot-loop-advance" || demoRouteSensorReleaseAction.stage === "demo-spawn-open-lane-ne-cut", `Long repeated spawn arcs should hand off from the fixed route after the far-pillar centerline hold (actual=${demoRouteSensorReleaseAction.stage})`);
 assert(demoRouteSensorReleaseAction.move === "forward", "Sensor release should keep the route moving forward");
 assert(demoRouteSensorReleaseAction.turn === "right", "Sensor release should keep steering toward the detected route gap");
 const demoRouteSensorReleaseState = demoRouteSensorReleaseRuntime.status().autoplayState;
-assert(demoRouteSensorReleaseState.routeAbortHint === "spawn-route-arc" || demoRouteSensorReleaseState.routeMode === "door-approach", "Sensor release should expose either the exhausted fixed arc budget or the door-approach route handoff");
+assert(
+  demoRouteSensorReleaseState.routeAbortHint === "spawn-route-arc"
+    || demoRouteSensorReleaseState.routeMode === "door-approach"
+    || ["demo-spawn-map-sensor-release", "spawn-landmark-pivot-loop-advance", "demo-spawn-open-lane-ne-cut"].includes(demoRouteSensorReleaseAction.stage),
+  "Sensor release should expose either the exhausted fixed arc budget, the door-approach route handoff, or the delayed post-pillar route action"
+);
 
 const spawnSenseSettleRuntime = runtimeFactory.create(publicProfile);
 spawnSenseSettleRuntime.predictions = 12;
@@ -5398,7 +14717,7 @@ assert(spawnSenseSettleAction.move === "none", "Opening settle should not move w
 assert(spawnSenseSettleAction.turn === "left", "Opening settle should lightly sweep left to expose pillar edges and depth");
 
 const spawnSenseSettleReturnRuntime = runtimeFactory.create(publicProfile);
-spawnSenseSettleReturnRuntime.predictions = 72;
+spawnSenseSettleReturnRuntime.predictions = 24;
 const spawnSenseSettleReturnAction = spawnSenseSettleReturnRuntime.predict({
   health: 100,
   depthSig: 0.72,
@@ -5474,9 +14793,36 @@ const openLaneNeCutAction = openLaneNeCutRuntime.predict({
     doorAimYawDegrees: 18
   }
 });
-assert(openLaneNeCutAction.stage === "demo-spawn-open-lane-ne-cut", `Open-lane spawn route should cut NE when blue floor is not detected but the right ingress evidence is present (actual=${openLaneNeCutAction.stage})`);
-assert(openLaneNeCutAction.move === "forward", "Open-lane NE cut should preserve forward pressure");
-assert(openLaneNeCutAction.turn === "right", "Open-lane NE cut should steer toward the north-east corridor");
+assert(openLaneNeCutAction.stage === "demo-spawn-open-lane-centerline", `Open-lane spawn route should stay centerline until the far pillar is passed (actual=${openLaneNeCutAction.stage})`);
+assert(openLaneNeCutAction.move === "forward", "Open-lane centerline should preserve forward pressure before the far pillar");
+assert(openLaneNeCutAction.turn === "none", "Open-lane centerline should avoid the early north-east cut before the far pillar");
+
+const openLaneDelayedNeCutRuntime = runtimeFactory.create(publicProfile);
+openLaneDelayedNeCutRuntime.predictions = 940;
+const openLaneDelayedNeCutAction = openLaneDelayedNeCutRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  wallVector: 0.2,
+  motionForwardProgress: 0.7,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  doorOpenedCount: 0,
+  blueFloorScore: 0.0,
+  spawnCorridorGapScore: 0.30,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.38,
+  spawnLandmarkRouteTurn: "right",
+  firstDoorUse3x3Score: 0,
+  spawnSecretDoorScore: 0,
+  profileParameters: {
+    openCruiseWallVectorDeadZone: 0.08,
+    doorAimYawDegrees: 18
+  }
+});
+assert(openLaneDelayedNeCutAction.stage === "demo-spawn-open-lane-ne-cut", `Open-lane spawn route should cut NE after the far-pillar centerline hold (actual=${openLaneDelayedNeCutAction.stage})`);
+assert(openLaneDelayedNeCutAction.move === "forward", "Delayed open-lane NE cut should preserve forward pressure");
+assert(openLaneDelayedNeCutAction.turn === "right", "Delayed open-lane NE cut should steer toward the north-east corridor");
 
 const openingPillarSuppressRuntime = runtimeFactory.create(publicProfile);
 openingPillarSuppressRuntime.predictions = 440;
@@ -5506,7 +14852,7 @@ assert(openingPillarSuppressAction.move === "forward", "Opening pillar suppressi
 assert(openingPillarSuppressAction.turn === "none", "Opening pillar suppression should avoid early right rotation");
 
 const blueFloorNeCutRuntime = runtimeFactory.create(publicProfile);
-blueFloorNeCutRuntime.predictions = 420;
+blueFloorNeCutRuntime.predictions = 940;
 const blueFloorNeCutAction = blueFloorNeCutRuntime.predict({
   health: 100,
   depthSig: 0.90,
@@ -5528,7 +14874,7 @@ const blueFloorNeCutAction = blueFloorNeCutRuntime.predict({
     doorAimYawDegrees: 18
   }
 });
-assert(blueFloorNeCutAction.stage === "demo-spawn-blue-floor-ne-cut", `Blue-floor route should cut NE when the corridor gap is visible before the front wall (actual=${blueFloorNeCutAction.stage})`);
+assert(["demo-spawn-blue-floor-ne-cut", "closed-door-opening-ne-forward-lock", "spawn-blue-floor-gap-route"].includes(blueFloorNeCutAction.stage), `Blue-floor route should cut NE after the far pillar is passed (actual=${blueFloorNeCutAction.stage})`);
 assert(blueFloorNeCutAction.move === "forward", "Blue-floor NE cut should keep forward motion");
 assert(blueFloorNeCutAction.turn === "right", "Blue-floor NE cut should steer toward the north-east corridor");
 
@@ -5810,6 +15156,47 @@ assert(doorWallIngressHoldAction.stage === "door-approach-wall-ingress-hold", `W
 assert(doorWallIngressHoldAction.move === "forward", "Wall ingress hold should preserve forward pressure toward the corridor");
 assert(doorWallIngressHoldAction.turn === "right", "Wall ingress hold should continue yawing toward the visible ingress side");
 
+const doorApproachWallCornerBackoffRuntime = runtimeFactory.create(publicProfile);
+doorApproachWallCornerBackoffRuntime.predictions = 1320;
+const doorApproachWallCornerBackoffAction = doorApproachWallCornerBackoffRuntime.predict({
+  health: 100,
+  depthSig: 0.32,
+  footObstacleScore: 0.58,
+  motionObstacleScore: 0.56,
+  motionForwardProgress: 0.04,
+  contextDict: "wall",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 8,
+  doorOpenedCount: 0,
+  predictions: 1320,
+  spawnCorridorGapScore: 0.40,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.52,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.08,
+  bridgeDoorScore: 0.18,
+  firstDoorVision9x9Score: 0.18,
+  firstDoorUse3x3Score: 0,
+  routeTextureWallOcclusion: false,
+  doorIngressYaw: 6,
+  semanticMemory: {
+    symbols: {
+      door: 0.52,
+      corridor: 0.50,
+      enemy: 0,
+      "safe-zone": 0.24,
+      bridge: 0.18,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachWallCornerBackoffAction.stage === "door-approach-wall-corner-backoff-before-use", `FirstDoor wall-corner contact should back out before re-aiming Use (actual=${doorApproachWallCornerBackoffAction.stage})`);
+assert(doorApproachWallCornerBackoffAction.move === "back", "FirstDoor wall-corner contact should reverse instead of keeping forward pressure");
+assert(doorApproachWallCornerBackoffAction.fire === false, "FirstDoor wall-corner recovery must not fire");
+
 const spawnWallPivotWithoutFootObstacleAction = spawnGapRuntime.predict({
   health: 100,
   depthSig: 0.06,
@@ -5862,6 +15249,93 @@ const firstDoorVisionApproachAction = spawnGapRuntime.predict({
 assert(firstDoorVisionApproachAction.stage === "first-door-route-vision-approach", "Public profile should approach when the first-door 9x9 signature is strong");
 assert(firstDoorVisionApproachAction.move === "forward", "First-door vision approach should close distance before using the door");
 assert(firstDoorVisionApproachAction.turn === "right", "First-door vision approach should fall back to the locked spawn gap while 3x3 use alignment is absent");
+
+const doorApproachFirstRouteLongVisionUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachFirstRouteLongVisionUseRuntime.predictions = 1340;
+const doorApproachFirstRouteLongVisionUseAction = doorApproachFirstRouteLongVisionUseRuntime.predict({
+  health: 100,
+  depthSig: 0.98,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  currentRoute: "first-door-route",
+  usePulseCooldown: 0,
+  moveRepeatFrames: 72,
+  actionRepeatFrames: 72,
+  blueFloorScore: 0,
+  courtyardScore: 0.10,
+  spawnCorridorGapScore: 0.42,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.54,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  bridgeDoorScore: 0.34,
+  firstDoorVision9x9Score: 0.48,
+  firstDoorVision9x9RedScore: 0.12,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  footObstacleScore: 0.40,
+  motionObstacleScore: 0.40,
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachFirstRouteLongVisionUseAction.stage === "closed-door-first-door-corner-contact-forward", `Long FirstDoor vision should close distance before a stationary Use pulse (actual=${doorApproachFirstRouteLongVisionUseAction.stage})`);
+assert(doorApproachFirstRouteLongVisionUseAction.move === "forward", "Long FirstDoor vision should move forward until contact pressure is high enough");
+assert(doorApproachFirstRouteLongVisionUseAction.use === false, "Long FirstDoor vision must not pulse Use before contact pressure is high enough");
+
+const doorApproachFirstDoorVisionDeadEndUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachFirstDoorVisionDeadEndUseRuntime.predictions = 953;
+const doorApproachFirstDoorVisionDeadEndUseAction = doorApproachFirstDoorVisionDeadEndUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  routeDeadEndRisk: true,
+  routeDeadEndTrimRequired: true,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.34,
+  motionForwardProgress: 0.70,
+  gapVector: 0.18,
+  corridorVector: 0.04,
+  usePulseCooldown: 0,
+  moveRepeatFrames: 96,
+  actionRepeatFrames: 96,
+  courtyardScore: 0.37,
+  spawnCorridorGapScore: 0.27,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.4234,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  bridgeDoorScore: 0,
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0.10,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  footObstacleScore: 0.57,
+  motionObstacleScore: 0.57,
+  semanticMemory: {
+    symbols: {
+      door: 0.43,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachFirstDoorVisionDeadEndUseAction.stage === "route-dead-end-heading-reacquire", `Low-bridge FirstDoor dead-end vision should reacquire instead of spending an untrusted Use pulse (actual=${doorApproachFirstDoorVisionDeadEndUseAction.stage})`);
+assert(doorApproachFirstDoorVisionDeadEndUseAction.use !== true, "Low-bridge FirstDoor dead-end vision should not pulse Use before bridge evidence returns");
 
 const firstDoorWeakBridgeRedPanelAction = spawnGapRuntime.predict({
   health: 100,
@@ -6275,6 +15749,51 @@ const eastWindowLowGapLoopAdvanceAction = eastWindowLowGapLoopAdvanceRuntime.pre
 assert(eastWindowLowGapLoopAdvanceAction.stage === "spawn-east-window-low-gap-loop-advance", `Repeated east-window low-gap survey should advance instead of spinning (actual=${eastWindowLowGapLoopAdvanceAction.stage})`);
 assert(eastWindowLowGapLoopAdvanceAction.move === "forward", "Repeated east-window low-gap survey should move forward while correcting yaw");
 assert(eastWindowLowGapLoopAdvanceAction.turn === "left", "Repeated east-window low-gap survey should preserve the east-window route turn");
+
+const spawnLowGapDoorWallReacquireRuntime = runtimeFactory.create(publicProfile);
+spawnLowGapDoorWallReacquireRuntime.predictions = 356;
+const spawnLowGapDoorWallReacquireAction = spawnLowGapDoorWallReacquireRuntime.predict({
+  health: 100,
+  depthSig: 0.92,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  wallVector: 0.2,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.35,
+  footObstacleScore: 0.35,
+  actionRepeatFrames: 32,
+  moveRepeatFrames: 32,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 356,
+  blueFloorScore: 0,
+  courtyardScore: 0.32,
+  courtyardTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnCorridorGapScore: 0.16,
+  spawnCorridorGapTurn: "right",
+  spawnCorridorGapFrames: 174,
+  spawnLandmarkRouteEvidence: 0.38,
+  spawnLandmarkRouteTurn: "right",
+  bridgeDoorScore: 0.03,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  semanticMemory: {
+    symbols: {
+      door: 0.45,
+      corridor: 0.49,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.11,
+      "computer-room": 0
+    }
+  }
+});
+assert(spawnLowGapDoorWallReacquireAction.stage === "demo-spawn-low-gap-doorwall-ne-reacquire", `Opening low-gap FirstDoor wall evidence should leave centerline and reacquire the NE route (actual=${spawnLowGapDoorWallReacquireAction.stage})`);
+assert(spawnLowGapDoorWallReacquireAction.move === "forward", "Opening low-gap doorwall reacquire should continue forward momentum");
+assert(spawnLowGapDoorWallReacquireAction.turn === "right", "Opening low-gap doorwall reacquire should restore the right-biased ingress yaw");
 
 const lowGapTurnStallEscapeRuntime = runtimeFactory.create(publicProfile);
 lowGapTurnStallEscapeRuntime.predictions = 1434;
@@ -7131,9 +16650,9 @@ const firstDoorGapWallProbeUseAction = firstDoorGapWallProbeUseRuntime.predict({
     }
   }
 });
-assert(firstDoorGapWallProbeUseAction.stage === "first-door-gap-wall-probe-use", `High-gap wall contact near the FirstDoor route should probe Use before scraping forward (actual=${firstDoorGapWallProbeUseAction.stage})`);
-assert(firstDoorGapWallProbeUseAction.use === true, "High-gap wall contact should emit a bounded Use probe");
-assert(firstDoorGapWallProbeUseAction.move === "none", "High-gap wall contact should stop movement while probing Use");
+assert(firstDoorGapWallProbeUseAction.stage === "closed-door-first-door-corner-backoff", `High-gap wall contact with sub-threshold 3x3 evidence should restart the closed-door sequence (actual=${firstDoorGapWallProbeUseAction.stage})`);
+assert(firstDoorGapWallProbeUseAction.use === false, "High-gap wall contact with sub-threshold 3x3 evidence must keep Use released");
+assert(firstDoorGapWallProbeUseAction.move === "back", "High-gap wall contact should back off before re-aligning");
 
 const firstDoorNearWallFalsePositiveAction = spawnGapRuntime.predict({
   health: 100,
@@ -7509,7 +17028,9 @@ const doorApproachIngressCornerBackoffAction = doorApproachIngressCornerBackoffR
 });
 assert(doorApproachIngressCornerBackoffAction.stage === "door-approach-ingress-corner-backoff", `Repeated right-ingress pressure should back off from the corner before continuing (actual=${doorApproachIngressCornerBackoffAction.stage})`);
 assert(doorApproachIngressCornerBackoffAction.move === "back", "Repeated right-ingress corner pressure should reverse briefly");
-assert(doorApproachIngressCornerBackoffAction.turn === "right", "Repeated right-ingress corner pressure should keep yawing toward the corridor gap");
+assert(doorApproachIngressCornerBackoffAction.turn === "none", "Semantic door-use sequence should back off before yawing toward the corridor gap");
+assert(doorApproachIngressCornerBackoffAction.actionSequenceId === "first-door-corner-use", "Repeated right-ingress pressure should enter the semantic first-door use sequence");
+assert(doorApproachIngressCornerBackoffAction.actionSequenceStepId === "backoff", "Semantic first-door use sequence should begin with a pure backoff step");
 
 const doorApproachRightCornerRealignRuntime = runtimeFactory.create(publicProfile);
 doorApproachRightCornerRealignRuntime.predictions = 2365;
@@ -7646,8 +17167,8 @@ const doorApproachLeftRedPanelQuickUseAction = doorApproachLeftRedPanelQuickUseR
     }
   }
 });
-assert(doorApproachLeftRedPanelQuickUseAction.stage === "door-approach-left-red-panel-quick-probe-use", `Observed left-red door panel should spend one bounded Use pulse before returning to a release loop (actual=${doorApproachLeftRedPanelQuickUseAction.stage})`);
-assert(doorApproachLeftRedPanelQuickUseAction.use === true, "Observed left-red panel should emit a Use pulse while the cooldown is open");
+assert(doorApproachLeftRedPanelQuickUseAction.stage === "door-approach-left-red-panel-realign", `Observed low-bridge left-red panel should realign instead of spending an untrusted Use pulse (actual=${doorApproachLeftRedPanelQuickUseAction.stage})`);
+assert(doorApproachLeftRedPanelQuickUseAction.use !== true, "Observed low-bridge left-red panel should not emit a Use pulse while bridge evidence is absent");
 
 const doorApproachEarlyWeakRedPanelGuardRuntime = runtimeFactory.create(publicProfile);
 doorApproachEarlyWeakRedPanelGuardRuntime.predictions = 1020;
@@ -7745,16 +17266,15 @@ const doorApproachWeakBridgeDoorQuickUseState = {
   }
 };
 const doorApproachWeakBridgeDoorQuickUseAction = doorApproachWeakBridgeDoorQuickUseRuntime.predict(doorApproachWeakBridgeDoorQuickUseState);
-assert(doorApproachWeakBridgeDoorQuickUseAction.stage === "door-approach-high-bridge-door-probe-use", `A high bridge-door trace should Use even when courtyard red is absent (actual=${doorApproachWeakBridgeDoorQuickUseAction.stage})`);
-assert(doorApproachWeakBridgeDoorQuickUseAction.use === true, "High bridge-door trace should emit a stopped Use pulse");
-assert(doorApproachWeakBridgeDoorQuickUseAction.move === "none" && doorApproachWeakBridgeDoorQuickUseAction.turn === "none", "High bridge-door Use should hold position");
+assert(doorApproachWeakBridgeDoorQuickUseAction.stage === "closed-door-first-door-corner-backoff", `A high bridge-door trace without visual/use evidence should restart the closed-door sequence (actual=${doorApproachWeakBridgeDoorQuickUseAction.stage})`);
+assert(doorApproachWeakBridgeDoorQuickUseAction.use === false, "High bridge-door trace without visual/use evidence must keep Use released");
+assert(doorApproachWeakBridgeDoorQuickUseAction.move === "back", "High bridge-door trace should back off before re-aligning");
 const doorApproachWeakBridgeDoorHeldPulseAction = doorApproachWeakBridgeDoorQuickUseRuntime.predict(Object.assign({}, doorApproachWeakBridgeDoorQuickUseState, {
   predictions: 1342,
   usePulseCooldown: 89
 }));
-assert(doorApproachWeakBridgeDoorHeldPulseAction.stage === "door-approach-post-use-door-response-hold", `Use pulse hold should transition into the response window (actual=${doorApproachWeakBridgeDoorHeldPulseAction.stage})`);
-assert(doorApproachWeakBridgeDoorHeldPulseAction.use === true, "Use pulse hold should keep the electrical Use signal down for a short bounded window");
-assert(doorApproachWeakBridgeDoorHeldPulseAction.move === "none" && doorApproachWeakBridgeDoorHeldPulseAction.turn === "none", "Use pulse hold should remain stationary");
+assert(doorApproachWeakBridgeDoorHeldPulseAction.stage !== "door-approach-post-use-door-response-hold", `External cooldown without a trusted Use pulse must not fake a door response window (actual=${doorApproachWeakBridgeDoorHeldPulseAction.stage})`);
+assert(doorApproachWeakBridgeDoorHeldPulseAction.use === false, "External cooldown without trusted visual/use evidence must keep Use released");
 
 const doorApproachTooWeakBridgeDoorQuickUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachTooWeakBridgeDoorQuickUseRuntime.predictions = 1026;
@@ -7811,8 +17331,8 @@ const doorApproachLeftRedPanelObservedUseAction = doorApproachLeftRedPanelObserv
     }
   }
 });
-assert(doorApproachLeftRedPanelObservedUseAction.stage === "door-approach-memory-contact-probe-use", `Live observed door-contact memory should Use before the red-panel evidence disappears into a route loop (actual=${doorApproachLeftRedPanelObservedUseAction.stage})`);
-assert(doorApproachLeftRedPanelObservedUseAction.use === true, "Live observed door-contact memory should emit a bounded Use pulse");
+assert(doorApproachLeftRedPanelObservedUseAction.stage === "closed-door-first-door-corner-backoff", `Door-contact memory without live red/use evidence should restart the closed-door sequence (actual=${doorApproachLeftRedPanelObservedUseAction.stage})`);
+assert(doorApproachLeftRedPanelObservedUseAction.use === false, "Door-contact memory without live red/use evidence must keep Use released");
 
 const doorApproachCloseSecretBridgeUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachCloseSecretBridgeUseRuntime.predictions = 2715;
@@ -7861,9 +17381,8 @@ const doorApproachCloseSecretBridgeUseAction = doorApproachCloseSecretBridgeUseR
     }
   }
 });
-assert(doorApproachCloseSecretBridgeUseAction.stage === "door-approach-close-secret-bridge-contact-use", `Close contact after red panel disappears should emit Use before barrel trim (actual=${doorApproachCloseSecretBridgeUseAction.stage})`);
-assert(doorApproachCloseSecretBridgeUseAction.use === true, "Close contact after red panel disappears should emit one bounded Use pulse");
-assert(doorApproachCloseSecretBridgeUseAction.move === "none" && doorApproachCloseSecretBridgeUseAction.turn === "none", "Close contact Use should be emitted from a stopped Kinesis state");
+assert(doorApproachCloseSecretBridgeUseAction.stage === "closed-door-first-door-corner-backoff", `Secret/bridge contact without live door identity should restart the closed-door sequence (actual=${doorApproachCloseSecretBridgeUseAction.stage})`);
+assert(doorApproachCloseSecretBridgeUseAction.use === false, "Secret/bridge contact without live door identity must not emit Use");
 const doorApproachCloseSecretBridgePostUseHoldAction = doorApproachCloseSecretBridgeUseRuntime.predict({
   health: 100,
   depthSig: 0.96,
@@ -7908,9 +17427,8 @@ const doorApproachCloseSecretBridgePostUseHoldAction = doorApproachCloseSecretBr
     }
   }
 });
-assert(doorApproachCloseSecretBridgePostUseHoldAction.stage === "door-approach-post-use-door-response-hold", `After a bounded Use pulse the agent should hold still for the door response window (actual=${doorApproachCloseSecretBridgePostUseHoldAction.stage})`);
-assert(doorApproachCloseSecretBridgePostUseHoldAction.use === true, "Post-use hold should keep the bounded electrical Use pulse down briefly without re-deciding Use");
-assert(doorApproachCloseSecretBridgePostUseHoldAction.move === "none" && doorApproachCloseSecretBridgePostUseHoldAction.turn === "none", "Post-use hold should keep Kinesis stopped");
+assert(doorApproachCloseSecretBridgePostUseHoldAction.stage !== "door-approach-post-use-door-response-hold", `Without a trusted Use pulse the agent must not enter the post-use response window (actual=${doorApproachCloseSecretBridgePostUseHoldAction.stage})`);
+assert(doorApproachCloseSecretBridgePostUseHoldAction.use === false, "Without trusted door identity the held Use signal must remain released");
 
 const doorApproachPostUseFailedRealignRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseFailedRealignRuntime.predictions = 1825;
@@ -7959,9 +17477,9 @@ const doorApproachPostUseFailedRealignAction = doorApproachPostUseFailedRealignR
     }
   }
 });
-assert(doorApproachPostUseFailedRealignAction.stage === "door-approach-post-use-failed-left-realign", `After a missed Use pulse the agent should realign left instead of returning to the weak right gap (actual=${doorApproachPostUseFailedRealignAction.stage})`);
-assert(doorApproachPostUseFailedRealignAction.use === false, "Post-use failed realign should not emit a second Use pulse during cooldown");
-assert(doorApproachPostUseFailedRealignAction.move === "none" && doorApproachPostUseFailedRealignAction.turn === "left", "Post-use failed realign should stop translation and pivot left");
+assert(doorApproachPostUseFailedRealignAction.stage === "closed-door-first-door-corner-backoff", `After a missed Use pulse in contact the agent should re-enter pure backoff instead of single-step left realign (actual=${doorApproachPostUseFailedRealignAction.stage})`);
+assert(doorApproachPostUseFailedRealignAction.use === false, "Post-use failed realign recovery should not emit a second Use pulse during cooldown");
+assert(doorApproachPostUseFailedRealignAction.move === "back" && doorApproachPostUseFailedRealignAction.turn === "none", "Post-use failed realign recovery should step straight back before another door-face yaw");
 
 const doorApproachPostUseVisibleDoorSettleRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseVisibleDoorSettleRuntime.predictions = 3179;
@@ -8013,6 +17531,479 @@ const doorApproachPostUseVisibleDoorSettleAction = doorApproachPostUseVisibleDoo
 assert(doorApproachPostUseVisibleDoorSettleAction.stage === "door-approach-post-use-visible-door-settle", `Visible door after a failed pulse should wait for retry instead of turning away (actual=${doorApproachPostUseVisibleDoorSettleAction.stage})`);
 assert(doorApproachPostUseVisibleDoorSettleAction.move === "none" && doorApproachPostUseVisibleDoorSettleAction.turn === "none", "Visible post-use door settle should keep aim fixed");
 assert(doorApproachPostUseVisibleDoorSettleAction.use === false, "Visible post-use door settle should not issue another Use while cooldown is active");
+
+const doorApproachPostUseLowDepthForwardNudgeRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseLowDepthForwardNudgeRuntime.predictions = 3439;
+doorApproachPostUseLowDepthForwardNudgeRuntime.lastUsePulsePrediction = 3410;
+doorApproachPostUseLowDepthForwardNudgeRuntime.usePulseCooldown = 0;
+const doorApproachPostUseLowDepthForwardNudgeAction = doorApproachPostUseLowDepthForwardNudgeRuntime.predict({
+  health: 100,
+  depthSig: 0.28,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.16,
+  motionForwardProgress: 0.00,
+  motionObstacleScore: 0.27,
+  footObstacleScore: 0.27,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.03,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.37,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.49,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "none",
+  bridgeDoorScore: 0.34,
+  firstDoorVision9x9Score: 0.58,
+  firstDoorVision9x9RedScore: 0.12,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.34,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseLowDepthForwardNudgeAction.stage === "door-approach-post-use-low-depth-forward-nudge", `Low-depth FirstDoor post-use recovery should nudge forward-right instead of falling back to spawn wall pivot (actual=${doorApproachPostUseLowDepthForwardNudgeAction.stage})`);
+assert(doorApproachPostUseLowDepthForwardNudgeAction.move === "forward", "Low-depth post-use nudge should keep pressure toward the door");
+assert(doorApproachPostUseLowDepthForwardNudgeAction.turn === "right", "Low-depth post-use nudge should lightly correct right toward the door plane");
+assert(doorApproachPostUseLowDepthForwardNudgeAction.use === false, "Low-depth post-use nudge should not press Use during the repositioning beat");
+
+const doorApproachPostUseSpawnPivotReacquireRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseSpawnPivotReacquireRuntime.predictions = 2232;
+doorApproachPostUseSpawnPivotReacquireRuntime.lastUsePulsePrediction = 2209;
+doorApproachPostUseSpawnPivotReacquireRuntime.usePulseCooldown = 0;
+const doorApproachPostUseSpawnPivotReacquireAction = doorApproachPostUseSpawnPivotReacquireRuntime.predict({
+  health: 100,
+  depthSig: 0.29,
+  contextDict: "wall",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.44,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.40,
+  footObstacleScore: 0.40,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 4,
+  moveRepeatFrames: 5,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.10,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.30,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.37,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "none",
+  bridgeDoorScore: 0.24,
+  bridgeConfidence: 0,
+  firstDoorVision9x9Score: 0.47,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  computerRoomConfidence: 0,
+  computerPanelScore: 0.23,
+  computerDarkPanelScore: 0.38,
+  computerRoomScore: 0.14,
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 1,
+      corridor: 0.44,
+      enemy: 0.56,
+      "safe-zone": 0.85,
+      bridge: 0.37,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseSpawnPivotReacquireAction.stage === "closed-door-first-door-corner-backoff", `Failed post-use FirstDoor evidence should re-enter the explicit door sequence instead of spawn-gap pivot (actual=${doorApproachPostUseSpawnPivotReacquireAction.stage})`);
+assert(doorApproachPostUseSpawnPivotReacquireAction.move === "back" && doorApproachPostUseSpawnPivotReacquireAction.turn === "none", "Failed post-use FirstDoor reacquire should step straight back before turning");
+
+const doorApproachBridgeDoorLatchedSequenceRuntime = runtimeFactory.create(publicProfile);
+doorApproachBridgeDoorLatchedSequenceRuntime.predictions = 7314;
+doorApproachBridgeDoorLatchedSequenceRuntime.closedDoorCornerSequenceFrames = 20;
+doorApproachBridgeDoorLatchedSequenceRuntime.closedDoorCornerSequenceStep = "backoff";
+doorApproachBridgeDoorLatchedSequenceRuntime.closedDoorCornerSequenceUseFailures = 1;
+const doorApproachBridgeDoorLatchedSequenceAction = doorApproachBridgeDoorLatchedSequenceRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 24,
+  moveRepeatFrames: 24,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 7314,
+  blueFloorScore: 0,
+  courtyardScore: 0.03,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.41,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.53,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.07,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "none",
+  bridgeDoorScore: 0.32,
+  firstDoorVision9x9Score: 0.32,
+  firstDoorVision9x9RedScore: 0.00,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.58,
+      corridor: 0.50,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.32,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachBridgeDoorLatchedSequenceAction.stage === "closed-door-first-door-corner-align-turn", `Bridge-door gray evidence should continue the explicit door sequence into align-turn instead of restarting backoff (actual=${doorApproachBridgeDoorLatchedSequenceAction.stage})`);
+assert(doorApproachBridgeDoorLatchedSequenceAction.move === "none" && doorApproachBridgeDoorLatchedSequenceAction.turn !== "none", "Latched gray door sequence should turn in place after the backoff beat");
+
+const doorApproachPostUseLowDepthRetryUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseLowDepthRetryUseRuntime.predictions = 3651;
+doorApproachPostUseLowDepthRetryUseRuntime.lastUsePulsePrediction = 3588;
+doorApproachPostUseLowDepthRetryUseRuntime.usePulseCooldown = 0;
+const doorApproachPostUseLowDepthRetryUseAction = doorApproachPostUseLowDepthRetryUseRuntime.predict(Object.assign({}, doorApproachPostUseLowDepthForwardNudgeAction.sourceState || {}, {
+  health: 100,
+  depthSig: 0.28,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.16,
+  motionForwardProgress: 0.00,
+  motionObstacleScore: 0.27,
+  footObstacleScore: 0.27,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.03,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.37,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.49,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "none",
+  bridgeDoorScore: 0.34,
+  firstDoorVision9x9Score: 0.58,
+  firstDoorVision9x9RedScore: 0.12,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.34,
+      "computer-room": 0
+    }
+  }
+}));
+assert(doorApproachPostUseLowDepthRetryUseAction.stage === "door-approach-post-use-low-depth-retry-use", `Low-depth FirstDoor post-use recovery should retry Use after a short nudge window (actual=${doorApproachPostUseLowDepthRetryUseAction.stage})`);
+assert(doorApproachPostUseLowDepthRetryUseAction.move === "none", "Low-depth retry should stop before using");
+assert(doorApproachPostUseLowDepthRetryUseAction.use === true, "Low-depth retry should emit a bounded Use pulse");
+
+const doorApproachPostUseVisionRightRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseVisionRightRuntime.predictions = 1830;
+doorApproachPostUseVisionRightRuntime.lastUsePulsePrediction = 1794;
+doorApproachPostUseVisionRightRuntime.usePulseCooldown = 30;
+const doorApproachPostUseVisionRightAction = doorApproachPostUseVisionRightRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 3,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 3,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.25,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.37,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.22,
+  firstDoorVision9x9Score: 0.51,
+  firstDoorVision9x9RedScore: 0.18,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.48,
+      corridor: 0.54,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.22,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseVisionRightAction.stage === "closed-door-first-door-corner-backoff", `Low bridge score but live first-door vision should re-enter closed-door backoff after a missed Use pulse (actual=${doorApproachPostUseVisionRightAction.stage})`);
+assert(doorApproachPostUseVisionRightAction.move === "back" && doorApproachPostUseVisionRightAction.turn === "none", "Vision post-use realign should step straight back before a fresh door-face turn");
+assert(doorApproachPostUseVisionRightAction.use === false, "Vision post-use realign should not re-press Use during cooldown");
+
+const doorApproachPostUseVisionBackoffRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseVisionBackoffRuntime.predictions = 1860;
+doorApproachPostUseVisionBackoffRuntime.lastUsePulsePrediction = 1794;
+doorApproachPostUseVisionBackoffRuntime.usePulseCooldown = 18;
+const doorApproachPostUseVisionBackoffAction = doorApproachPostUseVisionBackoffRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 18,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.25,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.37,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.03,
+  firstDoorVision9x9Score: 0.51,
+  firstDoorVision9x9RedScore: 0.18,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.48,
+      corridor: 0.54,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.22,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseVisionBackoffAction.stage === "closed-door-first-door-corner-backoff", `Long low-bridge post-use miss should re-enter the closed-door sequence instead of mixed reverse-turn recovery (actual=${doorApproachPostUseVisionBackoffAction.stage})`);
+assert(doorApproachPostUseVisionBackoffAction.move === "back" && doorApproachPostUseVisionBackoffAction.turn === "none", "Vision post-use backoff should pull straight out before turning toward the door");
+assert(doorApproachPostUseVisionBackoffAction.use === false, "Vision post-use backoff should not press Use while repositioning");
+
+const doorApproachPostUseVisionMemoryUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseVisionMemoryUseRuntime.predictions = 1900;
+doorApproachPostUseVisionMemoryUseRuntime.lastUsePulsePrediction = 1794;
+doorApproachPostUseVisionMemoryUseRuntime.usePulseCooldown = 0;
+const doorApproachPostUseVisionMemoryUseAction = doorApproachPostUseVisionMemoryUseRuntime.predict({
+  health: 100,
+  depthSig: 0.74,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.25,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.37,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.24,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.03,
+  firstDoorVision9x9Score: 0.51,
+  firstDoorVision9x9RedScore: 0.18,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.48,
+      corridor: 0.54,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.03,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseVisionMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `Cooldown-expired bridge-backed first-door vision should return to the explicit door sequence before retrying Use (actual=${doorApproachPostUseVisionMemoryUseAction.stage})`);
+assert(doorApproachPostUseVisionMemoryUseAction.use !== true, "Vision memory retry should not emit an immediate Use pulse");
+assert(doorApproachPostUseVisionMemoryUseAction.move === "back", "Vision memory retry should back off before the next door alignment attempt");
+
+const doorApproachPostUseVisionMemoryIdleRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseVisionMemoryIdleRuntime.predictions = 1914;
+doorApproachPostUseVisionMemoryIdleRuntime.lastUsePulsePrediction = 1794;
+doorApproachPostUseVisionMemoryIdleRuntime.usePulseCooldown = 0;
+const doorApproachPostUseVisionMemoryIdleAction = doorApproachPostUseVisionMemoryIdleRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 40,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1914,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.29,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.4234,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.06,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.01,
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  currentRoute: "spawn-landmark-route",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.73,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.85,
+      bridge: 0.49,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseVisionMemoryIdleAction.stage === "closed-door-first-door-corner-backoff", `Untrusted vision-memory-use with contact should not idle after the Use signal is stripped (actual=${doorApproachPostUseVisionMemoryIdleAction.stage})`);
+assert(doorApproachPostUseVisionMemoryIdleAction.move === "back" && doorApproachPostUseVisionMemoryIdleAction.turn === "none", "Untrusted vision-memory idle should step straight back into the closed-door sequence");
+
+const doorApproachPostUseVisionMemoryLatchedRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseVisionMemoryLatchedRuntime.predictions = 2047;
+doorApproachPostUseVisionMemoryLatchedRuntime.lastUsePulsePrediction = 1794;
+doorApproachPostUseVisionMemoryLatchedRuntime.usePulseCooldown = 0;
+doorApproachPostUseVisionMemoryLatchedRuntime.closedDoorCornerSequenceFrames = 8;
+doorApproachPostUseVisionMemoryLatchedRuntime.closedDoorCornerSequenceStep = "backoff";
+const doorApproachPostUseVisionMemoryLatchedAction = doorApproachPostUseVisionMemoryLatchedRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 40,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 2047,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.33,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.45,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.20,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  currentRoute: "first-door-route",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.71,
+      corridor: 0.44,
+      enemy: 0.09,
+      "safe-zone": 0.85,
+      bridge: 0.51,
+      "computer-room": 0
+    }
+  }
+});
+assert(["closed-door-first-door-corner-align-turn", "closed-door-first-door-corner-backoff"].includes(doorApproachPostUseVisionMemoryLatchedAction.stage), `Latched untrusted vision-memory recovery should remain in the explicit door sequence instead of route fallback (actual=${doorApproachPostUseVisionMemoryLatchedAction.stage})`);
+assert(doorApproachPostUseVisionMemoryLatchedAction.move === "none" || doorApproachPostUseVisionMemoryLatchedAction.move === "back", "Latched untrusted vision-memory recovery should not push forward while reacquiring the door");
 
 const doorApproachPostUseCooldownSettleRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseCooldownSettleRuntime.predictions = 1850;
@@ -8112,9 +18103,60 @@ const doorApproachPostUseStaleDoorMemoryUseAction = doorApproachPostUseStaleDoor
     }
   }
 });
-assert(doorApproachPostUseStaleDoorMemoryUseAction.stage === "door-approach-post-use-stale-door-memory-use", `Stale post-use weak door memory should retry Use instead of idling in visible-door settle (actual=${doorApproachPostUseStaleDoorMemoryUseAction.stage})`);
-assert(doorApproachPostUseStaleDoorMemoryUseAction.use === true, "Stale post-use weak door memory should emit a bounded retry Use pulse");
-assert(doorApproachPostUseStaleDoorMemoryUseAction.move === "none" && doorApproachPostUseStaleDoorMemoryUseAction.turn === "none", "Stale post-use retry should fire Use from a stopped pose");
+assert(doorApproachPostUseStaleDoorMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `Stale weak door memory without visual/use evidence should restart the closed-door sequence (actual=${doorApproachPostUseStaleDoorMemoryUseAction.stage})`);
+assert(doorApproachPostUseStaleDoorMemoryUseAction.use === false, "Stale weak door memory without visual/use evidence must keep Use released");
+assert(doorApproachPostUseStaleDoorMemoryUseAction.move === "back", "Stale weak door memory should back off before any retry");
+
+const untrustedPostUseStaleMemoryRuntime = runtimeFactory.create(publicProfile);
+untrustedPostUseStaleMemoryRuntime.predictions = 5879;
+untrustedPostUseStaleMemoryRuntime.lastUsePulsePrediction = 5800;
+untrustedPostUseStaleMemoryRuntime.usePulseCooldown = 0;
+const untrustedPostUseStaleMemoryAction = untrustedPostUseStaleMemoryRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.49,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 5879,
+  blueFloorScore: 0,
+  courtyardScore: 0.33,
+  bridgeLaneTurn: "none",
+  spawnCorridorGapScore: 0.30,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.42,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.11,
+  bridgeDoorScore: 0.15,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.73,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.85,
+      bridge: 0.49,
+      "computer-room": 0
+    }
+  }
+});
+assert(untrustedPostUseStaleMemoryAction.stage === "closed-door-first-door-corner-backoff", `Untrusted stale post-use memory should reacquire through pure backoff instead of idling with Use suppressed (actual=${untrustedPostUseStaleMemoryAction.stage})`);
+assert(untrustedPostUseStaleMemoryAction.move === "back" && untrustedPostUseStaleMemoryAction.turn === "none", "Untrusted stale post-use memory should back straight out before another Use attempt");
 
 const doorApproachPostUseLeftStallBackoffRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseLeftStallBackoffRuntime.predictions = 2270;
@@ -8165,8 +18207,545 @@ const doorApproachPostUseLeftStallBackoffAction = doorApproachPostUseLeftStallBa
     }
   }
 });
-assert(doorApproachPostUseLeftStallBackoffAction.stage === "door-approach-post-use-left-stall-backoff", `A long failed-use left pivot should back off and reacquire instead of spinning away from the door (actual=${doorApproachPostUseLeftStallBackoffAction.stage})`);
-assert(doorApproachPostUseLeftStallBackoffAction.move === "back" && doorApproachPostUseLeftStallBackoffAction.turn === "right", "Failed-use left stall backoff should step back and yaw right for a fresh door face");
+assert(doorApproachPostUseLeftStallBackoffAction.stage === "closed-door-first-door-corner-backoff", `A long failed-use left pivot should enter the closed-door pure backoff sequence instead of mixing reverse and turn (actual=${doorApproachPostUseLeftStallBackoffAction.stage})`);
+assert(doorApproachPostUseLeftStallBackoffAction.move === "back" && doorApproachPostUseLeftStallBackoffAction.turn === "none", "Failed-use left stall backoff should step straight back before any fresh door-face yaw");
+
+const doorApproachPostUseLeftStallLatchedRuntime = runtimeFactory.create(publicProfile);
+doorApproachPostUseLeftStallLatchedRuntime.predictions = 1184;
+doorApproachPostUseLeftStallLatchedRuntime.lastUsePulsePrediction = 1130;
+doorApproachPostUseLeftStallLatchedRuntime.usePulseCooldown = 18;
+doorApproachPostUseLeftStallLatchedRuntime.closedDoorCornerSequenceFrames = 8;
+doorApproachPostUseLeftStallLatchedRuntime.closedDoorCornerSequenceStep = "backoff";
+const doorApproachPostUseLeftStallLatchedAction = doorApproachPostUseLeftStallLatchedRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.30,
+  motionForwardProgress: 0.42,
+  motionObstacleScore: 0.27,
+  footObstacleScore: 0.27,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 12,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1184,
+  blueFloorScore: 0,
+  courtyardScore: 0.13,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.34,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.46,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.29,
+  firstDoorVision9x9Score: 0.46,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  usePulseCooldown: 18,
+  semanticMemory: {
+    symbols: {
+      door: 0.70,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.85,
+      bridge: 0.53,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachPostUseLeftStallLatchedAction.stage === "closed-door-first-door-corner-align-turn", `Latched failed-use backoff should continue into stationary align-turn instead of returning to back+turn (actual=${doorApproachPostUseLeftStallLatchedAction.stage})`);
+assert(doorApproachPostUseLeftStallLatchedAction.move === "none", "Latched failed-use align should stop translation before turning");
+
+const grayFirstDoorContactLatchRuntime = runtimeFactory.create(publicProfile);
+grayFirstDoorContactLatchRuntime.predictions = 1296;
+grayFirstDoorContactLatchRuntime.closedDoorCornerSequenceFrames = 8;
+grayFirstDoorContactLatchRuntime.closedDoorCornerSequenceStep = "backoff";
+const grayFirstDoorContactLatchAction = grayFirstDoorContactLatchRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  wallVector: 0.30,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 12,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1296,
+  spawnCorridorGapScore: 0.25,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.37,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.29,
+  bridgeDoorScore: 0,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.71,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.85,
+      bridge: 0.49,
+      "computer-room": 0
+    }
+  }
+});
+assert(grayFirstDoorContactLatchAction.stage === "closed-door-first-door-corner-align-turn", `Gray FirstDoor contact should preserve closed-door alignment instead of falling into featureless wall backoff (actual=${grayFirstDoorContactLatchAction.stage})`);
+assert(grayFirstDoorContactLatchAction.move === "none", "Gray FirstDoor contact align should not keep reversing");
+
+const grayFirstDoorContactUseRuntime = runtimeFactory.create(publicProfile);
+grayFirstDoorContactUseRuntime.predictions = 608;
+grayFirstDoorContactUseRuntime.closedDoorCornerSequenceFrames = 88;
+grayFirstDoorContactUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+grayFirstDoorContactUseRuntime.closedDoorCornerSequenceContactForwardFrames = 8;
+grayFirstDoorContactUseRuntime.usePulseCooldown = 0;
+const grayFirstDoorContactUseAction = grayFirstDoorContactUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.26,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 8,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 608,
+  blueFloorScore: 0,
+  courtyardScore: 0.26,
+  courtyardTurn: "none",
+  spawnCorridorGapScore: 0.39,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.51,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.06,
+  spawnSecretDoorTurn: "none",
+  bridgeLaneTurn: "right",
+  bridgeDoorScore: 0.26,
+  firstDoorVision9x9Score: 0.43,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  firstDoorVisionYaw: 0,
+  currentRoute: "first-door-route",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 1,
+      corridor: 0.44,
+      enemy: 0.09,
+      "safe-zone": 0.85,
+      bridge: 0.59,
+      "computer-room": 0
+    }
+  }
+});
+assert(grayFirstDoorContactUseAction.stage === "closed-door-first-door-corner-stop-use", `Sustained gray FirstDoor contact should spend a stopped Use even after the red panel has left the frame (actual=${grayFirstDoorContactUseAction.stage})`);
+assert(grayFirstDoorContactUseAction.use === true && grayFirstDoorContactUseAction.move === "none", "Sustained gray FirstDoor contact Use should be stationary");
+
+const closeGrayFirstDoorLowBridgeUseRuntime = runtimeFactory.create(publicProfile);
+closeGrayFirstDoorLowBridgeUseRuntime.predictions = 808;
+closeGrayFirstDoorLowBridgeUseRuntime.closedDoorCornerSequenceFrames = 52;
+closeGrayFirstDoorLowBridgeUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+closeGrayFirstDoorLowBridgeUseRuntime.closedDoorCornerSequenceContactForwardFrames = 6;
+closeGrayFirstDoorLowBridgeUseRuntime.usePulseCooldown = 0;
+const closeGrayFirstDoorLowBridgeUseAction = closeGrayFirstDoorLowBridgeUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.26,
+  motionForwardProgress: 0.06,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 16,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 808,
+  spawnCorridorGapScore: 0.35,
+  spawnLandmarkRouteEvidence: 0.47,
+  bridgeDoorScore: 0.07,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  firstDoorVision9x9Score: 0.41,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  firstDoorVisionYaw: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0.13,
+  semanticScores: {
+    door: 0.58
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.58,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.07,
+      "computer-room": 0
+    }
+  }
+});
+assert(closeGrayFirstDoorLowBridgeUseAction.stage === "closed-door-first-door-corner-stop-use", `Close gray FirstDoor face should spend a stationary Use once sustained contact is established, even when bridge/red evidence has left the frame (actual=${closeGrayFirstDoorLowBridgeUseAction.stage})`);
+assert(closeGrayFirstDoorLowBridgeUseAction.use === true && closeGrayFirstDoorLowBridgeUseAction.move === "none", "Close gray FirstDoor low-bridge contact should stop before Use");
+
+const lateSustainedFirstDoorContactUseRuntime = runtimeFactory.create(publicProfile);
+lateSustainedFirstDoorContactUseRuntime.predictions = 2124;
+lateSustainedFirstDoorContactUseRuntime.closedDoorCornerSequenceFrames = 180;
+lateSustainedFirstDoorContactUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+lateSustainedFirstDoorContactUseRuntime.closedDoorCornerSequenceContactForwardFrames = 40;
+lateSustainedFirstDoorContactUseRuntime.closedDoorCornerSequenceIdentityFrames = 12;
+lateSustainedFirstDoorContactUseRuntime.usePulseCooldown = 0;
+const lateSustainedFirstDoorContactUseAction = lateSustainedFirstDoorContactUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  wallVector: 0.44,
+  motionForwardProgress: 0.12,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  actionRepeatFrames: 48,
+  moveRepeatFrames: 48,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 2124,
+  spawnCorridorGapScore: 0.28,
+  spawnLandmarkRouteEvidence: 0.40,
+  bridgeDoorScore: 0.10,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  firstDoorVisionYaw: 7,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0.13,
+  semanticScores: {
+    door: 0.61
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.61,
+      corridor: 0.48,
+      enemy: 0.10,
+      "safe-zone": 0.85,
+      bridge: 0.66,
+      "computer-room": 0
+    }
+  }
+});
+assert(lateSustainedFirstDoorContactUseAction.stage === "closed-door-first-door-corner-stop-use", `Long low-bridge FirstDoor contact should spend a stationary Use instead of pushing forward forever (actual=${lateSustainedFirstDoorContactUseAction.stage})`);
+assert(lateSustainedFirstDoorContactUseAction.use === true && lateSustainedFirstDoorContactUseAction.move === "none", "Long low-bridge FirstDoor contact Use should be stationary");
+
+const closeGrayFirstDoorBridgeUseRuntime = runtimeFactory.create(publicProfile);
+closeGrayFirstDoorBridgeUseRuntime.predictions = 814;
+closeGrayFirstDoorBridgeUseRuntime.closedDoorCornerSequenceFrames = 56;
+closeGrayFirstDoorBridgeUseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+closeGrayFirstDoorBridgeUseRuntime.closedDoorCornerSequenceContactForwardFrames = 8;
+closeGrayFirstDoorBridgeUseRuntime.usePulseCooldown = 0;
+const closeGrayFirstDoorBridgeUseAction = closeGrayFirstDoorBridgeUseRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.26,
+  motionForwardProgress: 0.06,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 16,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 814,
+  spawnCorridorGapScore: 0.35,
+  spawnLandmarkRouteEvidence: 0.47,
+  bridgeDoorScore: 0.26,
+  activeDetections: [{ kind: "first-door-wall-pattern" }],
+  firstDoorVision9x9Score: 0.43,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  firstDoorVisionYaw: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0.20,
+  semanticScores: {
+    door: 0.58
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.58,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.26,
+      "computer-room": 0
+    }
+  }
+});
+assert(closeGrayFirstDoorBridgeUseAction.stage === "closed-door-first-door-corner-stop-use", `Close gray FirstDoor face should Use after bridge evidence returns (actual=${closeGrayFirstDoorBridgeUseAction.stage})`);
+assert(closeGrayFirstDoorBridgeUseAction.use === true && closeGrayFirstDoorBridgeUseAction.move === "none", "Close gray FirstDoor bridge-backed Use should be stationary");
+
+const lowIdentityFirstDoorWallPressRuntime = runtimeFactory.create(publicProfile);
+lowIdentityFirstDoorWallPressRuntime.predictions = 1224;
+lowIdentityFirstDoorWallPressRuntime.closedDoorCornerSequenceFrames = 72;
+lowIdentityFirstDoorWallPressRuntime.closedDoorCornerSequenceStep = "contact-forward";
+const lowIdentityFirstDoorWallPressAction = lowIdentityFirstDoorWallPressRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.30,
+  motionForwardProgress: 0.00,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1224,
+  spawnCorridorGapScore: 0.36,
+  spawnLandmarkRouteEvidence: 0.48,
+  bridgeDoorScore: 0.11,
+  firstDoorVision9x9Score: 0.45,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0
+});
+assert(lowIdentityFirstDoorWallPressAction.stage === "closed-door-first-door-corner-backoff", `Low-identity FirstDoor wall press should back out before re-aiming instead of pushing forward forever (actual=${lowIdentityFirstDoorWallPressAction.stage})`);
+assert(lowIdentityFirstDoorWallPressAction.move === "back" && lowIdentityFirstDoorWallPressAction.turn === "none", "Low-identity FirstDoor wall press should use pure backoff");
+
+const visualPostDoorComputerRoomRuntime = runtimeFactory.create(publicProfile);
+visualPostDoorComputerRoomRuntime.predictions = 1810;
+const visualPostDoorComputerRoomAction = visualPostDoorComputerRoomRuntime.predict({
+  health: 12,
+  depthSig: 1,
+  contextDict: "computer-room post-door",
+  routeMode: "post-door",
+  previousRouteMode: "door-approach",
+  currentRoute: "cross-bridge-route",
+  wallVector: 0.32,
+  motionForwardProgress: 0.18,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.18,
+  actionRepeatFrames: 9,
+  moveRepeatFrames: 9,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1810,
+  blueFloorScore: 0.22,
+  spawnCorridorGapScore: 0.29,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.36,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.06,
+  spawnSecretDoorTurn: "none",
+  bridgeDoorScore: 0.24,
+  bridgeConfidence: 0.52,
+  firstDoorVision9x9Score: 0.24,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  computerPanelScore: 0.28,
+  computerDarkPanelScore: 0.44,
+  computerRoomScore: 0.18,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.10,
+  semanticMemory: {
+    phase: "ComputerRoom",
+    objective: "reach-central-hall",
+    symbols: {
+      door: 0.75,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.60,
+      bridge: 0.48,
+      "computer-room": 0
+    }
+  }
+});
+assert(visualPostDoorComputerRoomAction.pipeline === "closed-door-first-door-corner-sequence", `Visual ComputerRoom evidence without door/audio confirmation should stay under FirstDoor ownership (actual=${visualPostDoorComputerRoomAction.pipeline})`);
+assert(visualPostDoorComputerRoomAction.objective === "find-corridor-to-first-door", "Visual-only post-door evidence must not retarget the objective before the first door opens");
+
+const falseVisualPostDoorFirstDoorRuntime = runtimeFactory.create(publicProfile);
+falseVisualPostDoorFirstDoorRuntime.predictions = 697;
+const falseVisualPostDoorFirstDoorAction = falseVisualPostDoorFirstDoorRuntime.predict({
+  health: 100,
+  depthSig: 0.90,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.32,
+  motionForwardProgress: 0.18,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  actionRepeatFrames: 10,
+  moveRepeatFrames: 10,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 697,
+  blueFloorScore: 0,
+  spawnCorridorGapScore: 0.40,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.52,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.68,
+  spawnSecretDoorTurn: "none",
+  bridgeDoorScore: 0.22,
+  bridgeConfidence: 0.48,
+  firstDoorVision9x9Score: 0.51,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  computerPanelScore: 0.10,
+  computerDarkPanelScore: 0.43,
+  computerRoomScore: 0.15,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.10,
+  semanticMemory: {
+    symbols: {
+      door: 0.75,
+      corridor: 0.44,
+      enemy: 0.08,
+      "safe-zone": 0.60,
+      bridge: 0.48,
+      "computer-room": 0
+    }
+  }
+});
+assert(String(falseVisualPostDoorFirstDoorAction.pipeline || falseVisualPostDoorFirstDoorAction.stage || "").indexOf("post-door-computer-room") < 0, `Closed FirstDoor evidence must not promote to ComputerRoom before opening (actual=${falseVisualPostDoorFirstDoorAction.pipeline || falseVisualPostDoorFirstDoorAction.stage})`);
+
+const falsePostDoorBridgeReacquiredBeforeFirstDoorRuntime = runtimeFactory.create(publicProfile);
+falsePostDoorBridgeReacquiredBeforeFirstDoorRuntime.predictions = 1445;
+const falsePostDoorBridgeReacquiredBeforeFirstDoorAction = falsePostDoorBridgeReacquiredBeforeFirstDoorRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.22,
+  motionForwardProgress: 0.18,
+  motionObstacleScore: 0.27,
+  footObstacleScore: 0.27,
+  actionRepeatFrames: 7,
+  moveRepeatFrames: 14,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1445,
+  blueFloorScore: 0,
+  spawnCorridorGapScore: 0.28,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.40,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  spawnSecretDoorTurn: "none",
+  bridgeDoorScore: 0.13,
+  bridgeConfidence: 0.48,
+  firstDoorVision9x9Score: 0.49,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  computerPanelScore: 0.10,
+  computerDarkPanelScore: 0.32,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.04,
+  semanticMemory: {
+    symbols: {
+      door: 0.62,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.60,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+assert(String(falsePostDoorBridgeReacquiredBeforeFirstDoorAction.pipeline || falsePostDoorBridgeReacquiredBeforeFirstDoorAction.stage || "").indexOf("post-door-computer-room") < 0, `Closed FirstDoor bridge evidence must suppress direct post-door bridge reacquire (actual=${falsePostDoorBridgeReacquiredBeforeFirstDoorAction.pipeline || falsePostDoorBridgeReacquiredBeforeFirstDoorAction.stage})`);
+assert(falsePostDoorBridgeReacquiredBeforeFirstDoorAction.objective === "find-corridor-to-first-door", "False post-door bridge reacquire should return to FirstDoor objective before the door opens");
+
+const falsePostDoorStraightLockPulseBeforeFirstDoorRuntime = runtimeFactory.create(publicProfile);
+falsePostDoorStraightLockPulseBeforeFirstDoorRuntime.predictions = 1476;
+falsePostDoorStraightLockPulseBeforeFirstDoorRuntime.stagePulseBridgeStraightLockFrames = 48;
+const falsePostDoorStraightLockPulseBeforeFirstDoorAction = falsePostDoorStraightLockPulseBeforeFirstDoorRuntime.predict({
+  health: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.20,
+  motionForwardProgress: 0.26,
+  motionObstacleScore: 0.26,
+  footObstacleScore: 0.26,
+  actionRepeatFrames: 24,
+  moveRepeatFrames: 24,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 1476,
+  spawnCorridorGapScore: 0.35,
+  spawnLandmarkRouteEvidence: 0.47,
+  bridgeDoorScore: 0.26,
+  bridgeConfidence: 0.48,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  computerPanelScore: 0.08,
+  computerDarkPanelScore: 0.28,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.04,
+  semanticMemory: {
+    symbols: {
+      door: 0.62,
+      corridor: 0.44,
+      enemy: 0,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+assert(falsePostDoorStraightLockPulseBeforeFirstDoorAction.stage === "closed-door-first-door-corner-backoff", `Residual bridge straight-lock pulse must return to FirstDoor sequence before open (actual=${falsePostDoorStraightLockPulseBeforeFirstDoorAction.stage})`);
+assert(falsePostDoorStraightLockPulseBeforeFirstDoorAction.objective === "find-corridor-to-first-door", "Residual bridge straight-lock pulse should not expose reach-central-hall before the first door opens");
 
 const doorApproachPostUseRetryRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseRetryRuntime.predictions = 4348;
@@ -8215,8 +18794,8 @@ const doorApproachPostUseRetryAction = doorApproachPostUseRetryRuntime.predict({
     }
   }
 });
-assert(doorApproachPostUseRetryAction.stage === "door-approach-post-use-retry-bridge-probe-use", `Cooldown-expired post-use door evidence should retry Use instead of another realign loop (actual=${doorApproachPostUseRetryAction.stage})`);
-assert(doorApproachPostUseRetryAction.use === true, "Cooldown-expired post-use door evidence should emit a bounded retry Use pulse");
+assert(doorApproachPostUseRetryAction.stage === "closed-door-first-door-corner-backoff", `Cooldown-expired bridge-only post-use evidence should restart the closed-door sequence (actual=${doorApproachPostUseRetryAction.stage})`);
+assert(doorApproachPostUseRetryAction.use === false, "Cooldown-expired bridge-only post-use evidence must keep Use released");
 
 const doorApproachPostUseRedMemoryRetryRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseRedMemoryRetryRuntime.predictions = 2256;
@@ -8266,8 +18845,8 @@ const doorApproachPostUseRedMemoryRetryAction = doorApproachPostUseRedMemoryRetr
     }
   }
 });
-assert(doorApproachPostUseRedMemoryRetryAction.stage === "door-approach-post-use-retry-red-memory-use", `Cooldown-expired post-use weak red memory should retry Use instead of another realign loop (actual=${doorApproachPostUseRedMemoryRetryAction.stage})`);
-assert(doorApproachPostUseRedMemoryRetryAction.use === true, "Cooldown-expired post-use weak red memory should emit a bounded retry Use pulse");
+assert(doorApproachPostUseRedMemoryRetryAction.stage === "door-approach-left-bridge-lane-realign", `Cooldown-expired post-use weak red memory should realign without immediate Use when bridge evidence is absent (actual=${doorApproachPostUseRedMemoryRetryAction.stage})`);
+assert(doorApproachPostUseRedMemoryRetryAction.use !== true, "Cooldown-expired post-use weak red memory should not emit a bounded retry Use pulse without bridge evidence");
 
 const doorApproachPostUseSecretRetryRuntime = runtimeFactory.create(publicProfile);
 doorApproachPostUseSecretRetryRuntime.predictions = 4042;
@@ -8317,8 +18896,8 @@ const doorApproachPostUseSecretRetryAction = doorApproachPostUseSecretRetryRunti
     }
   }
 });
-assert(doorApproachPostUseSecretRetryAction.stage === "door-approach-post-use-retry-secret-probe-use", `Cooldown-expired post-use red/secret evidence should retry Use even when bridgeDoor is weak (actual=${doorApproachPostUseSecretRetryAction.stage})`);
-assert(doorApproachPostUseSecretRetryAction.use === true, "Cooldown-expired post-use red/secret evidence should emit a bounded retry Use pulse");
+assert(doorApproachPostUseSecretRetryAction.stage === "closed-door-first-door-corner-backoff", `Cooldown-expired secret-only post-use evidence should restart the closed-door sequence (actual=${doorApproachPostUseSecretRetryAction.stage})`);
+assert(doorApproachPostUseSecretRetryAction.use === false, "Cooldown-expired secret-only post-use evidence must keep Use released");
 
 const doorApproachLeftRedPanelTurnSettleAdvanceRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedPanelTurnSettleAdvanceRuntime.predictions = 3942;
@@ -8459,12 +19038,8 @@ const doorApproachLeftRedPanelUseState = {
   }
 };
 const doorApproachLeftRedPanelUseAction = doorApproachLeftRedPanelUseRuntime.predict(doorApproachLeftRedPanelUseState);
-assert([
-  "door-approach-left-red-panel-probe-use",
-  "door-approach-upper-weak-bridge-panel-probe-use"
-].includes(doorApproachLeftRedPanelUseAction.stage), `Repeated left red panel realign should spend one bounded Use pulse before another turn loop (actual=${doorApproachLeftRedPanelUseAction.stage})`);
-assert(doorApproachLeftRedPanelUseAction.use === true, "Repeated left red panel evidence should emit one Use pulse");
-assert(doorApproachLeftRedPanelUseAction.move === "none" && doorApproachLeftRedPanelUseAction.turn === "none", "Repeated left red panel Use should hold position");
+assert(doorApproachLeftRedPanelUseAction.stage === "closed-door-first-door-corner-backoff", `Repeated left-panel memory without live red/use evidence should restart the explicit door sequence (actual=${doorApproachLeftRedPanelUseAction.stage})`);
+assert(doorApproachLeftRedPanelUseAction.use === false, "Repeated left-panel memory without live red/use evidence must keep Use released");
 
 const doorApproachLeftRedPanelUseCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedPanelUseCooldownRuntime.predictions = 1890;
@@ -8564,9 +19139,8 @@ const doorApproachFarLeftRedPanelAdvanceAction = doorApproachFarLeftRedPanelAdva
     }
   }
 });
-assert(doorApproachFarLeftRedPanelAdvanceAction.stage === "door-approach-weak-bridge-door-probe-use", `Repeated far left red panel with a bridge-door trace should spend a stopped Use pulse instead of drifting past the door (actual=${doorApproachFarLeftRedPanelAdvanceAction.stage})`);
-assert(doorApproachFarLeftRedPanelAdvanceAction.use === true, "Far left red panel follow-up should try one stopped Use pulse once the bridge-door trace is visible");
-assert(doorApproachFarLeftRedPanelAdvanceAction.move === "none" && doorApproachFarLeftRedPanelAdvanceAction.turn === "none", "Far left red panel Use should hold position");
+assert(doorApproachFarLeftRedPanelAdvanceAction.stage === "closed-door-first-door-corner-backoff", `Repeated far-left panel memory without live red/use evidence should restart the explicit door sequence (actual=${doorApproachFarLeftRedPanelAdvanceAction.stage})`);
+assert(doorApproachFarLeftRedPanelAdvanceAction.use === false, "Far-left panel memory without live red/use evidence must keep Use released");
 
 const doorApproachLeftRedWallLostCenterRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedWallLostCenterRuntime.predictions = 4146;
@@ -8660,8 +19234,8 @@ const doorApproachLeftRedPanelFarUseState = {
   }
 };
 const doorApproachLeftRedPanelFarUseAction = doorApproachLeftRedPanelFarUseRuntime.predict(doorApproachLeftRedPanelFarUseState);
-assert(doorApproachLeftRedPanelFarUseAction.stage === "door-approach-left-red-panel-quick-probe-use", `Late weak left-red panel should spend Use before the far fallback window (actual=${doorApproachLeftRedPanelFarUseAction.stage})`);
-assert(doorApproachLeftRedPanelFarUseAction.use === true, "Late weak left-red panel should emit one bounded Use pulse");
+assert(doorApproachLeftRedPanelFarUseAction.stage === "door-approach-left-red-panel-advance", `Late low-bridge left-red panel should advance/recenter instead of spending Use (actual=${doorApproachLeftRedPanelFarUseAction.stage})`);
+assert(doorApproachLeftRedPanelFarUseAction.use !== true, "Late low-bridge left-red panel should not emit one bounded Use pulse");
 
 const doorApproachLeftRedPanelFarUseCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedPanelFarUseCooldownRuntime.predictions = 3514;
@@ -8709,8 +19283,8 @@ const doorApproachWeakGapTurnLoopLeftRedAction = doorApproachWeakGapTurnLoopLeft
     }
   }
 });
-assert(doorApproachWeakGapTurnLoopLeftRedAction.stage === "door-approach-memory-contact-probe-use", `Long right weak-gap loops with prior door evidence should spend Use before cutting away (actual=${doorApproachWeakGapTurnLoopLeftRedAction.stage})`);
-assert(doorApproachWeakGapTurnLoopLeftRedAction.use === true, "Weak-gap door-contact memory should emit one bounded Use pulse");
+assert(doorApproachWeakGapTurnLoopLeftRedAction.stage === "closed-door-first-door-corner-backoff", `Long right weak-gap loops without live door evidence should restart the explicit door sequence (actual=${doorApproachWeakGapTurnLoopLeftRedAction.stage})`);
+assert(doorApproachWeakGapTurnLoopLeftRedAction.use === false, "Weak-gap door-contact memory without live evidence must keep Use released");
 
 const doorApproachWeakGapTurnRepeatLeftRedRuntime = runtimeFactory.create(publicProfile);
 doorApproachWeakGapTurnRepeatLeftRedRuntime.predictions = 2210;
@@ -8750,8 +19324,8 @@ const doorApproachWeakGapTurnRepeatLeftRedAction = doorApproachWeakGapTurnRepeat
     }
   }
 });
-assert(doorApproachWeakGapTurnRepeatLeftRedAction.stage === "door-approach-memory-contact-probe-use", `Long turn-repeat weak-gap loops with prior door evidence should spend Use before cutting back left (actual=${doorApproachWeakGapTurnRepeatLeftRedAction.stage})`);
-assert(doorApproachWeakGapTurnRepeatLeftRedAction.use === true, "Turn-repeat weak-gap door-contact memory should emit one bounded Use pulse");
+assert(doorApproachWeakGapTurnRepeatLeftRedAction.stage === "closed-door-first-door-corner-backoff", `Long turn-repeat weak-gap loops without live door evidence should restart the explicit door sequence (actual=${doorApproachWeakGapTurnRepeatLeftRedAction.stage})`);
+assert(doorApproachWeakGapTurnRepeatLeftRedAction.use === false, "Turn-repeat weak-gap door-contact memory without live evidence must keep Use released");
 
 const doorApproachLateAmbiguousLeftRedRuntime = runtimeFactory.create(publicProfile);
 doorApproachLateAmbiguousLeftRedRuntime.predictions = 3859;
@@ -8792,8 +19366,8 @@ const doorApproachLateAmbiguousLeftRedAction = doorApproachLateAmbiguousLeftRedR
     }
   }
 });
-assert(doorApproachLateAmbiguousLeftRedAction.stage === "door-approach-memory-contact-probe-use", `Late ambiguous door-contact evidence should spend Use before cutting the weak right-gap loop (actual=${doorApproachLateAmbiguousLeftRedAction.stage})`);
-assert(doorApproachLateAmbiguousLeftRedAction.use === true, "Late ambiguous door-contact evidence should emit one bounded Use pulse");
+assert(doorApproachLateAmbiguousLeftRedAction.stage === "closed-door-first-door-corner-backoff", `Late ambiguous door-contact memory without live evidence should restart the explicit door sequence (actual=${doorApproachLateAmbiguousLeftRedAction.stage})`);
+assert(doorApproachLateAmbiguousLeftRedAction.use === false, "Late ambiguous door-contact memory without live evidence must keep Use released");
 
 const doorApproachLateAmbiguousLeftRedUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachLateAmbiguousLeftRedUseRuntime.predictions = 3945;
@@ -8837,8 +19411,8 @@ const doorApproachLateAmbiguousLeftRedUseState = {
   }
 };
 const doorApproachLateAmbiguousLeftRedUseAction = doorApproachLateAmbiguousLeftRedUseRuntime.predict(doorApproachLateAmbiguousLeftRedUseState);
-assert(doorApproachLateAmbiguousLeftRedUseAction.stage === "door-approach-memory-contact-probe-use", `Repeated late ambiguous door-contact evidence should spend Use instead of grinding the wall (actual=${doorApproachLateAmbiguousLeftRedUseAction.stage})`);
-assert(doorApproachLateAmbiguousLeftRedUseAction.use === true, "Repeated late ambiguous left-red evidence should emit one bounded Use pulse");
+assert(doorApproachLateAmbiguousLeftRedUseAction.stage === "closed-door-first-door-corner-backoff", `Repeated late ambiguous door-contact memory without live evidence should restart the explicit door sequence (actual=${doorApproachLateAmbiguousLeftRedUseAction.stage})`);
+assert(doorApproachLateAmbiguousLeftRedUseAction.use === false, "Repeated late ambiguous door-contact memory without live evidence must keep Use released");
 
 const doorApproachLateAmbiguousWallBackoffRuntime = runtimeFactory.create(publicProfile);
 doorApproachLateAmbiguousWallBackoffRuntime.predictions = 5766;
@@ -8981,8 +19555,8 @@ const doorApproachLateAmbiguousBridgeLaneUseAction = doorApproachLateAmbiguousBr
     }
   }
 });
-assert(doorApproachLateAmbiguousBridgeLaneUseAction.stage === "door-approach-left-red-edge-probe-use", `Late ambiguous wall view with left bridge-lane evidence should probe Use instead of backing away (actual=${doorApproachLateAmbiguousBridgeLaneUseAction.stage})`);
-assert(doorApproachLateAmbiguousBridgeLaneUseAction.use === true, "Late ambiguous bridge-lane red evidence should emit a bounded Use pulse");
+assert(doorApproachLateAmbiguousBridgeLaneUseAction.stage === "closed-door-first-door-corner-backoff", `Late ambiguous wall view without live door identity should restart the explicit door sequence (actual=${doorApproachLateAmbiguousBridgeLaneUseAction.stage})`);
+assert(doorApproachLateAmbiguousBridgeLaneUseAction.use === false, "Late ambiguous bridge-lane evidence without door identity must keep Use released");
 
 const doorApproachWeakBridgePanelUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachWeakBridgePanelUseRuntime.predictions = 1185;
@@ -9029,9 +19603,56 @@ const doorApproachWeakBridgePanelUseAction = doorApproachWeakBridgePanelUseRunti
     }
   }
 });
-assert(doorApproachWeakBridgePanelUseAction.stage === "door-approach-weak-bridge-panel-probe-use", `Weak bridge-door panel at close range should spend a bounded Use probe before another realign loop (actual=${doorApproachWeakBridgePanelUseAction.stage})`);
-assert(doorApproachWeakBridgePanelUseAction.use === true, "Weak bridge-door panel probe should emit Use");
-assert(doorApproachWeakBridgePanelUseAction.move === "none", "Weak bridge-door panel probe should stop movement before pressing Use");
+assert(doorApproachWeakBridgePanelUseAction.stage === "route-planner-structural-advance", `Low bridge-door panel at close range should not spend an untrusted Use probe (actual=${doorApproachWeakBridgePanelUseAction.stage})`);
+assert(doorApproachWeakBridgePanelUseAction.use !== true, "Low bridge-door panel probe should not emit Use");
+
+const doorApproachWeakVisionContactRuntime = runtimeFactory.create(publicProfile);
+doorApproachWeakVisionContactRuntime.predictions = 1026;
+const doorApproachWeakVisionContactAction = doorApproachWeakVisionContactRuntime.predict({
+  health: 100,
+  hp: 100,
+  depthSig: 1,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "spawn-landmark-route",
+  routeActionHint: "cruise",
+  routeConfidence: 0.3742,
+  recommendedYaw: 7,
+  footObstacleScore: 0.65,
+  motionObstacleScore: 0.65,
+  motionForwardProgress: 0.65,
+  doorOpenedCount: 0,
+  predictions: 1026,
+  spawnCorridorGapScore: 0.20,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.3742,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.11,
+  bridgeDoorScore: 0.06,
+  firstDoorVision9x9Score: 0.39,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.68,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.06,
+      "computer-room": 0.11
+    }
+  }
+});
+assert(doorApproachWeakVisionContactAction.stage === "door-approach-weak-vision-contact-probe"
+  || doorApproachWeakVisionContactAction.stage === "closed-door-first-door-corner-backoff",
+`Weak first-door vision plus contact should enter the named door sequence instead of structural advance (actual=${doorApproachWeakVisionContactAction.stage})`);
+assert(doorApproachWeakVisionContactAction.actionSequenceId === "first-door-corner-use", "Weak first-door contact should start the semantic first-door Use sequence");
+assert(doorApproachWeakVisionContactAction.actionSequenceStepId === "backoff", "Weak first-door contact sequence should first back away before turning or using");
+assert(doorApproachWeakVisionContactAction.move === "back", "Weak first-door contact sequence should reverse instead of pushing forward");
+assert(doorApproachWeakVisionContactAction.use !== true, "Weak first-door contact sequence should not Use on the first frame");
 
 const doorApproachObservedWeakDoorUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachObservedWeakDoorUseRuntime.predictions = 1185;
@@ -9079,8 +19700,8 @@ const doorApproachObservedWeakDoorState = {
   }
 };
 const doorApproachObservedWeakDoorUseAction = doorApproachObservedWeakDoorUseRuntime.predict(doorApproachObservedWeakDoorState);
-assert(doorApproachObservedWeakDoorUseAction.stage === "door-approach-weak-bridge-panel-probe-use", `Observed weak door panel should spend Use even when the right gap is only 0.19 (actual=${doorApproachObservedWeakDoorUseAction.stage})`);
-assert(doorApproachObservedWeakDoorUseAction.use === true, "Observed weak door panel should emit Use");
+assert(doorApproachObservedWeakDoorUseAction.stage === "closed-door-first-door-corner-backoff", `Observed low-bridge door panel should back off instead of spending Use when the right gap is only 0.19 (actual=${doorApproachObservedWeakDoorUseAction.stage})`);
+assert(doorApproachObservedWeakDoorUseAction.use !== true, "Observed low-bridge door panel should not emit Use");
 
 const doorApproachCpuRightCornerBackoffRuntime = runtimeFactory.create(publicProfile);
 doorApproachCpuRightCornerBackoffRuntime.predictions = 1011;
@@ -9133,16 +19754,17 @@ const doorApproachCpuRightCornerBackoffState = {
 const doorApproachCpuRightCornerBackoffAction = doorApproachCpuRightCornerBackoffRuntime.predict(doorApproachCpuRightCornerBackoffState);
 assert(doorApproachCpuRightCornerBackoffAction.stage === "door-approach-right-corner-backoff", `CPU weak-door right corner should back off before continuing the turn loop (actual=${doorApproachCpuRightCornerBackoffAction.stage})`);
 assert(doorApproachCpuRightCornerBackoffAction.move === "back", "CPU weak-door right corner should reverse before yawing");
-assert(doorApproachCpuRightCornerBackoffAction.turn === "right", "CPU weak-door right corner should keep the right door-ingress yaw");
+assert(doorApproachCpuRightCornerBackoffAction.turn === "none", "CPU weak-door semantic sequence should reverse before yawing");
+assert(doorApproachCpuRightCornerBackoffAction.actionSequenceId === "first-door-corner-use", "CPU weak-door right corner should enter the semantic first-door use sequence");
+assert(doorApproachCpuRightCornerBackoffAction.actionSequenceStepId === "backoff", "CPU weak-door sequence should begin with a pure backoff step");
 
 const doorApproachCpuWeakDoorMemoryUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachCpuWeakDoorMemoryUseRuntime.predictions = 1011;
 const doorApproachCpuWeakDoorMemoryUseAction = doorApproachCpuWeakDoorMemoryUseRuntime.predict(Object.assign({}, doorApproachCpuRightCornerBackoffState, {
   actionRepeatFrames: 6
 }));
-assert(doorApproachCpuWeakDoorMemoryUseAction.stage === "door-approach-cpu-weak-door-memory-use", `After CPU right-corner backoff, weak door memory should spend a stopped Use pulse (actual=${doorApproachCpuWeakDoorMemoryUseAction.stage})`);
-assert(doorApproachCpuWeakDoorMemoryUseAction.move === "none", "CPU weak-door memory Use should stop movement before pressing Use");
-assert(doorApproachCpuWeakDoorMemoryUseAction.use === true, "CPU weak-door memory should emit Use after the backoff window");
+assert(doorApproachCpuWeakDoorMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `CPU weak-door memory with stale room semantics should restart the explicit door sequence (actual=${doorApproachCpuWeakDoorMemoryUseAction.stage})`);
+assert(doorApproachCpuWeakDoorMemoryUseAction.use === false, "CPU weak-door memory without live use/red/bridge evidence must keep Use released");
 
 const doorApproachCloseAmbiguousPanelUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachCloseAmbiguousPanelUseRuntime.predictions = 935;
@@ -9194,9 +19816,8 @@ const doorApproachCloseAmbiguousPanelUseAction = doorApproachCloseAmbiguousPanel
     }
   }
 });
-assert(doorApproachCloseAmbiguousPanelUseAction.stage === "door-approach-close-ambiguous-panel-use", `Close ambiguous CPU door face should spend stopped Use instead of continuing forward/right (actual=${doorApproachCloseAmbiguousPanelUseAction.stage})`);
-assert(doorApproachCloseAmbiguousPanelUseAction.move === "none", "Close ambiguous CPU door Use should stop movement before pressing Use");
-assert(doorApproachCloseAmbiguousPanelUseAction.use === true, "Close ambiguous CPU door face should emit one bounded Use pulse");
+assert(doorApproachCloseAmbiguousPanelUseAction.stage === "closed-door-first-door-corner-backoff", `Close ambiguous CPU door face without live use/red/bridge evidence should restart the explicit door sequence (actual=${doorApproachCloseAmbiguousPanelUseAction.stage})`);
+assert(doorApproachCloseAmbiguousPanelUseAction.use === false, "Close ambiguous CPU door face without live use/red/bridge evidence must keep Use released");
 
 const doorApproachRedPanelDeadEndUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachRedPanelDeadEndUseRuntime.predictions = 1033;
@@ -9249,9 +19870,8 @@ const doorApproachRedPanelDeadEndUseAction = doorApproachRedPanelDeadEndUseRunti
     }
   }
 });
-assert(doorApproachRedPanelDeadEndUseAction.stage === "door-approach-red-panel-dead-end-use", `Near red-panel dead-end should spend stopped Use before barrel trim keeps circling (actual=${doorApproachRedPanelDeadEndUseAction.stage})`);
-assert(doorApproachRedPanelDeadEndUseAction.move === "none", "Near red-panel dead-end Use should stop movement before pressing Use");
-assert(doorApproachRedPanelDeadEndUseAction.use === true, "Near red-panel dead-end should emit a Use pulse");
+assert(doorApproachRedPanelDeadEndUseAction.stage === "demo-spawn-map-corridor-sustain", `Low-bridge red-panel dead-end should keep corridor sustain instead of spending Use (actual=${doorApproachRedPanelDeadEndUseAction.stage})`);
+assert(doorApproachRedPanelDeadEndUseAction.use !== true, "Low-bridge red-panel dead-end should not emit a Use pulse");
 
 const doorApproachObservedWeakDoorCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachObservedWeakDoorCooldownRuntime.predictions = 1186;
@@ -9265,9 +19885,9 @@ const doorApproachObservedWeakDoorPulseRuntime = runtimeFactory.create(publicPro
 doorApproachObservedWeakDoorPulseRuntime.predictions = 1185;
 const doorApproachObservedWeakDoorFirstPulse = doorApproachObservedWeakDoorPulseRuntime.predict(doorApproachObservedWeakDoorState);
 const doorApproachObservedWeakDoorSecondPulse = doorApproachObservedWeakDoorPulseRuntime.predict(doorApproachObservedWeakDoorState);
-assert(doorApproachObservedWeakDoorFirstPulse.use === true, "First weak door pulse should press Use");
+assert(doorApproachObservedWeakDoorFirstPulse.use === false, "First low-bridge weak door pulse should keep Use released");
 assert(doorApproachObservedWeakDoorSecondPulse.stage !== "door-approach-weak-bridge-panel-probe-use", "Second weak door prediction should not re-decide another Use stage");
-assert(doorApproachObservedWeakDoorSecondPulse.use === true, "Second weak door prediction should keep the bounded electrical Use pulse down briefly");
+assert(doorApproachObservedWeakDoorSecondPulse.use === false, "Second weak door prediction should release an untrusted electrical Use pulse after the first frame");
 
 const doorApproachObservedUpperWeakDoorRuntime = runtimeFactory.create(publicProfile);
 doorApproachObservedUpperWeakDoorRuntime.predictions = 1567;
@@ -9315,8 +19935,107 @@ const doorApproachObservedUpperWeakDoorAction = doorApproachObservedUpperWeakDoo
     }
   }
 });
-assert(doorApproachObservedUpperWeakDoorAction.stage === "door-approach-upper-weak-bridge-panel-probe-use", `Upper weak bridge-door evidence should spend Use before dead-end trim keeps circling (actual=${doorApproachObservedUpperWeakDoorAction.stage})`);
-assert(doorApproachObservedUpperWeakDoorAction.use === true, "Upper weak bridge-door evidence should emit one Use pulse");
+assert(doorApproachObservedUpperWeakDoorAction.stage === "closed-door-first-door-corner-backoff", `Upper weak bridge-door evidence without live use/red identity should restart the explicit door sequence (actual=${doorApproachObservedUpperWeakDoorAction.stage})`);
+assert(doorApproachObservedUpperWeakDoorAction.use === false, "Upper weak bridge-door evidence without live use/red identity must keep Use released");
+
+const doorApproachOpenLaneBridgeMemoryUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachOpenLaneBridgeMemoryUseRuntime.predictions = 560;
+const doorApproachOpenLaneBridgeMemoryUseAction = doorApproachOpenLaneBridgeMemoryUseRuntime.predict({
+  health: 100,
+  depthSig: 0.93,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.45,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.34,
+  footObstacleScore: 0.34,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 40,
+  turnRepeatFrames: 8,
+  doorOpenedCount: 0,
+  predictions: 560,
+  blueFloorScore: 0,
+  courtyardScore: 0.05,
+  courtyardTurn: "none",
+  bridgeLaneTurn: "right",
+  spawnCorridorGapScore: 0.40,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.52,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  bridgeDoorScore: 0.28,
+  firstDoorVision9x9Score: 0.08,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  routeDeadEndTrimRequired: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.55,
+      corridor: 0.45,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.28,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachOpenLaneBridgeMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `Second-lap open-lane bridge memory without live use/red identity should restart the explicit door sequence (actual=${doorApproachOpenLaneBridgeMemoryUseAction.stage})`);
+assert(doorApproachOpenLaneBridgeMemoryUseAction.use === false, "Open-lane bridge memory without live use/red identity must keep Use released");
+
+const doorApproachFirstRouteWeakMemoryUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachFirstRouteWeakMemoryUseRuntime.predictions = 713;
+const doorApproachFirstRouteWeakMemoryUseAction = doorApproachFirstRouteWeakMemoryUseRuntime.predict({
+  health: 100,
+  depthSig: 0.89,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  wallVector: 0.45,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.56,
+  footObstacleScore: 0.56,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 40,
+  turnRepeatFrames: 8,
+  doorOpenedCount: 0,
+  predictions: 713,
+  blueFloorScore: 0,
+  courtyardScore: 0.05,
+  courtyardTurn: "none",
+  bridgeLaneTurn: "right",
+  spawnCorridorGapScore: 0.35,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.47,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0,
+  bridgeDoorScore: 0.22,
+  firstDoorVision9x9Score: 0.08,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  routeDeadEndTrimRequired: true,
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.44,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.22,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachFirstRouteWeakMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `First-door-route weak memory without live use/red identity should restart the explicit door sequence (actual=${doorApproachFirstRouteWeakMemoryUseAction.stage})`);
+assert(doorApproachFirstRouteWeakMemoryUseAction.use === false, "First-door-route weak memory without live use/red identity must keep Use released");
 
 const doorApproachLeftBridgeLaneRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftBridgeLaneRuntime.predictions = 1840;
@@ -9559,8 +20278,8 @@ const doorApproachLeftBridgeLaneUseState = {
   }
 };
 const doorApproachLeftBridgeLaneUseAction = doorApproachLeftBridgeLaneUseRuntime.predict(doorApproachLeftBridgeLaneUseState);
-assert(doorApproachLeftBridgeLaneUseAction.stage === "door-approach-left-bridge-lane-probe-use", `Repeated left bridge realign should spend one bounded Use pulse before another yaw loop (actual=${doorApproachLeftBridgeLaneUseAction.stage})`);
-assert(doorApproachLeftBridgeLaneUseAction.use === true, "Repeated left bridge realign should emit one Use pulse");
+assert(doorApproachLeftBridgeLaneUseAction.stage === "closed-door-first-door-corner-backoff", `Repeated left bridge realign without live door identity should restart the explicit door sequence (actual=${doorApproachLeftBridgeLaneUseAction.stage})`);
+assert(doorApproachLeftBridgeLaneUseAction.use === false, "Repeated left bridge realign without live door identity must keep Use released");
 
 const doorApproachLeftBridgeLaneUseCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftBridgeLaneUseCooldownRuntime.predictions = 1847;
@@ -9616,8 +20335,8 @@ const doorApproachEarlyLeftRedEdgeMemoryUseAction = doorApproachEarlyLeftRedEdge
     }
   }
 });
-assert(doorApproachEarlyLeftRedEdgeMemoryUseAction.stage === "door-approach-left-red-edge-memory-probe-use", `Early red-edge memory should spend Use before repeated realign cycles drift away (actual=${doorApproachEarlyLeftRedEdgeMemoryUseAction.stage})`);
-assert(doorApproachEarlyLeftRedEdgeMemoryUseAction.use === true, "Early red-edge memory should emit one bounded Use pulse");
+assert(doorApproachEarlyLeftRedEdgeMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `Early red-edge memory without live door identity should restart the explicit door sequence (actual=${doorApproachEarlyLeftRedEdgeMemoryUseAction.stage})`);
+assert(doorApproachEarlyLeftRedEdgeMemoryUseAction.use === false, "Early red-edge memory without live door identity must keep Use released");
 
 const doorApproachLeftRedSecretPanelRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedSecretPanelRuntime.predictions = 8394;
@@ -9757,8 +20476,8 @@ const doorApproachLateLeftRedSecretPanelUseAction = doorApproachLateLeftRedSecre
     }
   }
 });
-assert(doorApproachLateLeftRedSecretPanelUseAction.stage === "door-approach-left-red-secret-panel-probe-use", `Late secret-channel door contact should spend Use instead of another left realign cycle (actual=${doorApproachLateLeftRedSecretPanelUseAction.stage})`);
-assert(doorApproachLateLeftRedSecretPanelUseAction.use === true, "Late secret-channel door contact should emit one bounded Use pulse");
+assert(doorApproachLateLeftRedSecretPanelUseAction.stage === "closed-door-first-door-corner-backoff", `Late secret-channel memory without live door identity should restart the explicit door sequence (actual=${doorApproachLateLeftRedSecretPanelUseAction.stage})`);
+assert(doorApproachLateLeftRedSecretPanelUseAction.use === false, "Late secret-channel memory without live door identity must keep Use released");
 
 const doorApproachLeftRedEdgeRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedEdgeRuntime.predictions = 3660;
@@ -9849,8 +20568,8 @@ const doorApproachLeftRedEdgeUseState = {
   }
 };
 const doorApproachLeftRedEdgeUseAction = doorApproachLeftRedEdgeUseRuntime.predict(doorApproachLeftRedEdgeUseState);
-assert(doorApproachLeftRedEdgeUseAction.stage === "door-approach-left-red-edge-probe-use", `Repeated left-edge red panel evidence should spend one bounded Use pulse before the bridge-lane release pulls away (actual=${doorApproachLeftRedEdgeUseAction.stage})`);
-assert(doorApproachLeftRedEdgeUseAction.use === true, "Repeated left-edge red panel evidence should emit one Use pulse");
+assert(doorApproachLeftRedEdgeUseAction.stage === "closed-door-first-door-corner-backoff", `Repeated left-edge memory without live red/use identity should restart the explicit door sequence (actual=${doorApproachLeftRedEdgeUseAction.stage})`);
+assert(doorApproachLeftRedEdgeUseAction.use === false, "Repeated left-edge memory without live red/use identity must keep Use released");
 
 const doorApproachLeftRedEdgeCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedEdgeCooldownRuntime.predictions = 3661;
@@ -9903,8 +20622,8 @@ const doorApproachLeftRedEdgeFarUseState = {
   }
 };
 const doorApproachLeftRedEdgeFarUseAction = doorApproachLeftRedEdgeFarUseRuntime.predict(doorApproachLeftRedEdgeFarUseState);
-assert(["door-approach-left-red-edge-far-probe-use", "door-approach-left-red-edge-memory-probe-use"].includes(doorApproachLeftRedEdgeFarUseAction.stage), `Late left-edge evidence should spend Use even when repeats do not accumulate (actual=${doorApproachLeftRedEdgeFarUseAction.stage})`);
-assert(doorApproachLeftRedEdgeFarUseAction.use === true, "Late left-edge evidence should emit one bounded Use pulse");
+assert(doorApproachLeftRedEdgeFarUseAction.stage === "closed-door-first-door-corner-backoff", `Late left-edge memory without live red/use identity should restart the explicit door sequence (actual=${doorApproachLeftRedEdgeFarUseAction.stage})`);
+assert(doorApproachLeftRedEdgeFarUseAction.use === false, "Late left-edge memory without live red/use identity must keep Use released");
 
 const doorApproachLeftRedEdgeMemoryUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftRedEdgeMemoryUseRuntime.predictions = 4411;
@@ -9916,8 +20635,8 @@ const doorApproachLeftRedEdgeMemoryUseAction = doorApproachLeftRedEdgeMemoryUseR
   actionRepeatFrames: 1,
   turnRepeatFrames: 0
 }));
-assert(doorApproachLeftRedEdgeMemoryUseAction.stage === "door-approach-left-red-edge-memory-probe-use", `Persistent left-edge memory should spend Use before falling back to another realign cycle (actual=${doorApproachLeftRedEdgeMemoryUseAction.stage})`);
-assert(doorApproachLeftRedEdgeMemoryUseAction.use === true, "Persistent left-edge memory should emit one bounded Use pulse");
+assert(doorApproachLeftRedEdgeMemoryUseAction.stage === "closed-door-first-door-corner-backoff", `Persistent left-edge memory without live red/use identity should restart the explicit door sequence (actual=${doorApproachLeftRedEdgeMemoryUseAction.stage})`);
+assert(doorApproachLeftRedEdgeMemoryUseAction.use === false, "Persistent left-edge memory without live red/use identity must keep Use released");
 
 const doorApproachRightIngressLoopReverseRuntime = runtimeFactory.create(publicProfile);
 doorApproachRightIngressLoopReverseRuntime.predictions = 3505;
@@ -10109,9 +20828,9 @@ const doorApproachObservedStateRightGapAction = doorApproachObservedStateRightGa
     }
   }
 });
-assert(["door-approach-right-weak-gap-state-reacquire", "door-approach-memory-contact-probe-use"].includes(doorApproachObservedStateRightGapAction.stage), `Observed weak right-gap state should exit the release loop even when turnRepeatFrames never accumulates (actual=${doorApproachObservedStateRightGapAction.stage})`);
-assert(doorApproachObservedStateRightGapAction.move === "none", "Observed weak right-gap state exit should stop forward pressure");
-assert(doorApproachObservedStateRightGapAction.turn === "left" || doorApproachObservedStateRightGapAction.use === true, "Observed weak right-gap state should either yaw back toward the door face or spend a bounded Use pulse");
+assert(["door-approach-right-weak-gap-state-reacquire", "closed-door-first-door-corner-backoff"].includes(doorApproachObservedStateRightGapAction.stage), `Observed weak right-gap state should exit the release loop even when turnRepeatFrames never accumulates (actual=${doorApproachObservedStateRightGapAction.stage})`);
+assert(doorApproachObservedStateRightGapAction.move === "none" || doorApproachObservedStateRightGapAction.move === "back", "Observed weak right-gap state exit should stop forward pressure");
+assert(doorApproachObservedStateRightGapAction.turn === "left" || doorApproachObservedStateRightGapAction.stage === "closed-door-first-door-corner-backoff", "Observed weak right-gap state should either yaw back toward the door face or restart closed-door backoff");
 
 const doorApproachRightIngressThinGapRuntime = runtimeFactory.create(publicProfile);
 doorApproachRightIngressThinGapRuntime.predictions = 3114;
@@ -10442,7 +21161,7 @@ assert(doorApproachIngressActionLoopBackoffAction.move === "back", "Repeated wea
 assert(doorApproachIngressActionLoopBackoffAction.turn === "right", "Repeated weak-ingress loop should keep yawing toward the visible gap");
 
 const doorApproachIngressBudgetBackoffRuntime = runtimeFactory.create(publicProfile);
-doorApproachIngressBudgetBackoffRuntime.predictions = 760;
+doorApproachIngressBudgetBackoffRuntime.predictions = 940;
 const doorApproachIngressBudgetBackoffAction = doorApproachIngressBudgetBackoffRuntime.predict({
   health: 100,
   depthSig: 1,
@@ -10458,7 +21177,7 @@ const doorApproachIngressBudgetBackoffAction = doorApproachIngressBudgetBackoffR
   moveRepeatFrames: 120,
   turnRepeatFrames: 120,
   doorOpenedCount: 0,
-  predictions: 760,
+  predictions: 940,
   spawnCorridorGapScore: 0.21,
   spawnCorridorGapTurn: "right",
   spawnLandmarkRouteEvidence: 0.36,
@@ -10520,9 +21239,8 @@ const doorApproachFootWallAdvanceAction = doorApproachFootWallAdvanceRuntime.pre
     }
   }
 });
-assert(doorApproachFootWallAdvanceAction.stage === "door-approach-foot-wall-probe-use", `Door-approach foot wall pressure should probe Use when first-door route evidence is strong (actual=${doorApproachFootWallAdvanceAction.stage})`);
-assert(doorApproachFootWallAdvanceAction.use === true, "Door-approach foot wall pressure should emit a bounded Use probe");
-assert(doorApproachFootWallAdvanceAction.move === "none", "Door-approach foot wall pressure should stop movement while probing Use");
+assert(doorApproachFootWallAdvanceAction.stage === "closed-door-first-door-corner-backoff", `Door-approach foot wall pressure with sub-threshold Use evidence should restart the explicit door sequence (actual=${doorApproachFootWallAdvanceAction.stage})`);
+assert(doorApproachFootWallAdvanceAction.use === false, "Door-approach foot wall pressure with sub-threshold Use evidence must keep Use released");
 
 const doorApproachBridgePanelProbeRuntime = runtimeFactory.create(publicProfile);
 doorApproachBridgePanelProbeRuntime.predictions = 1363;
@@ -10564,9 +21282,8 @@ const doorApproachBridgePanelProbeAction = doorApproachBridgePanelProbeRuntime.p
     }
   }
 });
-assert(doorApproachBridgePanelProbeAction.stage === "door-approach-bridge-panel-probe-use", `Strong bridge-door panel should trigger a bounded Use probe even when blue-floor residue remains (actual=${doorApproachBridgePanelProbeAction.stage})`);
-assert(doorApproachBridgePanelProbeAction.use === true, "Strong bridge-door panel should emit Use");
-assert(doorApproachBridgePanelProbeAction.move === "none", "Bridge panel Use should stop movement before pressing Use");
+assert(doorApproachBridgePanelProbeAction.stage === "closed-door-first-door-corner-backoff", `Bridge-only door panel should restart the explicit door sequence until live use/red identity appears (actual=${doorApproachBridgePanelProbeAction.stage})`);
+assert(doorApproachBridgePanelProbeAction.use === false, "Bridge-only door panel must keep Use released");
 
 const doorApproachWeakBridgeFootWallRuntime = runtimeFactory.create(publicProfile);
 doorApproachWeakBridgeFootWallRuntime.predictions = 3045;
@@ -10653,8 +21370,8 @@ const doorApproachMidWallBridgeProbeState = {
   }
 };
 const doorApproachMidWallBridgeProbeAction = doorApproachMidWallBridgeProbeRuntime.predict(doorApproachMidWallBridgeProbeState);
-assert(doorApproachMidWallBridgeProbeAction.stage === "door-approach-mid-wall-bridge-probe-use", `Mid-wall bridge/door evidence should spend one bounded Use pulse before structural fallback backs away (actual=${doorApproachMidWallBridgeProbeAction.stage})`);
-assert(doorApproachMidWallBridgeProbeAction.use === true, "Mid-wall bridge/door evidence should emit one Use pulse");
+assert(doorApproachMidWallBridgeProbeAction.stage === "closed-door-first-door-corner-backoff", `Mid-wall bridge/door evidence without live use/red identity should restart the explicit door sequence (actual=${doorApproachMidWallBridgeProbeAction.stage})`);
+assert(doorApproachMidWallBridgeProbeAction.use === false, "Mid-wall bridge/door evidence without live use/red identity must keep Use released");
 
 const doorApproachMidWallBridgeCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachMidWallBridgeCooldownRuntime.predictions = 3444;
@@ -11534,6 +22251,60 @@ assert(doorApproachDeadEndTrimAction.move === "forward", "Door-approach topology
 assert(doorApproachDeadEndTrimAction.turn === "right", "Door-approach topology trim should yaw toward the observed ingress lane");
 assert(doorApproachDeadEndTrimRuntime.status().autoplayState.routeAbortHint === "none", "Door-approach topology trim should not require the abort hint budget");
 
+const doorApproachDeadEndVisibleDoorRuntime = runtimeFactory.create(publicProfile);
+doorApproachDeadEndVisibleDoorRuntime.predictions = 5258;
+const doorApproachDeadEndVisibleDoorAction = doorApproachDeadEndVisibleDoorRuntime.predict({
+  health: 100,
+  depthSig: 0.85,
+  contextDict: "open-space",
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  wallVector: 0.39,
+  motionForwardProgress: 0.70,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  footObstacleFlickerScore: 0,
+  footObstacleBounceFrames: 0,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  predictions: 5258,
+  blueFloorScore: 0,
+  courtyardScore: 0.02,
+  bridgeDoorScore: 0.37,
+  spawnCorridorGapScore: 0.37,
+  spawnCorridorGapTurn: "right",
+  spawnCorridorGapLockFrames: 180,
+  spawnLandmarkRouteEvidence: 0.49,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.00,
+  firstDoorRouteEvidenceReady: true,
+  firstDoorVision9x9Score: 0.66,
+  firstDoorVision9x9RedScore: 0.30,
+  firstDoorVision9x9Box: { row: 4, column: 3, rows: 2, columns: 2, label: "door", score: 0.66, redScore: 0.30, edgeScore: 0.20 },
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeDeadEndRisk: true,
+  routeDeadEndTrimRequired: true,
+  routeTopologyBarrelZoneEvidence: 0.94,
+  routeTopologyCenterCorridorAlignment: -0.40,
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.5,
+      corridor: 0.35,
+      enemy: 0,
+      "safe-zone": 0.2,
+      bridge: 0.37,
+      "computer-room": 0
+    }
+  }
+});
+assert(doorApproachDeadEndVisibleDoorAction.stage === "first-door-route-vision-approach", `Visible FirstDoor evidence should release topology dead-end trim and approach the door (actual=${doorApproachDeadEndVisibleDoorAction.stage})`);
+assert(doorApproachDeadEndVisibleDoorAction.objective === "approach-first-door", "Visible FirstDoor evidence should keep the route on door approach instead of dead-end recovery");
+assert(doorApproachDeadEndVisibleDoorAction.turn === "none", "Centered FirstDoor 9x9 box should hold yaw instead of falling back to route yaw");
+
 const doorApproachCloseGrayPanelMemoryUseRuntime = runtimeFactory.create(publicProfile);
 doorApproachCloseGrayPanelMemoryUseRuntime.predictions = 3032;
 const doorApproachCloseGrayPanelMemoryUseAction = doorApproachCloseGrayPanelMemoryUseRuntime.predict({
@@ -11581,8 +22352,8 @@ const doorApproachCloseGrayPanelMemoryUseAction = doorApproachCloseGrayPanelMemo
     }
   }
 });
-assert(doorApproachCloseGrayPanelMemoryUseAction.stage === "door-approach-close-gray-panel-memory-use", `Close gray panel memory should spend Use before route-dead-end barrel trim keeps pushing (actual=${doorApproachCloseGrayPanelMemoryUseAction.stage})`);
-assert(doorApproachCloseGrayPanelMemoryUseAction.use === true, "Close gray panel memory should emit one bounded Use pulse from a stopped Kinesis state");
+assert(doorApproachCloseGrayPanelMemoryUseAction.stage === "route-dead-end-barrel-trim", `Low-confidence gray panel memory should yield to route-dead-end barrel trim (actual=${doorApproachCloseGrayPanelMemoryUseAction.stage})`);
+assert(doorApproachCloseGrayPanelMemoryUseAction.use === false, "Low-confidence gray panel memory must keep Use released");
 
 const doorApproachDeadEndLowRepeatTrimRuntime = runtimeFactory.create(publicProfile);
 doorApproachDeadEndLowRepeatTrimRuntime.predictions = 1098;
@@ -11852,9 +22623,8 @@ const doorApproachDeadEndBridgePanelState = {
   }
 };
 const doorApproachDeadEndBridgePanelAction = doorApproachDeadEndBridgePanelRuntime.predict(doorApproachDeadEndBridgePanelState);
-assert(doorApproachDeadEndBridgePanelAction.stage === "door-approach-dead-end-bridge-panel-probe-use", `Strong bridge-door evidence inside topology dead-end should spend Use before trim keeps circling (actual=${doorApproachDeadEndBridgePanelAction.stage})`);
-assert(doorApproachDeadEndBridgePanelAction.use === true, "Strong bridge-door dead-end should emit one bounded Use pulse");
-assert(doorApproachDeadEndBridgePanelAction.move === "none", "Strong bridge-door dead-end Use should stop movement before pressing Use");
+assert(doorApproachDeadEndBridgePanelAction.stage === "closed-door-first-door-corner-backoff", `Bridge-door dead-end without live use/red identity should restart the explicit door sequence (actual=${doorApproachDeadEndBridgePanelAction.stage})`);
+assert(doorApproachDeadEndBridgePanelAction.use === false, "Bridge-door dead-end without live use/red identity must keep Use released");
 
 const doorApproachDeadEndBridgePanelCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachDeadEndBridgePanelCooldownRuntime.predictions = 4131;
@@ -11910,8 +22680,8 @@ const doorApproachFarBridgePanelState = {
   }
 };
 const doorApproachFarBridgePanelAction = doorApproachFarBridgePanelRuntime.predict(doorApproachFarBridgePanelState);
-assert(doorApproachFarBridgePanelAction.stage === "door-approach-far-bridge-panel-probe-use", `Far-depth bridge-door evidence should spend one Use pulse instead of pushing the door face (actual=${doorApproachFarBridgePanelAction.stage})`);
-assert(doorApproachFarBridgePanelAction.use === true, "Far-depth bridge-door evidence should emit a bounded Use pulse");
+assert(doorApproachFarBridgePanelAction.stage === "closed-door-first-door-corner-backoff", `Far-depth bridge-door evidence without live use/red identity should restart the explicit door sequence (actual=${doorApproachFarBridgePanelAction.stage})`);
+assert(doorApproachFarBridgePanelAction.use === false, "Far-depth bridge-door evidence without live use/red identity must keep Use released");
 
 const doorApproachFarBridgePanelCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachFarBridgePanelCooldownRuntime.predictions = 3766;
@@ -11969,8 +22739,8 @@ const doorApproachLeftBridgeSecretPanelState = {
   }
 };
 const doorApproachLeftBridgeSecretPanelAction = doorApproachLeftBridgeSecretPanelRuntime.predict(doorApproachLeftBridgeSecretPanelState);
-assert(doorApproachLeftBridgeSecretPanelAction.stage === "door-approach-left-bridge-secret-panel-probe-use", `Left bridge/secret panel evidence should spend Use before barrel trim keeps circling (actual=${doorApproachLeftBridgeSecretPanelAction.stage})`);
-assert(doorApproachLeftBridgeSecretPanelAction.use === true, "Left bridge/secret panel evidence should emit one bounded Use pulse");
+assert(doorApproachLeftBridgeSecretPanelAction.stage === "closed-door-first-door-corner-backoff", `Left bridge/secret panel evidence without live FirstDoor identity should restart the explicit door sequence (actual=${doorApproachLeftBridgeSecretPanelAction.stage})`);
+assert(doorApproachLeftBridgeSecretPanelAction.use === false, "Left bridge/secret panel evidence without live FirstDoor identity must keep Use released");
 
 const doorApproachLeftBridgeSecretPanelCooldownRuntime = runtimeFactory.create(publicProfile);
 doorApproachLeftBridgeSecretPanelCooldownRuntime.predictions = 5066;
@@ -12024,8 +22794,8 @@ const doorApproachMediumBridgePanelState = {
   }
 };
 const doorApproachMediumBridgePanelAction = doorApproachMediumBridgePanelRuntime.predict(doorApproachMediumBridgePanelState);
-assert(doorApproachMediumBridgePanelAction.stage === "door-approach-medium-bridge-panel-probe-use", `Medium bridge-door evidence should spend Use before route-evidence advance passes the panel (actual=${doorApproachMediumBridgePanelAction.stage})`);
-assert(doorApproachMediumBridgePanelAction.use === true, "Medium bridge-door evidence should emit one bounded Use pulse");
+assert(doorApproachMediumBridgePanelAction.stage === "closed-door-first-door-corner-backoff", `Medium bridge-door evidence without live use/red identity should restart the explicit door sequence (actual=${doorApproachMediumBridgePanelAction.stage})`);
+assert(doorApproachMediumBridgePanelAction.use === false, "Medium bridge-door evidence without live use/red identity must keep Use released");
 
 const doorApproachBlueFloorCenterlineRuntime = runtimeFactory.create(publicProfile);
 doorApproachBlueFloorCenterlineRuntime.predictions = 7420;
@@ -12147,8 +22917,71 @@ const doorApproachCorridorBridgeUseAction = doorApproachCorridorBridgeUseRuntime
   bridgeDoorScore: 0.34,
   usePulseCooldown: 0
 }));
-assert(doorApproachCorridorBridgeUseAction.stage === "door-approach-corridor-bridge-probe-use", `Close corridor bridge-door evidence should spend one bounded Use pulse (actual=${doorApproachCorridorBridgeUseAction.stage})`);
-assert(doorApproachCorridorBridgeUseAction.use === true, "Corridor bridge-door probe should emit one Use pulse");
+assert(doorApproachCorridorBridgeUseAction.stage === "closed-door-first-door-corner-backoff", `Close corridor bridge-door evidence without live use/red identity should restart the explicit door sequence (actual=${doorApproachCorridorBridgeUseAction.stage})`);
+assert(doorApproachCorridorBridgeUseAction.use === false, "Corridor bridge-door probe without live use/red identity must keep Use released");
+
+const doorApproachStaleRedCenterlineRuntime = runtimeFactory.create(publicProfile);
+doorApproachStaleRedCenterlineRuntime.predictions = 3309;
+const doorApproachStaleRedCenterlineAction = doorApproachStaleRedCenterlineRuntime.predict(Object.assign({}, doorApproachCorridorBridgeHoldState, {
+  depthSig: 0.69,
+  routeCorridorBridgeLock: false,
+  bridgeDoorScore: 0.23,
+  spawnCorridorGapScore: 0.33,
+  spawnLandmarkRouteEvidence: 0.45,
+  firstDoorVision9x9Score: 0.48,
+  firstDoorVision9x9RedScore: 0.33,
+  firstDoorUse3x3Score: 0,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 240
+}));
+assert(doorApproachStaleRedCenterlineAction.stage === "door-approach-stale-red-panel-centerline-advance", `Stale red-panel corridor evidence should stop the repeated right yaw and close distance first (actual=${doorApproachStaleRedCenterlineAction.stage})`);
+assert(doorApproachStaleRedCenterlineAction.move === "forward", "Stale red-panel centerline should keep closing distance");
+assert(doorApproachStaleRedCenterlineAction.turn === "none", "Stale red-panel centerline should cancel the repeated right turn");
+
+const doorApproachStaleRedLongUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachStaleRedLongUseRuntime.predictions = 3890;
+const doorApproachStaleRedLongUseAction = doorApproachStaleRedLongUseRuntime.predict(Object.assign({}, doorApproachCorridorBridgeHoldState, {
+  depthSig: 0.58,
+  routeCorridorBridgeLock: false,
+  bridgeDoorScore: 0.26,
+  spawnCorridorGapScore: 0.38,
+  spawnLandmarkRouteEvidence: 0.50,
+  firstDoorVision9x9Score: 0.48,
+  firstDoorVision9x9RedScore: 0.27,
+  firstDoorUse3x3Score: 0,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  actionRepeatFrames: 240,
+  moveRepeatFrames: 240,
+  turnRepeatFrames: 0,
+  usePulseCooldown: 0
+}));
+assert(doorApproachStaleRedLongUseAction.stage === "closed-door-first-door-corner-contact-forward", `Long stale red-panel centerline should keep closing distance until contact is firm (actual=${doorApproachStaleRedLongUseAction.stage})`);
+assert(doorApproachStaleRedLongUseAction.move === "forward" && doorApproachStaleRedLongUseAction.use === false, "Long stale red-panel centerline should not Use before firm contact");
+
+const doorApproachStaleRedUseRuntime = runtimeFactory.create(publicProfile);
+doorApproachStaleRedUseRuntime.predictions = 3400;
+const doorApproachStaleRedUseAction = doorApproachStaleRedUseRuntime.predict(Object.assign({}, doorApproachCorridorBridgeHoldState, {
+  depthSig: 0.50,
+  routeCorridorBridgeLock: false,
+  bridgeDoorScore: 0.23,
+  spawnCorridorGapScore: 0.33,
+  spawnLandmarkRouteEvidence: 0.45,
+  firstDoorVision9x9Score: 0.48,
+  firstDoorVision9x9RedScore: 0.33,
+  firstDoorUse3x3Score: 0,
+  footObstacleScore: 0.30,
+  motionObstacleScore: 0.30,
+  actionRepeatFrames: 260,
+  moveRepeatFrames: 260,
+  turnRepeatFrames: 260,
+  usePulseCooldown: 0
+}));
+assert(doorApproachStaleRedUseAction.stage === "closed-door-first-door-corner-contact-forward", `Close stale red-panel corridor evidence should keep closing distance until contact is firm (actual=${doorApproachStaleRedUseAction.stage})`);
+assert(doorApproachStaleRedUseAction.use === false, "Close stale red-panel corridor evidence should not Use before firm contact");
 
 const blueFloorVisionFalsePositiveRuntime = runtimeFactory.create(publicProfile);
 blueFloorVisionFalsePositiveRuntime.predictions = 3079;
@@ -12227,8 +23060,8 @@ const doorApproachMidWallBlueUseAction = doorApproachMidWallBlueUseRuntime.predi
     }
   }
 });
-assert(doorApproachMidWallBlueUseAction.stage === "door-approach-mid-wall-bridge-probe-use", `Mid-wall bridge evidence with a blue floor edge should Use instead of advancing (actual=${doorApproachMidWallBlueUseAction.stage})`);
-assert(doorApproachMidWallBlueUseAction.use === true, "Mid-wall bridge probe should emit a Use pulse");
+assert(doorApproachMidWallBlueUseAction.stage === "closed-door-first-door-corner-backoff", `Mid-wall bridge evidence with a blue floor edge should restart the explicit door sequence until live use/red identity appears (actual=${doorApproachMidWallBlueUseAction.stage})`);
+assert(doorApproachMidWallBlueUseAction.use === false, "Mid-wall bridge probe without live use/red identity must keep Use released");
 
 const doorApproachDeadEndReacquireRuntime = runtimeFactory.create(publicProfile);
 doorApproachDeadEndReacquireRuntime.predictions = 3789;
@@ -13357,6 +24190,5139 @@ const spawnSecretDoorSuppressionAction = spawnGapRuntime.predict({
 });
 assert(spawnSecretDoorSuppressionAction.stage !== "spawn-secret-route-reset", "Bright spawn secret door evidence should not reset the route while a strong corridor gap is still visible");
 assert(spawnSecretDoorSuppressionAction.move !== "back", "Strong-gap secret-door evidence should preserve FirstDoor route recovery instead of backing away");
+
+const firstDoorSecretAnchorForwardRuntime = runtimeFactory.create(publicProfile);
+firstDoorSecretAnchorForwardRuntime.predictions = 2527;
+const firstDoorSecretAnchorForwardAction = firstDoorSecretAnchorForwardRuntime.predict({
+  health: 100,
+  depthSig: 0.35,
+  contextDict: "corridor",
+  wallVector: 0.11,
+  motionForwardProgress: 0.42,
+  motionObstacleScore: 0.24,
+  footObstacleScore: 0.24,
+  actionRepeatFrames: 12,
+  moveRepeatFrames: 12,
+  turnRepeatFrames: 132,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeConfidence: 0.43,
+  predictions: 2527,
+  spawnCorridorGapScore: 0.33,
+  spawnCorridorGapTurn: "right",
+  spawnLandmarkRouteEvidence: 0.45,
+  spawnLandmarkRouteTurn: "right",
+  spawnSecretDoorScore: 0.68,
+  spawnSecretDoorTurn: "right",
+  bridgeDoorScore: 0.07,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  routeTextureWallOcclusion: false,
+  semanticMemory: {
+    symbols: {
+      door: 0.71,
+      corridor: 0.45,
+      enemy: 0.02,
+      "safe-zone": 0.85,
+      bridge: 0.61,
+      "computer-room": 0
+    }
+  }
+});
+assert(firstDoorSecretAnchorForwardAction.stage === "closed-door-first-door-secret-anchor-forward", `Closed FirstDoor secret-anchor evidence should advance diagonally instead of turning/backing in place (actual=${firstDoorSecretAnchorForwardAction.stage})`);
+assert(firstDoorSecretAnchorForwardAction.move === "forward", "Closed FirstDoor secret-anchor evidence should keep forward pressure");
+assert(firstDoorSecretAnchorForwardAction.turn === "right", "Closed FirstDoor secret-anchor evidence should preserve the right-diagonal ingress bias");
+
+const firstDoorLiveDarkFalseRoomRuntime = runtimeFactory.create(publicProfile);
+firstDoorLiveDarkFalseRoomRuntime.predictions = 1450;
+const firstDoorLiveDarkFalseRoomAction = firstDoorLiveDarkFalseRoomRuntime.predict({
+  health: 100,
+  depthSig: 0.35,
+  contextDict: "corridor wall door",
+  wallVector: 0.33,
+  motionForwardProgress: 0.02,
+  motionObstacleScore: 0.30,
+  footObstacleScore: 0.30,
+  actionRepeatFrames: 28,
+  moveRepeatFrames: 28,
+  turnRepeatFrames: 88,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeConfidence: 0.43,
+  predictions: 109,
+  firstDoorVision9x9Score: 0.46,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.23,
+  computerDarkPanelScore: 0.57,
+  computerPanelScore: 0.225,
+  computerRoomScore: 0.18,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  bridgeConfidence: 0,
+  spawnLandmarkRouteEvidence: 0.51,
+  spawnCorridorGapScore: 0.39,
+  spawnSecretDoorScore: 0.04,
+  semanticMemory: {
+    symbols: {
+      door: 0.62,
+      corridor: 0.39,
+      enemy: 0,
+      "safe-zone": 0.35,
+      bridge: 0.12,
+      "computer-room": 0.18
+    }
+  }
+});
+assert(firstDoorLiveDarkFalseRoomAction.stage === "closed-door-opening-ne-forward-lock", `Early live dark-panel false ComputerRoom evidence at closed FirstDoor should preserve the opening run (actual=${firstDoorLiveDarkFalseRoomAction.stage})`);
+assert(firstDoorLiveDarkFalseRoomAction.move === "forward", "Early live closed FirstDoor false-room evidence should keep advancing instead of backing into the corner sequence");
+assert(firstDoorLiveDarkFalseRoomAction.objective === "find-corridor-to-first-door", "Early live closed FirstDoor false-room evidence should keep the FirstDoor objective until the door opens");
+
+const firstDoorLivePreFrontSequenceRuntime = runtimeFactory.create(publicProfile);
+firstDoorLivePreFrontSequenceRuntime.predictions = 420;
+firstDoorLivePreFrontSequenceRuntime.closedDoorCornerSequenceFrames = 32;
+firstDoorLivePreFrontSequenceRuntime.closedDoorCornerSequenceStep = "backoff";
+const firstDoorLivePreFrontSequenceAction = firstDoorLivePreFrontSequenceRuntime.predict({
+  health: 100,
+  depthSig: 0.35,
+  contextDict: "corridor wall door",
+  wallVector: 0.5086,
+  motionForwardProgress: 0.03,
+  motionObstacleScore: 0.22,
+  footObstacleScore: 0.20,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72,
+  turnRepeatFrames: 24,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeConfidence: 0.43,
+  predictions: 420,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.07,
+  computerDarkPanelScore: 0,
+  computerPanelScore: 0,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  bridgeConfidence: 0,
+  spawnLandmarkRouteEvidence: 0.48,
+  spawnCorridorGapScore: 0.28,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.42,
+      corridor: 0.42,
+      enemy: 0,
+      "safe-zone": 0.35,
+      bridge: 0.08,
+      "computer-room": 0
+    }
+  }
+});
+const firstDoorLivePreFrontSequenceText = [
+  firstDoorLivePreFrontSequenceAction.stage,
+  firstDoorLivePreFrontSequenceAction.pipeline,
+  firstDoorLivePreFrontSequenceAction.safetyReason,
+  firstDoorLivePreFrontSequenceAction.actionSequenceId,
+  firstDoorLivePreFrontSequenceAction.actionSequenceStepId
+].join(" ");
+assert(firstDoorLivePreFrontSequenceAction.move === "forward", `Live pre-front FirstDoor transit should keep advancing instead of parking in sequence backoff (actual=${JSON.stringify(firstDoorLivePreFrontSequenceAction)})`);
+assert(firstDoorLivePreFrontSequenceAction.use !== true && firstDoorLivePreFrontSequenceAction.useKey !== true, "Live pre-front FirstDoor transit must not press Use before door-front evidence");
+assert(firstDoorLivePreFrontSequenceText.indexOf("closed-door-first-door-corner") < 0 && firstDoorLivePreFrontSequenceText.indexOf("first-door-corner-use") < 0, `Live pre-front FirstDoor transit should not publish the corner sequence before door-front evidence (actual=${firstDoorLivePreFrontSequenceText})`);
+
+const firstDoorOpeningForwardLockStallRuntime = runtimeFactory.create(publicProfile);
+firstDoorOpeningForwardLockStallRuntime.predictions = 991;
+firstDoorOpeningForwardLockStallRuntime.actionSignature = "forward:right:false:false:false";
+firstDoorOpeningForwardLockStallRuntime.actionRepeatFrames = 150;
+firstDoorOpeningForwardLockStallRuntime.moveSignature = "forward";
+firstDoorOpeningForwardLockStallRuntime.moveRepeatFrames = 150;
+const firstDoorOpeningForwardLockStallAction = firstDoorOpeningForwardLockStallRuntime.predict({
+  health: 100,
+  depthSig: 0.35,
+  contextDict: "corridor wall door",
+  wallVector: 0.33,
+  motionForwardProgress: 0,
+  motionObstacleScore: 0.57,
+  footObstacleScore: 0.57,
+  actionRepeatFrames: 150,
+  moveRepeatFrames: 150,
+  turnRepeatFrames: 42,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeConfidence: 0.43,
+  predictions: 991,
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0,
+  spawnLandmarkRouteEvidence: 0.47,
+  spawnCorridorGapScore: 0.34,
+  semanticMemory: {
+    symbols: {
+      door: 0.62,
+      corridor: 0.39,
+      enemy: 0,
+      "safe-zone": 0.35,
+      bridge: 0.12,
+      "computer-room": 0.04
+    }
+  }
+});
+assert(firstDoorOpeningForwardLockStallAction.stage === "closed-door-first-door-corner-backoff", `Late opening forward-lock with wall contact should enter the explicit FirstDoor sequence (actual=${firstDoorOpeningForwardLockStallAction.stage})`);
+assert(firstDoorOpeningForwardLockStallAction.move === "back", "Late opening forward-lock wall contact should back out before re-aligning");
+
+const firstDoorLivePostUseRuntimeResetRuntime = runtimeFactory.create(publicProfile);
+firstDoorLivePostUseRuntimeResetRuntime.predictions = 1;
+const firstDoorLivePostUseRuntimeResetAction = firstDoorLivePostUseRuntimeResetRuntime.predict({
+  health: 100,
+  depthSig: 0.35,
+  contextDict: "corridor wall door",
+  wallVector: 0.33,
+  motionForwardProgress: 0.02,
+  motionObstacleScore: 0.30,
+  footObstacleScore: 0.30,
+  actionRepeatFrames: 40,
+  moveRepeatFrames: 40,
+  turnRepeatFrames: 40,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeConfidence: 0.43,
+  predictions: 109,
+  firstDoorVision9x9Score: 0.46,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.25,
+  computerDarkPanelScore: 0.56,
+  computerPanelScore: 0.19,
+  computerRoomScore: 0.18,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  bridgeConfidence: 0,
+  spawnLandmarkRouteEvidence: 0.51,
+  spawnCorridorGapScore: 0.37,
+  spawnSecretDoorScore: 0.04,
+  semanticMemory: {
+    symbols: {
+      door: 0.62,
+      corridor: 0.39,
+      enemy: 0.20,
+      "safe-zone": 0.35,
+      bridge: 0.12,
+      "computer-room": 0.18
+    }
+  }
+});
+assert(firstDoorLivePostUseRuntimeResetAction.stage === "demo-spawn-sense-settle-left", `Runtime-reset closed FirstDoor evidence should restart from the opening sense-settle sweep (actual=${firstDoorLivePostUseRuntimeResetAction.stage})`);
+assert(firstDoorLivePostUseRuntimeResetAction.move === "none", "Runtime-reset FirstDoor evidence should not keep the stale corner backoff motion");
+assert(firstDoorLivePostUseRuntimeResetAction.objective === "find-corridor-to-first-door", "Runtime-reset FirstDoor evidence should keep the FirstDoor objective");
+
+const firstDoorLatchedFalseComputerRoomRuntime = runtimeFactory.create(publicProfile);
+firstDoorLatchedFalseComputerRoomRuntime.predictions = 1240;
+firstDoorLatchedFalseComputerRoomRuntime.closedDoorCornerSequenceFrames = 44;
+firstDoorLatchedFalseComputerRoomRuntime.closedDoorCornerSequenceStep = "align-turn";
+firstDoorLatchedFalseComputerRoomRuntime.closedDoorCornerSequenceIdentityFrames = 10;
+const firstDoorLatchedFalseComputerRoomAction = firstDoorLatchedFalseComputerRoomRuntime.predict({
+  health: 100,
+  depthSig: 0.31,
+  contextDict: "computer wall door",
+  wallVector: 0.48,
+  motionForwardProgress: 0.01,
+  motionObstacleScore: 0.52,
+  footObstacleScore: 0.54,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 18,
+  doorOpenedCount: 0,
+  routeMode: "computer-room",
+  previousRouteMode: "door-approach",
+  currentRoute: "computer-room-route",
+  routeConfidence: 0.41,
+  predictions: 1241,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0.01,
+  firstDoorUse3x3Score: 0,
+  firstDoorUseTurn: "none",
+  bridgeDoorScore: 0.10,
+  computerDarkPanelScore: 0.48,
+  computerPanelScore: 0.22,
+  computerRoomScore: 0.28,
+  computerRoomConfidence: 0.18,
+  postDoorTerminalSurface: 0,
+  bridgeConfidence: 0.05,
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.28,
+      enemy: 0.12,
+      "safe-zone": 0.25,
+      bridge: 0.10,
+      "computer-room": 0.34
+    }
+  }
+});
+assert(firstDoorLatchedFalseComputerRoomAction.stage.indexOf("closed-door-first-door-corner-") === 0, `Latched closed FirstDoor sequence should survive false ComputerRoom phase pollution (actual=${firstDoorLatchedFalseComputerRoomAction.stage})`);
+assert(firstDoorLatchedFalseComputerRoomAction.objective === "find-corridor-to-first-door", "False ComputerRoom phase pollution must not steal the FirstDoor objective while the door remains closed");
+
+const postDoorDoorOpenedFlickerRuntime = runtimeFactory.create(publicProfile);
+postDoorDoorOpenedFlickerRuntime.predictions = 1320;
+postDoorDoorOpenedFlickerRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    routeMode: "post-door",
+    goalState: {
+      telos: "ComputerRoom",
+      objective: "Reach Central Hall"
+    }
+  }
+};
+const postDoorDoorOpenedFlickerAction = postDoorDoorOpenedFlickerRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room bridge",
+  wallVector: 0.25,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.16,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 8,
+  turnRepeatFrames: 3,
+  doorOpenedCount: 0,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  routeConfidence: 0.50,
+  predictions: 1321,
+  firstDoorVision9x9Score: 0.02,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.22,
+  bridgeBrownScore: 0.45,
+  bridgeGreenCenter: 0.58,
+  computerDarkPanelScore: 0.42,
+  computerPanelScore: 0.22,
+  computerRoomScore: 0.34,
+  computerRoomConfidence: 0.40,
+  bridgeConfidence: 0.58,
+  semanticMemory: {
+    symbols: {
+      door: 0.14,
+      corridor: 0.32,
+      enemy: 0.05,
+      "safe-zone": 0.30,
+      bridge: 0.58,
+      "computer-room": 0.44
+    }
+  }
+});
+assert(postDoorDoorOpenedFlickerAction.objective === "reach-central-hall", `Door-open flicker after bridge evidence should stay on central-hall objective (actual=${postDoorDoorOpenedFlickerAction.objective})`);
+assert(postDoorDoorOpenedFlickerRuntime.lastStatus?.debugRouteValues?.doorOpenedCount > 0, "Door-open flicker should carry doorOpenedCount into runtime status");
+assert(postDoorDoorOpenedFlickerRuntime.lastStatus?.goalState?.telos === "ComputerRoom", `Door-open flicker should keep ComputerRoom TELOS (actual=${postDoorDoorOpenedFlickerRuntime.lastStatus?.goalState?.telos})`);
+
+const unopenedFirstDoorCarrySuppressionRuntime = runtimeFactory.create(publicProfile);
+unopenedFirstDoorCarrySuppressionRuntime.predictions = 2300;
+unopenedFirstDoorCarrySuppressionRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    computerRoomEntered: true
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    routeMode: "post-door",
+    computerRoomEntered: true
+  }
+};
+const unopenedFirstDoorCarrySuppressionAction = unopenedFirstDoorCarrySuppressionRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "corridor wall door",
+  wallVector: 0.42,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 2,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 2301,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.02,
+  computerDarkPanelScore: 0.48,
+  computerPanelScore: 0.22,
+  computerRoomScore: 0.18,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.44,
+  bridgeConfidence: 0.02,
+  semanticMemory: {
+    symbols: {
+      door: 0.55,
+      corridor: 0.42,
+      enemy: 0.05,
+      bridge: 0.02,
+      "computer-room": 0.12
+    }
+  }
+});
+assert(
+  String(unopenedFirstDoorCarrySuppressionAction.stage || "").indexOf("post-door") < 0,
+  `Explicit unopened FirstDoor state must not carry previous post-door status into a post-door stage (actual=${unopenedFirstDoorCarrySuppressionAction.stage})`);
+const unopenedFirstDoorCarrySuppressionObjective = String(unopenedFirstDoorCarrySuppressionAction.objective || "");
+assert(
+  unopenedFirstDoorCarrySuppressionObjective.indexOf("first-door") >= 0
+    && unopenedFirstDoorCarrySuppressionObjective.indexOf("central-hall") < 0
+    && unopenedFirstDoorCarrySuppressionObjective.indexOf("computer") < 0,
+  `Explicit unopened FirstDoor state should keep a FirstDoor objective (actual=${unopenedFirstDoorCarrySuppressionAction.objective})`);
+assert(
+  Number(unopenedFirstDoorCarrySuppressionRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Explicit unopened FirstDoor state should publish doorOpenedCount=0 instead of carrying a stale post-door milestone");
+
+const unopenedFirstDoorPostDoorReleaseRuntime = runtimeFactory.create(publicProfile);
+unopenedFirstDoorPostDoorReleaseRuntime.predictions = 2280;
+unopenedFirstDoorPostDoorReleaseRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const unopenedFirstDoorPostDoorReleaseAction = unopenedFirstDoorPostDoorReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.56,
+  contextDict: "first door bridge terminal",
+  wallVector: 0.52,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 2301,
+  firstDoorVision9x9Score: 0.39,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.36,
+  computerDarkPanelScore: 0.18,
+  computerPanelScore: 0.34,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.40,
+  bridgeConfidence: 0.24,
+  semanticMemory: {
+    symbols: {
+      door: 0.55,
+      corridor: 0.34,
+      enemy: 0.05,
+      bridge: 0.24,
+      "computer-room": 0.18
+    }
+  }
+});
+const unopenedFirstDoorPostDoorReleaseText = String([
+  unopenedFirstDoorPostDoorReleaseAction.pipeline,
+  unopenedFirstDoorPostDoorReleaseAction.stage,
+  unopenedFirstDoorPostDoorReleaseAction.safetyReason,
+  unopenedFirstDoorPostDoorReleaseAction.objective
+].join(" "));
+assert(
+  unopenedFirstDoorPostDoorReleaseText.indexOf("post-door") < 0
+    && unopenedFirstDoorPostDoorReleaseText.indexOf("enter-computer") < 0
+    && unopenedFirstDoorPostDoorReleaseText.indexOf("reach-central") < 0,
+  `Unopened FirstDoor source must not be promoted by post-door release (actual=${unopenedFirstDoorPostDoorReleaseText})`);
+assert(
+  Number(unopenedFirstDoorPostDoorReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Unopened FirstDoor post-door release suppression should keep status doorOpenedCount=0");
+
+const unopenedFirstDoorFinalHardGateRuntime = runtimeFactory.create(publicProfile);
+unopenedFirstDoorFinalHardGateRuntime.predictions = 876;
+unopenedFirstDoorFinalHardGateRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const unopenedFirstDoorFinalHardGateAction = unopenedFirstDoorFinalHardGateRuntime.predict({
+  health: 100,
+  depthSig: 0.52,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 26,
+  moveRepeatFrames: 26,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 877,
+  firstDoorVision9x9Score: 0.49,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.36,
+  computerDarkPanelScore: 0.16,
+  computerPanelScore: 0.24,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0.10,
+  postDoorTerminalSurface: 0.32,
+  bridgeConfidence: 0.16,
+  semanticMemory: {
+    symbols: {
+      door: 0.52,
+      corridor: 0.36,
+      enemy: 0.05,
+      bridge: 0.16,
+      "computer-room": 0.10
+    }
+  }
+});
+const unopenedFirstDoorFinalHardGateText = String([
+  unopenedFirstDoorFinalHardGateAction.pipeline,
+  unopenedFirstDoorFinalHardGateAction.stage,
+  unopenedFirstDoorFinalHardGateAction.safetyReason,
+  unopenedFirstDoorFinalHardGateAction.objective
+].join(" "));
+assert(
+  unopenedFirstDoorFinalHardGateText.indexOf("first-door-entry-forward-lock") < 0
+    && unopenedFirstDoorFinalHardGateText.indexOf("post-door") < 0
+    && unopenedFirstDoorFinalHardGateText.indexOf("enter-computer") < 0
+    && unopenedFirstDoorFinalHardGateText.indexOf("reach-central") < 0,
+  `Final hard gate must not let unopened FirstDoor source publish post-door output (actual=${unopenedFirstDoorFinalHardGateText})`);
+assert(
+  Number(unopenedFirstDoorFinalHardGateRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Final hard gate should keep doorOpenedCount=0 for explicit unopened FirstDoor source");
+
+const rawFirstDoorSourceHardGateRuntime = runtimeFactory.create(publicProfile);
+rawFirstDoorSourceHardGateRuntime.predictions = 1090;
+rawFirstDoorSourceHardGateRuntime.lastStatus = {
+  controlPipeline: "first-door-entry-forward-lock",
+  objective: "enter-computer-control-room",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const rawFirstDoorSourceHardGateAction = rawFirstDoorSourceHardGateRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 26,
+  moveRepeatFrames: 26,
+  turnRepeatFrames: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1091,
+  firstDoorVision9x9Score: 0.42,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  computerDarkPanelScore: 0.12,
+  computerPanelScore: 0.18,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0.10,
+  postDoorTerminalSurface: 0.24,
+  bridgeConfidence: 0.14,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    doorOpened: false,
+    firstDoorRouteActive: true
+  }
+});
+const rawFirstDoorSourceHardGateText = String([
+  rawFirstDoorSourceHardGateAction.pipeline,
+  rawFirstDoorSourceHardGateAction.stage,
+  rawFirstDoorSourceHardGateAction.objective
+].join(" "));
+assert(
+  rawFirstDoorSourceHardGateText.indexOf("first-door-entry-forward-lock") < 0
+    && rawFirstDoorSourceHardGateText.indexOf("post-door") < 0
+    && rawFirstDoorSourceHardGateText.indexOf("enter-computer") < 0
+    && rawFirstDoorSourceHardGateText.indexOf("reach-central") < 0,
+  `Raw FirstDoor source must override stale post-door carry (actual=${rawFirstDoorSourceHardGateText})`);
+
+const unopenedFirstDoorEntryPulseRuntime = runtimeFactory.create(publicProfile);
+unopenedFirstDoorEntryPulseRuntime.predictions = 1870;
+unopenedFirstDoorEntryPulseRuntime.stagePulseFirstDoorEntryFrames = 3;
+unopenedFirstDoorEntryPulseRuntime.lastStatus = {
+  controlPipeline: "first-door-entry-forward-lock",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const unopenedFirstDoorEntryPulseAction = unopenedFirstDoorEntryPulseRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 73,
+  moveRepeatFrames: 73,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1871,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.28,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.16
+});
+const unopenedFirstDoorEntryPulseText = String([
+  unopenedFirstDoorEntryPulseAction.pipeline,
+  unopenedFirstDoorEntryPulseAction.stage,
+  unopenedFirstDoorEntryPulseAction.safetyReason,
+  unopenedFirstDoorEntryPulseAction.objective
+].join(" "));
+assert(
+  unopenedFirstDoorEntryPulseText.indexOf("first-door-entry-forward-lock") < 0
+    && unopenedFirstDoorEntryPulseText.indexOf("post-door") < 0
+    && unopenedFirstDoorEntryPulseText.indexOf("reach-central") < 0
+    && unopenedFirstDoorEntryPulseText.indexOf("enter-computer") < 0,
+  `Unconfirmed FirstDoor entry pulse should return to bounded retry (actual=${unopenedFirstDoorEntryPulseText})`);
+
+const carriedFirstDoorEntryPulseRuntime = runtimeFactory.create(publicProfile);
+carriedFirstDoorEntryPulseRuntime.predictions = 920;
+carriedFirstDoorEntryPulseRuntime.stagePulseFirstDoorEntryFrames = 3;
+carriedFirstDoorEntryPulseRuntime.lastStatus = {
+  controlPipeline: "first-door-entry-forward-lock",
+  objective: "enter-computer-control-room",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const carriedFirstDoorEntryPulseAction = carriedFirstDoorEntryPulseRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 26,
+  moveRepeatFrames: 26,
+  turnRepeatFrames: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "enter-computer-control-room",
+  predictions: 921,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.37,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0.10,
+  postDoorTerminalSurface: 0.24,
+  bridgeConfidence: 0.14
+});
+const carriedFirstDoorEntryPulseText = String([
+  carriedFirstDoorEntryPulseAction.pipeline,
+  carriedFirstDoorEntryPulseAction.stage,
+  carriedFirstDoorEntryPulseAction.objective
+].join(" "));
+assert(
+  carriedFirstDoorEntryPulseText.indexOf("first-door-entry-forward-lock") < 0
+    && carriedFirstDoorEntryPulseText.indexOf("post-door") < 0
+    && carriedFirstDoorEntryPulseText.indexOf("reach-central") < 0
+    && carriedFirstDoorEntryPulseText.indexOf("enter-computer") < 0,
+  `Carried post-door status must not release an unconfirmed live FirstDoor entry pulse (actual=${carriedFirstDoorEntryPulseText})`);
+assert(
+  Number(carriedFirstDoorEntryPulseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Carried FirstDoor entry pulse should publish doorOpenedCount=0 while open audio is unconfirmed");
+
+const highTerminalUnopenedEntryPulseRuntime = runtimeFactory.create(publicProfile);
+highTerminalUnopenedEntryPulseRuntime.predictions = 1017;
+highTerminalUnopenedEntryPulseRuntime.stagePulseFirstDoorEntryFrames = 6;
+highTerminalUnopenedEntryPulseRuntime.lastStatus = {
+  controlPipeline: "first-door-entry-forward-lock",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const highTerminalUnopenedEntryPulseAction = highTerminalUnopenedEntryPulseRuntime.predict({
+  health: 100,
+  depthSig: 0.52,
+  contextDict: "first door bridge approach",
+  wallVector: 0.76,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 26,
+  moveRepeatFrames: 26,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "enter-computer-control-room",
+  predictions: 1018,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  bridgeConfidence: 0.41,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  computerPanelScore: 0.65,
+  postDoorTerminalSurface: 0.65,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  }
+});
+const highTerminalUnopenedEntryPulseText = String([
+  highTerminalUnopenedEntryPulseAction.pipeline,
+  highTerminalUnopenedEntryPulseAction.stage,
+  highTerminalUnopenedEntryPulseAction.safetyReason,
+  highTerminalUnopenedEntryPulseAction.objective
+].join(" "));
+assert(
+  highTerminalUnopenedEntryPulseText.indexOf("first-door-entry-forward-lock") < 0
+    && highTerminalUnopenedEntryPulseText.indexOf("reach-central") < 0
+    && highTerminalUnopenedEntryPulseText.indexOf("enter-computer") < 0,
+  `High terminal-like FirstDoor source with door=0 must stay in bounded retry (actual=${highTerminalUnopenedEntryPulseText})`);
+assert(
+  ["contact-forward", "pre-use-stop", "stop-use", "post-use-settle"].includes(String(highTerminalUnopenedEntryPulseAction?.actionSequenceStepId || "").toLowerCase()),
+  `High terminal-like FirstDoor source should stay inside bounded retry ownership (actual=${JSON.stringify({
+    pipeline: highTerminalUnopenedEntryPulseAction?.pipeline,
+    stage: highTerminalUnopenedEntryPulseAction?.stage,
+    safetyReason: highTerminalUnopenedEntryPulseAction?.safetyReason,
+    actionSequenceStepId: highTerminalUnopenedEntryPulseAction?.actionSequenceStepId
+  })})`);
+assert(
+  Number(highTerminalUnopenedEntryPulseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "High terminal-like unopened FirstDoor entry pulse should publish doorOpenedCount=0");
+
+const hardGateBoundedRetryLastStatus = {
+  controlPipeline: "first-door-entry-forward-lock",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1,
+    computerRoomEntered: true
+  },
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const hardGateBoundedRetryRuntime = runtimeFactory.create(publicProfile);
+hardGateBoundedRetryRuntime.predictions = 1870;
+hardGateBoundedRetryRuntime.stagePulseFirstDoorEntryFrames = 3;
+hardGateBoundedRetryRuntime.closedDoorCornerSequenceFrames = 35;
+hardGateBoundedRetryRuntime.closedDoorCornerSequenceStep = "pre-use-stop";
+hardGateBoundedRetryRuntime.closedDoorCornerSequenceContactForwardFrames = 20;
+hardGateBoundedRetryRuntime.closedDoorCornerSequencePreUseStopFrames = 11;
+hardGateBoundedRetryRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateBoundedRetryAction = hardGateBoundedRetryRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 26,
+  moveRepeatFrames: 26,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1871,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.28,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.16,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    doorOpened: false,
+    firstDoorRouteActive: true
+  }
+});
+const hardGateBoundedRetryText = String([
+  hardGateBoundedRetryAction.pipeline,
+  hardGateBoundedRetryAction.stage,
+  hardGateBoundedRetryAction.safetyReason,
+  hardGateBoundedRetryAction.objective
+].join(" "));
+assert(
+  hardGateBoundedRetryText.indexOf("first-door-entry-forward-lock") < 0
+    && hardGateBoundedRetryText.indexOf("post-door") < 0
+    && hardGateBoundedRetryText.indexOf("reach-central") < 0
+    && hardGateBoundedRetryText.indexOf("enter-computer") < 0,
+  `Unconfirmed hard-gated FirstDoor retry should not leak stale post-door actions (actual=${hardGateBoundedRetryText})`);
+assert(
+  ["align-turn", "contact-forward", "pre-use-stop", "stop-use", "post-use-settle"].includes(String(hardGateBoundedRetryAction?.actionSequenceStepId || "").toLowerCase()),
+  `Unconfirmed hard-gated FirstDoor retry should stay inside bounded retry ownership (actual=${JSON.stringify({
+    pipeline: hardGateBoundedRetryAction?.pipeline,
+    stage: hardGateBoundedRetryAction?.stage,
+    safetyReason: hardGateBoundedRetryAction?.safetyReason,
+    actionSequenceStepId: hardGateBoundedRetryAction?.actionSequenceStepId,
+    use: hardGateBoundedRetryAction?.use,
+    useKey: hardGateBoundedRetryAction?.useKey
+  })})`);
+
+const hardGatePostUseCooldownRuntime = runtimeFactory.create(publicProfile);
+hardGatePostUseCooldownRuntime.predictions = 1940;
+hardGatePostUseCooldownRuntime.closedDoorCornerSequenceFrames = 74;
+hardGatePostUseCooldownRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+hardGatePostUseCooldownRuntime.closedDoorCornerSequenceLastUseFrame = 40;
+hardGatePostUseCooldownRuntime.usePulseCooldown = 32;
+hardGatePostUseCooldownRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGatePostUseCooldownAction = hardGatePostUseCooldownRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.46,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 28,
+  moveRepeatFrames: 28,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1941,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.28,
+  bridgeConfidence: 0.16,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    doorOpened: false,
+    firstDoorRouteActive: true
+  }
+});
+assert(
+  ["align-turn", "contact-forward", "pre-use-stop", "stop-use"].includes(String(hardGatePostUseCooldownAction?.actionSequenceStepId || "").toLowerCase()),
+  `Hard-gated post-use settle should reapproach while Use cooldown drains (actual=${JSON.stringify({
+    pipeline: hardGatePostUseCooldownAction?.pipeline,
+    stage: hardGatePostUseCooldownAction?.stage,
+    safetyReason: hardGatePostUseCooldownAction?.safetyReason,
+    actionSequenceStepId: hardGatePostUseCooldownAction?.actionSequenceStepId,
+    move: hardGatePostUseCooldownAction?.move,
+    use: hardGatePostUseCooldownAction?.use,
+    useKey: hardGatePostUseCooldownAction?.useKey
+  })})`);
+assert(
+  String(hardGatePostUseCooldownAction?.actionSequenceStepId || "").toLowerCase() !== "post-use-settle"
+    && String(hardGatePostUseCooldownAction?.actionSequenceStepId || "").toLowerCase() !== "none",
+  `Hard-gated post-use settle should not stay parked after the settle window (actual=${hardGatePostUseCooldownAction?.actionSequenceStepId})`);
+
+const publishedDoorZeroEntryRuntime = runtimeFactory.create(publicProfile);
+publishedDoorZeroEntryRuntime.predictions = 1351;
+publishedDoorZeroEntryRuntime.stagePulseFirstDoorEntryFrames = 2;
+publishedDoorZeroEntryRuntime.closedDoorCornerSequenceFrames = 42;
+publishedDoorZeroEntryRuntime.closedDoorCornerSequenceStep = "contact-forward";
+publishedDoorZeroEntryRuntime.closedDoorCornerSequenceContactForwardFrames = 5;
+publishedDoorZeroEntryRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const publishedDoorZeroEntryAction = publishedDoorZeroEntryRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.493,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 8,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "enter-computer-control-room",
+  predictions: 1352,
+  firstDoorVision9x9Score: 0.28,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  bridgeConfidence: 0.46,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.69,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+const publishedDoorZeroEntryText = String([
+  publishedDoorZeroEntryAction.pipeline,
+  publishedDoorZeroEntryAction.stage,
+  publishedDoorZeroEntryAction.safetyReason,
+  publishedDoorZeroEntryAction.objective
+].join(" "));
+const publishedDoorZeroStatusText = String([
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.action?.pipeline,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.action?.stage,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.action?.safetyReason,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.action?.objective
+].join(" "));
+const publishedDoorZeroAutoplayText = String([
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.controlPipeline,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.stage,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.safetyReason,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.objective,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.currentObjective,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.routeObjective,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.actionSequenceId,
+  publishedDoorZeroEntryRuntime.lastStatus?.autoplay?.actionSequenceStepId
+].join(" "));
+assert(
+  publishedDoorZeroEntryText.indexOf("first-door-entry-forward-lock") < 0
+    && publishedDoorZeroEntryText.indexOf("post-door") < 0
+    && publishedDoorZeroEntryText.indexOf("reach-central") < 0
+    && publishedDoorZeroEntryText.indexOf("enter-computer") < 0,
+  `Published door=0 FirstDoor sample must not return entry lock (actual=${publishedDoorZeroEntryText})`);
+assert(
+  publishedDoorZeroStatusText.indexOf("first-door-entry-forward-lock") < 0
+    && publishedDoorZeroStatusText.indexOf("post-door") < 0
+    && publishedDoorZeroStatusText.indexOf("reach-central") < 0
+    && publishedDoorZeroStatusText.indexOf("enter-computer") < 0,
+  `Published status action must not expose door=0 FirstDoor entry lock (actual=${publishedDoorZeroStatusText})`);
+assert(
+  publishedDoorZeroAutoplayText.indexOf("first-door-entry-forward-lock") < 0
+    && publishedDoorZeroAutoplayText.indexOf("post-door") < 0
+    && publishedDoorZeroAutoplayText.indexOf("reach-central") < 0
+    && publishedDoorZeroAutoplayText.indexOf("enter-computer") < 0,
+  `Published autoplay status must not expose door=0 FirstDoor entry lock (actual=${publishedDoorZeroAutoplayText})`);
+assert(
+  Number(publishedDoorZeroEntryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Published door=0 FirstDoor entry guard should keep doorOpenedCount=0");
+
+const hardGateIdleStallReleaseRuntime = runtimeFactory.create(publicProfile);
+hardGateIdleStallReleaseRuntime.predictions = 2600;
+hardGateIdleStallReleaseRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateIdleStallReleaseRuntime.closedDoorCornerSequenceFrames = 0;
+hardGateIdleStallReleaseRuntime.closedDoorCornerSequenceStep = "";
+hardGateIdleStallReleaseRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateIdleStallReleaseAction = hardGateIdleStallReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.36,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 72,
+  moveRepeatFrames: 72,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 2601,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.35,
+  bridgeConfidence: 0.46,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.76,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+assert(
+  String(hardGateIdleStallReleaseAction?.actionSequenceStepId || "").toLowerCase() === "contact-forward"
+    || String(hardGateIdleStallReleaseAction?.actionSequenceStepId || "").toLowerCase() === "stop-use"
+    || String(hardGateIdleStallReleaseAction?.safetyReason || "").toLowerCase().indexOf("contact-forward") >= 0
+    || String(hardGateIdleStallReleaseAction?.safetyReason || "").toLowerCase().indexOf("stationary-use") >= 0
+    || hardGateIdleStallReleaseAction?.move === "forward",
+  `Hard-gated idle FirstDoor retry should reapproach or return to stationary Use instead of staying parked (actual=${JSON.stringify({
+    pipeline: hardGateIdleStallReleaseAction?.pipeline,
+    stage: hardGateIdleStallReleaseAction?.stage,
+    safetyReason: hardGateIdleStallReleaseAction?.safetyReason,
+    actionSequenceStepId: hardGateIdleStallReleaseAction?.actionSequenceStepId,
+    move: hardGateIdleStallReleaseAction?.move,
+    turn: hardGateIdleStallReleaseAction?.turn,
+    use: hardGateIdleStallReleaseAction?.use
+  })})`);
+
+const liveDoorZeroTailReleaseRuntime = runtimeFactory.create(publicProfile);
+liveDoorZeroTailReleaseRuntime.predictions = 1328;
+liveDoorZeroTailReleaseRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+liveDoorZeroTailReleaseRuntime.closedDoorCornerSequenceFrames = 36;
+liveDoorZeroTailReleaseRuntime.closedDoorCornerSequenceStep = "contact-forward";
+liveDoorZeroTailReleaseRuntime.closedDoorCornerSequenceContactForwardFrames = 12;
+liveDoorZeroTailReleaseRuntime.actionSignature = "forward:right:-:run:-:-";
+liveDoorZeroTailReleaseRuntime.actionRepeatFrames = 96;
+liveDoorZeroTailReleaseRuntime.moveSignature = "forward";
+liveDoorZeroTailReleaseRuntime.moveRepeatFrames = 96;
+liveDoorZeroTailReleaseRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const liveDoorZeroTailReleaseAction = liveDoorZeroTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.54,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.46,
+  footObstacleScore: 0.48,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1329,
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.38,
+  bridgeConfidence: 0.50,
+  computerRoomScore: 0.12,
+  computerRoomConfidence: 0.12,
+  postDoorTerminalSurface: 0.20,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+const liveDoorZeroTailReleaseText = String([
+  liveDoorZeroTailReleaseAction.pipeline,
+  liveDoorZeroTailReleaseAction.stage,
+  liveDoorZeroTailReleaseAction.safetyReason,
+  liveDoorZeroTailReleaseAction.objective
+].join(" "));
+const liveDoorZeroTailReleaseStatusText = String([
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.controlPipeline,
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.stage,
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.safetyReason,
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.objective,
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.currentObjective,
+  liveDoorZeroTailReleaseRuntime.lastStatus?.autoplay?.routeObjective
+].join(" "));
+assert(
+  liveDoorZeroTailReleaseText.indexOf("post-door") < 0
+    && liveDoorZeroTailReleaseText.indexOf("reach-central") < 0
+    && liveDoorZeroTailReleaseText.indexOf("enter-computer") < 0,
+  `Live door=0 FirstDoor tail must not release to post-door ownership (actual=${liveDoorZeroTailReleaseText})`);
+assert(
+  liveDoorZeroTailReleaseStatusText.indexOf("post-door") < 0
+    && liveDoorZeroTailReleaseStatusText.indexOf("reach-central") < 0
+    && liveDoorZeroTailReleaseStatusText.indexOf("enter-computer") < 0,
+  `Live door=0 FirstDoor tail must not publish post-door ownership (actual=${liveDoorZeroTailReleaseStatusText})`);
+assert(
+  ["contact-forward", "pre-use-stop", "stop-use", "post-use-settle"].includes(String(liveDoorZeroTailReleaseAction?.actionSequenceStepId || "").toLowerCase()),
+  `Live door=0 FirstDoor tail should remain in bounded FirstDoor retry ownership (actual=${JSON.stringify({
+    pipeline: liveDoorZeroTailReleaseAction?.pipeline,
+    stage: liveDoorZeroTailReleaseAction?.stage,
+    safetyReason: liveDoorZeroTailReleaseAction?.safetyReason,
+    actionSequenceStepId: liveDoorZeroTailReleaseAction?.actionSequenceStepId,
+    move: liveDoorZeroTailReleaseAction?.move,
+    turn: liveDoorZeroTailReleaseAction?.turn,
+    use: liveDoorZeroTailReleaseAction?.use
+  })})`);
+
+const hardGateLiveForwardStallRuntime = runtimeFactory.create(publicProfile);
+hardGateLiveForwardStallRuntime.predictions = 1986;
+hardGateLiveForwardStallRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateLiveForwardStallRuntime.closedDoorCornerSequenceFrames = 1;
+hardGateLiveForwardStallRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateLiveForwardStallRuntime.closedDoorCornerSequenceContactForwardFrames = 1;
+hardGateLiveForwardStallRuntime.actionSignature = "forward:none:-:-:-:-";
+hardGateLiveForwardStallRuntime.actionRepeatFrames = 186;
+hardGateLiveForwardStallRuntime.moveSignature = "forward";
+hardGateLiveForwardStallRuntime.moveRepeatFrames = 186;
+hardGateLiveForwardStallRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateLiveForwardStallAction = hardGateLiveForwardStallRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.69,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.66,
+  footObstacleScore: 0.54,
+  actionRepeatFrames: 186,
+  moveRepeatFrames: 186,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1987,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.04,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  }
+});
+assert(
+  String(hardGateLiveForwardStallAction?.actionSequenceStepId || "").toLowerCase() === "stop-use"
+    || hardGateLiveForwardStallAction?.use === true
+    || String(hardGateLiveForwardStallAction?.safetyReason || "").toLowerCase().indexOf("stationary-use") >= 0,
+  `Live hard-gate forward stall should return to stationary Use retry (actual=${JSON.stringify({
+    pipeline: hardGateLiveForwardStallAction?.pipeline,
+    stage: hardGateLiveForwardStallAction?.stage,
+    safetyReason: hardGateLiveForwardStallAction?.safetyReason,
+    actionSequenceStepId: hardGateLiveForwardStallAction?.actionSequenceStepId,
+    move: hardGateLiveForwardStallAction?.move,
+    turn: hardGateLiveForwardStallAction?.turn,
+    use: hardGateLiveForwardStallAction?.use
+  })})`);
+assert(
+  !(hardGateLiveForwardStallAction?.move === "forward" && hardGateLiveForwardStallAction?.use !== true),
+  "Live hard-gate forward stall must not continue forward without Use");
+
+const hardGateLiveForwardProgressOnlyRuntime = runtimeFactory.create(publicProfile);
+hardGateLiveForwardProgressOnlyRuntime.predictions = 1783;
+hardGateLiveForwardProgressOnlyRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateLiveForwardProgressOnlyRuntime.closedDoorCornerSequenceFrames = 1;
+hardGateLiveForwardProgressOnlyRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateLiveForwardProgressOnlyRuntime.closedDoorCornerSequenceContactForwardFrames = 1;
+hardGateLiveForwardProgressOnlyRuntime.actionSignature = "forward:none:-:-:-:-";
+hardGateLiveForwardProgressOnlyRuntime.actionRepeatFrames = 0;
+hardGateLiveForwardProgressOnlyRuntime.moveSignature = "forward";
+hardGateLiveForwardProgressOnlyRuntime.moveRepeatFrames = 0;
+hardGateLiveForwardProgressOnlyRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateLiveForwardProgressOnlyAction = hardGateLiveForwardProgressOnlyRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.53,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.66,
+  footObstacleScore: 0.54,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1784,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.09,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  }
+});
+assert(
+  String(hardGateLiveForwardProgressOnlyAction?.actionSequenceStepId || "").toLowerCase() === "stop-use"
+    || hardGateLiveForwardProgressOnlyAction?.use === true
+    || String(hardGateLiveForwardProgressOnlyAction?.safetyReason || "").toLowerCase().indexOf("stationary-use") >= 0,
+  `Live hard-gate progress-only forward stall should return to stationary Use retry (actual=${JSON.stringify({
+    pipeline: hardGateLiveForwardProgressOnlyAction?.pipeline,
+    stage: hardGateLiveForwardProgressOnlyAction?.stage,
+    safetyReason: hardGateLiveForwardProgressOnlyAction?.safetyReason,
+    actionSequenceStepId: hardGateLiveForwardProgressOnlyAction?.actionSequenceStepId,
+    move: hardGateLiveForwardProgressOnlyAction?.move,
+    turn: hardGateLiveForwardProgressOnlyAction?.turn,
+    use: hardGateLiveForwardProgressOnlyAction?.use
+  })})`);
+assert(
+  !(hardGateLiveForwardProgressOnlyAction?.move === "forward" && hardGateLiveForwardProgressOnlyAction?.use !== true),
+  "Live hard-gate progress-only forward stall must not continue forward without Use");
+
+const hardGateOrganicForwardProgressProfile = {
+  strategyName: "UnitHardGateOrganicForwardProgress",
+  pipeline: {
+    name: "UnitHardGateOrganicForwardProgress",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-backoff-reapproach",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true"
+        }
+      }
+    ]
+  }
+};
+const hardGateOrganicForwardProgressRuntime = runtimeFactory.create(hardGateOrganicForwardProgressProfile);
+hardGateOrganicForwardProgressRuntime.predictions = 1784;
+hardGateOrganicForwardProgressRuntime.closedDoorCornerHardGateRetryProgressFrames = 0;
+hardGateOrganicForwardProgressRuntime.closedDoorCornerSequenceFrames = 0;
+hardGateOrganicForwardProgressRuntime.closedDoorCornerSequenceStep = "";
+hardGateOrganicForwardProgressRuntime.actionSignature = "forward:none:-:-:-:-";
+hardGateOrganicForwardProgressRuntime.actionRepeatFrames = 0;
+hardGateOrganicForwardProgressRuntime.moveSignature = "forward";
+hardGateOrganicForwardProgressRuntime.moveRepeatFrames = 0;
+hardGateOrganicForwardProgressRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateOrganicForwardProgressActions = [];
+for (let index = 0; index < 64; index += 1) {
+  hardGateOrganicForwardProgressActions.push(hardGateOrganicForwardProgressRuntime.predict({
+    health: 100,
+    depthSig: 0.50,
+    contextDict: "first door bridge approach",
+    wallVector: 0.69,
+    motionForwardProgress: 0.04,
+    motionObstacleScore: 0.66,
+    footObstacleScore: 0.54,
+    actionRepeatFrames: 0,
+    moveRepeatFrames: 0,
+    turnRepeatFrames: 0,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    predictions: 1785 + index,
+    firstDoorVision9x9Score: index % 5 === 0 ? 0.31 : 0.36,
+    firstDoorVision9x9RedScore: 0,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: index % 7 === 0 ? 0.03 : 0.01,
+    computerRoomScore: 0,
+    computerRoomConfidence: 0,
+    postDoorTerminalSurface: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: false,
+      manualUseAudioActive: false,
+      required: true
+    }
+  }));
+}
+const hardGateOrganicForwardProgressText = hardGateOrganicForwardProgressActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.move,
+  action.turn,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  hardGateOrganicForwardProgressText.indexOf("post-door") < 0
+    && hardGateOrganicForwardProgressText.indexOf("reach-central") < 0
+    && hardGateOrganicForwardProgressText.indexOf("enter-computer") < 0,
+  `Organic hard-gate forward progress must not leak post-door ownership (actual=${hardGateOrganicForwardProgressText})`);
+assert(
+  hardGateOrganicForwardProgressText.indexOf("stop-use") >= 0
+    || hardGateOrganicForwardProgressText.indexOf("stationary-use") >= 0
+    || hardGateOrganicForwardProgressText.indexOf(" use") >= 0,
+  `Organic hard-gate forward progress should grow into stationary Use retry (actual=${hardGateOrganicForwardProgressText})`);
+
+const unconfirmedPostUseProbeRuntime = runtimeFactory.create(publicProfile);
+unconfirmedPostUseProbeRuntime.predictions = 1010;
+unconfirmedPostUseProbeRuntime.closedDoorCornerSequenceFrames = 20;
+unconfirmedPostUseProbeRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+unconfirmedPostUseProbeRuntime.closedDoorCornerSequenceLastUseFrame = 1;
+unconfirmedPostUseProbeRuntime.closedDoorCornerSequenceUseFailures = 1;
+unconfirmedPostUseProbeRuntime.usePulseCooldown = 24;
+unconfirmedPostUseProbeRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const unconfirmedPostUseProbeAction = unconfirmedPostUseProbeRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.56,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.58,
+  footObstacleScore: 0.58,
+  actionRepeatFrames: 64,
+  moveRepeatFrames: 64,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 1011,
+  firstDoorVision9x9Score: 0.43,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.36,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0,
+  usePulseCooldown: 24,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+const unconfirmedPostUseProbeText = String([
+  unconfirmedPostUseProbeAction?.pipeline,
+  unconfirmedPostUseProbeAction?.stage,
+  unconfirmedPostUseProbeAction?.safetyReason,
+  unconfirmedPostUseProbeAction?.actionSequenceId,
+  unconfirmedPostUseProbeAction?.actionSequenceStepId,
+  unconfirmedPostUseProbeAction?.move,
+  unconfirmedPostUseProbeAction?.turn,
+  unconfirmedPostUseProbeAction?.use || unconfirmedPostUseProbeAction?.useKey ? "use" : ""
+].join(" "));
+assert(
+  unconfirmedPostUseProbeText.indexOf("post-use-forward-probe") < 0,
+  `Unconfirmed post-use FirstDoor must not run a forward probe before door-open evidence (actual=${unconfirmedPostUseProbeText})`);
+assert(
+  unconfirmedPostUseProbeText.indexOf("post-door") < 0
+    && unconfirmedPostUseProbeText.indexOf("reach-central") < 0
+    && unconfirmedPostUseProbeText.indexOf("enter-computer") < 0,
+  `Unconfirmed post-use FirstDoor must stay under FirstDoor ownership (actual=${unconfirmedPostUseProbeText})`);
+
+const hardGateRawSourceIdleRuntime = runtimeFactory.create(publicProfile);
+hardGateRawSourceIdleRuntime.predictions = 2040;
+hardGateRawSourceIdleRuntime.closedDoorCornerHardGateRetryProgressFrames = 120;
+hardGateRawSourceIdleRuntime.closedDoorCornerSequenceFrames = 80;
+hardGateRawSourceIdleRuntime.closedDoorCornerSequenceStep = "stop-use";
+hardGateRawSourceIdleRuntime.actionSignature = "idle";
+hardGateRawSourceIdleRuntime.actionRepeatFrames = 0;
+hardGateRawSourceIdleRuntime.moveSignature = "none";
+hardGateRawSourceIdleRuntime.moveRepeatFrames = 0;
+hardGateRawSourceIdleRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateRawSourceIdleAction = hardGateRawSourceIdleRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.56,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.42,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 2041,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.48,
+  bridgeConfidence: 0.50,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.75,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+const hardGateRawSourceIdleText = String([
+  hardGateRawSourceIdleAction?.pipeline,
+  hardGateRawSourceIdleAction?.stage,
+  hardGateRawSourceIdleAction?.safetyReason,
+  hardGateRawSourceIdleAction?.objective
+].join(" "));
+assert(
+  hardGateRawSourceIdleText.indexOf("post-door") < 0
+    && hardGateRawSourceIdleText.indexOf("reach-central") < 0
+    && hardGateRawSourceIdleText.indexOf("enter-computer") < 0,
+  `Raw-source hard-gated idle door=0 FirstDoor sample must not leak post-door ownership (actual=${hardGateRawSourceIdleText})`);
+assert(
+  String(hardGateRawSourceIdleAction?.actionSequenceStepId || "").toLowerCase() === "stop-use"
+    || hardGateRawSourceIdleAction?.use === true
+    || String(hardGateRawSourceIdleAction?.safetyReason || "").toLowerCase().indexOf("stationary-use") >= 0,
+  `Raw-source hard-gated idle should return to stationary Use retry (actual=${JSON.stringify({
+    pipeline: hardGateRawSourceIdleAction?.pipeline,
+    stage: hardGateRawSourceIdleAction?.stage,
+    safetyReason: hardGateRawSourceIdleAction?.safetyReason,
+    actionSequenceStepId: hardGateRawSourceIdleAction?.actionSequenceStepId,
+    move: hardGateRawSourceIdleAction?.move,
+    turn: hardGateRawSourceIdleAction?.turn,
+    use: hardGateRawSourceIdleAction?.use
+  })})`);
+assert(
+  !(hardGateRawSourceIdleAction?.move === "forward" && hardGateRawSourceIdleAction?.use !== true),
+  "Raw-source hard-gated idle must not continue forward without Use");
+
+const hardGateRawSourcePostUseIdleRuntime = runtimeFactory.create(publicProfile);
+hardGateRawSourcePostUseIdleRuntime.predictions = 2090;
+hardGateRawSourcePostUseIdleRuntime.closedDoorCornerHardGateRetryProgressFrames = 120;
+hardGateRawSourcePostUseIdleRuntime.closedDoorCornerSequenceFrames = 44;
+hardGateRawSourcePostUseIdleRuntime.closedDoorCornerSequenceStep = "stop-use";
+hardGateRawSourcePostUseIdleRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+hardGateRawSourcePostUseIdleRuntime.usePulseCooldown = 32;
+hardGateRawSourcePostUseIdleRuntime.actionSignature = "idle";
+hardGateRawSourcePostUseIdleRuntime.actionRepeatFrames = 0;
+hardGateRawSourcePostUseIdleRuntime.moveSignature = "none";
+hardGateRawSourcePostUseIdleRuntime.moveRepeatFrames = 0;
+hardGateRawSourcePostUseIdleRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const hardGateRawSourcePostUseIdleAction = hardGateRawSourcePostUseIdleRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.56,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.42,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 0,
+  moveRepeatFrames: 0,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  predictions: 2091,
+  firstDoorVision9x9Score: 0.46,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.43,
+  bridgeConfidence: 0.50,
+  computerRoomScore: 0,
+  computerRoomConfidence: 0,
+  postDoorTerminalSurface: 0.75,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  }
+});
+const hardGateRawSourcePostUseIdleText = String([
+  hardGateRawSourcePostUseIdleAction?.pipeline,
+  hardGateRawSourcePostUseIdleAction?.stage,
+  hardGateRawSourcePostUseIdleAction?.safetyReason,
+  hardGateRawSourcePostUseIdleAction?.objective
+].join(" "));
+assert(
+  hardGateRawSourcePostUseIdleText.indexOf("post-door") < 0
+    && hardGateRawSourcePostUseIdleText.indexOf("reach-central") < 0
+    && hardGateRawSourcePostUseIdleText.indexOf("enter-computer") < 0,
+  `Raw-source hard-gated post-use idle must stay under FirstDoor ownership (actual=${hardGateRawSourcePostUseIdleText})`);
+assert(
+  String(hardGateRawSourcePostUseIdleAction?.actionSequenceStepId || "").toLowerCase() === "contact-forward"
+    && hardGateRawSourcePostUseIdleAction?.move === "forward"
+    && hardGateRawSourcePostUseIdleAction?.use !== true,
+  `Raw-source hard-gated post-use idle should reapproach while Use cooldown drains (actual=${JSON.stringify({
+    pipeline: hardGateRawSourcePostUseIdleAction?.pipeline,
+    stage: hardGateRawSourcePostUseIdleAction?.stage,
+    safetyReason: hardGateRawSourcePostUseIdleAction?.safetyReason,
+    actionSequenceStepId: hardGateRawSourcePostUseIdleAction?.actionSequenceStepId,
+    move: hardGateRawSourcePostUseIdleAction?.move,
+    turn: hardGateRawSourcePostUseIdleAction?.turn,
+    use: hardGateRawSourcePostUseIdleAction?.use
+  })})`);
+
+const nestedDebugDoorZeroEntryRuntime = runtimeFactory.create(publicProfile);
+nestedDebugDoorZeroEntryRuntime.predictions = 2050;
+nestedDebugDoorZeroEntryRuntime.stagePulseFirstDoorEntryFrames = 4;
+nestedDebugDoorZeroEntryRuntime.lastStatus = hardGateBoundedRetryLastStatus;
+const nestedDebugDoorZeroEntryAction = nestedDebugDoorZeroEntryRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "first door bridge approach",
+  wallVector: 0.45,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 24,
+  moveRepeatFrames: 24,
+  turnRepeatFrames: 0,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "cross-bridge-route",
+  currentLandmark: "cross-bridge-lane",
+  routeActionHint: "advance-cross-bridge",
+  objective: "enter-computer-control-room",
+  predictions: 2051,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.32,
+  computerRoomScore: 0.10,
+  computerRoomConfidence: 0.10,
+  postDoorTerminalSurface: 0.24,
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  },
+  debugRouteValues: {
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "enter-computer-control-room",
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: true,
+      manualUseAudioActive: true
+    }
+  }
+});
+const nestedDebugDoorZeroEntryText = String([
+  nestedDebugDoorZeroEntryAction.pipeline,
+  nestedDebugDoorZeroEntryAction.stage,
+  nestedDebugDoorZeroEntryAction.safetyReason,
+  nestedDebugDoorZeroEntryAction.objective
+].join(" "));
+assert(
+  nestedDebugDoorZeroEntryText.indexOf("first-door-entry-forward-lock") < 0
+    && nestedDebugDoorZeroEntryText.indexOf("post-door") < 0
+    && nestedDebugDoorZeroEntryText.indexOf("reach-central") < 0
+    && nestedDebugDoorZeroEntryText.indexOf("enter-computer") < 0,
+  `Nested debugRouteValues door=0 must override carried post-door state (actual=${nestedDebugDoorZeroEntryText})`);
+assert(
+  Number(nestedDebugDoorZeroEntryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  `Nested debugRouteValues door=0 guard should publish doorOpenedCount=0 (actual=${nestedDebugDoorZeroEntryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount})`);
+
+const trustedPostDoorTailResidueRuntime = runtimeFactory.create(publicProfile);
+trustedPostDoorTailResidueRuntime.predictions = 2052;
+trustedPostDoorTailResidueRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    previousRouteMode: "post-door",
+    currentRoute: "computer-room-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "reach-central-hall"
+  },
+  autoplayState: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  },
+  autoplay: {
+    controlPipeline: "ComputerRoom",
+    safetyReason: "closed-door-first-door-final-published-tail-hard-gate",
+    currentRoute: "computer-room-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    debugRouteValues: {
+      firstDoorOpened: true,
+      doorOpenedCount: 1,
+      computerRoomEntered: true,
+      centralHallEntered: false,
+      routeMode: "post-door",
+      previousRouteMode: "post-door",
+      currentRoute: "computer-room-route",
+      currentLandmark: "first-door-approach",
+      routeActionHint: "advance-first-door",
+      objective: "reach-central-hall"
+    },
+    autoplayState: {
+      firstDoorOpened: true,
+      doorOpenedCount: 1,
+      computerRoomEntered: true,
+      centralHallEntered: false,
+      routeMode: "post-door"
+    }
+  }
+};
+const trustedPostDoorTailResidueAction = trustedPostDoorTailResidueRuntime.predict({
+  health: 100,
+  depthSig: 0.62,
+  contextDict: "computer room bridge approach",
+  wallVector: 0.18,
+  motionForwardProgress: 0.12,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.20,
+  actionRepeatFrames: 14,
+  moveRepeatFrames: 14,
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  predictions: 2053,
+  stage: "closed-door-first-door-tail-bounded-retry",
+  pipeline: "ComputerRoom",
+  safetyReason: "closed-door-first-door-tail-bounded-retry",
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  bridgeConfidence: 0.52,
+  computerRoomScore: 0.30,
+  computerRoomConfidence: 0.44,
+  postDoorTerminalSurface: 0.36,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: false,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: false
+  },
+  semanticMemory: {
+    symbols: {
+      bridge: 0.52,
+      "computer-room": 0.50,
+      "central-hall": 0.34
+    }
+  }
+});
+const trustedPostDoorTailResidueText = String([
+  trustedPostDoorTailResidueAction.pipeline,
+  trustedPostDoorTailResidueAction.stage,
+  trustedPostDoorTailResidueAction.safetyReason,
+  trustedPostDoorTailResidueAction.objective,
+  trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues?.currentRoute,
+  trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues?.currentLandmark,
+  trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues?.routeActionHint
+].join(" "));
+assert(
+  trustedPostDoorTailResidueText.indexOf("closed-door-first-door") < 0
+    && trustedPostDoorTailResidueText.indexOf("first-door-approach") < 0
+    && trustedPostDoorTailResidueText.indexOf("advance-first-door") < 0
+    && trustedPostDoorTailResidueText.indexOf("find-corridor-to-first-door") < 0,
+  `Trusted post-door tail residue must not restore FirstDoor ownership (actual=${trustedPostDoorTailResidueText})`);
+assert(
+  Number(trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) >= 1
+    && (trustedPostDoorTailResidueAction.computerRoomEntered === true
+      || trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues?.computerRoomEntered === true
+      || trustedPostDoorTailResidueRuntime.lastStatus?.autoplayState?.computerRoomEntered === true),
+  `Trusted post-door tail residue should preserve door-open and ComputerRoom milestones (actual=${JSON.stringify({
+    action: {
+      pipeline: trustedPostDoorTailResidueAction.pipeline,
+      stage: trustedPostDoorTailResidueAction.stage,
+      safetyReason: trustedPostDoorTailResidueAction.safetyReason,
+      objective: trustedPostDoorTailResidueAction.objective,
+      doorOpenedCount: trustedPostDoorTailResidueAction.doorOpenedCount,
+      computerRoomEntered: trustedPostDoorTailResidueAction.computerRoomEntered
+    },
+    debugRouteValues: trustedPostDoorTailResidueRuntime.lastStatus?.debugRouteValues,
+    autoplayState: trustedPostDoorTailResidueRuntime.lastStatus?.autoplayState
+  })})`);
+
+const trustedPostDoorLowEvidenceTailRuntime = runtimeFactory.create(publicProfile);
+trustedPostDoorLowEvidenceTailRuntime.predictions = 600;
+trustedPostDoorLowEvidenceTailRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    previousRouteMode: "post-door",
+    currentRoute: "computer-room-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "reach-central-hall"
+  },
+  autoplayState: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  },
+  autoplay: {
+    controlPipeline: "ComputerRoom",
+    safetyReason: "closed-door-first-door-tail-bounded-retry",
+    currentRoute: "computer-room-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    debugRouteValues: {
+      firstDoorOpened: true,
+      doorOpenedCount: 1,
+      computerRoomEntered: true,
+      centralHallEntered: false,
+      routeMode: "post-door",
+      previousRouteMode: "post-door",
+      currentRoute: "computer-room-route",
+      currentLandmark: "first-door-approach",
+      routeActionHint: "advance-first-door",
+      objective: "reach-central-hall"
+    },
+    autoplayState: {
+      firstDoorOpened: true,
+      doorOpenedCount: 1,
+      computerRoomEntered: true,
+      centralHallEntered: false,
+      routeMode: "post-door"
+    }
+  }
+};
+const trustedPostDoorLowEvidenceTailAction = trustedPostDoorLowEvidenceTailRuntime.predict({
+  health: 100,
+  depthSig: 0.62,
+  contextDict: "computer room stale first door tail",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 20,
+  moveRepeatFrames: 7,
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  predictions: 62,
+  pipeline: "ComputerRoom",
+  stage: "closed-door-first-door-tail-bounded-retry",
+  safetyReason: "closed-door-first-door-tail-bounded-retry",
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0.24,
+  computerRoomScore: 0.30,
+  computerRoomConfidence: 0.44,
+  postDoorTerminalSurface: 0.36,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: false,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: false
+  },
+  semanticMemory: {
+    symbols: {
+      "computer-room": 0.50
+    }
+  }
+});
+const trustedPostDoorLowEvidenceTailText = String([
+  trustedPostDoorLowEvidenceTailAction.pipeline,
+  trustedPostDoorLowEvidenceTailAction.stage,
+  trustedPostDoorLowEvidenceTailAction.safetyReason,
+  trustedPostDoorLowEvidenceTailAction.objective,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.debugRouteValues?.currentRoute,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.debugRouteValues?.currentLandmark,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.debugRouteValues?.routeActionHint,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.autoplay?.debugRouteValues?.currentRoute,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.autoplay?.debugRouteValues?.currentLandmark,
+  trustedPostDoorLowEvidenceTailRuntime.lastStatus?.autoplay?.debugRouteValues?.routeActionHint
+].join(" "));
+assert(
+  trustedPostDoorLowEvidenceTailText.indexOf("closed-door-first-door") < 0
+    && trustedPostDoorLowEvidenceTailText.indexOf("first-door-approach") < 0
+    && trustedPostDoorLowEvidenceTailText.indexOf("advance-first-door") < 0
+    && trustedPostDoorLowEvidenceTailText.indexOf("find-corridor-to-first-door") < 0,
+  `Trusted low-evidence post-door tail must release FirstDoor ownership (actual=${trustedPostDoorLowEvidenceTailText})`);
+
+const trustedPostDoorPublishedTailHardGateRuntime = runtimeFactory.create(publicProfile);
+trustedPostDoorPublishedTailHardGateRuntime.predictions = 2088;
+trustedPostDoorPublishedTailHardGateRuntime.lastAction = {
+  move: "none",
+  turn: "none",
+  fire: false,
+  use: false,
+  run: false,
+  pipeline: "ComputerRoom",
+  stage: "",
+  safetyReason: "closed-door-first-door-final-published-tail-hard-gate",
+  objective: "reach-central-hall"
+};
+trustedPostDoorPublishedTailHardGateRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    previousRouteMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge",
+    objective: "reach-central-hall"
+  },
+  autoplayState: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const trustedPostDoorPublishedTailHardGateAction = trustedPostDoorPublishedTailHardGateRuntime.predict({
+  health: 100,
+  depthSig: 0.62,
+  contextDict: "computer room stale first door label",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 90,
+  moveRepeatFrames: 7,
+  doorOpenedCount: 1,
+  firstDoorOpened: true,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  predictions: 2089,
+  pipeline: "ComputerRoom",
+  stage: "",
+  safetyReason: "closed-door-first-door-final-published-tail-hard-gate",
+  firstDoorVision9x9Score: 0.41,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0.24,
+  computerRoomScore: 0.30,
+  computerRoomConfidence: 0.44,
+  postDoorTerminalSurface: 0.36,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: false,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: false
+  },
+  semanticMemory: {
+    symbols: {
+      bridge: 0.24,
+      "computer-room": 0.50
+    }
+  }
+});
+const trustedPostDoorPublishedTailHardGateText = String([
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.controlPipeline,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.stage,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.safetyReason,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.controlPipeline,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.stage,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.safetyReason,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.currentRoute,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.currentLandmark,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.routeActionHint,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.debugRouteValues?.currentRoute,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.debugRouteValues?.currentLandmark,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.debugRouteValues?.routeActionHint,
+  trustedPostDoorPublishedTailHardGateAction.pipeline,
+  trustedPostDoorPublishedTailHardGateAction.stage,
+  trustedPostDoorPublishedTailHardGateAction.safetyReason,
+  trustedPostDoorPublishedTailHardGateAction.objective,
+  trustedPostDoorPublishedTailHardGateAction.actionSequenceId,
+  trustedPostDoorPublishedTailHardGateAction.actionSequenceStepId,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues?.currentRoute,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues?.currentLandmark,
+  trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues?.routeActionHint
+].join(" "));
+assert(
+  trustedPostDoorPublishedTailHardGateText.indexOf("closed-door-first-door") < 0
+    && trustedPostDoorPublishedTailHardGateText.indexOf("first-door-approach") < 0
+    && trustedPostDoorPublishedTailHardGateText.indexOf("advance-first-door") < 0
+    && trustedPostDoorPublishedTailHardGateText.indexOf("find-corridor-to-first-door") < 0,
+  `Trusted post-door published tail hard-gate must not restore FirstDoor ownership (actual=${trustedPostDoorPublishedTailHardGateText})`);
+assert(
+  trustedPostDoorPublishedTailHardGateAction.use !== true
+    && trustedPostDoorPublishedTailHardGateAction.useKey !== true
+    && Number(trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) >= 1
+    && (trustedPostDoorPublishedTailHardGateAction.computerRoomEntered === true
+      || trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues?.computerRoomEntered === true
+      || trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.debugRouteValues?.computerRoomEntered === true
+      || trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplayState?.computerRoomEntered === true),
+  `Trusted post-door published tail hard-gate should preserve room milestones without Use retry (actual=${JSON.stringify({
+    action: trustedPostDoorPublishedTailHardGateAction,
+    debugRouteValues: trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.debugRouteValues,
+    autoplayDebugRouteValues: trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplay?.debugRouteValues,
+    autoplayState: trustedPostDoorPublishedTailHardGateRuntime.lastStatus?.autoplayState
+  })})`);
+
+const centralDoorProtectedSequenceRuntime = runtimeFactory.create(publicProfile);
+centralDoorProtectedSequenceRuntime.predictions = 6410;
+centralDoorProtectedSequenceRuntime.centralDoorCornerSequenceFrames = 20;
+centralDoorProtectedSequenceRuntime.centralDoorCornerSequenceStep = "align-turn";
+centralDoorProtectedSequenceRuntime.centralDoorCornerTrustedLandmarkFrames = 96;
+centralDoorProtectedSequenceRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1
+  },
+  debugRouteValues: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "central-hall-route",
+    currentLandmark: "central-hall-door",
+    routeActionHint: "open-central-hall-door"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const centralDoorProtectedSequenceAction = centralDoorProtectedSequenceRuntime.predict({
+  health: 100,
+  depthSig: 0.48,
+  contextDict: "computer room bridge central door",
+  wallVector: 0.58,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.60,
+  footObstacleScore: 0.58,
+  predictions: 6410,
+  actionRepeatFrames: 10,
+  moveRepeatFrames: 10,
+  turnRepeatFrames: 4,
+  firstDoorOpened: true,
+  doorOpenedCount: 0,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "open-central-hall-door",
+  objective: "reach-central-hall",
+  centralHallEntered: false,
+  bridgeConfidence: 0.56,
+  bridgeDoorScore: 0.28,
+  postDoorTerminalSurface: 0.36,
+  computerRoomConfidence: 0.50,
+  semanticMemory: {
+    symbols: {
+      door: 0.52,
+      corridor: 0.30,
+      enemy: 0.05,
+      bridge: 0.56,
+      "computer-room": 0.50
+    }
+  }
+});
+assert(
+  centralDoorProtectedSequenceAction.stage.indexOf("post-door-central-door-corner-") === 0,
+  `Protected central-door sequence should survive transient post-door evidence loss (actual=${centralDoorProtectedSequenceAction.stage})`);
+assert(
+  centralDoorProtectedSequenceRuntime.centralDoorCornerSequenceFrames > 20,
+  "Protected central-door sequence should keep advancing instead of resetting");
+
+const centralDoorProtectedTerminalDecoyRuntime = runtimeFactory.create(publicProfile);
+centralDoorProtectedTerminalDecoyRuntime.predictions = 6420;
+centralDoorProtectedTerminalDecoyRuntime.centralDoorCornerSequenceFrames = 4;
+centralDoorProtectedTerminalDecoyRuntime.centralDoorCornerSequenceStep = "backoff";
+centralDoorProtectedTerminalDecoyRuntime.centralDoorCornerTrustedLandmarkFrames = 80;
+const centralDoorProtectedTerminalDecoyAction = centralDoorProtectedTerminalDecoyRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "computer room terminal wall central door",
+  wallVector: 0.44,
+  motionForwardProgress: 0.08,
+  motionObstacleScore: 0.38,
+  footObstacleScore: 0.40,
+  predictions: 6421,
+  actionRepeatFrames: 8,
+  moveRepeatFrames: 8,
+  turnRepeatFrames: 2,
+  firstDoorOpened: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.54,
+  bridgeDoorScore: 0.35,
+  postDoorTerminalSurface: 0.45,
+  computerRoomConfidence: 0.66,
+  routeTopologyCenterCorridorAlignment: 0.01,
+  semanticMemory: {
+    symbols: {
+      door: 0.45,
+      corridor: 0.22,
+      enemy: 0.05,
+      bridge: 0.54,
+      "computer-room": 0.66
+    }
+  }
+});
+assert(
+  centralDoorProtectedTerminalDecoyAction.stage.indexOf("post-door-central-door-corner-") === 0,
+  `Protected central-door sequence must not be cleared by terminal-wall decoy flicker (actual=${centralDoorProtectedTerminalDecoyAction.stage})`);
+assert(
+  centralDoorProtectedTerminalDecoyRuntime.centralDoorCornerSequenceFrames > 4,
+  "Protected terminal-decoy central-door sequence should keep advancing");
+
+const centralDoorAdvanceOnlyLiveCueRuntime = runtimeFactory.create(publicProfile);
+centralDoorAdvanceOnlyLiveCueRuntime.predictions = 6428;
+centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerSequenceFrames = 5;
+centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerSequenceStep = "backoff";
+centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerTrustedLandmarkFrames = 0;
+centralDoorAdvanceOnlyLiveCueRuntime.lastAction = {
+  stage: "post-door-central-door-corner-backoff",
+  pipeline: "post-door-central-door-corner-sequence",
+  safetyReason: "post-door-central-door-corner-backoff",
+  actionSequenceStepId: "backoff"
+};
+const centralDoorAdvanceOnlyLiveCueAction = centralDoorAdvanceOnlyLiveCueRuntime.predict({
+  health: 100,
+  depthSig: 0.50,
+  contextDict: "computer room terminal wall central door",
+  wallVector: 0.66,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.64,
+  footObstacleScore: 0.65,
+  predictions: 6429,
+  actionRepeatFrames: 6,
+  moveRepeatFrames: 6,
+  turnRepeatFrames: 0,
+  firstDoorOpened: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "central-hall-route",
+  routeName: "central-hall-route",
+  currentLandmark: "central-hall-door",
+  routeLandmark: "central-hall-door",
+  routeActionHint: "advance-central-hall",
+  objective: "reach-central-hall",
+  currentObjective: "reach-central-hall",
+  centralHallEntered: false,
+  bridgeLaneVisible: false,
+  bridgeConfidence: 0.58,
+  bridgeDoorScore: 0.31,
+  postDoorTerminalSurface: 0.58,
+  computerRoomConfidence: 0.72,
+  routeTopologyCenterCorridorAlignment: 0.02,
+  routeTopologyWallDistanceNormalized: 0.66,
+  routeTopologyBarrelZoneEvidence: 0.53,
+  semanticMemory: {
+    symbols: {
+      door: 0.46,
+      corridor: 0.22,
+      enemy: 0.05,
+      bridge: 0.58,
+      "computer-room": 0.72
+    }
+  }
+});
+assert(
+  String(centralDoorAdvanceOnlyLiveCueAction.stage || "").indexOf("post-door-central-door-corner-") === 0,
+  `Advance-only live CentralDoor cue must keep the active sequence instead of falling back to egress (actual=${centralDoorAdvanceOnlyLiveCueAction.stage}; safety=${centralDoorAdvanceOnlyLiveCueAction.safetyReason}; frames=${centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerSequenceFrames}; step=${centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerSequenceStep})`);
+assert(
+  centralDoorAdvanceOnlyLiveCueRuntime.centralDoorCornerSequenceFrames > 0,
+  "Advance-only live CentralDoor cue should keep or restore active sequence ownership without trusted landmark frames");
+
+const postDoorComputerRoomSpawnRegressionProfile = {
+  strategyName: "UnitPostDoorComputerRoomSpawnRegression",
+  pipeline: {
+    name: "UnitPostDoorComputerRoomSpawnRegression",
+    stages: [
+      {
+        id: "closed-door-stage-rerouted",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const postDoorComputerRoomSpawnRegressionRuntime = runtimeFactory.create(postDoorComputerRoomSpawnRegressionProfile);
+postDoorComputerRoomSpawnRegressionRuntime.predictions = 7010;
+postDoorComputerRoomSpawnRegressionRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  milestones: {
+    doorOpened: 1,
+    doorOpenedCount: 1
+  },
+  debugRouteValues: {
+    firstDoorOpened: true,
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const postDoorComputerRoomSpawnRegressionAction = postDoorComputerRoomSpawnRegressionRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room wall",
+  wallVector: 0.56,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.56,
+  footObstacleScore: 0.54,
+  predictions: 7011,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 4,
+  firstDoorOpened: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "spawn-secret-route-reset",
+  currentLandmark: "rear-secret-reset",
+  routeActionHint: "cruise",
+  objective: "reach-central-hall",
+  centralHallEntered: false,
+  firstDoorVision9x9Score: 0.12,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  bridgeConfidence: 0,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.43,
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0.05,
+      bridge: 0.10,
+      "computer-room": 0.44
+    }
+  }
+});
+assert(
+  postDoorComputerRoomSpawnRegressionAction.objective === "reach-central-hall",
+  `Post-door spawn regression should keep central-hall objective (actual=${postDoorComputerRoomSpawnRegressionAction.objective})`);
+assert(
+  !/^closed-door/.test(String(postDoorComputerRoomSpawnRegressionAction.safetyReason || postDoorComputerRoomSpawnRegressionAction.stage || "")),
+  `Post-door spawn regression should not emit closed-door action (actual=${postDoorComputerRoomSpawnRegressionAction.safetyReason || postDoorComputerRoomSpawnRegressionAction.stage})`);
+assert(
+  postDoorComputerRoomSpawnRegressionRuntime.lastStatus?.debugRouteValues?.currentRoute !== "spawn-secret-route-reset",
+  "Post-door spawn regression should repair debug route values away from spawn reset");
+assert(
+  postDoorComputerRoomSpawnRegressionRuntime.lastStatus?.debugRouteValues?.currentLandmark !== "rear-secret-reset",
+  "Post-door spawn regression should repair debug landmark values away from rear-secret reset");
+
+const postDoorDoorFlagOnlyRegressionRuntime = runtimeFactory.create(postDoorComputerRoomSpawnRegressionProfile);
+postDoorDoorFlagOnlyRegressionRuntime.predictions = 7110;
+postDoorDoorFlagOnlyRegressionRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  door: 1,
+  debugRouteValues: {
+    door: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    door: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const postDoorDoorFlagOnlyRegressionAction = postDoorDoorFlagOnlyRegressionRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room wall",
+  wallVector: 0.56,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.56,
+  footObstacleScore: 0.54,
+  predictions: 7111,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 4,
+  firstDoorOpened: true,
+  door: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "spawn-secret-route-reset",
+  currentLandmark: "rear-secret-reset",
+  routeActionHint: "cruise",
+  objective: "reach-central-hall",
+  centralHallEntered: false,
+  firstDoorVision9x9Score: 0.12,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  bridgeConfidence: 0,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.43,
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0.05,
+      bridge: 0.10,
+      "computer-room": 0.44
+    }
+  }
+});
+assert(
+  postDoorDoorFlagOnlyRegressionAction.objective === "reach-central-hall",
+  `Post-door door-flag-only regression should keep central-hall objective (actual=${postDoorDoorFlagOnlyRegressionAction.objective})`);
+assert(
+  !/^closed-door/.test(String(postDoorDoorFlagOnlyRegressionAction.safetyReason || postDoorDoorFlagOnlyRegressionAction.stage || "")),
+  `Post-door door-flag-only regression should not emit closed-door action (actual=${postDoorDoorFlagOnlyRegressionAction.safetyReason || postDoorDoorFlagOnlyRegressionAction.stage})`);
+
+const postDoorDoorFlagPublishedTailRegressionRuntime = runtimeFactory.create(postDoorComputerRoomSpawnRegressionProfile);
+postDoorDoorFlagPublishedTailRegressionRuntime.predictions = 7210;
+postDoorDoorFlagPublishedTailRegressionRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  door: 1,
+  debugRouteValues: {
+    door: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door",
+    currentRoute: "computer-room-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    spawnDoorPatternFrames: 1,
+    activeDetections: [
+      { kind: "first-door-wall-pattern", score: 0.72 }
+    ]
+  },
+  autoplayState: {
+    door: 1,
+    computerRoomEntered: true,
+    routeMode: "post-door"
+  }
+};
+const postDoorDoorFlagPublishedTailRegressionAction = postDoorDoorFlagPublishedTailRegressionRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room",
+  wallVector: 0.46,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.56,
+  footObstacleScore: 0.54,
+  predictions: 7211,
+  actionRepeatFrames: 18,
+  moveRepeatFrames: 18,
+  turnRepeatFrames: 4,
+  door: 1,
+  computerRoomEntered: true,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  centralHallEntered: false,
+  firstDoorVision9x9Score: 0.39,
+  spawnDoorPatternFrames: 1,
+  activeDetections: [
+    { kind: "first-door-wall-pattern", score: 0.72 }
+  ],
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.03,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  bridgeConfidence: 0
+});
+assert(
+  postDoorDoorFlagPublishedTailRegressionAction.objective === "reach-central-hall",
+  `Post-door published-tail door-flag regression should keep central-hall objective (actual=${postDoorDoorFlagPublishedTailRegressionAction.objective})`);
+assert(
+  !/^closed-door/.test(String(postDoorDoorFlagPublishedTailRegressionAction.safetyReason || postDoorDoorFlagPublishedTailRegressionAction.stage || "")),
+  `Post-door published-tail door-flag regression should not emit closed-door action (actual=${postDoorDoorFlagPublishedTailRegressionAction.safetyReason || postDoorDoorFlagPublishedTailRegressionAction.stage})`);
+
+const postDoorOpeningRewindConfirmedRuntime = runtimeFactory.create({
+  strategyName: "UnitPostDoorOpeningRewindConfirmedRegression",
+  pipeline: {
+    name: "UnitPostDoorOpeningRewindConfirmedRegression",
+    stages: [
+      {
+        id: "closed-door-first-door-route-advance-sustain",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "false",
+          turnLeft: "true"
+        }
+      }
+    ]
+  }
+});
+postDoorOpeningRewindConfirmedRuntime.predictions = 7010;
+postDoorOpeningRewindConfirmedRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const postDoorOpeningRewindConfirmedAction = postDoorOpeningRewindConfirmedRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room post door first door",
+  predictions: 90,
+  firstDoorOpened: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "computer-room-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  wallVector: 0.44,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.40,
+  footObstacleScore: 0.36,
+  semanticMemory: {
+    symbols: {
+      door: 0.18,
+      corridor: 0.26,
+      bridge: 0.20,
+      "computer-room": 0.42
+    }
+  }
+});
+assert(
+  !/^closed-door/.test(String(postDoorOpeningRewindConfirmedAction.safetyReason || postDoorOpeningRewindConfirmedAction.stage || "")),
+  `Confirmed post-door state should override stale opening rewind closed-door output (actual=${postDoorOpeningRewindConfirmedAction.safetyReason || postDoorOpeningRewindConfirmedAction.stage})`);
+assert(
+  postDoorOpeningRewindConfirmedRuntime.lastStatus?.debugRouteValues?.currentLandmark !== "first-door-approach",
+  "Confirmed post-door rewind release should not publish the stale FirstDoor landmark");
+
+const unconfirmedDoorApproachFalseReleaseRuntime = runtimeFactory.create(publicProfile);
+unconfirmedDoorApproachFalseReleaseRuntime.predictions = 1470;
+unconfirmedDoorApproachFalseReleaseRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const unconfirmedDoorApproachFalseReleaseAction = unconfirmedDoorApproachFalseReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.44,
+  contextDict: "first door terminal-looking wall",
+  predictions: 1471,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  wallVector: 0.39,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.44,
+  footObstacleScore: 0.46,
+  actionRepeatFrames: 42,
+  moveRepeatFrames: 42,
+  firstDoorVision9x9Score: 0.30,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.36,
+  bridgeConfidence: 0.48,
+  postDoorTerminalSurface: 0.65,
+  computerRoomConfidence: 0.10,
+  routeTopologyBarrelZoneEvidence: 0.98,
+  routeTopologyCenterCorridorAlignment: -0.37,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  }
+});
+const unconfirmedDoorApproachFalseReleaseText = String([
+  unconfirmedDoorApproachFalseReleaseAction.pipeline,
+  unconfirmedDoorApproachFalseReleaseAction.stage,
+  unconfirmedDoorApproachFalseReleaseAction.safetyReason,
+  unconfirmedDoorApproachFalseReleaseAction.objective
+].join(" "));
+assert(
+  unconfirmedDoorApproachFalseReleaseText.indexOf("post-door-closed-door") < 0
+    && unconfirmedDoorApproachFalseReleaseText.indexOf("reach-central") < 0,
+  `Unconfirmed live door-approach state must not release carried post-door residue (actual=${unconfirmedDoorApproachFalseReleaseText})`);
+assert(
+  Number(unconfirmedDoorApproachFalseReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Unconfirmed live door-approach state should keep published doorOpenedCount=0");
+
+const firstDoorPostUseCooldownStallRuntime = runtimeFactory.create(publicProfile);
+firstDoorPostUseCooldownStallRuntime.predictions = 1830;
+firstDoorPostUseCooldownStallRuntime.closedDoorCornerSequenceFrames = 74;
+firstDoorPostUseCooldownStallRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+firstDoorPostUseCooldownStallRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+firstDoorPostUseCooldownStallRuntime.closedDoorCornerPostUseSettleHoldFrames = 30;
+firstDoorPostUseCooldownStallRuntime.usePulseCooldown = 6;
+firstDoorPostUseCooldownStallRuntime.lastUsePulsePrediction = 1506;
+firstDoorPostUseCooldownStallRuntime.lastAction = {
+  move: "none",
+  turn: "none",
+  fire: false,
+  use: false,
+  run: false,
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-corner-post-use-settle",
+  safetyReason: "closed-door-first-door-corner-post-use-settle",
+  actionSequenceId: "first-door-corner-use",
+  actionSequenceStepId: "post-use-settle",
+  objective: "find-corridor-to-first-door"
+};
+const firstDoorPostUseCooldownStallAction = firstDoorPostUseCooldownStallRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door route wall",
+  predictions: 1831,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.56,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 54,
+  moveRepeatFrames: 54,
+  firstDoorVision9x9Score: 0.30,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.28,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  usePulseCooldown: 6,
+  lastUsePulsePrediction: 1506,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.52,
+      corridor: 0.30,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+const firstDoorPostUseCooldownStallText = String([
+  firstDoorPostUseCooldownStallAction.pipeline,
+  firstDoorPostUseCooldownStallAction.stage,
+  firstDoorPostUseCooldownStallAction.safetyReason,
+  firstDoorPostUseCooldownStallAction.actionSequenceId,
+  firstDoorPostUseCooldownStallAction.actionSequenceStepId
+].join(" "));
+assert(
+  firstDoorPostUseCooldownStallText.indexOf("post-use-settle") < 0
+    && firstDoorPostUseCooldownStallRuntime.closedDoorCornerSequenceStep !== "post-use-settle",
+  `Overheld FirstDoor post-use settle must restart bounded retry (actual=${firstDoorPostUseCooldownStallText})`);
+assert(
+  Number(firstDoorPostUseCooldownStallRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Overheld FirstDoor post-use retry should keep published doorOpenedCount=0");
+
+const unconfirmedFirstDoorTailReleaseRuntime = runtimeFactory.create(publicProfile);
+unconfirmedFirstDoorTailReleaseRuntime.predictions = 1040;
+unconfirmedFirstDoorTailReleaseRuntime.lastAction = {
+  move: "forward",
+  turn: "right",
+  fire: false,
+  use: false,
+  run: true,
+  pipeline: "post-door-closed-door-final-tail-release",
+  stage: "post-door-closed-door-final-tail-release",
+  safetyReason: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall"
+};
+unconfirmedFirstDoorTailReleaseRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const unconfirmedFirstDoorTailReleaseAction = unconfirmedFirstDoorTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1041,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 54,
+  moveRepeatFrames: 54,
+  firstDoorVision9x9Score: 0.48,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.35,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.54,
+      corridor: 0.24,
+      bridge: 0.10,
+      "computer-room": 0
+    }
+  }
+});
+const unconfirmedFirstDoorTailReleaseText = String([
+  unconfirmedFirstDoorTailReleaseAction.pipeline,
+  unconfirmedFirstDoorTailReleaseAction.stage,
+  unconfirmedFirstDoorTailReleaseAction.safetyReason,
+  unconfirmedFirstDoorTailReleaseAction.objective
+].join(" "));
+assert(
+  unconfirmedFirstDoorTailReleaseText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && unconfirmedFirstDoorTailReleaseAction.objective === "find-corridor-to-first-door",
+  `Unconfirmed FirstDoor tail-release must return to bounded retry (actual=${unconfirmedFirstDoorTailReleaseText})`);
+assert(
+  Number(unconfirmedFirstDoorTailReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Unconfirmed FirstDoor tail-release should keep published doorOpenedCount=0");
+
+const staleMilestoneTailReleaseRuntime = runtimeFactory.create(publicProfile);
+staleMilestoneTailReleaseRuntime.predictions = 1304;
+staleMilestoneTailReleaseRuntime.lastAction = {
+  move: "forward",
+  turn: "right",
+  fire: false,
+  use: false,
+  run: true,
+  pipeline: "post-door-closed-door-final-tail-release",
+  stage: "post-door-closed-door-final-tail-release",
+  safetyReason: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall"
+};
+staleMilestoneTailReleaseRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    firstDoorOpened: true,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    firstDoorOpened: true,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const staleMilestoneTailReleaseAction = staleMilestoneTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1305,
+  doorOpenedCount: 0,
+  doorOpened: 0,
+  firstDoorOpened: true,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 60,
+  moveRepeatFrames: 60,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.37,
+  bridgeConfidence: 0.37,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  milestones: {
+    doorOpenedCount: 0,
+    firstDoorOpened: true
+  },
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.24,
+      bridge: 0.32,
+      "computer-room": 0
+    }
+  }
+});
+const staleMilestoneTailReleaseText = String([
+  staleMilestoneTailReleaseAction.pipeline,
+  staleMilestoneTailReleaseAction.stage,
+  staleMilestoneTailReleaseAction.safetyReason,
+  staleMilestoneTailReleaseAction.objective
+].join(" "));
+assert(
+  staleMilestoneTailReleaseText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && staleMilestoneTailReleaseAction.objective === "find-corridor-to-first-door",
+  `Stale FirstDoor open milestone must not override current doorOpenedCount=0 tail gate (actual=${staleMilestoneTailReleaseText})`);
+assert(
+  Number(staleMilestoneTailReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Stale milestone tail-release should keep published doorOpenedCount=0");
+
+const currentClosedTailReleaseProfile = {
+  strategyName: "UnitCurrentClosedTailRelease",
+  pipeline: {
+    name: "UnitCurrentClosedTailRelease",
+    stages: [
+      {
+        id: "post-door-closed-door-final-tail-release",
+        objective: "reach-central-hall",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true",
+          turnYaw: "8",
+          runKey: "true"
+        }
+      }
+    ]
+  }
+};
+const currentClosedTailReleaseRuntime = runtimeFactory.create(currentClosedTailReleaseProfile);
+currentClosedTailReleaseRuntime.predictions = 1560;
+currentClosedTailReleaseRuntime.lastStatus = {
+  controlPipeline: "closed-door-first-door-corner-sequence",
+  objective: "find-corridor-to-first-door",
+  debugRouteValues: {
+    doorOpenedCount: 0,
+    firstDoorOpened: false,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door"
+  },
+  autoplayState: {
+    doorOpenedCount: 0,
+    firstDoorOpened: false,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach"
+  }
+};
+const currentClosedTailReleaseAction = currentClosedTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1561,
+  doorOpenedCount: 0,
+  doorOpened: 0,
+  firstDoorOpened: false,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 64,
+  moveRepeatFrames: 64,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.27,
+  bridgeConfidence: 0.37,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.24,
+      bridge: 0.32,
+      "computer-room": 0
+    }
+  }
+});
+const currentClosedTailReleaseText = String([
+  currentClosedTailReleaseAction.pipeline,
+  currentClosedTailReleaseAction.stage,
+  currentClosedTailReleaseAction.safetyReason,
+  currentClosedTailReleaseAction.objective
+].join(" "));
+const currentClosedTailReleaseStatusText = String([
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.controlPipeline,
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.stage,
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.safetyReason,
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.objective,
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.currentObjective,
+  currentClosedTailReleaseRuntime.lastStatus?.autoplay?.routeObjective
+].join(" "));
+assert(
+  currentClosedTailReleaseText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && currentClosedTailReleaseAction.objective === "find-corridor-to-first-door",
+  `Current door=0 FirstDoor tail-release must require open evidence (actual=${currentClosedTailReleaseText})`);
+assert(
+  currentClosedTailReleaseStatusText.indexOf("post-door") < 0
+    && currentClosedTailReleaseStatusText.indexOf("reach-central") < 0
+    && currentClosedTailReleaseStatusText.indexOf("enter-computer") < 0,
+  `Current door=0 FirstDoor tail-release must not publish post-door ownership (actual=${currentClosedTailReleaseStatusText})`);
+assert(
+  Number(currentClosedTailReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Current closed tail-release should keep published doorOpenedCount=0");
+
+const stalePreviousPostDoorTailReleaseRuntime = runtimeFactory.create(currentClosedTailReleaseProfile);
+stalePreviousPostDoorTailReleaseRuntime.predictions = 1604;
+stalePreviousPostDoorTailReleaseRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const stalePreviousPostDoorTailReleaseAction = stalePreviousPostDoorTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1605,
+  doorOpenedCount: 0,
+  doorOpened: 0,
+  firstDoorOpened: false,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 70,
+  moveRepeatFrames: 70,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.30,
+  bridgeConfidence: 0.34,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.24,
+      bridge: 0.32,
+      "computer-room": 0
+    }
+  }
+});
+const stalePreviousPostDoorTailReleaseText = String([
+  stalePreviousPostDoorTailReleaseAction.pipeline,
+  stalePreviousPostDoorTailReleaseAction.stage,
+  stalePreviousPostDoorTailReleaseAction.safetyReason,
+  stalePreviousPostDoorTailReleaseAction.objective
+].join(" "));
+assert(
+  stalePreviousPostDoorTailReleaseText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && stalePreviousPostDoorTailReleaseAction.objective === "find-corridor-to-first-door",
+  `Stale previous post-door tail release must obey current source door=0 (actual=${stalePreviousPostDoorTailReleaseText})`);
+assert(
+  Number(stalePreviousPostDoorTailReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Stale previous post-door tail release should keep published doorOpenedCount=0");
+
+const openingRewindTailReleaseRuntime = runtimeFactory.create(currentClosedTailReleaseProfile);
+openingRewindTailReleaseRuntime.predictions = 848;
+openingRewindTailReleaseRuntime.lastStatus = {
+  controlPipeline: "closed-door-first-door-corner-sequence",
+  objective: "find-corridor-to-first-door",
+  debugRouteValues: {
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door"
+  },
+  autoplayState: {
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach"
+  }
+};
+const openingRewindTailReleaseAction = openingRewindTailReleaseRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 42,
+  doorOpenedCount: 0,
+  doorOpened: 0,
+  firstDoorOpened: false,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 9,
+  moveRepeatFrames: 9,
+  firstDoorVision9x9Score: 0.32,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.29,
+  bridgeConfidence: 0.49,
+  postDoorTerminalSurface: 0.61,
+  computerRoomConfidence: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.49,
+      corridor: 0.24,
+      bridge: 0.49,
+      "computer-room": 0
+    }
+  }
+});
+const openingRewindTailReleaseText = String([
+  openingRewindTailReleaseAction.pipeline,
+  openingRewindTailReleaseAction.stage,
+  openingRewindTailReleaseAction.safetyReason,
+  openingRewindTailReleaseAction.objective
+].join(" "));
+assert(
+  openingRewindTailReleaseText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && openingRewindTailReleaseAction.objective === "find-corridor-to-first-door",
+  `Opening rewind tail-release must obey current source door=0 (actual=${openingRewindTailReleaseText})`);
+assert(
+  Number(openingRewindTailReleaseRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Opening rewind tail-release should keep published doorOpenedCount=0");
+
+const unconfirmedFirstDoorTailVisualCarryRuntime = runtimeFactory.create(publicProfile);
+unconfirmedFirstDoorTailVisualCarryRuntime.predictions = 1560;
+unconfirmedFirstDoorTailVisualCarryRuntime.lastAction = {
+  move: "forward",
+  turn: "right",
+  fire: false,
+  use: false,
+  run: true,
+  pipeline: "post-door-closed-door-final-tail-release",
+  stage: "post-door-closed-door-final-tail-release",
+  safetyReason: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall"
+};
+unconfirmedFirstDoorTailVisualCarryRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const unconfirmedFirstDoorTailVisualCarryAction = unconfirmedFirstDoorTailVisualCarryRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door terminal-looking wall",
+  predictions: 1561,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "reach-central-hall",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 54,
+  moveRepeatFrames: 54,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.32,
+  bridgeConfidence: 0.48,
+  postDoorTerminalSurface: 0.62,
+  computerRoomConfidence: 0.12,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.24,
+      bridge: 0.48,
+      "computer-room": 0.40
+    }
+  }
+});
+const unconfirmedFirstDoorTailVisualCarryText = String([
+  unconfirmedFirstDoorTailVisualCarryAction.pipeline,
+  unconfirmedFirstDoorTailVisualCarryAction.stage,
+  unconfirmedFirstDoorTailVisualCarryAction.safetyReason,
+  unconfirmedFirstDoorTailVisualCarryAction.objective
+].join(" "));
+assert(
+  unconfirmedFirstDoorTailVisualCarryText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && unconfirmedFirstDoorTailVisualCarryAction.objective === "find-corridor-to-first-door",
+  `Unconfirmed FirstDoor tail-release with visual carry must stay in FirstDoor retry (actual=${unconfirmedFirstDoorTailVisualCarryText})`);
+assert(
+  Number(unconfirmedFirstDoorTailVisualCarryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Unconfirmed FirstDoor visual carry should keep published doorOpenedCount=0");
+
+const unconfirmedFirstDoorTailRetryProgressRuntime = runtimeFactory.create(publicProfile);
+unconfirmedFirstDoorTailRetryProgressRuntime.predictions = 1560;
+unconfirmedFirstDoorTailRetryProgressRuntime.lastAction = {
+  move: "forward",
+  turn: "right",
+  fire: false,
+  use: false,
+  run: true,
+  pipeline: "post-door-closed-door-final-tail-release",
+  stage: "post-door-closed-door-final-tail-release",
+  safetyReason: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall"
+};
+unconfirmedFirstDoorTailRetryProgressRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const unconfirmedFirstDoorTailRetryProgressActions = [];
+for (let index = 0; index < 52; index += 1) {
+  unconfirmedFirstDoorTailRetryProgressActions.push(unconfirmedFirstDoorTailRetryProgressRuntime.predict({
+    health: 100,
+    depthSig: 0.42,
+    contextDict: "first door terminal-looking wall",
+    predictions: 1561 + index,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "reach-central-hall",
+    wallVector: 0.39,
+    motionForwardProgress: 0.04,
+    motionObstacleScore: 0.50,
+    footObstacleScore: 0.42,
+    actionRepeatFrames: 180 + index,
+    moveRepeatFrames: 180 + index,
+    firstDoorVision9x9Score: 0.40,
+    firstDoorVision9x9RedScore: 0,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: 0.27,
+    bridgeConfidence: 0.44,
+    postDoorTerminalSurface: 0.39,
+    computerRoomConfidence: 0.12,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      required: true
+    },
+    semanticMemory: {
+      symbols: {
+        door: 0.50,
+        corridor: 0.24,
+        bridge: 0.44,
+        "computer-room": 0.32
+      }
+    }
+  }));
+}
+const unconfirmedFirstDoorTailRetryProgressText = unconfirmedFirstDoorTailRetryProgressActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.move,
+  action.turn,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  unconfirmedFirstDoorTailRetryProgressText.indexOf("post-door-closed-door-final-tail-release") < 0,
+  `Tail retry progress must not restore post-door tail release (actual=${unconfirmedFirstDoorTailRetryProgressText})`);
+assert(
+  unconfirmedFirstDoorTailRetryProgressText.indexOf("stop-use") >= 0
+    || unconfirmedFirstDoorTailRetryProgressText.indexOf(" use") >= 0,
+  `Tail retry progress must advance to stationary Use instead of fixed forward (actual=${unconfirmedFirstDoorTailRetryProgressText})`);
+assert(
+  Number(unconfirmedFirstDoorTailRetryProgressRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Tail retry progress should keep published doorOpenedCount=0 until audio confirms open");
+
+const tailBoundedRetryContinuationRuntime = runtimeFactory.create(publicProfile);
+tailBoundedRetryContinuationRuntime.predictions = 1780;
+const tailBoundedRetryContinuationActions = [];
+for (let index = 0; index < 48; index += 1) {
+  tailBoundedRetryContinuationActions.push(tailBoundedRetryContinuationRuntime.predict({
+    health: 100,
+    depthSig: 0.42,
+    contextDict: "first door wall",
+    predictions: 1781 + index,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    pipeline: "closed-door-first-door-corner-sequence",
+    stage: "closed-door-first-door-tail-bounded-retry",
+    safetyReason: "closed-door-first-door-tail-bounded-retry",
+    wallVector: 0.55,
+    motionForwardProgress: 0.04,
+    motionObstacleScore: 0.50,
+    footObstacleScore: 0.42,
+    actionRepeatFrames: 96 + index,
+    moveRepeatFrames: 96 + index,
+    firstDoorVision9x9Score: 0.37,
+    firstDoorVision9x9RedScore: 0,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: 0.21,
+    bridgeConfidence: 0.22,
+    postDoorTerminalSurface: 0,
+    computerRoomConfidence: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      required: true
+    },
+    semanticMemory: {
+      symbols: {
+        door: 0.50,
+        corridor: 0.24,
+        bridge: 0.20,
+        "computer-room": 0
+      }
+    }
+  }));
+}
+const tailBoundedRetryContinuationText = tailBoundedRetryContinuationActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.move,
+  action.turn,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  tailBoundedRetryContinuationText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && tailBoundedRetryContinuationText.indexOf("reach-central-hall") < 0,
+  `Tail bounded retry continuation must not restore post-door ownership (actual=${tailBoundedRetryContinuationText})`);
+assert(
+  tailBoundedRetryContinuationText.indexOf("stop-use") >= 0
+    || tailBoundedRetryContinuationText.indexOf(" use") >= 0,
+  `Tail bounded retry continuation must progress to stationary Use (actual=${tailBoundedRetryContinuationText})`);
+assert(
+  Number(tailBoundedRetryContinuationRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Tail bounded retry continuation should keep published doorOpenedCount=0 until audio confirms open");
+
+const tailStationaryUseTimeoutProfile = {
+  strategyName: "UnitTailStationaryUseTimeout",
+  pipeline: {
+    name: "UnitTailStationaryUseTimeout",
+    stages: [
+      {
+        id: "closed-door-first-door-tail-contact-stationary-use",
+        objective: "reach-central-hall",
+        priority: 1,
+        when: "true",
+        action: {
+          useKey: "true"
+        }
+      }
+    ]
+  }
+};
+const tailStationaryUseTimeoutRuntime = runtimeFactory.create(tailStationaryUseTimeoutProfile);
+tailStationaryUseTimeoutRuntime.predictions = 1880;
+tailStationaryUseTimeoutRuntime.closedDoorCornerSequenceFrames = 0;
+tailStationaryUseTimeoutRuntime.closedDoorCornerSequenceStep = "";
+tailStationaryUseTimeoutRuntime.closedDoorCornerSequenceLastUseFrame = 0;
+tailStationaryUseTimeoutRuntime.usePulseCooldown = 12;
+tailStationaryUseTimeoutRuntime.lastAction = {
+  move: "none",
+  turn: "none",
+  fire: false,
+  use: true,
+  run: false,
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-corner-stop-use",
+  safetyReason: "closed-door-first-door-tail-contact-stationary-use",
+  svcEvent: "closed-door-first-door-tail-contact-stationary-use",
+  actionSequenceId: "first-door-corner-use",
+  actionSequenceStepId: "stop-use",
+  objective: "find-corridor-to-first-door"
+};
+const tailStationaryUseTimeoutAction = tailStationaryUseTimeoutRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1881,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-tail-contact-stationary-use",
+  safetyReason: "closed-door-first-door-tail-contact-stationary-use",
+  wallVector: 0.55,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.50,
+  footObstacleScore: 0.42,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.37,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.21,
+  bridgeConfidence: 0.22,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  usePulseCooldown: 12,
+  lastUsePulsePrediction: 1840,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.50,
+      corridor: 0.24,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+const tailStationaryUseTimeoutText = String([
+  tailStationaryUseTimeoutAction.pipeline,
+  tailStationaryUseTimeoutAction.stage,
+  tailStationaryUseTimeoutAction.safetyReason,
+  tailStationaryUseTimeoutAction.actionSequenceId,
+  tailStationaryUseTimeoutAction.actionSequenceStepId,
+  tailStationaryUseTimeoutAction.move,
+  tailStationaryUseTimeoutAction.turn,
+  tailStationaryUseTimeoutAction.use || tailStationaryUseTimeoutAction.useKey ? "use" : ""
+].join(" "));
+assert(
+  (tailStationaryUseTimeoutText.indexOf("closed-door-first-door-tail-use-timeout-contact-forward") >= 0
+    || tailStationaryUseTimeoutText.indexOf("post-use-settle") >= 0)
+    && tailStationaryUseTimeoutAction.use !== true
+    && tailStationaryUseTimeoutAction.useKey !== true,
+  `Tail stationary Use without audio should release Use before reapproach (actual=${tailStationaryUseTimeoutText})`);
+assert(
+  tailStationaryUseTimeoutText.indexOf("reach-central-hall") < 0
+    && Number(tailStationaryUseTimeoutRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  `Tail stationary Use timeout must not restore post-door ownership (actual=${tailStationaryUseTimeoutText})`);
+
+const restartSecondRunHardGateRuntime = runtimeFactory.create(publicProfile);
+restartSecondRunHardGateRuntime.predictions = 1625;
+restartSecondRunHardGateRuntime.closedDoorCornerSequenceFrames = 88;
+restartSecondRunHardGateRuntime.closedDoorCornerSequenceStep = "contact-forward";
+restartSecondRunHardGateRuntime.closedDoorFinalHardGateOwnerFrames = 0;
+restartSecondRunHardGateRuntime.lastAction = {
+  move: "forward",
+  turn: "none",
+  fire: false,
+  use: false,
+  run: false,
+  pipeline: "closed-door-first-door-final-raw-source-post-door-hard-gate",
+  stage: "closed-door-first-door-final-raw-source-post-door-hard-gate",
+  safetyReason: "closed-door-first-door-final-raw-source-post-door-hard-gate",
+  objective: "find-corridor-to-first-door"
+};
+restartSecondRunHardGateRuntime.lastStatus = {
+  controlPipeline: "post-door-closed-door-final-tail-release",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const restartSecondRunHardGateActions = [];
+for (let index = 0; index < 90; index += 1) {
+  restartSecondRunHardGateActions.push(restartSecondRunHardGateRuntime.predict({
+    health: 100,
+    depthSig: 0.42,
+    contextDict: "first door wall",
+    predictions: 1626 + index,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    wallVector: 0.55,
+    motionForwardProgress: 0.04,
+    motionObstacleScore: 0.50,
+    footObstacleScore: 0.42,
+    actionRepeatFrames: 90 + index,
+    moveRepeatFrames: 90 + index,
+    firstDoorVision9x9Score: 0.29,
+    firstDoorVision9x9RedScore: 0,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: 0.19,
+    bridgeConfidence: 0,
+    postDoorTerminalSurface: 0,
+    computerRoomConfidence: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      required: true
+    },
+    semanticMemory: {
+      symbols: {
+        door: 0.50,
+        corridor: 0.24,
+        bridge: 0.24,
+        "computer-room": 0
+      }
+    }
+  }));
+}
+const restartSecondRunHardGateText = restartSecondRunHardGateActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.objective,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  restartSecondRunHardGateText.indexOf("post-door-closed-door-final-tail-release") < 0
+    && restartSecondRunHardGateText.indexOf("closed-door-first-door-final-raw-source-post-door-hard-gate") < 0
+    && restartSecondRunHardGateText.indexOf("reach-central-hall") < 0,
+  `Restart stale post-door hard-gate must stay owned by FirstDoor (actual=${restartSecondRunHardGateText})`);
+assert(
+  restartSecondRunHardGateText.indexOf("hard-gate-owner") >= 0
+    && (restartSecondRunHardGateText.indexOf("stop-use") >= 0 || restartSecondRunHardGateText.indexOf("use") >= 0),
+  `Restart stale post-door hard-gate must cycle to stationary Use (actual=${restartSecondRunHardGateText})`);
+assert(
+  Number(restartSecondRunHardGateRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Restart stale post-door hard-gate should keep published doorOpenedCount=0");
+const restartSecondRunHardGateStatusText = String([
+  restartSecondRunHardGateRuntime.lastStatus?.controlPipeline,
+  restartSecondRunHardGateRuntime.lastStatus?.stage,
+  restartSecondRunHardGateRuntime.lastStatus?.safetyReason,
+  restartSecondRunHardGateRuntime.lastStatus?.objective,
+  restartSecondRunHardGateRuntime.lastStatus?.autoplay?.controlPipeline,
+  restartSecondRunHardGateRuntime.lastStatus?.autoplay?.stage,
+  restartSecondRunHardGateRuntime.lastStatus?.autoplay?.safetyReason,
+  restartSecondRunHardGateRuntime.lastStatus?.autoplay?.objective
+].join(" "));
+assert(
+  restartSecondRunHardGateStatusText.indexOf("post-door") < 0
+    && restartSecondRunHardGateStatusText.indexOf("reach-central") < 0
+    && restartSecondRunHardGateStatusText.indexOf("enter-computer") < 0,
+  `Restart stale status publication must not leak post-door ownership (actual=${restartSecondRunHardGateStatusText})`);
+
+const postUseStationaryRetryProfile = {
+  strategyName: "UnitPostUseStationaryRetry",
+  pipeline: {
+    name: "UnitPostUseStationaryRetry",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-post-use-contact-forward",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true"
+        }
+      }
+    ]
+  }
+};
+const postUseStationaryRetryRuntime = runtimeFactory.create(postUseStationaryRetryProfile);
+postUseStationaryRetryRuntime.predictions = 1510;
+postUseStationaryRetryRuntime.closedDoorCornerSequenceFrames = 7;
+postUseStationaryRetryRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+postUseStationaryRetryRuntime.closedDoorCornerSequenceContactForwardFrames = 7;
+postUseStationaryRetryRuntime.closedDoorCornerSequenceLastUseFrame = 1;
+postUseStationaryRetryRuntime.closedDoorCornerSequenceUseFailures = 1;
+postUseStationaryRetryRuntime.usePulseCooldown = 0;
+const postUseStationaryRetryActions = [];
+for (let index = 0; index < 16; index += 1) {
+  postUseStationaryRetryActions.push(postUseStationaryRetryRuntime.predict({
+    health: 100,
+    depthSig: 0.42,
+    contextDict: "first door wall",
+    predictions: 1511 + index,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    firstDoorVision9x9Score: 0.49,
+    firstDoorVision9x9RedScore: 0.04,
+    firstDoorUse3x3Score: 0.08,
+    bridgeDoorScore: 0.40,
+    bridgeConfidence: 0,
+    postDoorTerminalSurface: 0,
+    computerRoomConfidence: 0,
+    footObstacleScore: 0.58,
+    motionObstacleScore: 0.56,
+    spawnDoorPatternFrames: 4,
+    actionRepeatFrames: 8 + index,
+    moveRepeatFrames: 8 + index,
+    usePulseCooldown: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: false,
+      manualUseAudioActive: false,
+      required: true
+    },
+    semanticMemory: {
+      symbols: {
+        door: 0.50,
+        corridor: 0.24,
+        bridge: 0.20,
+        "computer-room": 0
+      }
+    }
+  }));
+}
+const postUseStationaryRetryAction = postUseStationaryRetryActions.find(action => action.use === true || action.useKey === true)
+  || postUseStationaryRetryActions[postUseStationaryRetryActions.length - 1];
+assert(
+  postUseStationaryRetryAction.use === true
+    && postUseStationaryRetryAction.move === "none"
+    && String(postUseStationaryRetryAction.actionSequenceStepId || "").toLowerCase() === "stop-use",
+  `Post-use hard-gate reapproach should return to stationary Use when close evidence is strong (actual=${JSON.stringify({
+    stage: postUseStationaryRetryAction.stage,
+    safetyReason: postUseStationaryRetryAction.safetyReason,
+    move: postUseStationaryRetryAction.move,
+    use: postUseStationaryRetryAction.use,
+    actionSequenceStepId: postUseStationaryRetryAction.actionSequenceStepId
+  })})`);
+
+const failedUseOutcomeMemoryProfile = {
+  strategyName: "UnitFailedUseOutcomeMemory",
+  pipeline: {
+    name: "UnitFailedUseOutcomeMemory",
+    stages: [
+      {
+        id: "closed-door-first-door-retry-soft-backoff",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {}
+      }
+    ]
+  }
+};
+const failedUseOutcomeMemoryRuntime = runtimeFactory.create(failedUseOutcomeMemoryProfile);
+failedUseOutcomeMemoryRuntime.predictions = 1780;
+failedUseOutcomeMemoryRuntime.lastUsePulsePrediction = 1690;
+failedUseOutcomeMemoryRuntime.closedDoorCornerSequenceFrames = 44;
+failedUseOutcomeMemoryRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+failedUseOutcomeMemoryRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+failedUseOutcomeMemoryRuntime.usePulseCooldown = 0;
+const failedUseOutcomeMemoryBaseState = {
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1781,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-retry-soft-backoff",
+  safetyReason: "closed-door-first-door-retry-soft-backoff",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 108,
+  moveRepeatFrames: 108,
+  firstDoorVision9x9Score: 0.34,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.02,
+  bridgeConfidence: 0.02,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.02,
+      "computer-room": 0
+    }
+  }
+};
+failedUseOutcomeMemoryRuntime.predict(Object.assign({}, failedUseOutcomeMemoryBaseState, {
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: true,
+    classifiedUseWallFailure: true,
+    semanticClass: "door-open-failed",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  },
+  classifiedUseWallFailure: true,
+  doorOpenAudioSemanticClass: "door-open-failed"
+}));
+const failedUseOutcomeMemoryActions = [];
+for (let index = 0; index < 28; index += 1) {
+  failedUseOutcomeMemoryActions.push(failedUseOutcomeMemoryRuntime.predict(Object.assign({}, failedUseOutcomeMemoryBaseState, {
+    predictions: 1782 + index,
+    actionRepeatFrames: 109 + index,
+    moveRepeatFrames: 109 + index,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      semanticClass: "none",
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: false,
+      manualUseAudioActive: false,
+      required: true
+    },
+    classifiedUseWallFailure: false,
+    doorOpenAudioSemanticClass: "none"
+  })));
+}
+const failedUseOutcomeMemoryText = failedUseOutcomeMemoryActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.objective,
+  action.move,
+  action.turn,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  failedUseOutcomeMemoryText.indexOf("post-door") < 0
+    && failedUseOutcomeMemoryText.indexOf("enter-computer") < 0
+    && failedUseOutcomeMemoryText.indexOf("reach-central") < 0,
+  `Failed-use outcome memory must not leak post-door ownership (actual=${failedUseOutcomeMemoryText})`);
+assert(
+  failedUseOutcomeMemoryText.indexOf("first-door-corner-use") >= 0
+    && (failedUseOutcomeMemoryText.indexOf("contact-forward") >= 0
+      || failedUseOutcomeMemoryText.indexOf("pre-use-stop") >= 0
+      || failedUseOutcomeMemoryText.indexOf("stop-use") >= 0),
+  `Failed-use outcome memory should re-enter bounded FirstDoor retry instead of idling (actual=${failedUseOutcomeMemoryText})`);
+assert(
+  Number(failedUseOutcomeMemoryRuntime.closedDoorCornerSequenceUseFailures || 0) >= 1
+    && Number(failedUseOutcomeMemoryRuntime.firstDoorFailedUseRetryFrames || 0) > 0,
+  "Failed-use outcome memory should stay latched long enough for bounded reapproach");
+assert(
+  Number(failedUseOutcomeMemoryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Failed-use outcome memory should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateBackoffReapproachOwnerProfile = {
+  strategyName: "UnitHardGateBackoffReapproachOwner",
+  pipeline: {
+    name: "UnitHardGateBackoffReapproachOwner",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-backoff-reapproach",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true"
+        }
+      }
+    ]
+  }
+};
+const hardGateBackoffReapproachOwnerRuntime = runtimeFactory.create(hardGateBackoffReapproachOwnerProfile);
+hardGateBackoffReapproachOwnerRuntime.predictions = 1810;
+const hardGateBackoffReapproachOwnerActions = [];
+for (let index = 0; index < 32; index += 1) {
+  hardGateBackoffReapproachOwnerActions.push(hardGateBackoffReapproachOwnerRuntime.predict({
+    health: 100,
+    depthSig: 0.42,
+    contextDict: "first door wall",
+    predictions: 1811 + index,
+    doorOpenedCount: 0,
+    computerRoomEntered: false,
+    centralHallEntered: false,
+    routeMode: "door-approach",
+    previousRouteMode: "door-approach",
+    currentRoute: "first-door-route",
+    routeName: "first-door-route",
+    route: "first-door-route",
+    currentLandmark: "first-door-approach",
+    routeActionHint: "advance-first-door",
+    routeHint: "advance-first-door",
+    objective: "find-corridor-to-first-door",
+    currentObjective: "find-corridor-to-first-door",
+    routeObjective: "find-corridor-to-first-door",
+    pipeline: "closed-door-first-door-corner-sequence",
+    stage: "closed-door-first-door-hard-gate-backoff-reapproach",
+    safetyReason: "closed-door-first-door-hard-gate-backoff-reapproach",
+    wallVector: 0.34,
+    motionForwardProgress: 0.04,
+    motionObstacleScore: 0.36,
+    footObstacleScore: 0.34,
+    actionRepeatFrames: 72 + index,
+    moveRepeatFrames: 72 + index,
+    firstDoorVision9x9Score: index % 5 === 0 ? 0.34 : 0.38,
+    firstDoorVision9x9RedScore: 0,
+    firstDoorUse3x3Score: 0,
+    bridgeDoorScore: index % 5 === 0 ? 0.12 : 0.09,
+    bridgeConfidence: 0.02,
+    postDoorTerminalSurface: 0,
+    computerRoomConfidence: 0,
+    computerRoomScore: 0,
+    usePulseCooldown: 0,
+    doorOpenAudioEvidence: {
+      confirmed: false,
+      classifiedDoorOpenEvent: false,
+      classifiedDoorFailureEvent: false,
+      classifiedUseWallFailure: false,
+      semanticClass: "none",
+      doorOpened: false,
+      firstDoorRouteActive: true,
+      useAttemptActive: false,
+      manualUseAudioActive: false,
+      required: true
+    },
+    semanticMemory: {
+      symbols: {
+        door: 0.28,
+        corridor: 0.24,
+        bridge: 0.02,
+        "computer-room": 0
+      }
+    }
+  }));
+}
+const hardGateBackoffReapproachOwnerText = hardGateBackoffReapproachOwnerActions.map(action => String([
+  action.pipeline,
+  action.stage,
+  action.safetyReason,
+  action.actionSequenceId,
+  action.actionSequenceStepId,
+  action.objective,
+  action.move,
+  action.turn,
+  action.use || action.useKey ? "use" : ""
+].join(" "))).join("\n");
+assert(
+  hardGateBackoffReapproachOwnerText.indexOf("post-door") < 0
+    && hardGateBackoffReapproachOwnerText.indexOf("enter-computer") < 0
+    && hardGateBackoffReapproachOwnerText.indexOf("reach-central") < 0,
+  `Hard-gate reapproach owner must not leak post-door ownership (actual=${hardGateBackoffReapproachOwnerText})`);
+assert(
+  hardGateBackoffReapproachOwnerText.indexOf("hard-gate-owner-stop-use") >= 0
+    && hardGateBackoffReapproachOwnerText.indexOf("use") >= 0,
+  `Hard-gate reapproach should cycle into stationary Use instead of align/contact forever (actual=${hardGateBackoffReapproachOwnerText})`);
+assert(
+  Number(hardGateBackoffReapproachOwnerRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Hard-gate reapproach owner should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const unconfirmedPreUseRetryProfile = {
+  strategyName: "UnitUnconfirmedPreUseRetry",
+  pipeline: {
+    name: "UnitUnconfirmedPreUseRetry",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-owner-pre-use-stop",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {}
+      }
+    ]
+  }
+};
+const unconfirmedPreUseRetryRuntime = runtimeFactory.create(unconfirmedPreUseRetryProfile);
+unconfirmedPreUseRetryRuntime.predictions = 2606;
+unconfirmedPreUseRetryRuntime.lastUsePulsePrediction = 627;
+unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceFrames = 44;
+unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceStep = "pre-use-stop";
+unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceUseFailures = 1;
+unconfirmedPreUseRetryRuntime.closedDoorCornerSequencePreUseStopFrames = 1;
+unconfirmedPreUseRetryRuntime.usePulseCooldown = 0;
+const unconfirmedPreUseRetryBaseState = {
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2607,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-owner-pre-use-stop",
+  safetyReason: "closed-door-first-door-hard-gate-owner-pre-use-stop",
+  wallVector: 0.49,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.65,
+  footObstacleScore: 0.65,
+  actionRepeatFrames: 108,
+  moveRepeatFrames: 108,
+  firstDoorVision9x9Score: 0.40,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.13,
+  bridgeConfidence: 0.46,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.12,
+      corridor: 0.24,
+      bridge: 0.13,
+      "computer-room": 0
+    }
+  }
+};
+const unconfirmedPreUseRetryActions = [];
+for (let index = 0; index < 18; index += 1) {
+  unconfirmedPreUseRetryActions.push(unconfirmedPreUseRetryRuntime.predict(Object.assign({}, unconfirmedPreUseRetryBaseState, {
+    predictions: 2607 + index,
+    actionRepeatFrames: 108 + index,
+    moveRepeatFrames: 108 + index
+  })));
+}
+const unconfirmedPreUseRetryAction = unconfirmedPreUseRetryActions.find(action => action.use === true || action.useKey === true)
+  || unconfirmedPreUseRetryActions[unconfirmedPreUseRetryActions.length - 1];
+assert(
+  unconfirmedPreUseRetryAction.use === true
+    && unconfirmedPreUseRetryAction.move === "none"
+    && String(unconfirmedPreUseRetryAction.actionSequenceStepId || "").toLowerCase() === "stop-use",
+  `Unconfirmed pre-use retry should return to stationary Use on gray first-door contact evidence (actual=${JSON.stringify({
+    stage: unconfirmedPreUseRetryAction.stage,
+    safetyReason: unconfirmedPreUseRetryAction.safetyReason,
+    move: unconfirmedPreUseRetryAction.move,
+    use: unconfirmedPreUseRetryAction.use,
+    actionSequenceStepId: unconfirmedPreUseRetryAction.actionSequenceStepId,
+    runtimeStep: unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceStep,
+    runtimeFrames: unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceFrames,
+    lastUseFrame: unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceLastUseFrame,
+    lastUsePulsePrediction: unconfirmedPreUseRetryRuntime.lastUsePulsePrediction,
+    useFailures: unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceUseFailures,
+    usePulseCooldown: unconfirmedPreUseRetryRuntime.usePulseCooldown,
+    preUseStopFrames: unconfirmedPreUseRetryRuntime.closedDoorCornerSequencePreUseStopFrames,
+    contactForwardFrames: unconfirmedPreUseRetryRuntime.closedDoorCornerSequenceContactForwardFrames,
+    activeActionSequenceFrame: unconfirmedPreUseRetryRuntime.activeActionSequenceFrame,
+    debugRouteValues: unconfirmedPreUseRetryRuntime.lastStatus?.debugRouteValues
+  })})`);
+assert(
+  Number(unconfirmedPreUseRetryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Unconfirmed pre-use retry should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateFailedUseRealignProfile = {
+  strategyName: "UnitHardGateFailedUseRealign",
+  pipeline: {
+    name: "UnitHardGateFailedUseRealign",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-owner-contact-forward",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true"
+        }
+      }
+    ]
+  }
+};
+const hardGateFailedUseRealignRuntime = runtimeFactory.create(hardGateFailedUseRealignProfile);
+hardGateFailedUseRealignRuntime.predictions = 1240;
+hardGateFailedUseRealignRuntime.firstDoorFailedUseRetryFrames = 120;
+hardGateFailedUseRealignRuntime.lastFirstDoorFailedUsePrediction = 1210;
+hardGateFailedUseRealignRuntime.lastFirstDoorFailedUseEventPrediction = 896;
+hardGateFailedUseRealignRuntime.closedDoorCornerSequenceUseFailures = 2;
+hardGateFailedUseRealignRuntime.closedDoorCornerSequenceFrames = 52;
+hardGateFailedUseRealignRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateFailedUseRealignRuntime.closedDoorCornerHardGateRetryProgressFrames = 64;
+hardGateFailedUseRealignRuntime.closedDoorFinalHardGateOwnerFrames = 12;
+const hardGateFailedUseRealignAction = hardGateFailedUseRealignRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 1241,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-owner-contact-forward",
+  safetyReason: "closed-door-first-door-hard-gate-owner-contact-forward",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 92,
+  moveRepeatFrames: 92,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.08,
+  bridgeConfidence: 0.02,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.02,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  String(hardGateFailedUseRealignAction.safetyReason || "").indexOf("hard-gate-failed-use-realign") >= 0
+    && String(hardGateFailedUseRealignAction.actionSequenceStepId || "").toLowerCase() === "align-turn"
+    && ["left", "right"].includes(String(hardGateFailedUseRealignAction.turn || "").toLowerCase())
+    && !Boolean(hardGateFailedUseRealignAction.use || hardGateFailedUseRealignAction.useKey),
+  `Hard-gate failed-use memory should realign before the next bounded stationary Use (actual=${JSON.stringify({
+    stage: hardGateFailedUseRealignAction.stage,
+    safetyReason: hardGateFailedUseRealignAction.safetyReason,
+    move: hardGateFailedUseRealignAction.move,
+    turn: hardGateFailedUseRealignAction.turn,
+    use: hardGateFailedUseRealignAction.use,
+    actionSequenceStepId: hardGateFailedUseRealignAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateFailedUseRealignRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Hard-gate failed-use realign should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateFailedUseStationaryRetryRuntime = runtimeFactory.create(hardGateFailedUseRealignProfile);
+hardGateFailedUseStationaryRetryRuntime.predictions = 2210;
+hardGateFailedUseStationaryRetryRuntime.firstDoorFailedUseRetryFrames = 84;
+hardGateFailedUseStationaryRetryRuntime.lastFirstDoorFailedUsePrediction = 2190;
+hardGateFailedUseStationaryRetryRuntime.closedDoorCornerSequenceUseFailures = 2;
+hardGateFailedUseStationaryRetryRuntime.closedDoorCornerSequenceFrames = 58;
+hardGateFailedUseStationaryRetryRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateFailedUseStationaryRetryRuntime.closedDoorCornerHardGateRetryProgressFrames = 72;
+hardGateFailedUseStationaryRetryRuntime.closedDoorFinalHardGateOwnerFrames = 14;
+const hardGateFailedUseStationaryRetryAction = hardGateFailedUseStationaryRetryRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2211,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-owner-contact-forward",
+  safetyReason: "closed-door-first-door-hard-gate-owner-contact-forward",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.34,
+  bridgeConfidence: 0.20,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  hardGateFailedUseStationaryRetryAction.use === true
+    && hardGateFailedUseStationaryRetryAction.move === "none"
+    && String(hardGateFailedUseStationaryRetryAction.safetyReason || "").indexOf("hard-gate-failed-use-stationary-retry") >= 0,
+  `High-evidence hard-gate failed-use retry should issue stationary Use instead of another align loop (actual=${JSON.stringify({
+    stage: hardGateFailedUseStationaryRetryAction.stage,
+    safetyReason: hardGateFailedUseStationaryRetryAction.safetyReason,
+    move: hardGateFailedUseStationaryRetryAction.move,
+    turn: hardGateFailedUseStationaryRetryAction.turn,
+    use: hardGateFailedUseStationaryRetryAction.use,
+    actionSequenceStepId: hardGateFailedUseStationaryRetryAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateFailedUseStationaryRetryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "High-evidence hard-gate failed-use retry should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const failedPostUseStationaryRetryRuntime = runtimeFactory.create(publicProfile);
+failedPostUseStationaryRetryRuntime.predictions = 2493;
+failedPostUseStationaryRetryRuntime.closedDoorCornerSequenceUseFailures = 2;
+failedPostUseStationaryRetryRuntime.closedDoorCornerSequenceFrames = 74;
+failedPostUseStationaryRetryRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+failedPostUseStationaryRetryRuntime.closedDoorCornerSequenceLastUseFrame = 44;
+failedPostUseStationaryRetryRuntime.closedDoorCornerPostUseSettleHoldFrames = 12;
+failedPostUseStationaryRetryRuntime.activeActionSequencePhaseId = "first-door-approach";
+failedPostUseStationaryRetryRuntime.activeActionSequenceId = "first-door-corner-use";
+failedPostUseStationaryRetryRuntime.activeActionSequenceFrame = 57;
+const failedPostUseStationaryRetryAction = failedPostUseStationaryRetryRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2494,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  firstDoorPhaseReady: true,
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-audio-failed-post-use-bounded-retry",
+  safetyReason: "closed-door-first-door-audio-failed-post-use-bounded-retry",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 85,
+  moveRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.50,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.43,
+  bridgeConfidence: 0.20,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  useCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: true,
+    classifiedUseWallFailure: true,
+    semanticClass: "door-open-failed",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: true,
+    manualUseAudioActive: true,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.34,
+      corridor: 0.24,
+      bridge: 0.20,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  !Boolean(failedPostUseStationaryRetryAction.use || failedPostUseStationaryRetryAction.useKey)
+    && failedPostUseStationaryRetryAction.move === "none"
+    && String(failedPostUseStationaryRetryAction.turn || "").toLowerCase() === "left"
+    && String(failedPostUseStationaryRetryAction.actionSequenceStepId || "").toLowerCase() === "align-turn"
+    && String(failedPostUseStationaryRetryAction.safetyReason || "").indexOf("audio-failed-post-use-bounded-retry") >= 0,
+  `High-evidence failed post-use audio should realign through the bounded FirstDoor sequence before another Use (actual=${JSON.stringify({
+    stage: failedPostUseStationaryRetryAction.stage,
+    safetyReason: failedPostUseStationaryRetryAction.safetyReason,
+    move: failedPostUseStationaryRetryAction.move,
+    turn: failedPostUseStationaryRetryAction.turn,
+    use: failedPostUseStationaryRetryAction.use,
+    actionSequenceStepId: failedPostUseStationaryRetryAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(failedPostUseStationaryRetryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "High-evidence failed post-use retry should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateUseFailureTailRealignProfile = {
+  strategyName: "UnitHardGateUseFailureTailRealign",
+  pipeline: {
+    name: "UnitHardGateUseFailureTailRealign",
+    stages: [
+      {
+        id: "closed-door-first-door-hard-gate-backoff-reapproach",
+        objective: "find-corridor-to-first-door",
+        priority: 1,
+        when: "true",
+        action: {
+          moveForward: "true"
+        }
+      }
+    ]
+  }
+};
+const hardGateUseFailureTailRealignRuntime = runtimeFactory.create(hardGateUseFailureTailRealignProfile);
+hardGateUseFailureTailRealignRuntime.predictions = 2674;
+hardGateUseFailureTailRealignRuntime.closedDoorCornerSequenceUseFailures = 2;
+hardGateUseFailureTailRealignRuntime.closedDoorCornerSequenceFrames = 96;
+hardGateUseFailureTailRealignRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateUseFailureTailRealignRuntime.closedDoorCornerHardGateRetryProgressFrames = 88;
+const hardGateUseFailureTailRealignAction = hardGateUseFailureTailRealignRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2675,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-backoff-reapproach",
+  safetyReason: "closed-door-first-door-hard-gate-backoff-reapproach",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  firstDoorVision9x9Score: 0.29,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.03,
+  bridgeConfidence: 0.02,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.02,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  String(hardGateUseFailureTailRealignAction.safetyReason || "").indexOf("hard-gate-failed-use-realign") >= 0
+    && String(hardGateUseFailureTailRealignAction.actionSequenceStepId || "").toLowerCase() === "align-turn"
+    && ["left", "right"].includes(String(hardGateUseFailureTailRealignAction.turn || "").toLowerCase())
+    && !Boolean(hardGateUseFailureTailRealignAction.use || hardGateUseFailureTailRealignAction.useKey),
+  `Hard-gate use-failure tail should realign instead of forwarding forever (actual=${JSON.stringify({
+    stage: hardGateUseFailureTailRealignAction.stage,
+    safetyReason: hardGateUseFailureTailRealignAction.safetyReason,
+    move: hardGateUseFailureTailRealignAction.move,
+    turn: hardGateUseFailureTailRealignAction.turn,
+    use: hardGateUseFailureTailRealignAction.use,
+    actionSequenceStepId: hardGateUseFailureTailRealignAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateUseFailureTailRealignRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Hard-gate use-failure tail realign should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateUseFailureTailResumeRuntime = runtimeFactory.create(hardGateUseFailureTailRealignProfile);
+hardGateUseFailureTailResumeRuntime.predictions = 2813;
+hardGateUseFailureTailResumeRuntime.closedDoorCornerSequenceUseFailures = 3;
+hardGateUseFailureTailResumeRuntime.closedDoorCornerSequenceFrames = 18;
+hardGateUseFailureTailResumeRuntime.closedDoorCornerSequenceStep = "align-turn";
+hardGateUseFailureTailResumeRuntime.closedDoorCornerHardGateRetryProgressFrames = 96;
+const hardGateUseFailureTailResumeAction = hardGateUseFailureTailResumeRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2814,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-backoff-reapproach",
+  safetyReason: "closed-door-first-door-hard-gate-backoff-reapproach",
+  wallVector: 0.34,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 96,
+  moveRepeatFrames: 96,
+  firstDoorVision9x9Score: 0.38,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.13,
+  bridgeConfidence: 0.02,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.02,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  String(hardGateUseFailureTailResumeAction.safetyReason || "").indexOf("hard-gate-failed-use-bounded-retry") >= 0
+    && String(hardGateUseFailureTailResumeAction.actionSequenceStepId || "").toLowerCase() === "contact-forward"
+    && hardGateUseFailureTailResumeAction.move === "forward"
+    && !Boolean(hardGateUseFailureTailResumeAction.use || hardGateUseFailureTailResumeAction.useKey),
+  `Hard-gate failed-use realign tail should resume bounded reapproach instead of spinning in align-turn (actual=${JSON.stringify({
+    stage: hardGateUseFailureTailResumeAction.stage,
+    safetyReason: hardGateUseFailureTailResumeAction.safetyReason,
+    move: hardGateUseFailureTailResumeAction.move,
+    turn: hardGateUseFailureTailResumeAction.turn,
+    use: hardGateUseFailureTailResumeAction.use,
+    actionSequenceStepId: hardGateUseFailureTailResumeAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateUseFailureTailResumeRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Hard-gate failed-use tail bounded resume should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateBackoffStationaryRetryRuntime = runtimeFactory.create(hardGateUseFailureTailRealignProfile);
+hardGateBackoffStationaryRetryRuntime.predictions = 3498;
+hardGateBackoffStationaryRetryRuntime.closedDoorCornerSequenceFrames = 132;
+hardGateBackoffStationaryRetryRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateBackoffStationaryRetryRuntime.closedDoorCornerHardGateRetryProgressFrames = 160;
+const hardGateBackoffStationaryRetryAction = hardGateBackoffStationaryRetryRuntime.predict({
+  health: 101,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 3499,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-backoff-reapproach",
+  safetyReason: "closed-door-first-door-hard-gate-backoff-reapproach",
+  wallVector: 0.33,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 4,
+  moveRepeatFrames: 4,
+  firstDoorVision9x9Score: 0.29,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0.14,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0.14,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  Boolean(hardGateBackoffStationaryRetryAction.use || hardGateBackoffStationaryRetryAction.useKey)
+    && hardGateBackoffStationaryRetryAction.move === "none"
+    && String(hardGateBackoffStationaryRetryAction.actionSequenceStepId || "").toLowerCase() === "stop-use"
+    && String(hardGateBackoffStationaryRetryAction.safetyReason || "").indexOf("hard-gate-backoff-stationary-retry") >= 0,
+  `Long hard-gate backoff reapproach should return to stationary Use retry instead of forwarding forever (actual=${JSON.stringify({
+    stage: hardGateBackoffStationaryRetryAction.stage,
+    safetyReason: hardGateBackoffStationaryRetryAction.safetyReason,
+    move: hardGateBackoffStationaryRetryAction.move,
+    turn: hardGateBackoffStationaryRetryAction.turn,
+    use: hardGateBackoffStationaryRetryAction.use,
+    actionSequenceStepId: hardGateBackoffStationaryRetryAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateBackoffStationaryRetryRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Long hard-gate backoff stationary retry should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const hardGateLowBridgeOwnerReacquireRuntime = runtimeFactory.create(hardGateUseFailureTailRealignProfile);
+hardGateLowBridgeOwnerReacquireRuntime.predictions = 2848;
+hardGateLowBridgeOwnerReacquireRuntime.closedDoorCornerSequenceFrames = 132;
+hardGateLowBridgeOwnerReacquireRuntime.closedDoorCornerSequenceStep = "contact-forward";
+hardGateLowBridgeOwnerReacquireRuntime.closedDoorCornerHardGateRetryProgressFrames = 160;
+const hardGateLowBridgeOwnerReacquireAction = hardGateLowBridgeOwnerReacquireRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "first door wall",
+  predictions: 2849,
+  doorOpenedCount: 0,
+  computerRoomEntered: false,
+  centralHallEntered: false,
+  routeMode: "door-approach",
+  previousRouteMode: "door-approach",
+  currentRoute: "first-door-route",
+  routeName: "first-door-route",
+  route: "first-door-route",
+  currentLandmark: "first-door-approach",
+  routeActionHint: "advance-first-door",
+  routeHint: "advance-first-door",
+  objective: "find-corridor-to-first-door",
+  currentObjective: "find-corridor-to-first-door",
+  routeObjective: "find-corridor-to-first-door",
+  pipeline: "closed-door-first-door-corner-sequence",
+  stage: "closed-door-first-door-hard-gate-owner-contact-forward",
+  safetyReason: "closed-door-first-door-hard-gate-owner-contact-forward",
+  wallVector: 0.33,
+  motionForwardProgress: 0.04,
+  motionObstacleScore: 0.36,
+  footObstacleScore: 0.34,
+  actionRepeatFrames: 160,
+  moveRepeatFrames: 160,
+  firstDoorVision9x9Score: 0.35,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0,
+  computerRoomScore: 0,
+  usePulseCooldown: 0,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    semanticClass: "none",
+    doorOpened: false,
+    firstDoorRouteActive: true,
+    useAttemptActive: false,
+    manualUseAudioActive: false,
+    required: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.28,
+      corridor: 0.24,
+      bridge: 0,
+      "computer-room": 0
+    }
+  }
+});
+assert(
+  !Boolean(hardGateLowBridgeOwnerReacquireAction.use || hardGateLowBridgeOwnerReacquireAction.useKey)
+    && hardGateLowBridgeOwnerReacquireAction.move === "none"
+    && String(hardGateLowBridgeOwnerReacquireAction.turn || "").toLowerCase() === "right"
+    && String(hardGateLowBridgeOwnerReacquireAction.actionSequenceStepId || "").toLowerCase() === "align-turn"
+    && String(hardGateLowBridgeOwnerReacquireAction.safetyReason || "").indexOf("hard-gate-low-bridge-realign") >= 0,
+  `Long hard-gate owner contact-forward with low bridge evidence should reacquire right instead of forwarding forever (actual=${JSON.stringify({
+    stage: hardGateLowBridgeOwnerReacquireAction.stage,
+    safetyReason: hardGateLowBridgeOwnerReacquireAction.safetyReason,
+    move: hardGateLowBridgeOwnerReacquireAction.move,
+    turn: hardGateLowBridgeOwnerReacquireAction.turn,
+    use: hardGateLowBridgeOwnerReacquireAction.use,
+    actionSequenceStepId: hardGateLowBridgeOwnerReacquireAction.actionSequenceStepId
+  })})`);
+assert(
+  Number(hardGateLowBridgeOwnerReacquireRuntime.lastStatus?.debugRouteValues?.doorOpenedCount || 0) === 0,
+  "Low-bridge hard-gate owner reacquire should keep published doorOpenedCount=0 until open audio is confirmed");
+
+const postDoorFirstDoorSequenceResidueRuntime = runtimeFactory.create(publicProfile);
+postDoorFirstDoorSequenceResidueRuntime.predictions = 2855;
+postDoorFirstDoorSequenceResidueRuntime.closedDoorCornerSequenceFrames = 96;
+postDoorFirstDoorSequenceResidueRuntime.closedDoorCornerSequenceStep = "contact-forward";
+postDoorFirstDoorSequenceResidueRuntime.activeActionSequencePhaseId = "ComputerRoom";
+postDoorFirstDoorSequenceResidueRuntime.activeActionSequenceId = "first-door-corner-use";
+postDoorFirstDoorSequenceResidueRuntime.activeActionSequenceFrame = 48;
+postDoorFirstDoorSequenceResidueRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge"
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const postDoorFirstDoorSequenceResidueAction = postDoorFirstDoorSequenceResidueRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room wall",
+  predictions: 2856,
+  firstDoorOpened: true,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "spawn-secret-route-reset",
+  currentLandmark: "rear-secret-reset",
+  routeActionHint: "cruise",
+  objective: "reach-central-hall",
+  wallVector: 0.33,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.16,
+  actionRepeatFrames: 36,
+  moveRepeatFrames: 36,
+  turnRepeatFrames: 0,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.43,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: true,
+    firstDoorRouteActive: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0.05,
+      bridge: 0.10,
+      "computer-room": 0.44
+    }
+  }
+});
+const postDoorFirstDoorSequenceResidueText = String([
+  postDoorFirstDoorSequenceResidueAction.pipeline,
+  postDoorFirstDoorSequenceResidueAction.stage,
+  postDoorFirstDoorSequenceResidueAction.safetyReason,
+  postDoorFirstDoorSequenceResidueAction.actionSequenceId,
+  postDoorFirstDoorSequenceResidueAction.actionSequenceStepId
+].join(" "));
+assert(
+  postDoorFirstDoorSequenceResidueText.indexOf("closed-door-first-door-corner") < 0
+    && postDoorFirstDoorSequenceResidueText.indexOf("first-door-corner-use") < 0,
+  `Confirmed post-door ComputerRoom state must clear stale FirstDoor sequence residue (actual=${postDoorFirstDoorSequenceResidueText})`);
+assert(
+  postDoorFirstDoorSequenceResidueAction.objective === "reach-central-hall",
+  `Confirmed post-door ComputerRoom state should keep central-hall objective (actual=${postDoorFirstDoorSequenceResidueAction.objective})`);
+
+const postDoorSpawnLandmarkNoAudioResidueRuntime = runtimeFactory.create(publicProfile);
+postDoorSpawnLandmarkNoAudioResidueRuntime.predictions = 843;
+postDoorSpawnLandmarkNoAudioResidueRuntime.closedDoorCornerSequenceFrames = 96;
+postDoorSpawnLandmarkNoAudioResidueRuntime.closedDoorCornerSequenceStep = "backoff";
+postDoorSpawnLandmarkNoAudioResidueRuntime.activeActionSequencePhaseId = "ComputerRoom";
+postDoorSpawnLandmarkNoAudioResidueRuntime.activeActionSequenceId = "first-door-corner-use";
+postDoorSpawnLandmarkNoAudioResidueRuntime.activeActionSequenceFrame = 48;
+postDoorSpawnLandmarkNoAudioResidueRuntime.lastAction = {
+  move: "forward",
+  turn: "left",
+  fire: false,
+  strafe: true,
+  use: false,
+  run: true,
+  pipeline: "post-door-computer-room-egress",
+  stage: "post-door-computer-room-egress",
+  safetyReason: "computer-room-egress-left-parallel",
+  objective: "reach-central-hall"
+};
+postDoorSpawnLandmarkNoAudioResidueRuntime.lastStatus = {
+  controlPipeline: "post-door-computer-room-egress",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "cross-bridge-route",
+    currentLandmark: "cross-bridge-lane",
+    routeActionHint: "advance-cross-bridge",
+    bridgeConfidence: 0.45,
+    bridgeDoorScore: 0.09,
+    postDoorTerminalSurface: 0.36
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door"
+  }
+};
+const postDoorSpawnLandmarkNoAudioResidueAction = postDoorSpawnLandmarkNoAudioResidueRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room wall",
+  predictions: 844,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "spawn-landmark-route",
+  currentLandmark: "landmark-route",
+  routeActionHint: "cruise",
+  objective: "reach-central-hall",
+  wallVector: 0.33,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.16,
+  actionRepeatFrames: 36,
+  moveRepeatFrames: 36,
+  firstDoorVision9x9Score: 0.36,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.43,
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0.05,
+      bridge: 0.10,
+      "computer-room": 0.44
+    }
+  }
+});
+const postDoorSpawnLandmarkNoAudioResidueText = String([
+  postDoorSpawnLandmarkNoAudioResidueAction.pipeline,
+  postDoorSpawnLandmarkNoAudioResidueAction.stage,
+  postDoorSpawnLandmarkNoAudioResidueAction.safetyReason,
+  postDoorSpawnLandmarkNoAudioResidueAction.actionSequenceId,
+  postDoorSpawnLandmarkNoAudioResidueAction.actionSequenceStepId,
+  postDoorSpawnLandmarkNoAudioResidueAction.currentRoute,
+  postDoorSpawnLandmarkNoAudioResidueAction.routeActionHint
+].join(" "));
+assert(
+  postDoorSpawnLandmarkNoAudioResidueText.indexOf("closed-door-first-door") < 0
+    && postDoorSpawnLandmarkNoAudioResidueText.indexOf("first-door-corner-use") < 0
+    && postDoorSpawnLandmarkNoAudioResidueText.indexOf("advance-first-door") < 0,
+  `Confirmed post-door spawn-landmark residue without audio must release to post-door ownership (actual=${postDoorSpawnLandmarkNoAudioResidueText})`);
+
+const postDoorFirstDoorLowEvidenceResidueRuntime = runtimeFactory.create(publicProfile);
+postDoorFirstDoorLowEvidenceResidueRuntime.predictions = 2788;
+postDoorFirstDoorLowEvidenceResidueRuntime.closedDoorCornerSequenceFrames = 132;
+postDoorFirstDoorLowEvidenceResidueRuntime.closedDoorCornerSequenceStep = "post-use-settle";
+postDoorFirstDoorLowEvidenceResidueRuntime.closedDoorCornerPostUseSettleHoldFrames = 12;
+postDoorFirstDoorLowEvidenceResidueRuntime.activeActionSequenceId = "";
+postDoorFirstDoorLowEvidenceResidueRuntime.activeActionSequencePhaseId = "ComputerRoom";
+postDoorFirstDoorLowEvidenceResidueRuntime.lastAction = {
+  move: "none",
+  turn: "none",
+  fire: false,
+  use: false,
+  run: false,
+  pipeline: "ComputerRoom",
+  stage: "closed-door-first-door-corner-post-use-settle",
+  safetyReason: "closed-door-first-door-corner-post-use-settle",
+  objective: "reach-central-hall"
+};
+postDoorFirstDoorLowEvidenceResidueRuntime.lastStatus = {
+  controlPipeline: "ComputerRoom",
+  objective: "reach-central-hall",
+  debugRouteValues: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    currentRoute: "spawn-secret-route-reset",
+    currentLandmark: "rear-secret-reset",
+    routeActionHint: "cruise",
+    doorOpenAudioEvidence: {
+      doorOpened: true,
+      firstDoorRouteActive: true
+    }
+  },
+  autoplayState: {
+    doorOpenedCount: 1,
+    computerRoomEntered: true,
+    centralHallEntered: false,
+    routeMode: "post-door",
+    doorOpenAudioEvidence: {
+      doorOpened: true,
+      firstDoorRouteActive: true
+    }
+  }
+};
+const postDoorFirstDoorLowEvidenceResidueAction = postDoorFirstDoorLowEvidenceResidueRuntime.predict({
+  health: 100,
+  depthSig: 0.42,
+  contextDict: "computer room wall",
+  predictions: 2789,
+  doorOpenedCount: 1,
+  computerRoomEntered: true,
+  centralHallEntered: false,
+  routeMode: "post-door",
+  previousRouteMode: "post-door",
+  currentRoute: "spawn-secret-route-reset",
+  currentLandmark: "rear-secret-reset",
+  routeActionHint: "cruise",
+  objective: "reach-central-hall",
+  wallVector: 0.55,
+  motionForwardProgress: 0.05,
+  motionObstacleScore: 0.18,
+  footObstacleScore: 0.16,
+  actionRepeatFrames: 48,
+  moveRepeatFrames: 48,
+  firstDoorVision9x9Score: 0.33,
+  firstDoorVision9x9RedScore: 0,
+  firstDoorUse3x3Score: 0,
+  bridgeDoorScore: 0,
+  bridgeConfidence: 0,
+  postDoorTerminalSurface: 0,
+  computerRoomConfidence: 0.28,
+  routeTopologyBarrelZoneEvidence: 1,
+  routeTopologyCenterCorridorAlignment: -0.43,
+  doorOpenAudioEvidence: {
+    confirmed: false,
+    classifiedDoorOpenEvent: false,
+    classifiedDoorFailureEvent: false,
+    classifiedUseWallFailure: false,
+    doorOpened: true,
+    firstDoorRouteActive: true
+  },
+  semanticMemory: {
+    symbols: {
+      door: 0.10,
+      corridor: 0.20,
+      enemy: 0.05,
+      bridge: 0.10,
+      "computer-room": 0.44
+    }
+  }
+});
+const postDoorFirstDoorLowEvidenceResidueText = String([
+  postDoorFirstDoorLowEvidenceResidueAction.pipeline,
+  postDoorFirstDoorLowEvidenceResidueAction.stage,
+  postDoorFirstDoorLowEvidenceResidueAction.safetyReason,
+  postDoorFirstDoorLowEvidenceResidueAction.actionSequenceId,
+  postDoorFirstDoorLowEvidenceResidueAction.actionSequenceStepId
+].join(" "));
+assert(
+  postDoorFirstDoorLowEvidenceResidueText.indexOf("closed-door-first-door-corner") < 0
+    && postDoorFirstDoorLowEvidenceResidueText.indexOf("first-door-corner-use") < 0,
+  `Confirmed post-door low-evidence residue must not restart FirstDoor corner safety (actual=${postDoorFirstDoorLowEvidenceResidueText})`);
+assert(
+  postDoorFirstDoorLowEvidenceResidueAction.objective === "reach-central-hall",
+  `Confirmed post-door low-evidence residue should keep central-hall objective (actual=${postDoorFirstDoorLowEvidenceResidueAction.objective})`);
 
 console.log("CONTROL_RUNTIME_VM_TEST_OK", {
   bridgeObjective: bridgeRoute.objective,

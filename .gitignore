@@ -47,6 +47,7 @@ CodeCoverage/
 # AIKernel.Doom native/WASM generated assets
 *.wasm
 *.wasm.map
+!src/DoomWeb/wwwroot/demo/doom/csharp-control/**/*.wasm
 *.wad
 *.WAD
 *.iwad

@@ -1,0 +1,238 @@
+(function () {
+  "use strict";
+
+  function createState() {
+    return {
+      sequence: [],
+      waitFrames: 0,
+      settleFrames: 0,
+      cooldownFrames: 0,
+      reason: "none",
+      restartRequestId: "",
+      healthRetryFrames: 0,
+      awaitingRecovery: false,
+      completedReason: "none"
+    };
+  }
+
+  function active(state) {
+    return Boolean((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0 || (state?.settleFrames || 0) > 0);
+  }
+
+  function snapshot(state) {
+    return {
+      active: active(state),
+      cooldownFrames: state?.cooldownFrames || 0,
+      settleFrames: state?.settleFrames || 0,
+      reason: state?.reason || "none",
+      restartRequestId: state?.restartRequestId || "",
+      awaitingRecovery: Boolean(state?.awaitingRecovery),
+      completedReason: state?.completedReason || "none"
+    };
+  }
+
+  function clear(state, host = {}) {
+    if (!state) {
+      return snapshot(state);
+    }
+
+    host.releaseInputs?.();
+    state.sequence = [];
+    state.waitFrames = 0;
+    state.settleFrames = 0;
+    state.cooldownFrames = 0;
+    state.reason = "none";
+    state.restartRequestId = "";
+    state.healthRetryFrames = 0;
+    state.awaitingRecovery = false;
+    state.completedReason = "none";
+    if (typeof host.queueInput === "function") {
+      if (host.keys?.use) {
+        host.queueInput(host.keys.use, false, "use");
+      }
+
+      if (host.enterKey) {
+        host.queueInput(host.enterKey, false, "enter");
+      }
+    }
+
+    return snapshot(state);
+  }
+
+  function buildRetrySequence(options = {}) {
+    const sequence = [];
+    const keys = options.keys || {};
+    const enterKey = options.enterKey || 13;
+    const tapFrames = options.tapFrames || 8;
+    const repeats = options.repeats || 3;
+
+    for (let index = 0; index < repeats; index += 1) {
+      sequence.push(
+        { keycode: keys.use, pressed: true, name: "use" },
+        { waitFrames: tapFrames },
+        { keycode: keys.use, pressed: false, name: "use" },
+        { waitFrames: tapFrames },
+        { keycode: enterKey, pressed: true, name: "enter" },
+        { waitFrames: tapFrames },
+        { keycode: enterKey, pressed: false, name: "enter" },
+        { waitFrames: tapFrames });
+    }
+
+    return sequence.filter(step => step.waitFrames || Number.isFinite(Number(step.keycode)));
+  }
+
+  function normalizeRetryReason(value) {
+    const text = String(value ?? "").trim();
+    return text && text.toLowerCase() !== "none" ? text : "";
+  }
+
+  function schedule(state, status, host = {}) {
+    if (!state || host.senseOnly || host.runtimeState !== "running") {
+      return { scheduled: false, reason: "inactive" };
+    }
+
+    if (state.cooldownFrames > 0) {
+      state.cooldownFrames -= 1;
+    }
+
+    const nativeRestartRequest = status?.csharpFirstDoor;
+    const nativeRestartRequestId = normalizeRetryReason(nativeRestartRequest?.restartRequestId);
+    const nativeRestartReason = normalizeRetryReason(nativeRestartRequest?.restartReason);
+    const nativeRestartRequested = nativeRestartRequest?.restartRequested === true
+      && nativeRestartRequestId.length > 0
+      && nativeRestartReason.length > 0;
+    const retryReason = nativeRestartRequested
+      ? nativeRestartReason
+      : normalizeRetryReason(status?.healthSensor?.retryReason);
+    const healthRetryRequested = Boolean(
+      nativeRestartRequested
+      || (status?.healthSensor?.retryRequested
+        && (status?.healthSensor?.likelyDead || retryReason)));
+    state.healthRetryFrames = healthRetryRequested
+      ? Math.min(12, Number(state.healthRetryFrames || 0) + 1)
+      : 0;
+
+    if (!healthRetryRequested) {
+      state.awaitingRecovery = false;
+      state.completedReason = "none";
+      state.restartRequestId = "";
+      if (state.settleFrames > 0) {
+        return { scheduled: false, reason: "settling" };
+      }
+
+      if (active(state)) {
+        clear(state, host);
+      }
+
+      return { scheduled: false, reason: "not-requested" };
+    }
+
+    if (state.awaitingRecovery) {
+      if (state.cooldownFrames <= 0 && state.healthRetryFrames >= 12) {
+        state.awaitingRecovery = false;
+        state.completedReason = "none";
+      } else {
+        return { scheduled: false, reason: "awaiting-recovery" };
+      }
+    }
+
+    if (!nativeRestartRequested && state.healthRetryFrames < 3) {
+      return { scheduled: false, reason: "debounce" };
+    }
+
+    if (active(state) || state.cooldownFrames > 0) {
+      return { scheduled: false, reason: "busy" };
+    }
+
+    state.reason = retryReason || "health-death";
+    state.restartRequestId = nativeRestartRequested ? nativeRestartRequestId : "";
+    host.releaseInputs?.();
+    host.resetSensors?.("pre-retry-reset", state.reason);
+    state.sequence = buildRetrySequence({
+      keys: host.keys,
+      enterKey: host.enterKey,
+      tapFrames: host.tapFrames,
+      repeats: host.repeats || 3
+    });
+    host.logQueued?.(state.reason);
+
+    return {
+      scheduled: true,
+      reason: state.reason,
+      restartRequestId: state.restartRequestId,
+      queuedSteps: state.sequence.length
+    };
+  }
+
+  function completeIfDone(state, host = {}) {
+    if ((state?.sequence?.length || 0) > 0 || (state?.waitFrames || 0) > 0 || (state?.settleFrames || 0) > 0) {
+      return false;
+    }
+
+    state.cooldownFrames = host.cooldownFrames || 180;
+    state.settleFrames = host.settleFrames || 60;
+    state.awaitingRecovery = true;
+    state.completedReason = state.reason || "none";
+    host.resetSensors?.("post-retry-reset", state.reason || "none");
+    host.logCompleted?.(state.reason || "none");
+    return true;
+  }
+
+  function process(state, host = {}) {
+    if (!state) {
+      return false;
+    }
+
+    if (state.waitFrames > 0) {
+      state.waitFrames -= 1;
+      host.releaseMoveInputs?.();
+      completeIfDone(state, host);
+      return true;
+    }
+
+    if (state.settleFrames > 0) {
+      state.settleFrames -= 1;
+      if (typeof host.releaseInputs === "function") {
+        host.releaseInputs();
+      } else {
+        host.releaseMoveInputs?.();
+      }
+
+      if (state.settleFrames <= 0) {
+        host.logSettled?.(state.reason || "none");
+      }
+
+      return true;
+    }
+
+    if (!Array.isArray(state.sequence) || state.sequence.length <= 0) {
+      return false;
+    }
+
+    const step = state.sequence.shift();
+    if (step.waitFrames) {
+      state.waitFrames = step.waitFrames;
+      host.releaseMoveInputs?.();
+      return true;
+    }
+
+    if (typeof host.queueInput === "function") {
+      host.queueInput(step.keycode, step.pressed, step.name || "");
+    }
+
+    if (state.sequence.length <= 0) {
+      completeIfDone(state, host);
+    }
+
+    return true;
+  }
+
+  self.AIKernelDoomRetryDispatch = Object.freeze({
+    createState,
+    snapshot,
+    schedule,
+    process,
+    clear,
+    buildRetrySequence
+  });
+})();

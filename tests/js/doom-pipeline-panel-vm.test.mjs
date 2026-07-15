@@ -473,4 +473,48 @@ const secretDoorPanel = panel.formatToposHud(secretDoorStatus, { detail: false }
 assert(secretDoorPanel.includes("Route: Rear Landmark Avoidance (0.72)"), "Spawn secret-door evidence should render as route avoidance, not a target route");
 assert(!secretDoorPanel.includes("Secret Door Anchor"), "Spawn secret-door evidence should not look like a route objective");
 
+const canonicalMoribundPanel = panel.formatToposHud({
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "healthy",
+      healthFaceLifeTemplatePhase: "healthy",
+      faceLifeTemplateLevel: 5,
+      healthFaceLifeTemplateLevel: 5
+    },
+    pipelineState: {
+      aisthesis: {},
+      noesis: {},
+      krisis: { kairos: {} },
+      kinesis: { zoe: { faceLifePhase: "healthy", faceLifeLevel: 5 } }
+    }
+  }
+}, { detail: false });
+assert(canonicalMoribundPanel.includes("heart 1 fade0.00"), "Canonical stabilized face life and explicit no-heartbeat should beat stale Zoe/template healthy aliases");
+
+const invulnerablePanel = panel.formatToposHud({
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "invulnerable",
+    healthFaceLifeLevel: 5,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "moribund",
+      faceLifeTemplateLevel: 1
+    },
+    pipelineState: {
+      aisthesis: {},
+      noesis: {},
+      krisis: { kairos: {} },
+      kinesis: { zoe: {} }
+    }
+  }
+}, { detail: false });
+assert(invulnerablePanel.includes("heart ∞ hb"), "Explicit canonical invulnerability should retain its infinity heartbeat glyph");
+
 console.log("DOOM_PIPELINE_PANEL_VM_TEST_OK", { simple, detail });

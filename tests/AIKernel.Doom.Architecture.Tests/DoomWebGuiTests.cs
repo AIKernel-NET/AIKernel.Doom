@@ -290,7 +290,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("fn pixelSize(width: f32) -> vec2<f32>", script, StringComparison.Ordinal);
         Assert.Contains("width / max(1.0, f32(info.width))", script, StringComparison.Ordinal);
         Assert.Contains("color = addLayerCard(color, uv, 0u, panel[0], ${wgslPanelMin(\"aisthesis\")}", script, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 36", contracts, StringComparison.Ordinal);
         Assert.Contains("enemyCircleActive: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleX: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleY: f32", script, StringComparison.Ordinal);
@@ -702,7 +702,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("[G] ${gpuPathSummary.shortText}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("hud=${source}${compositeActive ? \" cmp\" : \"\"}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("matrixSource === \"dto-flat\" ? \" flat\"", pipelinePanel, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 36", gpuContracts, StringComparison.Ordinal);
         Assert.Contains("compassHeading: f32", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("fn addEgoRadarHud", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("fn addRadarNorthMarker", webGpuProvider, StringComparison.Ordinal);
@@ -955,7 +955,9 @@ public sealed class DoomWebGuiTests
         Assert.Contains("createHudFlowControlStatus()", script, StringComparison.Ordinal);
         Assert.Contains("source: \"runtime-fps-control\"", script, StringComparison.Ordinal);
         Assert.Contains("dropPolicy: \"latest-only\"", script, StringComparison.Ordinal);
-        Assert.Contains("this.controlRuntime.predict(wasmState)", script, StringComparison.Ordinal);
+        Assert.Contains("return this.controlRuntime.predict(legacyState)", script, StringComparison.Ordinal);
+        Assert.Contains("this.autoplayCSharpDecisionSnapshot", script, StringComparison.Ordinal);
+        Assert.Contains("this.autoplayCSharpAppliedActionSnapshot", script, StringComparison.Ordinal);
         Assert.Contains("return requireDoomWasmState(\"createState\")(this, state)", script, StringComparison.Ordinal);
         Assert.Contains("return requireDoomWasmState(\"resolveObjective\")(signals)", script, StringComparison.Ordinal);
     }
@@ -1120,11 +1122,177 @@ public sealed class DoomWebGuiTests
         Assert.Contains("scriptUrl(\"/js/autoplay/cognition/pipeline-trace.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("const controlRuntimeFactory = self.AIKernelDoomControlRuntime?.create", runtime, StringComparison.Ordinal);
         Assert.Contains("this.autoplayControllerKind = \"control-runtime-shim\"", runtime, StringComparison.Ordinal);
-        Assert.Contains("this.controlRuntime.predict(wasmState)", runtime, StringComparison.Ordinal);
+        Assert.Contains("return this.controlRuntime.predict(legacyState)", runtime, StringComparison.Ordinal);
+        Assert.True(
+            runtime.IndexOf("csharpFirstDoor.evaluate(this, wasmState, wasmStatus)", StringComparison.Ordinal)
+                < runtime.IndexOf("return this.controlRuntime.predict(legacyState)", StringComparison.Ordinal),
+            "C# must decide ownership before the legacy runtime is invoked lazily.");
+        Assert.DoesNotContain("resolveOpeningForwardActionOverride", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("opening-forward-override-force", runtime, StringComparison.Ordinal);
         Assert.Contains("native doom.wasm remains engine/I/O only", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("aik_autoplay_init", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("callWasmJson", runtime, StringComparison.Ordinal);
         Assert.Contains("ControlRuntimeAdapter", File.ReadAllText(Path.Combine(root, "docs", "issues", "control-wasm-runtime-library-extraction.md")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomRuntime_UsesCSharpAsExclusiveFirstDoorOwnerAcrossWorkerAndFallbackHosts()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom.js"));
+        var adapter = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "csharp-first-door-adapter.js"));
+        var postRoomAdapter = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "autoplay", "csharp-post-computer-room-route-adapter.js"));
+        var worker = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker.js"));
+        var workerProxy = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom-worker-proxy.js"));
+        var loader = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-public-loader.js"));
+        var browserMain = File.ReadAllText(Path.Combine(root, "src", "DoomControlBrowser", "main.js"));
+        var browserBridge = File.ReadAllText(Path.Combine(root, "src", "DoomControlBrowser", "FirstDoorControlBrowserBridge.cs"));
+        var stagedBrowserMain = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "csharp-control", "main.js"));
+        var browserProject = File.ReadAllText(Path.Combine(root, "src", "DoomControlBrowser", "DoomControlBrowser.csproj"));
+        var solution = File.ReadAllText(Path.Combine(root, "AIKernel.Doom.slnx"));
+        var vmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "csharp-first-door-adapter-vm.test.mjs"));
+        var postRoomVmTest = File.ReadAllText(Path.Combine(root, "tests", "js", "csharp-post-computer-room-route-adapter-vm.test.mjs"));
+
+        Assert.Contains("FirstDoorBrowserControlSession", browserProject, StringComparison.Ordinal);
+        Assert.Contains("src/DoomControlBrowser/DoomControlBrowser.csproj", solution, StringComparison.Ordinal);
+        Assert.Contains("evaluateBrowserFirstDoor", browserMain, StringComparison.Ordinal);
+        Assert.Contains("evaluateBrowserPostComputerRoomRoute", browserMain, StringComparison.Ordinal);
+        Assert.Contains("releaseBrowserFirstDoorSession", browserMain, StringComparison.Ordinal);
+        Assert.DoesNotContain("evaluateFirstDoor", browserMain, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet.run()", browserMain, StringComparison.Ordinal);
+        Assert.Contains("Dictionary<string, BrowserSessionEntry> Sessions", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("MaximumBrowserSessions", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("ReleaseBrowserSession", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("EvaluateBrowserPostComputerRoomRoute", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("TryCreatePostComputerRoomActivationProof", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("Sessions.Count >= MaximumBrowserSessions", browserBridge, StringComparison.Ordinal);
+        Assert.Contains("Sessions.Remove(normalized)", browserBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("private static readonly FirstDoorBrowserControlSession Session", browserBridge, StringComparison.Ordinal);
+        Assert.Equal(browserMain, stagedBrowserMain);
+        Assert.True(File.Exists(Path.Combine(
+            root,
+            "src",
+            "DoomWeb",
+            "wwwroot",
+            "demo",
+            "doom",
+            "csharp-control",
+            "_framework",
+            "dotnet.native.wasm")));
+
+        Assert.Contains("self.AIKernelDoomCSharpFirstDoor", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("classifiedDoorOpenEvent", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("classifiedDoorFailureEvent", adapter, StringComparison.Ordinal);
+        Assert.Contains("readNativeFacts(runtime?.exports, 0)", adapter, StringComparison.Ordinal);
+        Assert.Contains("rawObservation: createRawObservation", adapter, StringComparison.Ordinal);
+        Assert.Contains("paletteIndicesBase64", adapter, StringComparison.Ordinal);
+        Assert.Contains("paletteRgbaBase64", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("firstDoorVisionKind:", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("routeMode:", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("doorIdentityConfidence:", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("firstDoorRouteEvidence", adapter, StringComparison.Ordinal);
+        Assert.Contains("manualUseSequence: runtime.autoplayManualUseSequence", adapter, StringComparison.Ordinal);
+        Assert.Contains("appliedActionAck: copyAppliedActionAck", adapter, StringComparison.Ordinal);
+        Assert.Contains("queuedUseInputEventSequence", adapter, StringComparison.Ordinal);
+        Assert.Contains("usePumped", adapter, StringComparison.Ordinal);
+        Assert.Contains("nativeLevelLoadSequenceAvailable", adapter, StringComparison.Ordinal);
+        Assert.Contains("function dispatch", adapter, StringComparison.Ordinal);
+        Assert.Contains("runtime.autoplayCSharpSemanticState = candidate", adapter, StringComparison.Ordinal);
+        Assert.Contains("captureSemanticTransaction", adapter, StringComparison.Ordinal);
+        Assert.Contains("restoreSemanticTransaction", adapter, StringComparison.Ordinal);
+        Assert.Contains("candidate.controlTick > existing.controlTick", adapter, StringComparison.Ordinal);
+        Assert.Contains("if (!isPlainRecord(action))", adapter, StringComparison.Ordinal);
+        Assert.Contains("throw tagNextOwnerError(new Error(\"semantic handoff compare-and-set conflict\"))", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("runtime.autoplayMilestones =", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("projectTrustedOpen", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("applyDecision", adapter, StringComparison.Ordinal);
+        Assert.Contains("CSHARP_FIRST_DOOR_ADAPTER_VM_TEST_OK", vmTest, StringComparison.Ordinal);
+        Assert.Contains("self.AIKernelDoomCSharpPostComputerRoomRoute", postRoomAdapter, StringComparison.Ordinal);
+        Assert.Contains("evaluateBrowserPostComputerRoomRoute", postRoomAdapter, StringComparison.Ordinal);
+        Assert.Contains("createPostRouteOverlay", postRoomAdapter, StringComparison.Ordinal);
+        Assert.Contains("csharpPostComputerRoomSemanticState", postRoomAdapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("csharpFirstDoorSemanticState: Object.assign({}, projectedSemanticState)", postRoomAdapter, StringComparison.Ordinal);
+        Assert.Contains("legacyPredict(legacyState)", postRoomAdapter, StringComparison.Ordinal);
+        Assert.Contains("CSHARP_POST_COMPUTER_ROOM_ROUTE_ADAPTER_VM_TEST_OK", postRoomVmTest, StringComparison.Ordinal);
+        Assert.Contains("this.autoplayCSharpSemanticState = dispatch.semanticState || this.autoplayCSharpSemanticState;", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("this.autoplayCSharpSemanticState = postComputerRoomDispatch?.semanticState", runtime, StringComparison.Ordinal);
+        Assert.Contains("csharpFirstDoorCommittedSemanticState: this.autoplayCSharpSemanticState || null", runtime, StringComparison.Ordinal);
+        Assert.Contains("csharpPostComputerRoomSemanticState: this.autoplayCSharpPostComputerRoomSemanticState || null", runtime, StringComparison.Ordinal);
+
+        Assert.Contains("scriptUrl(\"/js/autoplay/csharp-first-door-adapter.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("scriptUrl(\"/js/autoplay/csharp-post-computer-room-route-adapter.js\")", worker, StringComparison.Ordinal);
+        Assert.Contains("new URL(\"../csharp-control/main.js\", self.location.href)", worker, StringComparison.Ordinal);
+        Assert.Contains("await loadCSharpControl()", worker, StringComparison.Ordinal);
+        Assert.Contains("await import(runtimeScriptUrl)", worker, StringComparison.Ordinal);
+        Assert.DoesNotContain("importScripts(", worker, StringComparison.Ordinal);
+        Assert.DoesNotContain("(async function ()", worker, StringComparison.Ordinal);
+        Assert.Contains("type: \"module\"", workerProxy, StringComparison.Ordinal);
+        Assert.Contains("post(\"host-ready\"", worker, StringComparison.Ordinal);
+        Assert.Contains("message.type === \"host-ready\"", workerProxy, StringComparison.Ordinal);
+        Assert.Contains("this.pendingWorkerInit = { canvas, gpuMode }", workerProxy, StringComparison.Ordinal);
+        Assert.True(
+            worker.IndexOf("await loadCSharpControl()", StringComparison.Ordinal)
+                < worker.IndexOf("const runtimeScriptUrls", StringComparison.Ordinal),
+            "The C# runtime must initialize before legacy Doom scripts can alter Worker globals.");
+        Assert.True(
+            worker.IndexOf("await loadCSharpControl()", StringComparison.Ordinal)
+                < worker.IndexOf("runtime = new self.AIKernelDoomRuntime", StringComparison.Ordinal),
+            "Worker must await the C# runtime before creating the Doom runtime.");
+
+        Assert.Contains("autoplay/csharp-first-door-adapter.js", loader, StringComparison.Ordinal);
+        Assert.Contains("autoplay/csharp-post-computer-room-route-adapter.js", loader, StringComparison.Ordinal);
+        Assert.Contains("loadMainThreadCSharpControl", loader, StringComparison.Ordinal);
+        Assert.Contains("window.AIKernelDoomCSharpControlHost = \"worker\"", loader, StringComparison.Ordinal);
+        Assert.True(
+            loader.IndexOf("autoplay/csharp-first-door-adapter.js", StringComparison.Ordinal)
+                < loader.IndexOf("\"doom.js\"", StringComparison.Ordinal),
+            "The C# action adapter must load before Doom runtime code.");
+
+        Assert.Contains("csharpFirstDoorPacket = csharpFirstDoor.evaluate(this, wasmState, wasmStatus, state)", runtime, StringComparison.Ordinal);
+        Assert.Contains("const dispatch = csharpFirstDoor.dispatch(csharpFirstDoorPacket", runtime, StringComparison.Ordinal);
+        Assert.Contains("postRoute.createInput", runtime, StringComparison.Ordinal);
+        Assert.Contains("postRoute.evaluate", runtime, StringComparison.Ordinal);
+        Assert.Contains("postRoute.dispatch", runtime, StringComparison.Ordinal);
+        Assert.Contains("postComputerRoomDispatch?.semanticState", runtime, StringComparison.Ordinal);
+        Assert.Contains("postComputerRoomDispatch?.legacyState || dispatch.legacyState", runtime, StringComparison.Ordinal);
+        Assert.Contains("csharpFirstDoorState", runtime, StringComparison.Ordinal);
+        Assert.Contains("csharp-first-door-contract-fault", runtime, StringComparison.Ordinal);
+        Assert.Contains("exactAction: this.autoplayCSharpExactAction", runtime, StringComparison.Ordinal);
+        Assert.Contains("this.updateAutoplayKinesisActionLoop(rawAction, { exactAction: true })", runtime, StringComparison.Ordinal);
+        Assert.Contains("refreshCSharpNativeLevelLoadBoundary()", runtime, StringComparison.Ordinal);
+        Assert.Contains("this.autoplayCSharpAppliedActionSnapshot.usePumped = true", runtime, StringComparison.Ordinal);
+        Assert.Contains("const result = this.exports.doom_input(event.keycode, event.pressed)", runtime, StringComparison.Ordinal);
+        Assert.Contains("if (result !== OK)", runtime, StringComparison.Ordinal);
+        Assert.Contains("this.autoplayManualUseSequence", runtime, StringComparison.Ordinal);
+        Assert.Contains("releaseBrowserFirstDoorSession(this.autoplayCSharpSessionId)", runtime, StringComparison.Ordinal);
+        Assert.True(
+            runtime.IndexOf("if (this.refreshCSharpNativeLevelLoadBoundary())", StringComparison.Ordinal)
+                < runtime.IndexOf("csharpFirstDoor.evaluate(this, wasmState, wasmStatus, state)", StringComparison.Ordinal),
+            "The engine-owned level boundary must be applied before the next C# decision.");
+        Assert.True(
+            runtime.IndexOf("csharpFirstDoor.evaluate(this, wasmState, wasmStatus, state)", StringComparison.Ordinal)
+                < runtime.IndexOf("return this.controlRuntime.predict(legacyState)", StringComparison.Ordinal),
+            "Legacy prediction must be lazy and run only after the C# ownership decision.");
+        Assert.True(
+            runtime.IndexOf("if (this.autoplayCSharpExactAction) {", StringComparison.Ordinal)
+                < runtime.IndexOf("this.sanitizeDoorZeroPostDoorAction(rawAction, wasmState, state)", StringComparison.Ordinal),
+            "Exclusive and failed-safe C# actions must return before legacy sanitizers and status mutation.");
+
+        Assert.Equal(
+            runtime,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom.js")));
+        Assert.Equal(
+            worker,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-worker.js")));
+        Assert.Equal(
+            workerProxy,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-worker-proxy.js")));
+        Assert.Equal(
+            adapter,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "autoplay", "csharp-first-door-adapter.js")));
+        Assert.Equal(
+            postRoomAdapter,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "autoplay", "csharp-post-computer-room-route-adapter.js")));
     }
 
     [Fact]
@@ -1141,6 +1309,10 @@ public sealed class DoomWebGuiTests
         Assert.Contains("function applyAction", adapter, StringComparison.Ordinal);
         Assert.Contains("function releaseMoveInputs", adapter, StringComparison.Ordinal);
         Assert.Contains("function releaseInputs", adapter, StringComparison.Ordinal);
+        Assert.Contains("EXACT_ACTION_MODE", adapter, StringComparison.Ordinal);
+        Assert.Contains("appliedAction", adapter, StringComparison.Ordinal);
+        Assert.Contains("accepted !== true", adapter, StringComparison.Ordinal);
+        Assert.Contains("appliedAction.use.eventQueued = true", adapter, StringComparison.Ordinal);
         Assert.Contains("function requireDoomActionAdapter", runtime, StringComparison.Ordinal);
         Assert.Contains("requireDoomActionAdapter(\"applyAction\")(action", runtime, StringComparison.Ordinal);
         Assert.Contains("return requireDoomActionAdapter(\"releaseMoveInputs\")", runtime, StringComparison.Ordinal);
@@ -1152,6 +1324,10 @@ public sealed class DoomWebGuiTests
         Assert.Contains("DOOM_ACTION_ADAPTER_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("native ABI path should be selected", vmTest, StringComparison.Ordinal);
         Assert.Contains("manual move mode should not queue movement keys", vmTest, StringComparison.Ordinal);
+        Assert.Contains("exact mode must bypass Bonsai normalization", vmTest, StringComparison.Ordinal);
+        Assert.Equal(
+            adapter,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "autoplay", "doom-action-adapter.js")));
     }
 
     [Fact]
@@ -1180,6 +1356,19 @@ public sealed class DoomWebGuiTests
         Assert.True(
             runtime.IndexOf("this.scheduleAutoplayFrameRetryDispatch(state)", StringComparison.Ordinal) <
             runtime.IndexOf("this.updateGpuHudOverlayState(state);", StringComparison.Ordinal));
+        Assert.True(
+            runtime.IndexOf("this.scheduleAutoplayFrameRetryDispatch(state)", StringComparison.Ordinal) <
+            runtime.IndexOf("if (this.tryRunWasmAutoplay(state))", StringComparison.Ordinal),
+            "A confirmed death/retry must preempt C# exclusive autoplay ownership.");
+        Assert.DoesNotContain(
+            "!this.wasmAutoplayReady && this.scheduleAutoplayFrameRetryDispatch",
+            runtime,
+            StringComparison.Ordinal);
+        Assert.Contains("opening-reset|native-level-load", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Boolean(summary.healthFaceHeartbeatAlive || summary.faceHeartbeatAlive)",
+            runtime,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayRetrySequence", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayRetryWaitFrames", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("this.autoplayRetryCooldownFrames", runtime, StringComparison.Ordinal);
@@ -1324,6 +1513,9 @@ public sealed class DoomWebGuiTests
         Assert.Contains("scriptUrl(\"/js/doom-native-audio.js\")", worker, StringComparison.Ordinal);
         Assert.Contains("DOOM_NATIVE_AUDIO_VM_TEST_OK", vmTest, StringComparison.Ordinal);
         Assert.Contains("muted native audio should still drain without playback", vmTest, StringComparison.Ordinal);
+        Assert.Equal(
+            adapter,
+            File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-native-audio.js")));
     }
 
     [Fact]
@@ -1375,6 +1567,38 @@ public sealed class DoomWebGuiTests
         Assert.DoesNotContain("src\\aik_autoplay.c", buildPs1, StringComparison.Ordinal);
         Assert.DoesNotContain("_aik_autoplay_init", buildSh, StringComparison.Ordinal);
         Assert.DoesNotContain("src/aik_autoplay.c", buildSh, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoomNativeInputAbi_ReportsQueueAcceptanceBeforeBrowserAcknowledgement()
+    {
+        var root = FindRepoRoot(AppContext.BaseDirectory);
+        var header = File.ReadAllText(Path.Combine(root, "src", "DoomWasm.Native", "include", "aik_doom_abi.h"));
+        var inputHeader = File.ReadAllText(Path.Combine(root, "src", "DoomWasm.Native", "include", "aik_doom_input.h"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "DoomWasm.Native", "src", "aik_doom_abi.c"));
+        var engineSource = File.ReadAllText(Path.Combine(root, "src", "DoomWasm.Native", "src", "doomgeneric_aikernel.c"));
+        var runtime = File.ReadAllText(Path.Combine(root, "src", "DoomWeb", "wwwroot", "js", "doom.js"));
+
+        Assert.Contains("AIK_DOOM_EXPORT int doom_input(int keycode, int pressed);", header, StringComparison.Ordinal);
+        Assert.Contains("return aik_doom_input_push(keycode, pressed);", source, StringComparison.Ordinal);
+        Assert.Contains("result = aik_doom_input_push(keycode, desired);", source, StringComparison.Ordinal);
+        Assert.Contains("void aik_doom_input_action_reset(void);", inputHeader, StringComparison.Ordinal);
+        Assert.Contains("void aik_doom_input_action_reset(void)", source, StringComparison.Ordinal);
+        Assert.True(
+            engineSource.IndexOf("aik_doom_input_reset();", StringComparison.Ordinal)
+                < engineSource.IndexOf("aik_doom_input_action_reset();", StringComparison.Ordinal),
+            "doom_init must reset both the native queue and its action latch.");
+        Assert.True(
+            source.IndexOf("result = aik_doom_input_push(keycode, desired);", StringComparison.Ordinal)
+                < source.IndexOf("*current = desired;", StringComparison.Ordinal),
+            "The native action latch may change only after its queue event is accepted.");
+        Assert.Contains("const event = this.pendingInputEvents[0]", runtime, StringComparison.Ordinal);
+        Assert.Contains("const result = this.exports.doom_input(event.keycode, event.pressed)", runtime, StringComparison.Ordinal);
+        Assert.Contains("if (result !== OK)", runtime, StringComparison.Ordinal);
+        Assert.True(
+            runtime.IndexOf("if (result !== OK)", StringComparison.Ordinal)
+                < runtime.LastIndexOf("this.pendingInputEvents.shift()", StringComparison.Ordinal),
+            "The browser must retain a rejected native event for retry.");
     }
 
     [Fact]

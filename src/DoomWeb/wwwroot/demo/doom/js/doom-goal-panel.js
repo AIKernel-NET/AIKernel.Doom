@@ -12,6 +12,7 @@
     "align-first-door": "Align First Door",
     "approach-first-door": "Approach First Door",
     "open-first-door": "Open First Door",
+    "enter-computer-room": "Enter Computer Room",
     "enter-computer-control-room": "Enter Computer Room",
     "reach-central-hall": "Reach Central Hall",
     "engage-front-enemy": "Engage Front Enemy",
@@ -38,20 +39,67 @@
     return autoplay?.goalState || autoplay?.GoalState || autoplay?.autoplayState?.goalState || autoplay?.AutoplayState?.GoalState || null;
   }
 
-  function resolvePrimaryObjective(autoplay) {
-    const dto = resolveGoalState(autoplay);
-    if (dto?.objective || dto?.Objective) {
-      return dto.objective || dto.Objective;
+  function number(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  const postFirstDoorIntentPattern = /post[- ]?door|computer|monitor|bridge|central|gatekeeper|final|exit|cross[- ]?bridge/i;
+
+  function isPostFirstDoorIntent(value) {
+    return postFirstDoorIntentPattern.test(String(value || ""));
+  }
+
+  function firstDoorOpened(autoplay) {
+    const milestones = autoplay?.milestones || {};
+    if (Object.prototype.hasOwnProperty.call(autoplay || {}, "firstDoorOpened")) {
+      return Boolean(autoplay.firstDoorOpened);
     }
 
+    return Math.max(
+      number(autoplay?.doorOpenedCount, 0),
+      number(milestones.doorOpenedCount, 0),
+      number(milestones.doorOpened, 0),
+      number(autoplay?.doorOpened, 0)) > 0;
+  }
+
+  function resolveCurrentGoalState(autoplay) {
+    const dto = resolveGoalState(autoplay);
+    if (!dto) {
+      return null;
+    }
+
+    const dtoTelos = String(dto.telos || dto.Telos || "");
+    const dtoObjective = String(dto.objective || dto.Objective || "");
+    if (firstDoorOpened(autoplay)
+      && (/first[- ]?door/i.test(dtoTelos) || /first[- ]?door|door corridor/i.test(dtoObjective))) {
+      return null;
+    }
+
+    return dto;
+  }
+
+  function resolvePrimaryObjective(autoplay) {
     const milestones = autoplay?.milestones || {};
     const objective = String(autoplay?.objective || "");
+    const opened = firstDoorOpened(autoplay);
     if (!autoplay?.enabled) {
       return "Idle";
     }
 
     if (autoplay.healthLikelyDead || autoplay.healthSensor?.retryRequested || autoplay.retryDispatch?.active) {
       return "Recover From Death";
+    }
+
+    const dto = resolveCurrentGoalState(autoplay);
+    if (dto?.objective || dto?.Objective) {
+      return dto.objective || dto.Objective;
+    }
+
+    if (!opened && (isPostFirstDoorIntent(objective) || isPostFirstDoorIntent(autoplay.controlPipeline))) {
+      return milestones.firstDoorCorridorLocated || milestones.firstDoorUseAttempted
+        ? "Open First Door"
+        : "Locate First Door Corridor";
     }
 
     if (objective === "press-exit-switch" || milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
@@ -75,16 +123,19 @@
       || objective === "enter-first-door-corridor"
       || objective === "align-first-door"
       || objective === "approach-first-door"
-      || objective === "open-first-door"
-      || objective === "enter-computer-control-room") {
+      || objective === "open-first-door") {
       return labelize(objective);
     }
 
-    if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered || autoplay.controlPipeline === "ComputerRoom") {
-      return "Navigate Control Room";
+    if (opened && milestones.computerRoomEntered && !milestones.centralHallEntered) {
+      return "Reach Central Hall";
     }
 
-    if ((milestones.doorOpened || 0) > 0 || milestones.darkZoneEntered || (milestones.computerRoomAdvanceFrames || 0) > 0) {
+    if (opened && (milestones.centralHallEntered || milestones.stairsEntered)) {
+      return "Secure Central Hall";
+    }
+
+    if (opened) {
       return "Reach Computer Control Room";
     }
 
@@ -100,13 +151,9 @@
   }
 
   function resolveTelosObjective(autoplay) {
-    const dto = resolveGoalState(autoplay);
-    if (dto?.telos || dto?.Telos) {
-      return dto.telos || dto.Telos;
-    }
-
     const milestones = autoplay?.milestones || {};
     const objective = String(autoplay?.objective || "");
+    const opened = firstDoorOpened(autoplay);
     if (!autoplay?.enabled) {
       return "Idle";
     }
@@ -115,16 +162,29 @@
       return "Recovery";
     }
 
+    const dto = resolveCurrentGoalState(autoplay);
+    if (dto?.telos || dto?.Telos) {
+      return dto.telos || dto.Telos;
+    }
+
+    if (!opened && (isPostFirstDoorIntent(objective) || isPostFirstDoorIntent(autoplay.controlPipeline))) {
+      return "FirstDoor";
+    }
+
     if (milestones.finalRoomEntered || autoplay.controlPipeline === "ExitRoom") {
       return "Exit";
     }
 
-    if (milestones.centralHallEntered || milestones.stairsEntered || milestones.computerRoomEntered || autoplay.controlPipeline === "ComputerRoom") {
-      return "ComputerRoom";
+    if (opened && milestones.computerRoomEntered && !milestones.centralHallEntered) {
+      return "CentralHall";
     }
 
-    if ((milestones.doorOpened || 0) > 0 || milestones.darkZoneEntered || (milestones.computerRoomAdvanceFrames || 0) > 0) {
-      return "ComputerRoom";
+    if (opened && (milestones.centralHallEntered || milestones.stairsEntered)) {
+      return "CentralHall";
+    }
+
+    if (opened) {
+      return "PostDoor";
     }
 
     if (objective.indexOf("first-door") >= 0
@@ -313,7 +373,7 @@
       return "[L] Align Door";
     }
 
-    if (/computer|bridge|advance|corridor|transit/i.test(mobility) || autoplay.controlPipeline === "ComputerRoom") {
+    if (/computer|bridge|advance|corridor|transit/i.test(mobility)) {
       return "[L] Advance Route";
     }
 

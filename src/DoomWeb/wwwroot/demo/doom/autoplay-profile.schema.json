@@ -65,7 +65,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room"]
+                "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room", "central-hall", "final-room", "exit-switch"]
               },
               "kind": { "type": "string", "minLength": 1 }
             },
@@ -109,7 +109,7 @@
               "evidence": {
                 "type": "object",
                 "propertyNames": {
-                  "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room"]
+                  "enum": ["door", "corridor", "enemy", "safe-zone", "bridge", "computer-room", "central-hall", "final-room", "exit-switch"]
                 },
                 "additionalProperties": { "type": "number" }
               },
@@ -126,6 +126,61 @@
                   "attackKey": { "type": "string" }
                 },
                 "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "phasePipelines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "when"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "when": { "type": "string", "minLength": 1 },
+              "priority": { "type": "number" },
+              "exclusive": { "type": "boolean" },
+              "allowedStageIds": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "allowedStagePrefixes": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "actionSequences": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": { "type": "string", "minLength": 1 },
+                    "exclusive": { "type": "boolean" },
+                    "maxFrames": { "type": "integer", "minimum": 1 },
+                    "triggerStagePrefixes": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1 }
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "frames", "action"],
+                        "properties": {
+                          "id": { "type": "string", "minLength": 1 },
+                          "frames": { "type": "integer", "minimum": 1 },
+                          "action": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
               }
             },
             "additionalProperties": false

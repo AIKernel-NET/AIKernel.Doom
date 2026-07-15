@@ -141,7 +141,7 @@ renderer.renderDebugOverlay(dtoOverlay, {
         { kind: "objective", label: "PRIORITY:", value: "[L] Approach Target", left: 33, top: 49, width: 34, height: 16, priority: "mid", active: true },
         { kind: "door", label: "route", value: "first-door 0.42", left: 30, top: 18, width: 40, height: 42, priority: "high", active: true },
         { kind: "bridge", label: "bridge", value: "post-door 0.66", left: 30, top: 68, width: 40, height: 10, priority: "mid", active: true },
-        { kind: "zoe", label: "ZOE WARN", value: "hp=42 risk=0.16 low-health-goal-first", left: 4, top: 5, width: 28, height: 8, priority: "mid", active: true }
+        { kind: "zoe", label: "ZOE WARN", value: "vital=critical/2 risk=0.16 low-health-goal-first", left: 3.6, top: 17.2, width: 27, height: 7.4, priority: "mid", active: true }
       ],
       enemyCircle: { type: "visual", yaw: -12, direction: "left", confidence: 0.54, left: 21, top: 32, width: 12, height: 14, active: true },
       useProbe: { active: true, direction: "right", frames: 1 },
@@ -208,6 +208,162 @@ assert(combatNodes.some(node => String(node.className).includes("debug-gpu-label
 assert(!combatNodes.some(node => String(node.className).includes("is-vision-heat")), "GPU-backed overlay should let the WebGPU HUD own heat-grid rendering");
 assert(!combatNodes.some(node => String(node.className).includes("debug-region")), "GPU-backed overlay should not duplicate rectangular CSS regions");
 assert(combatOverlay.dataset.cssOverlayMode === "reduced", "GPU-backed overlay should mark CSS overlay work as reduced");
+
+const lifeOverlay = createNode("div");
+renderer.renderDebugOverlay(lifeOverlay, {
+  autoplay: {
+    enabled: true,
+    healthSensor: {
+      active: true,
+      faceLifePhase: "moribund",
+      faceLifeLevel: 1,
+      faceHeartbeatAlive: false,
+      faceHeartbeatOpacity: 0.18
+    }
+  }
+}, { force: true, gpuBacked: true });
+const lifeNode = flatten(lifeOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(lifeNode, "GPU-backed overlay should render the face-heartbeat badge when face life evidence is available");
+assert(lifeNode.style.top === "22.8%", "face-heartbeat badge should sit below the audio HUD cluster");
+assert(lifeNode.style.left === "3.4%", "face-heartbeat badge should stay on the left diagnostic rail");
+assert(lifeNode.style.opacity === "0.66", "classified warning face-heartbeat badge should stay visible while still pulsing with the heartbeat envelope");
+const lifeIconNode = lifeNode.children?.find(child => String(child.className).includes("life-heart-icon"));
+assert(lifeIconNode?.style?.opacity === "0.41", "face-heartbeat icon should keep a visible floor while preserving pulse decay contrast");
+const lifeValueNode = lifeNode.children?.find(child => String(child.className).includes("life-heart-value"));
+assert(lifeValueNode?.style?.opacity === "0.59", "face-heartbeat value should remain readable while heartbeat opacity fades");
+assert(lifeNode.dataset?.heartbeatOpacity === "0.41", "face-heartbeat badge should expose visible pulse opacity diagnostics");
+
+const unknownLifeOverlay = createNode("div");
+renderer.renderDebugOverlay(unknownLifeOverlay, {
+  autoplay: {
+    enabled: true,
+    healthSensor: {
+      active: false,
+      faceLifePhase: "unknown",
+      faceLifeLevel: 0,
+      faceHeartbeatAlive: false,
+      faceHeartbeatOpacity: 0
+    }
+  }
+}, { force: true, gpuBacked: true });
+const unknownLifeNode = flatten(unknownLifeOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(unknownLifeNode, "GPU-backed overlay should keep unknown face-heartbeat state visible for ROI diagnostics");
+assert(unknownLifeNode.style.opacity === "0.52", "unknown face-heartbeat badge should remain visible enough to debug missing ROI");
+assert(unknownLifeNode.children?.some(child => child.textContent === "?"), "unknown face-heartbeat badge should render a question mark");
+const unknownLifeIconNode = unknownLifeNode.children?.find(child => String(child.className).includes("life-heart-icon"));
+assert(unknownLifeIconNode?.style?.opacity === "0.28", "unknown face-heartbeat icon should fade low when no pulse is present");
+
+const healthFaceBridgeOverlay = createNode("div");
+renderer.renderDebugOverlay(healthFaceBridgeOverlay, {
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "healthy",
+    healthFaceLifeLevel: 5,
+    healthSensor: {
+      active: true,
+      faceLifePhase: "unknown",
+      faceLifeLevel: 0,
+      faceLifeQuantizedPhase: "unknown",
+      faceLifeQuantizedLevel: 0,
+      healthFaceLifePhase: "healthy",
+      healthFaceLifeLevel: 5,
+      faceHeartbeatAlive: true,
+      faceHeartbeatOpacity: 1
+    }
+  }
+}, { force: true, gpuBacked: true });
+const healthFaceBridgeNode = flatten(healthFaceBridgeOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(healthFaceBridgeNode, "GPU-backed overlay should render the face-heartbeat badge from healthFace fields");
+assert(healthFaceBridgeNode.children?.some(child => child.textContent === "5"), "healthFace life fields should bridge through stale unknown quantized fields as a level-5 heart");
+assert(!healthFaceBridgeNode.children?.some(child => child.textContent === "?"), "stale unknown quantized fields must not mask healthy healthFace evidence");
+
+const stabilizedLifeConflictOverlay = createNode("div");
+renderer.renderDebugOverlay(stabilizedLifeConflictOverlay, {
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    faceHeartbeatAlive: true,
+    healthSensor: {
+      active: true,
+      faceLifeTemplatePhase: "healthy",
+      faceLifeTemplateLevel: 5,
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceHeartbeatVisualOpacity: 0.75
+    }
+  }
+}, { force: true, gpuBacked: true });
+const stabilizedLifeConflictNode = flatten(stabilizedLifeConflictOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(stabilizedLifeConflictNode?.children?.some(child => child.textContent === "1"), "stabilized moribund level must outrank a one-frame healthy template pose");
+assert(!stabilizedLifeConflictNode?.children?.some(child => child.textContent === "5"), "raw healthy template must not overwrite the stabilized life floor in the HUD");
+assert(stabilizedLifeConflictNode?.title?.includes("fade0.75"), "canonical heartbeat false must outrank stale heartbeat aliases while visual opacity remains diagnostic-only");
+assert(!stabilizedLifeConflictNode?.title?.includes("heartbeat=hb"), "stale top-level heartbeat true must not resurrect canonical logical false");
+
+const healthFaceAliasPulseOverlay = createNode("div");
+renderer.renderDebugOverlay(healthFaceAliasPulseOverlay, {
+  autoplay: {
+    enabled: true,
+    healthSensor: {
+      active: true,
+      healthFaceLifePhase: "damaged",
+      healthFaceLifeLevel: 3,
+      faceHeartbeatOpacity: 0,
+      healthFaceHeartbeatAlive: true,
+      healthFaceHeartbeatOpacity: 0.67,
+      healthFaceNoHeartbeatFrames: 4
+    }
+  }
+}, { force: true, gpuBacked: true });
+const healthFaceAliasPulseNode = flatten(healthFaceAliasPulseOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(healthFaceAliasPulseNode, "GPU-backed overlay should render the face-heartbeat badge from healthFace heartbeat aliases");
+assert(healthFaceAliasPulseNode.children?.some(child => child.textContent === "3"), "healthFace life aliases should classify the badge level");
+assert(healthFaceAliasPulseNode.dataset?.heartbeatOpacity === "0.76", "healthFace heartbeat opacity alias should drive pulse opacity");
+const healthFaceAliasPulseValueNode = healthFaceAliasPulseNode.children?.find(child => String(child.className).includes("life-heart-value"));
+assert(healthFaceAliasPulseValueNode?.style?.opacity === "0.83", "healthFace heartbeat opacity should be visible on the heart value");
+assert(healthFaceAliasPulseNode.title.includes("hb"), "healthFace heartbeat alive alias should keep the badge in heartbeat mode");
+
+const visualHeartbeatOverlay = createNode("div");
+renderer.renderDebugOverlay(visualHeartbeatOverlay, {
+  autoplay: {
+    enabled: true,
+    healthSensor: {
+      active: true,
+      faceLifePhase: "healthy",
+      faceLifeLevel: 5,
+      faceHeartbeatAlive: false,
+      faceHeartbeatOpacity: 0,
+      faceHeartbeatVisualOpacity: 0.80
+    }
+  }
+}, { force: true, gpuBacked: true });
+const visualHeartbeatNode = flatten(visualHeartbeatOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(visualHeartbeatNode?.dataset?.heartbeatOpacity === "0.86", "visual heartbeat opacity should drive the HUD pulse even when control heartbeat opacity is zero");
+assert(visualHeartbeatNode?.title.includes("fade0.80"), "visual heartbeat opacity should remain visible in the diagnostic title");
+
+const healthFaceNoHeartbeatOverlay = createNode("div");
+renderer.renderDebugOverlay(healthFaceNoHeartbeatOverlay, {
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    healthFaceNoHeartbeatFrames: 54,
+    healthSensor: {
+      active: false,
+      faceLifePhase: "unknown",
+      faceLifeLevel: 0,
+      faceHeartbeatAlive: false,
+      faceHeartbeatOpacity: 0
+    }
+  }
+}, { force: true, gpuBacked: true });
+const healthFaceNoHeartbeatNode = flatten(healthFaceNoHeartbeatOverlay).find(node => String(node.className).includes("debug-life-heart"));
+assert(healthFaceNoHeartbeatNode, "GPU-backed overlay should render face vital state even when numeric health sensor is inactive");
+assert(healthFaceNoHeartbeatNode.style.opacity === "0.58", "moribund face vital evidence should remain visible but pulse-sensitive when heartbeat opacity has decayed");
+assert(healthFaceNoHeartbeatNode.title.includes("n54"), "face-heartbeat badge should expose no-heartbeat frame count in diagnostics");
+assert(healthFaceNoHeartbeatNode.children?.some(child => child.textContent === "1"), "top-level healthFace life fields should render a level-1 heart while numeric health is inactive");
+const healthFaceNoHeartbeatIconNode = healthFaceNoHeartbeatNode.children?.find(child => String(child.className).includes("life-heart-icon"));
+assert(healthFaceNoHeartbeatIconNode?.style?.opacity === "0.28", "no-heartbeat face vital icon should fade low while the badge remains diagnostically visible");
 
 const gpuDtoOverlay = createNode("div");
 renderer.renderDebugOverlay(gpuDtoOverlay, {

@@ -50,6 +50,13 @@ public static class AutoplayPipelineDslCompiler
             .ThenBy(stage => stage.Id, StringComparer.Ordinal)
             .Select(stage => CompileStage(stage, defaultThreshold))
             .ToArray();
+        var phasePipelines = definition.PhasePipelines
+            .DefaultIfEmpty(new AutoplayPhasePipelineDefinition { Id = "fallback-all", When = "true" })
+            .Where(phase => !string.IsNullOrWhiteSpace(phase.Id))
+            .OrderByDescending(phase => phase.Priority)
+            .ThenBy(phase => phase.Id, StringComparer.Ordinal)
+            .Select(CompilePhasePipeline)
+            .ToArray();
         var semanticSymbols = definition.SemanticMemory
             .Select(symbol => symbol.Id)
             .Concat(definition.Stages.SelectMany(stage => stage.Evidence.Keys))
@@ -62,6 +69,7 @@ public static class AutoplayPipelineDslCompiler
         return new CompiledAutoplayPipeline(
             string.IsNullOrWhiteSpace(definition.Name) ? profile.StrategyName : definition.Name,
             stages,
+            phasePipelines,
             semanticSymbols,
             dynamicCompilation.Graph,
             dynamicCompilation.Ast.Kinesis.Zoe.VetoRules,
@@ -96,6 +104,45 @@ public static class AutoplayPipelineDslCompiler
             stage.Evidence,
             AutoplayPipelineExpressionCompiler.CompileBooleanExpression(stage.When),
             CompileAction(stage.Action));
+
+    private static CompiledAutoplayPhasePipelineSet CompilePhasePipeline(AutoplayPhasePipelineDefinition phase)
+        => new(
+            phase.Id,
+            phase.Priority,
+            phase.Exclusive,
+            phase.AllowedStageIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .ToHashSet(StringComparer.Ordinal),
+            phase.AllowedStagePrefixes
+                .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
+                .Select(prefix => prefix.Trim())
+                .ToArray(),
+            phase.ActionSequences
+                .Where(sequence => !string.IsNullOrWhiteSpace(sequence.Id))
+                .Select(CompileActionSequence)
+                .ToArray(),
+            AutoplayPipelineExpressionCompiler.CompileBooleanExpression(phase.When));
+
+    private static CompiledAutoplayActionSequence CompileActionSequence(AutoplayActionSequenceDefinition sequence)
+        => new(
+            sequence.Id,
+            sequence.Exclusive,
+            Math.Max(1, sequence.MaxFrames),
+            sequence.TriggerStagePrefixes
+                .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
+                .Select(prefix => prefix.Trim())
+                .ToArray(),
+            sequence.Steps
+                .Where(step => !string.IsNullOrWhiteSpace(step.Id))
+                .Select(CompileActionSequenceStep)
+                .ToArray());
+
+    private static CompiledAutoplayActionSequenceStep CompileActionSequenceStep(AutoplayActionSequenceStepDefinition step)
+        => new(
+            step.Id,
+            Math.Max(1, step.Frames),
+            CompileAction(step.Action));
 
     private static Func<AutoplayPipelineContext, ActionCommand> CompileAction(IReadOnlyDictionary<string, string> action)
     {

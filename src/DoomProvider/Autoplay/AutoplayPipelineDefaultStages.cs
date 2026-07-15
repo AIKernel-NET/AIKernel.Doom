@@ -34,7 +34,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.1f),
             Stage(
                 "low-health-goal-first",
-                "health > 0 && health < $lowHealthThreshold",
+                "doorOpenedCount > 0 && health > 0 && health < $lowHealthThreshold",
                 new()
                 {
                     ["moveForward"] = "depthSig > $blockedDepth",
@@ -67,20 +67,20 @@ internal static class AutoplayPipelineDefaultStages
                 "soundEvent && trustedCombatEvidence && ammoLikelyEmpty == false",
                 AutoplayPipelineActionTemplates.Combat(),
                 80,
-                "avoid-enemy",
+                "engage-front-enemy",
                 new() { ["enemy"] = 1.0f },
                 0.35f),
             Stage(
                 "combat-visual",
                 "visualEnemyVisible && trustedCombatEvidence && ammoLikelyEmpty == false",
-                AutoplayPipelineActionTemplates.Combat(),
+                AutoplayPipelineActionTemplates.VisualCombat(),
                 79,
-                "avoid-enemy",
+                "engage-front-enemy",
                 new() { ["enemy"] = 1.0f },
                 0.35f),
             Stage(
                 "bridge-poison-straight-lock",
-                "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeGreenHazard >= 0.18 && depthSig > $blockedDepth",
+                "doorOpenedCount > 0 && centralHallEntered == false && bridgeLaneVisible && bridgeGreenHazard >= 0.18 && depthSig > $blockedDepth && trustedCombatEvidence == false && visualEnemyVisible == false",
                 AutoplayPipelineActionTemplates.StraightAdvance(),
                 97.5f,
                 "reach-central-hall",
@@ -88,7 +88,7 @@ internal static class AutoplayPipelineDefaultStages
                 0.1f),
             Stage(
                 "combat-visual-center-fire",
-                "doorOpenedCount > 0 && visualEnemyVisible && trustedCombatEvidence && ammoLikelyEmpty == false",
+                "visualEnemyVisible && trustedCombatEvidence && ammoLikelyEmpty == false && visualEnemyConfidence >= 0.52 || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && audioEnemyStrong || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyConfidence >= 0.88 || doorOpenedCount > 0 && visualEnemyVisible && ammoLikelyEmpty == false && enemyStructuralDecoy == false && trustedCombatEvidence && visualEnemyCentered && visualEnemyFireReady && enemyConfidence >= 0.42 && visualEnemyConfidence >= 0.42",
                 AutoplayPipelineActionTemplates.VisualCombat(),
                 87.4f,
                 "engage-front-enemy",
@@ -102,6 +102,31 @@ internal static class AutoplayPipelineDefaultStages
                 "engage-front-enemy",
                 new() { ["enemy"] = 0.7f, ["computer-room"] = 0.3f },
                 0.18f),
+            Stage(
+                "closed-door-first-door-weak-vision-reacquire",
+                "doorOpenedCount <= 0 && routeMode == door-approach && firstDoorPhaseReady && context == open-space && firstDoorRouteEvidenceReady && useProbeConfidence < 0.08 && routeTextureWallOcclusion == false",
+                new()
+                {
+                    ["moveForward"] = "true",
+                    ["moveBackward"] = "false",
+                    ["strafeLeft"] = "false",
+                    ["strafeRight"] = "false",
+                    ["turnYaw"] = "recommendedYaw",
+                    ["useKey"] = "false",
+                    ["runKey"] = "true"
+                },
+                86.13f,
+                "approach-first-door",
+                new() { ["door"] = 0.48f, ["corridor"] = 0.56f },
+                0.0f),
+            Stage(
+                "door-approach-weak-vision-contact-probe",
+                "doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && currentRoute == first-door-route && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && footObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && bridgeDoorScore >= 0.24 && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && footObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && currentRoute == first-door-route && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && motionObstacleScore >= 0.58 || doorOpenedCount <= 0 && routeMode == door-approach && context == open-space && routeLoopBudgetExceeded == false && spawnLandmarkRouteEvidence >= 0.36 && computerRoomConfidence < 0.30 && bridgeConfidence < 0.30 && bridgeDoorScore >= 0.24 && firstDoorVision9x9Score >= 0.34 && firstDoorUse3x3Score < 0.08 && routeTextureWallOcclusion == false && motionObstacleScore >= 0.58",
+                AutoplayPipelineActionTemplates.DoorProbe(),
+                86.12f,
+                "open-first-door",
+                new() { ["door"] = 0.62f, ["corridor"] = 0.42f },
+                0.0f),
             Stage(
                 "door-corner-probe",
                 "context == corner",

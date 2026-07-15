@@ -21,6 +21,56 @@
       : [];
   }
 
+  function sortPhasePipelines(phasePipelines, numberFn = fallbackNumber) {
+    return Array.isArray(phasePipelines)
+      ? phasePipelines
+        .filter(phase => phase?.id)
+        .slice()
+        .sort((a, b) => numberOf(b.priority, numberFn, 0) - numberOf(a.priority, numberFn, 0)
+          || String(a.id).localeCompare(String(b.id)))
+      : [];
+  }
+
+  function selectedPhaseFallback() {
+    return Object.freeze({
+      id: "fallback-all",
+      when: "true",
+      priority: 0,
+      exclusive: false,
+      allowedStageIds: [],
+      allowedStagePrefixes: [],
+      actionSequences: []
+    });
+  }
+
+  function selectPhasePipeline(context, phasePipelines, options = {}) {
+    const evaluateWhen = typeof options.evaluateWhen === "function" ? options.evaluateWhen : () => false;
+    for (const phase of phasePipelines || []) {
+      if (evaluateWhen(context, phase?.when || "false")) {
+        return phase;
+      }
+    }
+
+    return selectedPhaseFallback();
+  }
+
+  function filterStagesByPhasePipeline(stages, phasePipeline) {
+    const allowedIds = new Set(Array.isArray(phasePipeline?.allowedStageIds)
+      ? phasePipeline.allowedStageIds.filter(Boolean).map(String)
+      : []);
+    const allowedPrefixes = Array.isArray(phasePipeline?.allowedStagePrefixes)
+      ? phasePipeline.allowedStagePrefixes.filter(Boolean).map(String)
+      : [];
+    if (!allowedIds.size && !allowedPrefixes.length) {
+      return stages || [];
+    }
+
+    return (stages || []).filter((stage) => {
+      const id = String(stage?.id || "");
+      return allowedIds.has(id) || allowedPrefixes.some(prefix => id.startsWith(prefix));
+    });
+  }
+
   function evaluateStages(context, stages, options = {}) {
     const numberFn = typeof options.number === "function" ? options.number : fallbackNumber;
     const evaluateWhen = typeof options.evaluateWhen === "function" ? options.evaluateWhen : () => false;
@@ -63,6 +113,9 @@
 
   self.AIKernelDoomControlArbitration = Object.freeze({
     sortStages,
+    sortPhasePipelines,
+    selectPhasePipeline,
+    filterStagesByPhasePipeline,
     evaluateStages
   });
 })();

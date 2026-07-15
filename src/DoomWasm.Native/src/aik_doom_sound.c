@@ -3,11 +3,13 @@
 #include "deh_str.h"
 #include "doomtype.h"
 #include "i_sound.h"
+#include "sounds.h"
 #include "w_wad.h"
 #include "z_zone.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define AIK_DOOM_AUDIO_SAMPLE_RATE 44100
 #define AIK_DOOM_AUDIO_CHANNELS 2
@@ -15,12 +17,22 @@
 #define AIK_DOOM_AUDIO_MAX_SOUND_FRAMES 44100
 #define AIK_DOOM_AUDIO_OUTPUT_GAIN_NUM 3
 #define AIK_DOOM_AUDIO_OUTPUT_GAIN_DEN 2
+#define AIK_DOOM_AUDIO_EVENT_CAPACITY 32
+#define AIK_DOOM_AUDIO_EVENT_NAME_BYTES 9
+
+typedef struct
+{
+    uint32_t sequence;
+    int32_t sfx_id;
+    char sfx_name[AIK_DOOM_AUDIO_EVENT_NAME_BYTES];
+} aik_doom_audio_event_t;
 
 static int16_t g_audio_buffer[AIK_DOOM_AUDIO_CAPACITY_FRAMES * AIK_DOOM_AUDIO_CHANNELS];
 static uint32_t g_audio_read_frame = 0;
 static uint32_t g_audio_write_frame = 0;
 static uint32_t g_audio_available_frames = 0;
 static uint32_t g_audio_event_count = 0;
+static aik_doom_audio_event_t g_audio_events[AIK_DOOM_AUDIO_EVENT_CAPACITY];
 static int g_audio_initialized = 0;
 static int g_use_sfx_prefix = 1;
 
@@ -43,6 +55,69 @@ static void aik_doom_audio_reset(void)
     g_audio_write_frame = 0;
     g_audio_available_frames = 0;
     g_audio_event_count = 0;
+    memset(g_audio_events, 0, sizeof(g_audio_events));
+}
+
+static sfxinfo_t *aik_doom_audio_source(sfxinfo_t *sfx)
+{
+    return sfx != 0 && sfx->link != 0 ? sfx->link : sfx;
+}
+
+static int32_t aik_doom_audio_sfx_id(sfxinfo_t *sfx)
+{
+    int32_t index;
+    sfxinfo_t *source = aik_doom_audio_source(sfx);
+
+    for (index = 0; index < NUMSFX; ++index)
+    {
+        if (&S_sfx[index] == source)
+        {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+static void aik_doom_audio_record_event(sfxinfo_t *sfx)
+{
+    const char *name;
+    uint32_t slot;
+    aik_doom_audio_event_t *event;
+    sfxinfo_t *source = aik_doom_audio_source(sfx);
+
+    ++g_audio_event_count;
+    slot = (g_audio_event_count - 1) % AIK_DOOM_AUDIO_EVENT_CAPACITY;
+    event = &g_audio_events[slot];
+    event->sequence = g_audio_event_count;
+    event->sfx_id = aik_doom_audio_sfx_id(sfx);
+    memset(event->sfx_name, 0, sizeof(event->sfx_name));
+
+    name = source != 0 ? DEH_String(source->name) : 0;
+    if (name != 0)
+    {
+        snprintf(event->sfx_name, sizeof(event->sfx_name), "%s", name);
+    }
+}
+
+static const aik_doom_audio_event_t *aik_doom_audio_event(uint32_t sequence)
+{
+    uint32_t oldest;
+    const aik_doom_audio_event_t *event;
+
+    if (sequence == 0 || sequence > g_audio_event_count)
+    {
+        return 0;
+    }
+
+    oldest = doom_audio_event_oldest_sequence();
+    if (sequence < oldest)
+    {
+        return 0;
+    }
+
+    event = &g_audio_events[(sequence - 1) % AIK_DOOM_AUDIO_EVENT_CAPACITY];
+    return event->sequence == sequence ? event : 0;
 }
 
 static void aik_doom_audio_write_frame(int16_t left, int16_t right)
@@ -94,12 +169,7 @@ static int16_t aik_doom_audio_scale_sample(uint8_t sample, int gain)
 
 static void aik_doom_audio_name(sfxinfo_t *sfx, char *buffer, size_t buffer_length)
 {
-    sfxinfo_t *source = sfx;
-
-    if (source != 0 && source->link != 0)
-    {
-        source = source->link;
-    }
+    sfxinfo_t *source = aik_doom_audio_source(sfx);
 
     if (source == 0 || buffer_length == 0)
     {
@@ -206,7 +276,6 @@ static int aik_doom_audio_enqueue_lump(int lumpnum, int volume, int separation)
     }
 
     W_ReleaseLumpNum(lumpnum);
-    ++g_audio_event_count;
     return 1;
 }
 
@@ -258,6 +327,7 @@ static int aik_doom_sound_start(sfxinfo_t *sfx, int channel, int volume, int sep
         return -1;
     }
 
+    aik_doom_audio_record_event(sfx);
     return channel;
 }
 
@@ -414,4 +484,47 @@ uint32_t doom_audio_consume_frames(uint32_t frames)
 uint32_t doom_audio_event_count(void)
 {
     return g_audio_event_count;
+}
+
+uint32_t doom_audio_event_capacity(void)
+{
+    return AIK_DOOM_AUDIO_EVENT_CAPACITY;
+}
+
+uint32_t doom_audio_event_oldest_sequence(void)
+{
+    if (g_audio_event_count == 0)
+    {
+        return 0;
+    }
+
+    if (g_audio_event_count <= AIK_DOOM_AUDIO_EVENT_CAPACITY)
+    {
+        return 1;
+    }
+
+    return g_audio_event_count - AIK_DOOM_AUDIO_EVENT_CAPACITY + 1;
+}
+
+int doom_audio_event_available(uint32_t sequence)
+{
+    return aik_doom_audio_event(sequence) != 0;
+}
+
+int32_t doom_audio_event_sfx_id(uint32_t sequence)
+{
+    const aik_doom_audio_event_t *event = aik_doom_audio_event(sequence);
+    return event != 0 ? event->sfx_id : -1;
+}
+
+const uint8_t *doom_audio_event_sfx_name(uint32_t sequence)
+{
+    const aik_doom_audio_event_t *event = aik_doom_audio_event(sequence);
+    return event != 0 ? (const uint8_t *)event->sfx_name : 0;
+}
+
+uint32_t doom_audio_event_sfx_name_length(uint32_t sequence)
+{
+    const aik_doom_audio_event_t *event = aik_doom_audio_event(sequence);
+    return event != 0 ? (uint32_t)strlen(event->sfx_name) : 0;
 }

@@ -14,6 +14,7 @@ typedef struct aik_doom_key_event {
 } aik_doom_key_event_t;
 
 void aik_doom_input_reset(void);
+void aik_doom_input_action_reset(void);
 int aik_doom_input_push(int keycode, int pressed);
 int aik_doom_input_pop(aik_doom_key_event_t *event_out);
 

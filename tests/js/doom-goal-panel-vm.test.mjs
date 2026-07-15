@@ -67,7 +67,41 @@ const computerRoomAutoplay = {
   controlPipeline: "ComputerRoom",
   milestones: { doorOpened: 1, computerRoomEntered: true }
 };
-assert(panel.resolveTelosObjective(computerRoomAutoplay) === "ComputerRoom", "Opened door milestone should unlock ComputerRoom TELOS");
+assert(panel.resolveTelosObjective(computerRoomAutoplay) === "CentralHall", "Confirmed ComputerRoom entry should advance TELOS to CentralHall");
+assert(panel.resolvePrimaryObjective(computerRoomAutoplay) === "Reach Central Hall", "Confirmed ComputerRoom entry should advance the primary objective to CentralHall");
+
+const staleFirstDoorDtoAfterComputerRoom = {
+  enabled: true,
+  objective: "reach-central-hall",
+  controlPipeline: "post-computer-room-route",
+  goalState: {
+    telos: "FirstDoor",
+    objective: "Find Door Corridor"
+  },
+  milestones: { doorOpened: 1, doorOpenedCount: 1, computerRoomEntered: true }
+};
+assert(panel.resolveTelosObjective(staleFirstDoorDtoAfterComputerRoom) === "CentralHall", "Stale FirstDoor DTO must not overwrite TELOS after ComputerRoom entry");
+assert(panel.resolvePrimaryObjective(staleFirstDoorDtoAfterComputerRoom) === "Reach Central Hall", "Stale FirstDoor DTO must not overwrite the post-ComputerRoom objective");
+
+const postDoorAutoplay = {
+  enabled: true,
+  objective: "enter-computer-room",
+  controlPipeline: "ComputerRoom",
+  milestones: { doorOpened: 1, computerRoomEntered: false }
+};
+assert(panel.resolveTelosObjective(postDoorAutoplay) === "PostDoor", "Door-open states must not claim ComputerRoom before entry is confirmed");
+assert(panel.resolvePrimaryObjective(postDoorAutoplay) === "Reach Computer Control Room", "Door-open states should keep guiding entry into the ComputerRoom");
+
+const staleComputerRoomAutoplay = {
+  enabled: true,
+  objective: "enter-computer-room",
+  controlPipeline: "ComputerRoom",
+  doorOpenedCount: 0,
+  firstDoorOpened: false,
+  milestones: { doorOpened: 0, doorOpenedCount: 0, computerRoomEntered: true, firstDoorUseAttempted: true }
+};
+assert(panel.resolveTelosObjective(staleComputerRoomAutoplay) === "FirstDoor", "Closed first door must suppress stale ComputerRoom TELOS on retry loops");
+assert(panel.resolvePrimaryObjective(staleComputerRoomAutoplay) === "Open First Door", "Closed first door must guide the retry loop back to opening the door");
 
 const pathosAutoplay = {
   enabled: true,

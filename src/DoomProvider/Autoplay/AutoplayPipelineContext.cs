@@ -5,11 +5,13 @@ internal sealed class AutoplayPipelineContext
     public AutoplayPipelineContext(
         SensorFusion sensor,
         int recoveryFrames,
-        AutoplayOptimizationProfile profile)
+        AutoplayOptimizationProfile profile,
+        int predictions = 0)
     {
         Sensor = sensor;
         RecoveryFrames = recoveryFrames;
         Profile = profile;
+        Predictions = Math.Max(0, predictions);
         DepthSig = Math.Clamp(sensor.DepthSig, 0f, 1f);
         QDelta = Math.Clamp(sensor.QDelta, -180, 180);
         Context = string.IsNullOrWhiteSpace(sensor.ContextDict)
@@ -47,6 +49,12 @@ internal sealed class AutoplayPipelineContext
     /// [JA] この public shape は安定させてください。generated reference、demo tooling、DTO projection、または profile fixture が依存する可能性があります。
     /// </remarks>
     public int RecoveryFrames { get; }
+
+    /// <summary>
+    /// [EN] Autoplay prediction frame index used to keep phase transitions deterministic.
+    /// [JA] phase transition を決定論的に保つための autoplay prediction frame index です。
+    /// </summary>
+    public int Predictions { get; }
 
     /// <summary>
     /// [EN] Executes the <c>get</c> operation used by the Doom runtime or autoplay pipeline.
@@ -158,6 +166,55 @@ internal sealed class AutoplayPipelineContext
     /// </remarks>
     public int DoorProbeYaw { get; }
 
+    public string RouteMode { get; private set; } = "unknown";
+
+    public string CurrentRoute { get; private set; } = "unknown";
+
+    public string CurrentLandmark { get; private set; } = "none";
+
+    public string RouteActionHint { get; private set; } = "cruise";
+
+    public string RouteLoopKind { get; private set; } = "none";
+
+    public string RouteAbortHint { get; private set; } = "none";
+
+    public float FirstDoorRouteEvidence { get; private set; }
+
+    public bool FirstDoorRouteEvidenceReady { get; private set; }
+
+    public float RouteConfidence { get; private set; }
+
+    public int RecommendedYaw { get; private set; }
+
+    public float UseProbeConfidence { get; private set; }
+
+    public bool RouteTextureWallOcclusion { get; private set; }
+
+    public bool FirstDoorPhaseReady
+        => UseProbeConfidence >= 0.22f
+            || (FirstDoorRouteEvidenceReady && RouteConfidence >= 0.58f)
+            || (string.Equals(Context, "corridor", StringComparison.OrdinalIgnoreCase)
+                && FirstDoorRouteEvidenceReady
+                && RouteConfidence >= 0.44f);
+
+    public void AttachRoutePlan(DoomRoutePlannerResult routePlan)
+    {
+        ArgumentNullException.ThrowIfNull(routePlan);
+
+        RouteMode = string.IsNullOrWhiteSpace(routePlan.RouteMode) ? "unknown" : routePlan.RouteMode;
+        CurrentRoute = string.IsNullOrWhiteSpace(routePlan.CurrentRoute) ? "unknown" : routePlan.CurrentRoute;
+        CurrentLandmark = string.IsNullOrWhiteSpace(routePlan.CurrentLandmark) ? "none" : routePlan.CurrentLandmark;
+        RouteActionHint = string.IsNullOrWhiteSpace(routePlan.RouteActionHint) ? "cruise" : routePlan.RouteActionHint;
+        RouteLoopKind = string.IsNullOrWhiteSpace(routePlan.RouteLoopKind) ? "none" : routePlan.RouteLoopKind;
+        RouteAbortHint = string.IsNullOrWhiteSpace(routePlan.RouteAbortHint) ? "none" : routePlan.RouteAbortHint;
+        FirstDoorRouteEvidence = Clamp01(routePlan.FirstDoorRouteEvidence);
+        FirstDoorRouteEvidenceReady = routePlan.FirstDoorRouteEvidenceReady;
+        RouteConfidence = Clamp01(routePlan.RouteConfidence);
+        RecommendedYaw = routePlan.RecommendedYaw;
+        UseProbeConfidence = Clamp01(routePlan.UseProbeConfidence);
+        RouteTextureWallOcclusion = routePlan.RouteTextureWallOcclusion;
+    }
+
     public bool LowHealthGoalFirst
         => Sensor.Health > 0 && Sensor.Health < Profile.LowHealthThreshold;
 
@@ -165,14 +222,21 @@ internal sealed class AutoplayPipelineContext
         => Sensor.Health > 0 && Sensor.Health < Profile.CriticalHealthThreshold;
 
     public int DoorOpenedCount
-        => SemanticScore("computer-room") >= 0.5f
-            || SemanticScore("bridge") >= 0.5f
-            || SemanticScore("central-hall") >= 0.5f
-            ? 1
-            : 0;
+    {
+        get
+        {
+            var trustedCount = Math.Max(0, Sensor.DoorOpenedCount);
+            return trustedCount > 0 || Sensor.TrustedFirstDoorOpenMilestone
+                ? Math.Max(1, trustedCount)
+                : 0;
+        }
+    }
 
     public bool CentralHallEntered
-        => Context == "central-hall" || Sensor.SensorTensor.SemanticScore("central-hall") >= 0.5f;
+        => DoorOpenedCount > 0
+            && (Sensor.CentralHallEntered
+                || Context == "central-hall"
+                || Sensor.SensorTensor.SemanticScore("central-hall") >= 0.5f);
 
     public bool StairsEntered
         => Context == "stairs" || Sensor.SensorTensor.SemanticScore("final-room") >= 0.35f;
@@ -209,6 +273,9 @@ internal sealed class AutoplayPipelineContext
 
     public float BridgeConfidence
         => SemanticScore("bridge");
+
+    public float BridgeDoorScore
+        => Max(Tensor.Get("semantic.door"), Tensor.Get("vision.target") * 0.45f);
 
     public float ComputerRoomConfidence
         => SemanticScore("computer-room");
@@ -376,7 +443,7 @@ internal sealed class AutoplayPipelineContext
     /// [EN] The deterministic result produced by the Doom integration member.
     /// [JA] Doom integration member が生成する決定論的な result です。
     /// </returns>
-    public int UsePulseCooldownFrames => 0;
+    public int UsePulseCooldownFrames => Math.Max(0, Sensor.UsePulseCooldownFrames);
 
     private AutoplaySensorTensor Tensor => Sensor.SensorTensor;
 

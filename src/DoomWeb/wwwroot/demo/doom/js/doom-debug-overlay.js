@@ -68,6 +68,245 @@
     return Math.max(0, Math.min(1, Number(value) || 0));
   }
 
+  function normalizeLifePhase(value) {
+    const text = String(value || "unknown").toLowerCase();
+    if (text === "healthy"
+      || text === "wounded"
+      || text === "damaged"
+      || text === "critical"
+      || text === "moribund"
+      || text === "dead"
+      || text === "invulnerable") {
+      return text;
+    }
+
+    return "unknown";
+  }
+
+  function firstKnownLifePhase(...values) {
+    for (const value of values) {
+      const phase = normalizeLifePhase(value);
+      if (phase !== "unknown") {
+        return phase;
+      }
+    }
+
+    return "unknown";
+  }
+
+  function firstFiniteNumber(...values) {
+    for (const value of values) {
+      const number = Number(value);
+      if (Number.isFinite(number)) {
+        return number;
+      }
+    }
+
+    return NaN;
+  }
+
+  function firstExplicitBoolean(...values) {
+    for (const value of values) {
+      if (value === true || value === false) {
+        return value;
+      }
+      if (value === 1 || value === 0) {
+        return value === 1;
+      }
+      if (value === "true" || value === "false") {
+        return value === "true";
+      }
+    }
+
+    return false;
+  }
+
+  function maxFiniteNumber(...values) {
+    const finite = values
+      .map(value => Number(value))
+      .filter(value => Number.isFinite(value));
+    return finite.length > 0 ? Math.max(...finite) : NaN;
+  }
+
+  function resolveLifeLevel(phase, ...values) {
+    for (const value of values) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+
+      const level = Math.max(0, Math.min(5, Math.round(parsed)));
+      if (phase !== "dead" && phase !== "unknown" && level === 0) {
+        continue;
+      }
+
+      return level;
+    }
+
+    return NaN;
+  }
+
+  function resolveLifeGlyph(autoplay = {}) {
+    const health = autoplay.healthSensor || {};
+    const likelyDead = Boolean(
+      autoplay.healthLikelyDead
+      || autoplay.likelyDead
+      || autoplay.healthNoHeartbeatDeath
+      || autoplay.noHeartbeatDeath
+      || autoplay.healthFixedFaceDeath
+      || autoplay.fixedFaceDeath
+      || autoplay.healthFaceLifeNoHeartbeatDeath
+      || health.likelyDead
+      || health.retryRequested
+      || health.healthNoHeartbeatDeath
+      || health.faceLifeNoHeartbeatDeath
+      || health.noHeartbeatDeath
+      || health.healthFixedFaceDeath
+      || health.fixedFaceDeath);
+    const invulnerable = Boolean(
+      autoplay.healthInvulnerable
+      || autoplay.invulnerable
+      || autoplay.godMode
+      || health.healthInvulnerable
+      || health.invulnerable
+      || health.godMode);
+    const phase = likelyDead
+      ? "dead"
+      : (invulnerable
+        ? "invulnerable"
+        : firstKnownLifePhase(
+          autoplay.healthFaceLifePhase,
+          health.healthFaceLifePhase,
+          autoplay.faceLifePhase,
+          health.faceLifePhase,
+          health.faceLifeTemplatePhase,
+          health.healthFaceLifeTemplatePhase,
+          health.faceLifeQuantizedPhase,
+          health.healthFaceLifeQuantizedPhase));
+    const rawLevel = likelyDead
+      ? 0
+      : (invulnerable
+        ? 5
+        : resolveLifeLevel(
+          phase,
+          autoplay.healthFaceLifeLevel,
+          health.healthFaceLifeLevel,
+          autoplay.faceLifeLevel,
+          health.faceLifeLevel,
+          health.faceLifeTemplateLevel,
+          health.healthFaceLifeTemplateLevel,
+          health.faceLifeQuantizedLevel,
+          health.healthFaceLifeQuantizedLevel));
+    const fallbackLevel = phase === "healthy" || phase === "invulnerable" ? 5
+      : (phase === "wounded" ? 4
+        : (phase === "damaged" ? 3
+          : (phase === "critical" ? 2
+            : (phase === "moribund" ? 1 : 0))));
+    const level = Number.isFinite(rawLevel)
+      ? Math.max(0, Math.min(5, Math.round(rawLevel)))
+      : fallbackLevel;
+    const heartbeatAlive = firstExplicitBoolean(
+      health.faceHeartbeatAlive,
+      health.healthFaceHeartbeatAlive,
+      autoplay.faceHeartbeatAlive,
+      autoplay.healthFaceHeartbeatAlive);
+    const noHeartbeatFrames = Math.max(0, Math.floor(Number(
+      health.faceNoHeartbeatFrames
+      ?? health.healthFaceNoHeartbeatFrames
+      ?? autoplay.healthFaceNoHeartbeatFrames
+      ?? autoplay.faceNoHeartbeatFrames
+      ?? 0) || 0));
+    const healthOpacity = maxFiniteNumber(
+      health.faceHeartbeatVisualOpacity,
+      health.healthFaceHeartbeatVisualOpacity,
+      health.faceHeartbeatOpacity,
+      health.healthFaceHeartbeatOpacity);
+    const autoplayOpacity = maxFiniteNumber(
+      autoplay.faceHeartbeatVisualOpacity,
+      autoplay.healthFaceHeartbeatVisualOpacity,
+      autoplay.faceHeartbeatOpacity,
+      autoplay.healthFaceHeartbeatOpacity);
+    const opacity = likelyDead
+      ? 1
+      : clamp01(firstFiniteNumber(healthOpacity, autoplayOpacity, heartbeatAlive ? 1 : 0));
+    const heartbeat = likelyDead
+      ? "flat"
+      : (heartbeatAlive || phase === "invulnerable" ? "hb" : `fade${opacity.toFixed(2)}${noHeartbeatFrames > 0 ? ` n${noHeartbeatFrames}` : ""}`);
+    const symbol = phase === "invulnerable" ? "∞" : (phase === "dead" ? "0" : (phase === "unknown" ? "?" : String(level)));
+    return {
+      phase,
+      level,
+      opacity,
+      heartbeat,
+      symbol,
+      active: true,
+      dead: likelyDead || phase === "dead",
+      warning: phase === "critical" || phase === "moribund",
+      invulnerable,
+      noHeartbeatFrames
+    };
+  }
+
+  function appendLifeHeartBadge(fragment, autoplay = {}) {
+    const life = resolveLifeGlyph(autoplay);
+    if (!life.active) {
+      return;
+    }
+
+    const badge = document.createElement("div");
+    badge.className = `debug-life-heart is-${life.phase}${life.warning ? " is-warning" : ""}${life.dead && life.phase !== "dead" ? " is-dead" : ""}${life.invulnerable && life.phase !== "invulnerable" ? " is-invulnerable" : ""}`;
+    const beatSource = Math.max(0, Math.min(1, Number(life.opacity || 0)));
+    const opacity = life.dead || life.invulnerable
+      ? 1
+      : (life.phase === "unknown"
+        ? 0.52 + beatSource * 0.36
+        : (life.warning
+          ? 0.58 + beatSource * 0.42
+          : 0.50 + beatSource * 0.50));
+    badge.style.opacity = opacity.toFixed(2);
+    badge.style.left = "3.4%";
+    badge.style.top = "22.8%";
+    const beatOpacity = life.dead
+      ? 0.12
+      : (life.invulnerable
+        ? 1
+        : 0.28 + beatSource * 0.72);
+    const beatScale = life.dead
+      ? 0.84
+      : (life.invulnerable
+        ? 1.05
+        : 0.78 + beatSource * 0.34);
+    badge.style.setProperty("--life-heart-beat", beatOpacity.toFixed(2));
+    badge.style.setProperty("--life-heart-scale", beatScale.toFixed(2));
+    badge.dataset.heartbeatOpacity = beatOpacity.toFixed(2);
+    badge.title = `Face vital: ${life.phase}; heartbeat=${life.heartbeat}`;
+
+    const icon = document.createElement("span");
+    icon.className = "life-heart-icon";
+    icon.style.opacity = beatOpacity.toFixed(2);
+    icon.style.transform = `scale(${beatScale.toFixed(2)})`;
+    icon.textContent = "♥";
+    badge.appendChild(icon);
+
+    const value = document.createElement("span");
+    value.className = "life-heart-value";
+    value.style.opacity = life.dead || life.invulnerable
+      ? "1"
+      : (0.50 + beatSource * 0.50).toFixed(2);
+    value.textContent = life.symbol;
+    badge.appendChild(value);
+
+    const label = document.createElement("span");
+    label.className = "life-heart-label";
+    label.style.opacity = life.dead
+      ? "0.72"
+      : (0.42 + beatSource * 0.48).toFixed(2);
+    label.textContent = `${life.phase} ${life.heartbeat}`;
+    badge.appendChild(label);
+
+    fragment.appendChild(badge);
+  }
+
   function resolvePriorityAction(autoplay) {
     const resolver = self.AIKernelDoomGoalPanel?.resolvePriorityAction;
     if (typeof resolver === "function") {
@@ -882,6 +1121,7 @@
       renderDtoUseProbe(fragment, dto.useProbe || dto.UseProbe);
     }
     overlay.dataset.cssOverlayMode = gpuBacked ? "reduced" : "full";
+    appendLifeHeartBadge(fragment, options.autoplay || {});
     overlay.replaceChildren(fragment);
     return true;
   }
@@ -1342,6 +1582,7 @@
         wallAvoidActive
       });
       overlay.dataset.cssOverlayMode = "reduced";
+      appendLifeHeartBadge(fragment, autoplay);
       overlay.replaceChildren(fragment);
       return true;
     }
@@ -1560,6 +1801,7 @@
     }
 
     overlay.dataset.cssOverlayMode = gpuBacked ? "reduced" : "full";
+    appendLifeHeartBadge(fragment, autoplay);
     overlay.replaceChildren(fragment);
     return true;
   }

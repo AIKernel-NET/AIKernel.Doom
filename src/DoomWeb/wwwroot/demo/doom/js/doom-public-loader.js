@@ -57,6 +57,8 @@
     "autoplay/control/runtime-packets.js",
     "autoplay/wasm-state.js",
     "autoplay/control-runtime.js",
+    "autoplay/csharp-first-door-adapter.js",
+    "autoplay/csharp-post-computer-room-route-adapter.js",
     "autoplay/doom-sensor-inputs.js",
     "autoplay/doom-action-adapter.js",
     "autoplay/doom-retry-dispatch.js",
@@ -92,6 +94,21 @@
     sharedModel: true,
     loadedScripts: []
   });
+
+  function syncPublicBuildStatus() {
+    const buildMatch = String(version).match(/(?:dev|build)(\d+)$/i);
+    const build = buildMatch ? buildMatch[1] : String(version);
+    const releaseText = `AIKernel.Doom v0.1.3-dev${build}`;
+    const text = `build ${build} · public: v0.1.3-${build}`;
+    document.querySelectorAll("[data-doom-public-version-title]").forEach((node) => {
+      node.textContent = releaseText;
+      node.setAttribute("data-doom-public-version", version);
+    });
+    document.querySelectorAll("[data-doom-public-build-status]").forEach((node) => {
+      node.textContent = text;
+      node.setAttribute("data-doom-public-version", version);
+    });
+  }
 
   function loadScript(relativePath) {
     return new Promise((resolve, reject) => {
@@ -134,10 +151,39 @@
     return window.AIKernelWebGpuReady;
   }
 
-  loadCanonicalBridge()
+  function canUseWorkerRuntime() {
+    return Boolean(
+      window.Worker
+      && window.OffscreenCanvas
+      && window.HTMLCanvasElement?.prototype?.transferControlToOffscreen
+    );
+  }
+
+  function loadMainThreadCSharpControl() {
+    if (canUseWorkerRuntime()) {
+      window.AIKernelDoomCSharpControlHost = "worker";
+      return Promise.resolve(true);
+    }
+
+    const moduleUrl = new URL(`${base}../csharp-control/main.js`, document.baseURI);
+    moduleUrl.search = `?v=${encodeURIComponent(version)}`;
+    window.AIKernelDoomCSharpControlHost = "main-thread";
+    window.AIKernelDoomCSharpControlReady = import(moduleUrl.href).then(() => {
+      if (typeof window.aiKernelDoomControl?.evaluateBrowserFirstDoor !== "function"
+        || typeof window.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function") {
+        throw new Error("C# FirstDoor/post-COMPUTERROOM control bridge is unavailable on main thread.");
+      }
+
+      return true;
+    });
+    return window.AIKernelDoomCSharpControlReady;
+  }
+
+  Promise.all([loadCanonicalBridge(), loadMainThreadCSharpControl()])
     .then(() => scripts.reduce((chain, relativePath) => chain.then(() => loadScript(relativePath)), Promise.resolve()))
     .then(() => {
       document.documentElement.dataset.doomPublicBundle = version;
+      syncPublicBuildStatus();
     })
     .catch((error) => {
       document.documentElement.dataset.doomPublicBundleError = error?.message || String(error);

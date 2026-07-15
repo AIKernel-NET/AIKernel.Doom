@@ -122,4 +122,44 @@ assert(formatted.html.includes("<strong>runtime</strong>=running"), "Runtime HTM
 assert(formatted.fpsText.includes("drop3"), "FPS HUD text should include dropped-frame count");
 assert(formatted.objectiveText === "follow-demo-route-to-first-door", "Formatter should expose objective text");
 
+const canonicalMoribund = formatter.formatRuntimeStatus({
+  state: "running",
+  autoplay: {
+    enabled: true,
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "healthy",
+      healthFaceLifeTemplatePhase: "healthy",
+      faceLifeTemplateLevel: 5,
+      healthFaceLifeTemplateLevel: 5
+    },
+    pipelineState: {
+      kinesis: {
+        zoe: { faceLifePhase: "healthy", faceLifeLevel: 5 }
+      }
+    }
+  }
+});
+assert(canonicalMoribund.text.includes("health=live/moribund/fade0.00/v1"), "Canonical stabilized face life and explicit no-heartbeat should beat stale Zoe/template healthy aliases");
+
+const invulnerable = formatter.formatRuntimeStatus({
+  state: "running",
+  autoplay: {
+    enabled: true,
+    healthInvulnerable: true,
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "moribund",
+      faceLifeTemplateLevel: 1
+    }
+  }
+});
+assert(invulnerable.text.includes("health=live/invulnerable/hb/v∞"), "Explicit invulnerability should retain its infinity heartbeat glyph");
+
 console.log("DOOM_RUNTIME_FORMAT_VM_TEST_OK", { route, objective: formatted.objectiveText });

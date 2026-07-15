@@ -108,6 +108,11 @@ internal static class AutoplayPipelineExpressionCompiler
     private static Func<DynamicPipelineContext, bool> CompileDynamicBooleanAtom(string expression)
     {
         var atom = AutoplayDslExpressionSyntax.Normalize(expression);
+        if (AutoplayDslExpressionSyntax.HasTopLevelLogicalOperator(atom))
+        {
+            return CompileDynamicPredicate(atom);
+        }
+
         if (AutoplayDslExpressionSyntax.TryReadComparison(atom, out var leftToken, out var op, out var rightToken))
         {
             return context => AutoplayDslValueComparer.Compare(
@@ -131,6 +136,11 @@ internal static class AutoplayPipelineExpressionCompiler
     private static Func<AutoplayPipelineContext, bool> CompileBooleanAtom(string expression)
     {
         var atom = AutoplayDslExpressionSyntax.Normalize(expression);
+        if (AutoplayDslExpressionSyntax.HasTopLevelLogicalOperator(atom))
+        {
+            return CompileBooleanExpression(atom);
+        }
+
         if (AutoplayDslExpressionSyntax.TryReadComparison(atom, out var leftToken, out var op, out var rightToken))
         {
             return context => AutoplayDslValueComparer.Compare(

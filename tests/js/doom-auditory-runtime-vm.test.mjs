@@ -72,6 +72,7 @@ assert(auditory.readBridgeSnapshot(bridgeGlobal) === bridgeSnapshot, "readBridge
 assert(auditory.snapshotAgeMs({ timestampMs: nowMs - 250 }, nowMs) === 250, "snapshotAgeMs should use timestampMs");
 assert(auditory.snapshotAgeMs({ timestamp: "2026-06-18T00:00:00.750Z" }, nowMs) === 250, "snapshotAgeMs should parse timestamp");
 assert(auditory.snapshotEnergy({ leftEnergy: 0.1, midEnergy: 0.6 }) === 0.6, "snapshotEnergy should use strongest band");
+assert(auditory.snapshotEnergy({ leftEnergy: 0.1, peakEnergy: 0.8, rmsEnergy: 0.2 }) === 0.8, "snapshotEnergy should include peak waveform features");
 
 const bridgePreferred = auditory.createRuntimeSnapshot(runtime, {
   global: bridgeGlobal,
@@ -81,6 +82,7 @@ const bridgePreferred = auditory.createRuntimeSnapshot(runtime, {
 assert(bridgePreferred.eventType === "bridge", "fresh higher-energy bridge snapshot should be preferred");
 assert(bridgePreferred.active === true, "eventful bridge snapshot should be active");
 assert(bridgePreferred.timestamp === new Date(bridgeSnapshot.timestampMs).toISOString(), "timestampMs should be serialized");
+assert(bridgePreferred.level > 0 && bridgePreferred.attenuation < 1, "runtime snapshot should expose normalized audio level and attenuation");
 
 const runtimePreferred = auditory.createRuntimeSnapshot(runtime, {
   bridgeSnapshot: { leftEnergy: 0.01, timestampMs: nowMs - 300, eventType: "quiet-bridge" },

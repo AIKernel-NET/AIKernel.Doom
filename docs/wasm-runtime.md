@@ -37,11 +37,13 @@ int main(int argc, char** argv);
 int doom_init(void);
 int doom_tick(void);
 uint8_t* doom_render(void);
-void doom_input(int keycode, int pressed);
+int doom_input(int keycode, int pressed);
 ```
 
 These exports are the stable contract. Higher-level provider and web code must
 not depend on doomgeneric internals when the ABI can express the same behavior.
+`doom_input` returns `AIK_DOOM_OK` only after the native input queue accepts the
+event; callers must retain and retry an event when the queue reports an error.
 
 It also exports `doom_mount_wad` and `doom_wad_status` so AIKernel can pass a user-provided or shareware WAD through WASM linear memory. The overlay validates `IWAD`/`PWAD` headers and returns explicit error codes for missing or invalid WAD data.
 

@@ -110,4 +110,10 @@ public sealed partial record AutoplayPipelineDefinition
     /// JA: compiled dynamic pipeline graph 用の explicit stage definition です。
     /// </summary>
     public List<AutoplayPipelineStageDefinition> Stages { get; init; } = [];
+
+    /// <summary>
+    /// EN: Phase-specific pipeline sets that gate stage arbitration before low-level action selection.
+    /// JA: 低レベル action selection の前に stage arbitration を制限する phase-specific pipeline set です。
+    /// </summary>
+    public List<AutoplayPhasePipelineDefinition> PhasePipelines { get; init; } = [];
 }

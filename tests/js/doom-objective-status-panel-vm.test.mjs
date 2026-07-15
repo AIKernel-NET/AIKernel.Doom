@@ -107,6 +107,12 @@ const status = {
     zeroCopy: true,
     action: { move: "forward", turn: "left", fire: false, use: false },
     healthEstimatedPercent: 42,
+    healthSensor: {
+      faceLifePhase: "critical",
+      faceLifeLevel: 2,
+      faceHeartbeatAlive: true,
+      faceHeartbeatOpacity: 1
+    },
     useCooldown: 7,
     firstDoorUseLatchFrames: 2,
     milestones: {
@@ -239,7 +245,7 @@ const status = {
 const rows = panel.resolveRows(status);
 const labels = rows.map(row => row.label).join("|");
 assert(rows.length === 12, "Objective status panel should include the compact summary and the GPU path table");
-assert(labels === "TELOS|OBJECTIVE|PRIORITY|ROUTE|KAIROS|GAME|BONSAI|HUD|SENSOR|ACTION|HEALTH|PROGRESS", "Objective status rows should remain stable");
+assert(labels === "TELOS|OBJECTIVE|PRIORITY|ROUTE|KAIROS|GAME|BONSAI|HUD|SENSOR|ACTION|FACE VITAL|PROGRESS", "Objective status rows should remain stable");
 assert(rows.some(row => row.label === "TELOS" && row.value === "ComputerRoom"), "TELOS should be resolved from the goal panel contract");
 assert(rows.some(row => row.label === "OBJECTIVE" && row.value === "Enter Computer Room"), "OBJECTIVE should be resolved from the goal panel contract");
 assert(rows.some(row => row.label === "PRIORITY" && row.value === "[L] Approach Target"), "PRIORITY should be resolved from the goal panel contract");
@@ -263,8 +269,40 @@ assert(sensorRow?.metadata?.diagnostic_streak === "4", "SENSOR row should expose
 assert(sensorRow?.metadata?.required_streak === "8", "SENSOR row should expose required pilot streak");
 assert(sensorRow?.metadata?.doom_runtime_stamped === "true", "SENSOR row should mark runtime metadata projection");
 assert(rows.some(row => row.label === "SENSOR" && row.value.includes("mask=canonical")), "SENSOR should show canonical FeatureMask storage texture readiness");
-assert(rows.some(row => row.label === "HEALTH" && row.value.includes("hp=42")), "HEALTH should carry Zoe/health sensor state");
+assert(rows.some(row => row.label === "FACE VITAL" && row.value.includes("vital 2 critical hb")), "FACE VITAL should carry face heartbeat state");
 assert(rows.some(row => row.label === "PROGRESS" && row.value.includes("door=1")), "PROGRESS should carry phase milestones");
+
+const canonicalMoribundRows = panel.resolveRows({
+  autoplay: {
+    healthFaceLifePhase: "moribund",
+    healthFaceLifeLevel: 1,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "healthy",
+      healthFaceLifeTemplatePhase: "healthy",
+      faceLifeTemplateLevel: 5,
+      healthFaceLifeTemplateLevel: 5
+    }
+  }
+});
+const canonicalMoribundVital = canonicalMoribundRows.find(row => row.label === "FACE VITAL");
+assert(canonicalMoribundVital?.value.includes("vital 1 moribund fade0.00"), "Canonical stabilized face life and explicit no-heartbeat should beat stale healthy template aliases");
+assert(canonicalMoribundVital?.tone.includes("is-warn"), "Canonical moribund face life should retain warning tone");
+
+const invulnerableRows = panel.resolveRows({
+  autoplay: {
+    healthFaceLifePhase: "invulnerable",
+    healthFaceLifeLevel: 5,
+    healthSensor: {
+      faceHeartbeatAlive: false,
+      healthFaceHeartbeatAlive: true,
+      faceLifeTemplatePhase: "moribund",
+      faceLifeTemplateLevel: 1
+    }
+  }
+});
+assert(invulnerableRows.some(row => row.label === "FACE VITAL" && row.value.includes("vital ∞ invulnerable hb")), "Explicit canonical invulnerability should retain its infinity heartbeat glyph");
 
 const fallbackRows = panel.resolveRows({
   usingCpuFallback: true,
@@ -291,7 +329,7 @@ const nodes = flatten(root);
 assert(nodes.filter(node => String(node.className).includes("doom-objective-status-row")).length === 12, "Renderer should create one row node per summary row");
 assert(nodes.some(node => node.textContent === "TELOS"), "Renderer should emit TELOS label");
 assert(nodes.some(node => node.textContent === "ComputerRoom"), "Renderer should emit TELOS value");
-assert(nodes.some(node => node.textContent === "hp=42 risk=0.23"), "Renderer should emit health risk value");
+assert(nodes.some(node => node.textContent === "vital 2 critical hb risk=0.23"), "Renderer should emit face vital risk value");
 const renderedSensorRow = nodes.find(node => node.dataset?.passId === "sensor");
 assert(renderedSensorRow?.dataset?.pilotState === "ais:within;sp:unavailable", "Rendered SENSOR row should retain Canonical pilot state metadata");
 assert(renderedSensorRow?.dataset?.passReadiness === "ais:on/sp:on", "Rendered SENSOR row should retain Canonical pass readiness metadata");

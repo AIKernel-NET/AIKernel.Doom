@@ -74,7 +74,7 @@ assert(krisis.stages[1].title === "Kairos", "Krisis second stage should be Kairo
 
 const kinesis = panel.panelLayout.find(item => item.key === "kinesis");
 assert(kinesis.stages[1].title === "Zoe", "Kinesis second stage should be Zoe");
-assert(panel.detectionDescriptors.health.label === "HP Veto", "Health detector should be rendered as Zoe HP veto");
+assert(panel.detectionDescriptors.health.label === "Face Vital", "Health detector should be rendered as Zoe face-vital guard");
 
 console.log("DOOM_SENSOR_PANEL_VM_TEST_OK", {
   panels: panel.panelLayout.length,

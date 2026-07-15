@@ -12,9 +12,9 @@ int doom_wad_status(void)
     return aik_doom_wad_status();
 }
 
-void doom_input(int keycode, int pressed)
+int doom_input(int keycode, int pressed)
 {
-    (void)aik_doom_input_push(keycode, pressed);
+    return aik_doom_input_push(keycode, pressed);
 }
 
 static int g_action_forward = 0;
@@ -24,14 +24,30 @@ static int g_action_left = 0;
 static int g_action_fire = 0;
 static int g_action_strafe = 0;
 
+void aik_doom_input_action_reset(void)
+{
+    g_action_forward = 0;
+    g_action_back = 0;
+    g_action_right = 0;
+    g_action_left = 0;
+    g_action_fire = 0;
+    g_action_strafe = 0;
+}
+
 static int aik_doom_push_action_key(int keycode, int *current, int desired)
 {
+    int result;
+
     if (*current == desired) {
         return AIK_DOOM_OK;
     }
 
-    *current = desired;
-    return aik_doom_input_push(keycode, desired);
+    result = aik_doom_input_push(keycode, desired);
+    if (result == AIK_DOOM_OK) {
+        *current = desired;
+    }
+
+    return result;
 }
 
 int doom_input_action(int move, int turn, int fire, int strafe)

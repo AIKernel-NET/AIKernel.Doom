@@ -32,6 +32,28 @@
     return requireExpressionDsl("number")(value, fallback);
   }
 
+  function canonicalDoorOpenedCount(...sources) {
+    let sawCount = false;
+    let countValue = 0;
+    let legacyValue = 0;
+    sources.forEach(source => {
+      if (!source || typeof source !== "object") {
+        return;
+      }
+      const count = readValueCaseInsensitive(source, ["doorOpenedCount", "DoorOpenedCount"]);
+      if (count !== undefined) {
+        sawCount = true;
+        countValue = Math.max(countValue, number(count, 0));
+        return;
+      }
+      const legacy = readValueCaseInsensitive(source, ["doorOpened", "DoorOpened"]);
+      if (legacy !== undefined) {
+        legacyValue = Math.max(legacyValue, number(legacy, 0));
+      }
+    });
+    return Math.max(0, sawCount ? countValue : legacyValue);
+  }
+
   function readParameter(parameters, name) {
     return requireExpressionDsl("readParameter")(parameters, name);
   }
@@ -64,6 +86,167 @@
     }
 
     return undefined;
+  }
+
+  function readStateValue(state, autoplayState, milestones, names) {
+    const sources = [state, autoplayState, milestones];
+    for (let index = 0; index < sources.length; index += 1) {
+      const value = readValueCaseInsensitive(sources[index], names);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  function faceHealthPercentFromLevel(level, phase) {
+    const normalizedPhase = String(phase || "").trim().toLowerCase();
+    if (normalizedPhase === "dead" || normalizedPhase === "death" || normalizedPhase === "dead-fixed") {
+      return 0;
+    }
+    if (normalizedPhase === "invulnerable" || normalizedPhase === "god" || normalizedPhase === "iddqd") {
+      return 100;
+    }
+
+    const parsed = Math.round(number(level, NaN));
+    if (!Number.isFinite(parsed)) {
+      return NaN;
+    }
+
+    if (parsed >= 5) {
+      return 100;
+    }
+    if (parsed === 4) {
+      return 75;
+    }
+    if (parsed === 3) {
+      return 55;
+    }
+    if (parsed === 2) {
+      return 30;
+    }
+    if (parsed === 1) {
+      return 12;
+    }
+    return NaN;
+  }
+
+  function meaningfulFaceValue(...values) {
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const text = String(value).trim().toLowerCase();
+      if (text && text !== "unknown" && text !== "none") {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  function isDefinitiveFacePhase(phase) {
+    const normalized = String(phase || "").trim().toLowerCase();
+    return normalized === "dead"
+      || normalized === "death"
+      || normalized === "dead-fixed"
+      || normalized === "invulnerable"
+      || normalized === "god"
+      || normalized === "iddqd";
+  }
+
+  function resolveHealthPercent(fallback, ...sources) {
+    let numericHealth = NaN;
+    let faceHealth = NaN;
+    let faceConfidence = 0;
+    let faceAuthoritative = false;
+
+    sources.forEach(source => {
+      if (!source || typeof source !== "object") {
+        return;
+      }
+
+      const numeric = number(
+        source.health
+          ?? source.hp
+          ?? source.value
+          ?? source.estimatedPercent
+          ?? source.healthEstimatedPercent,
+        NaN);
+      if (Number.isFinite(numeric) && !Number.isFinite(numericHealth)) {
+        numericHealth = Math.max(0, Math.min(100, numeric));
+      }
+
+      const stablePhase = meaningfulFaceValue(
+        source.faceLifeTemplatePhase,
+        source.healthFaceLifeTemplatePhase,
+        source.faceLifePhase,
+        source.healthFaceLifePhase);
+      const stableLevel = meaningfulFaceValue(
+        source.faceLifeTemplateLevel,
+        source.healthFaceLifeTemplateLevel,
+        source.faceLifeLevel,
+        source.healthFaceLifeLevel);
+      let candidate = faceHealthPercentFromLevel(stableLevel, stablePhase);
+      if (!Number.isFinite(candidate)) {
+        const quantizedPhase = meaningfulFaceValue(
+          source.faceLifeQuantizedPhase,
+          source.healthFaceLifeQuantizedPhase);
+        const quantizedLevel = meaningfulFaceValue(
+          source.faceLifeQuantizedLevel,
+          source.healthFaceLifeQuantizedLevel);
+        const quantizedCandidate = faceHealthPercentFromLevel(quantizedLevel, quantizedPhase);
+        const quantizedConfidence = Math.max(0, Math.min(1, number(
+          source.faceLifeQuantizedConfidence
+            ?? source.healthFaceLifeQuantizedConfidence
+            ?? source.faceTemplateConfidence
+            ?? source.healthFaceTemplateConfidence,
+          0)));
+        if (Number.isFinite(quantizedCandidate)
+            && (isDefinitiveFacePhase(quantizedPhase) || quantizedConfidence >= 0.92)) {
+          candidate = quantizedCandidate;
+        }
+      }
+      if (!Number.isFinite(candidate) && Number.isFinite(numeric) && numeric > 0 && numeric <= 5) {
+        const phaseHint = meaningfulFaceValue(
+          stablePhase,
+          source.faceLifePattern,
+          source.healthFaceLifePattern);
+        if (phaseHint !== undefined || source.faceHeartbeatAlive === true || source.faceSignatureValid === true) {
+          candidate = faceHealthPercentFromLevel(numeric, phaseHint);
+        }
+      }
+      const confidence = Math.max(0, Math.min(1, number(
+        source.faceLifeTemplateConfidence
+          ?? source.healthFaceLifeTemplateConfidence
+          ?? source.faceTemplateConfidence
+          ?? source.healthFaceTemplateConfidence
+          ?? source.faceLifeConfidence
+          ?? source.healthFaceLifeConfidence,
+        0)));
+      if (Number.isFinite(candidate) && confidence >= faceConfidence) {
+        faceHealth = candidate;
+        faceConfidence = confidence;
+        faceAuthoritative = faceAuthoritative
+          || Boolean(source.faceLifeTemplateAuthoritative)
+          || Boolean(source.healthFaceLifeTemplateAuthoritative);
+      }
+    });
+
+    const faceTrusted = Number.isFinite(faceHealth)
+      && (faceAuthoritative || !Number.isFinite(numericHealth) || numericHealth <= 0);
+    const numericLooksLikeFaceLevel = Number.isFinite(faceHealth)
+      && Number.isFinite(numericHealth)
+      && numericHealth > 0
+      && numericHealth <= 5;
+    if (faceTrusted || numericLooksLikeFaceLevel) {
+      return faceHealth;
+    }
+    if (Number.isFinite(numericHealth)) {
+      return numericHealth;
+    }
+    return Math.max(0, Math.min(100, number(fallback, 100)));
   }
 
   function routeMetric(packet, camelName, pascalName, fallback = 0) {
@@ -191,7 +374,7 @@
     return number(yaw, 0);
   }
 
-  function determineRouteMode(doorOpenedCount, useProbeScore, firstDoorVisionScore, firstDoorRouteEvidenceReady, currentRoute, previousRouteMode, spawnGapScore, spawnLandmarkRouteEvidence, spawnSecretDoorScore) {
+  function determineRouteMode(doorOpenedCount, useProbeScore, firstDoorVisionScore, firstDoorRouteEvidenceReady, firstDoorPhaseReady, currentRoute, previousRouteMode, spawnGapScore, spawnLandmarkRouteEvidence, spawnSecretDoorScore, firstDoorContactMemoryReady = false) {
     if (doorOpenedCount > 0) {
       return "post-door";
     }
@@ -212,6 +395,10 @@
       return "spawn-approach";
     }
 
+    if (!firstDoorPhaseReady) {
+      return "spawn-approach";
+    }
+
     if (useProbeScore >= 0.22 || firstDoorVisionScore >= 0.38 || (firstDoorRouteEvidenceReady && currentRoute === "first-door-route")) {
       return "door-approach";
     }
@@ -220,6 +407,7 @@
       && (useProbeScore >= 0.12
         || firstDoorVisionScore >= 0.24
         || firstDoorRouteEvidenceReady
+        || firstDoorContactMemoryReady
         || spawnGapScore >= 0.24
         || spawnLandmarkRouteEvidence >= 0.36)) {
       return "door-approach";
@@ -228,12 +416,25 @@
     return "spawn-approach";
   }
 
+  function sanitizePreviousRouteMode(doorOpenedCount, previousRouteMode) {
+    const mode = String(previousRouteMode || "none").trim().toLowerCase();
+    if (doorOpenedCount <= 0 && mode === "post-door") {
+      return "none";
+    }
+
+    return mode || "none";
+  }
+
   function resolvePhaseCurrentRoute(routeMode, currentRoute, signals = {}) {
     if (routeMode !== "post-door") {
       return currentRoute;
     }
 
     if (signals.centralHallEntered) {
+      return "central-hall-route";
+    }
+
+    if (number(signals.centralHallConfidence) >= 0.18) {
       return "central-hall-route";
     }
 
@@ -250,8 +451,92 @@
     return "post-door-corridor-route";
   }
 
+  function resolveDoorApproachCurrentRoute(routeMode, currentRoute, signals = {}) {
+    if (routeMode !== "door-approach" || number(signals.doorOpenedCount) > 0) {
+      return currentRoute;
+    }
+
+    if (currentRoute === "first-door-route") {
+      return currentRoute;
+    }
+
+    const stickyFirstDoorApproach = signals.firstDoorPhaseReady
+      || signals.firstDoorContactMemoryReady
+      || number(signals.firstDoorVisionScore) >= 0.24
+      || number(signals.bridgeDoorScore) >= 0.12
+      || number(signals.spawnLandmarkRouteEvidence) >= 0.28
+      || number(signals.spawnCorridorGapScore) >= 0.24;
+    return stickyFirstDoorApproach ? "first-door-route" : currentRoute;
+  }
+
+  function resolvePhaseRouteHint(routeMode, currentRoute, routePlan = {}, signals = {}) {
+    if (routeMode !== "post-door") {
+      if (routeMode === "door-approach" && currentRoute === "first-door-route") {
+        return {
+          currentLandmark: "first-door-approach",
+          routeActionHint: "advance-first-door"
+        };
+      }
+
+      return {
+        currentLandmark: routePlan.currentLandmark || "none",
+        routeActionHint: routePlan.routeActionHint || "cruise"
+      };
+    }
+
+    if (currentRoute === "first-door-route"
+      && (
+        signals.computerRoomEntered
+        || number(signals.computerRoomConfidence) >= 0.18
+        || number(signals.postDoorTerminalSurface) >= 0.24
+        || signals.bridgeLaneVisible
+        || number(signals.bridgeConfidence) >= 0.18
+      )) {
+      currentRoute = signals.bridgeLaneVisible || number(signals.bridgeConfidence) >= 0.18
+        ? "cross-bridge-route"
+        : "computer-room-route";
+    }
+
+    if (currentRoute === "central-hall-route"
+      || signals.centralHallEntered
+      || number(signals.centralHallConfidence) >= 0.18) {
+      return {
+        currentLandmark: "central-hall-door",
+        routeActionHint: "advance-central-hall"
+      };
+    }
+
+    if (currentRoute === "cross-bridge-route"
+      || signals.bridgeLaneVisible
+      || number(signals.bridgeConfidence) >= 0.18) {
+      return {
+        currentLandmark: "cross-bridge-lane",
+        routeActionHint: "advance-cross-bridge"
+      };
+    }
+
+    if (currentRoute === "computer-room-route"
+      || signals.computerRoomEntered
+      || number(signals.computerRoomConfidence) >= 0.18
+      || number(signals.postDoorTerminalSurface) >= 0.24) {
+      return {
+        currentLandmark: "computer-room-egress",
+        routeActionHint: "advance-computer-room"
+      };
+    }
+
+    return {
+      currentLandmark: "post-door-corridor",
+      routeActionHint: "post-door-cruise"
+    };
+  }
+
   function createContext(profile, state) {
     const parameters = profile?.parameters || {};
+    const autoplayState = readObjectCaseInsensitive(state, ["autoplayState", "AutoplayState"]) || {};
+    const milestones = readObjectCaseInsensitive(autoplayState, ["milestones", "Milestones"])
+      || readObjectCaseInsensitive(state, ["milestones", "Milestones"])
+      || {};
     const depthEstimate = Math.max(0, Math.min(1.5, number(state?.depthEstimate ?? state?.depth ?? state?.depthSig, 1)));
     const depthSig = depthEstimate;
     const wall = wallVector(state);
@@ -270,6 +555,11 @@
       ? state.spawnCorridorGapTurn
       : "none";
     const spawnGapLockFrames = number(state?.spawnCorridorGapLockFrames, 0);
+    const spawnGapFrames = number(
+      state?.spawnCorridorGapFrames
+        ?? state?.milestones?.spawnCorridorGapFrames
+        ?? autoplayState?.milestones?.spawnCorridorGapFrames,
+      0);
     const spawnLandmarkRouteEvidence = number(state?.spawnLandmarkRouteEvidence, 0);
     const spawnLandmarkRouteFrames = number(state?.spawnLandmarkRouteFrames, 0);
     const spawnLandmarkRouteTurn = state?.spawnLandmarkRouteTurn === "left" || state?.spawnLandmarkRouteTurn === "right"
@@ -294,8 +584,14 @@
     const bridgeGreenLeft = number(state?.bridgeGreenLeft, 0);
     const bridgeGreenCenter = number(state?.bridgeGreenCenter, 0);
     const bridgeGreenRight = number(state?.bridgeGreenRight, 0);
+    const postDoorDoorOpenedCount = Math.max(
+      canonicalDoorOpenedCount(state),
+      canonicalDoorOpenedCount(state?.milestones),
+      canonicalDoorOpenedCount(state?.autoplayState),
+      canonicalDoorOpenedCount(state?.autoplayState?.milestones));
     const bridgeGreenHazard = Math.max(bridgeGreenLeft, bridgeGreenCenter, bridgeGreenRight);
-    const bridgeConfidence = Math.max(bridgeBrownScore, bridgeGreenHazard, number(state?.bridgeConfidence, 0));
+    const rawBridgeConfidence = Math.max(bridgeBrownScore, bridgeGreenHazard, number(state?.bridgeConfidence, 0));
+    const bridgeConfidence = postDoorDoorOpenedCount > 0 ? rawBridgeConfidence : 0;
     const bridgeLaneVisible = Boolean(state?.bridgeLaneVisible)
       || bridgeBrownScore >= 0.28
       || bridgeGreenHazard >= 0.18;
@@ -308,16 +604,85 @@
       : wall > 0 ? doorAimYawDegrees : -doorAimYawDegrees;
 
     const healthSensor = state?.healthSensor && typeof state.healthSensor === "object" ? state.healthSensor : {};
-    const health = number(healthSensor.value ?? healthSensor.health ?? state?.health, 100);
-    const criticalBloodAlive = Boolean(healthSensor.criticalBloodAlive ?? state?.criticalBloodAlive ?? state?.healthCriticalBloodAlive);
-    const bloodDangerScore = Math.max(0, Math.min(1, number(
+    const rawCriticalBloodAlive = Boolean(healthSensor.criticalBloodAlive ?? state?.criticalBloodAlive ?? state?.healthCriticalBloodAlive);
+    const rawBloodDangerScore = Math.max(0, Math.min(1, number(
       healthSensor.bloodDangerScore ?? state?.bloodDangerScore ?? state?.healthBloodDangerScore,
-      criticalBloodAlive ? 0.58 : 0)));
-    const healthDangerReason = String(healthSensor.healthDangerReason || state?.healthDangerReason || (criticalBloodAlive ? "face-heartbeat-blood" : "none"));
+      rawCriticalBloodAlive ? 0.58 : 0)));
+    const rawHealthDangerReason = String(healthSensor.healthDangerReason || state?.healthDangerReason || (rawCriticalBloodAlive ? "face-heartbeat-blood" : "none"));
     const facePoseDiversity = number(healthSensor.facePoseDiversity ?? state?.facePoseDiversity ?? state?.healthFacePoseDiversity, 0);
     const faceFixedFrames = number(healthSensor.faceFixedFrames ?? state?.faceFixedFrames ?? state?.healthFaceFixedFrames, 0);
-    const faceHeartbeatAlive = Boolean(healthSensor.faceHeartbeatAlive ?? state?.faceHeartbeatAlive ?? state?.healthFaceHeartbeatAlive);
+    const faceHeartbeatAlive = Boolean(
+      healthSensor.faceHeartbeatAlive
+      ?? healthSensor.healthFaceHeartbeatAlive
+      ?? state?.faceHeartbeatAlive
+      ?? state?.healthFaceHeartbeatAlive);
     const faceLifePattern = String(healthSensor.faceLifePattern || state?.faceLifePattern || state?.healthFaceLifePattern || "unknown");
+    const faceLifePhase = String(healthSensor.faceLifePhase || state?.faceLifePhase || state?.healthFaceLifePhase || "unknown");
+    const faceLifeLevel = Math.max(0, Math.min(5, Math.round(number(
+      healthSensor.faceLifeLevel ?? state?.faceLifeLevel ?? state?.healthFaceLifeLevel,
+      0))));
+    const faceLifeQuantizedPhase = String(
+      healthSensor.faceLifeQuantizedPhase
+        || state?.faceLifeQuantizedPhase
+        || state?.healthFaceLifeQuantizedPhase
+        || faceLifePhase
+        || "unknown");
+    const faceLifeQuantizedLevel = Math.max(0, Math.min(5, Math.round(number(
+      healthSensor.faceLifeQuantizedLevel
+        ?? state?.faceLifeQuantizedLevel
+        ?? state?.healthFaceLifeQuantizedLevel
+        ?? faceLifeLevel,
+      0))));
+    const faceLifeTemplatePhase = String(
+      healthSensor.faceLifeTemplatePhase
+        || state?.faceLifeTemplatePhase
+        || state?.healthFaceLifeTemplatePhase
+        || faceLifePhase
+        || faceLifeQuantizedPhase
+        || "unknown");
+    const faceLifeTemplateLevel = Math.max(0, Math.min(5, Math.round(number(
+      healthSensor.faceLifeTemplateLevel
+        ?? state?.faceLifeTemplateLevel
+        ?? state?.healthFaceLifeTemplateLevel
+        ?? faceLifeLevel
+        ?? faceLifeQuantizedLevel,
+      0))));
+    const faceLifeTemplateConfidence = Math.max(0, Math.min(1, number(
+      healthSensor.faceLifeTemplateConfidence
+        ?? state?.faceLifeTemplateConfidence
+        ?? state?.healthFaceLifeTemplateConfidence
+        ?? healthSensor.faceTemplateConfidence
+        ?? state?.faceTemplateConfidence,
+      0)));
+    const faceLifeTemplateAuthoritative = Boolean(
+      healthSensor.faceLifeTemplateAuthoritative
+        ?? state?.faceLifeTemplateAuthoritative
+        ?? state?.healthFaceLifeTemplateAuthoritative);
+    const explicitHealthSamples = [
+      healthSensor.health,
+      healthSensor.value,
+      healthSensor.estimatedPercent,
+      state?.health,
+      state?.hp,
+      state?.value,
+      state?.estimatedPercent
+    ]
+      .map(value => number(value, NaN))
+      .filter(value => Number.isFinite(value));
+    const explicitHighNumericHealth = explicitHealthSamples
+      .filter(value => value >= 50 && value <= 100)
+      .reduce((best, value) => Math.max(best, value), NaN);
+    const explicitNumericLowHealth = explicitHealthSamples
+      .some(value => value > 5 && value < 50);
+    const rawResolvedHealth = resolveHealthPercent(100, healthSensor, state);
+    const faceOnlyLowHealthNoise = rawResolvedHealth > 0
+      && rawResolvedHealth < 50
+      && Number.isFinite(explicitHighNumericHealth)
+      && !rawCriticalBloodAlive
+      && !faceLifeTemplateAuthoritative
+      && !Boolean(healthSensor.retryRequested ?? state?.healthRetryRequested)
+      && !Boolean(healthSensor.likelyDead ?? state?.healthLikelyDead);
+    const health = faceOnlyLowHealthNoise ? explicitHighNumericHealth : rawResolvedHealth;
     const lowHealthPressure = health > 0 && health < 50;
     const damagedHealthPressure = health > 0 && health < 65;
     const faceSig = number(state?.faceSig, 0);
@@ -332,16 +697,31 @@
       number(state?.enemyConfidencePeak, 0),
       number(state?.milestones?.enemyConfidencePeak, 0),
       rawVisualEnemyConfidence);
-    const postDoorDoorOpenedCount = Math.max(
-      number(state?.doorOpenedCount, 0),
-      number(state?.milestones?.doorOpened, 0),
-      number(state?.milestones?.doorOpenedCount, 0),
-      number(state?.autoplayState?.doorOpenedCount, 0));
+    const healthDeathOrRetry = health <= 0
+      || Boolean(healthSensor.retryRequested ?? state?.healthRetryRequested)
+      || Boolean(healthSensor.likelyDead ?? state?.healthLikelyDead);
+    const healthThreatEvidenceTrusted = healthDeathOrRetry
+      || rawCriticalBloodAlive
+      || Boolean(healthSensor.lowHealth ?? state?.lowHealth)
+      || Boolean(healthSensor.healthSensorEnabled ?? state?.healthSensorEnabled)
+      || Boolean(healthSensor.faceVitalEnabled ?? state?.faceVitalEnabled)
+      || faceLifeTemplateAuthoritative
+      || (faceHeartbeatAlive && faceLifeLevel > 0)
+      || (facePoseDiversity >= 2 && faceLifeLevel > 0)
+      || (explicitNumericLowHealth && !faceOnlyLowHealthNoise);
+    const preDoorHealthDangerSuppressed = postDoorDoorOpenedCount <= 0 && !healthDeathOrRetry;
+    const criticalBloodAlive = preDoorHealthDangerSuppressed ? false : rawCriticalBloodAlive;
+    const bloodDangerScore = preDoorHealthDangerSuppressed ? 0 : rawBloodDangerScore;
+    const healthDangerReason = preDoorHealthDangerSuppressed ? "pre-door-suppressed" : rawHealthDangerReason;
     const firstDoorVisionRedScore = number(state?.firstDoorVision9x9RedScore, 0);
     const computerPanelScore = number(state?.computerPanelScore ?? state?.milestones?.computerPanelScore, 0);
     const computerDarkPanelScore = number(state?.computerDarkPanelScore ?? state?.milestones?.computerDarkPanelScore, 0);
     const computerRoomScore = number(state?.computerRoomScore ?? state?.milestones?.computerRoomScore, 0);
-    const statePostDoorTerminalSurface = number(state?.postDoorTerminalSurface ?? state?.milestones?.postDoorTerminalSurface, 0);
+    const rawComputerRoomConfidence = number(state?.computerRoomConfidence, 0);
+    const computerRoomConfidence = postDoorDoorOpenedCount > 0 ? rawComputerRoomConfidence : 0;
+    const statePostDoorTerminalSurface = postDoorDoorOpenedCount > 0
+      ? number(state?.postDoorTerminalSurface ?? state?.milestones?.postDoorTerminalSurface, 0)
+      : 0;
     const terminalSurface = Math.max(
       statePostDoorTerminalSurface,
       computerPanelScore,
@@ -372,6 +752,7 @@
       && rawVisualEnemyConfidence >= (lowHealthPressure ? 0.24 : 0.30);
     const visualEnemySuppressed = (Boolean(state?.visualEnemySuppressed) && !darkDamageCombatEvidence)
       || enemyStructuralDecoy
+      || (terminalVisualCombatDecoy && !darkDamageCombatEvidence)
       || (terminalSurface >= 0.24
         && rawVisualEnemyConfidence <= 0.46
         && !darkDamageCombatEvidence
@@ -402,6 +783,7 @@
     const visualEnemyFireReady = visualEnemyCentered && visualEnemyConfidence >= 0.36;
     const postDoorEnemyMemoryEvidence = postDoorDoorOpenedCount > 0
       && !enemyStructuralDecoy
+      && !terminalVisualCombatDecoy
       && enemyConfidencePeak >= 0.62
       && rawVisualEnemyConfidence >= 0.08
       && terminalSurface >= 0.28;
@@ -425,22 +807,42 @@
       || faceLifePattern === "alive-cycle"
       || faceLifePattern === "alive-damaged"
       || facePoseDiversity >= 2;
-    const lowHealthGoalFirst = (health > 0 && health < lowHealthThreshold) || criticalBloodAlive;
-    const criticalHealth = health > 0 && health < criticalHealthThreshold;
-    const lethalRisk = Math.max(
+    const rawLowHealthGoalFirst = healthThreatEvidenceTrusted
+      && ((health > 0 && health < lowHealthThreshold) || criticalBloodAlive);
+    const rawCriticalHealth = healthThreatEvidenceTrusted && health > 0 && health < criticalHealthThreshold;
+    const stateLethalRisk = number(state?.lethalRisk, NaN);
+    const computedHealthRisk = health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold));
+    const rawLethalRisk = Math.max(
       bloodDangerScore,
-      number(state?.lethalRisk, health <= 0 ? 1 : Math.max(0, Math.min(1, (lowHealthThreshold - health) / lowHealthThreshold))));
-    const survivalGoalFirst = lowHealthGoalFirst
+      healthThreatEvidenceTrusted && Number.isFinite(stateLethalRisk) ? stateLethalRisk : computedHealthRisk);
+    const lowHealthGoalFirst = preDoorHealthDangerSuppressed ? false : rawLowHealthGoalFirst;
+    const criticalHealth = preDoorHealthDangerSuppressed ? false : rawCriticalHealth;
+    const lethalRisk = preDoorHealthDangerSuppressed ? 0 : rawLethalRisk;
+    const survivalGoalFirst = !preDoorHealthDangerSuppressed && (lowHealthGoalFirst
       || (!Boolean(healthSensor.retryRequested ?? state?.healthRetryRequested)
         && !Boolean(healthSensor.likelyDead ?? state?.healthLikelyDead)
         && aliveFacePattern
-        && bloodDangerScore >= survivalBloodDangerThreshold);
+        && bloodDangerScore >= survivalBloodDangerThreshold));
     const secretEscapeYawDegrees = Math.abs(number(readParameter(parameters, "spawnSecretDoorEscapeYawDegrees"), 34));
     const spawnSecretDoorEscapeYaw = spawnSecretDoorTurn === "right"
       ? -secretEscapeYawDegrees
       : secretEscapeYawDegrees;
-    const firstDoorUseYaw = turnYaw(firstDoorUseTurn, doorAimYawDegrees);
-    const firstDoorVisionYaw = turnYaw(firstDoorVisionTurn, Math.max(doorAimYawDegrees, 12));
+    const explicitFirstDoorUseYaw = number(readStateValue(state, state?.autoplayState, state?.milestones, [
+      "firstDoorUseYaw",
+      "FirstDoorUseYaw"
+    ]), NaN);
+    const explicitFirstDoorVisionYaw = number(readStateValue(state, state?.autoplayState, state?.milestones, [
+      "firstDoorVisionYaw",
+      "FirstDoorVisionYaw",
+      "firstDoorVision9x9Yaw",
+      "FirstDoorVision9x9Yaw"
+    ]), NaN);
+    const firstDoorUseYaw = Number.isFinite(explicitFirstDoorUseYaw)
+      ? explicitFirstDoorUseYaw
+      : turnYaw(firstDoorUseTurn, doorAimYawDegrees);
+    const firstDoorVisionYaw = Number.isFinite(explicitFirstDoorVisionYaw)
+      ? explicitFirstDoorVisionYaw
+      : turnYaw(firstDoorVisionTurn, Math.max(doorAimYawDegrees, 12));
     const footObstacleScore = number(state?.footObstacleScore, 0);
     const footObstacleFlickerScore = number(state?.footObstacleFlickerScore, 0);
     const footObstacleBounceFrames = number(state?.footObstacleBounceFrames, 0);
@@ -456,32 +858,106 @@
     const usePulseAgeFrames = lastUsePulsePrediction >= 0 && predictions >= lastUsePulsePrediction
       ? Math.max(0, Math.floor(predictions - lastUsePulsePrediction))
       : 9999;
-    const doorOpenedCount = postDoorDoorOpenedCount;
+    const centralHallEntered = Boolean(readStateValue(state, autoplayState, milestones, ["centralHallEntered", "CentralHallEntered"]));
+    const postDoorCarryText = [
+      state?.routeMode,
+      state?.previousRouteMode,
+      state?.currentRoute,
+      state?.route,
+      state?.objective,
+      state?.currentObjective,
+      state?.routeObjective,
+      state?.controlPipeline,
+      state?.stage,
+      state?.semanticMemory?.phase,
+      state?.semanticMemory?.objective,
+      autoplayState?.routeMode,
+      autoplayState?.currentRoute,
+      autoplayState?.route,
+      autoplayState?.objective,
+      autoplayState?.controlPipeline
+    ].join(" ").toLowerCase();
+    const postDoorCarryEvidence = /\b(post-door|computer-room|central-hall|reach-central-hall|cross-bridge)\b/.test(postDoorCarryText)
+      && Math.max(terminalSurface, computerRoomConfidence, computerRoomScore, computerPanelScore, computerDarkPanelScore, bridgeConfidence) >= 0.34;
+    const postDoorComputerRoomCarryEvidence = /\b(computer-room|central-hall|reach-central-hall|cross-bridge)\b/.test(postDoorCarryText)
+      && Math.max(terminalSurface, computerRoomConfidence, computerRoomScore, computerPanelScore, computerDarkPanelScore, bridgeConfidence) >= 0.28;
+    const explicitClosedDoorReset = number(state?.doorOpenedCount, NaN) === 0
+      && number(state?.milestones?.doorOpenedCount, NaN) === 0
+      && number(autoplayState?.milestones?.doorOpenedCount, NaN) === 0;
+    const liveClosedDoorCarryContradiction = explicitClosedDoorReset
+      && number(state?.firstDoorVision9x9Score, 0) >= 0.36
+      && number(state?.firstDoorUse3x3Score, 0) <= 0.08;
+    const postDoorCarryDoorOpened = postDoorDoorOpenedCount <= 0
+      && !centralHallEntered
+      && postDoorCarryEvidence
+      && !liveClosedDoorCarryContradiction;
+    const doorOpenedCount = Math.max(postDoorDoorOpenedCount, postDoorCarryDoorOpened ? 1 : 0);
     const postDoorTerminalSurface = doorOpenedCount > 0 ? terminalSurface : 0;
-    const postDoorAudioCue = Boolean(state?.postDoorAudioCue);
-    const computerRoomEntered = Boolean(state?.computerRoomEntered);
-    const centralHallEntered = Boolean(state?.centralHallEntered);
-    const computerRoomCombatContext = state?.contextDict === "computer-room"
-      || computerRoomEntered
-      || number(state?.computerRoomConfidence, 0) >= 0.28;
-    const centralHallFrames = number(state?.centralHallFrames, 0);
-    const stairsEntered = Boolean(state?.stairsEntered);
-    const enemyDefeatedCount = number(state?.enemyDefeatedCount, 0);
-    const combatFireFrames = number(state?.combatFireFrames, 0);
-    const combatBurstFrames = number(state?.combatBurstFrames, 0);
-    const combatBurstShots = number(state?.combatBurstShots, 0);
-    const ammoLikelyEmpty = Boolean(state?.ammoLikelyEmpty);
-    const finalRoomEntered = Boolean(state?.finalRoomEntered);
-    const finalRoomCandidateFrames = number(state?.finalRoomCandidateFrames, 0);
-    const exitSwitchUseFrames = number(state?.exitSwitchUseFrames, 0);
-    const exitSwitchPressed = Boolean(state?.exitSwitchPressed);
-    const centralHallConfidence = number(state?.centralHallConfidence, 0);
-    const finalRoomConfidence = number(state?.finalRoomConfidence, 0);
+    const postDoorAudioCue = doorOpenedCount > 0
+      && Boolean(readStateValue(state, autoplayState, milestones, ["postDoorAudioCue", "PostDoorAudioCue"]));
+    const computerRoomVisualEntry = doorOpenedCount > 0
+      && centralHallEntered !== true
+      && (computerRoomConfidence >= 0.70 || computerRoomScore >= 0.58)
+      && (postDoorTerminalSurface >= 0.24 || computerPanelScore >= 0.42 || computerDarkPanelScore >= 0.42 || bridgeConfidence >= 0.54);
+    const rawComputerRoomEntered = Boolean(readStateValue(state, autoplayState, milestones, ["computerRoomEntered", "ComputerRoomEntered"]));
+    const computerRoomEntered = doorOpenedCount > 0
+      && (rawComputerRoomEntered || computerRoomVisualEntry || (postDoorComputerRoomCarryEvidence && !liveClosedDoorCarryContradiction));
+    const computerRoomCombatContext = doorOpenedCount > 0
+      && (state?.contextDict === "computer-room"
+        || computerRoomEntered
+        || computerRoomConfidence >= 0.28);
+    const centralHallFrames = number(readStateValue(state, autoplayState, milestones, ["centralHallFrames", "CentralHallFrames"]), 0);
+    const stairsEntered = Boolean(readStateValue(state, autoplayState, milestones, ["stairsEntered", "StairsEntered"]));
+    const enemyDefeatedCount = number(readStateValue(state, autoplayState, milestones, ["enemyDefeatedCount", "EnemyDefeatedCount", "enemyDefeated", "EnemyDefeated"]), 0);
+    const combatFireFrames = number(readStateValue(state, autoplayState, milestones, ["combatFireFrames", "CombatFireFrames"]), 0);
+    const centralHallCombatFireBudget = Math.max(3, Math.round(number(readParameter(parameters, "centralHallCombatFireBudget"), 14)));
+    const combatRouteEngageAllowed = !centralHallEntered
+      || enemyDefeatedCount > 0
+      || combatFireFrames < centralHallCombatFireBudget
+      || trustedEnemyThreat >= 0.62
+      || audioEnemyConfidence >= 0.50;
+    const combatBurstFrames = number(readStateValue(state, autoplayState, milestones, ["combatBurstFrames", "CombatBurstFrames"]), 0);
+    const combatBurstShots = number(readStateValue(state, autoplayState, milestones, ["combatBurstShots", "CombatBurstShots"]), 0);
+    const ammoLikelyEmpty = Boolean(readStateValue(state, autoplayState, milestones, ["ammoLikelyEmpty", "AmmoLikelyEmpty"]));
+    const finalRoomEntered = Boolean(readStateValue(state, autoplayState, milestones, ["finalRoomEntered", "FinalRoomEntered"]));
+    const finalRoomCandidateFrames = number(readStateValue(state, autoplayState, milestones, ["finalRoomCandidateFrames", "FinalRoomCandidateFrames"]), 0);
+    const exitSwitchUseFrames = number(readStateValue(state, autoplayState, milestones, ["exitSwitchUseFrames", "ExitSwitchUseFrames"]), 0);
+    const exitSwitchPressed = Boolean(readStateValue(state, autoplayState, milestones, ["exitSwitchPressed", "ExitSwitchPressed"]));
+    const centralHallConfidence = number(readStateValue(state, autoplayState, milestones, ["centralHallConfidence", "CentralHallConfidence"]), 0);
+    const finalRoomConfidence = number(readStateValue(state, autoplayState, milestones, ["finalRoomConfidence", "FinalRoomConfidence"]), 0);
     const centralHallBypassAllowed = centralHallEntered && (survivalGoalFirst || ammoLikelyEmpty || enemyDefeatedCount > 0);
     const finalRoomRouteCandidate = stairsEntered || doorOpenedCount > 1 || finalRoomConfidence >= 0.45;
-    const computerRoomConfidence = number(state?.computerRoomConfidence, 0);
     const useProbeScore = number(state?.firstDoorUse3x3Score, 0);
     const firstDoorVisionScore = number(state?.firstDoorVision9x9Score, 0);
+    const firstDoorVisionBox = state?.milestones?.firstDoorVision9x9Box || state?.firstDoorVision9x9Box || null;
+    const firstDoorVisionBoxKind = String(
+      firstDoorVisionBox?.kind
+        || firstDoorVisionBox?.label
+        || firstDoorVisionBox?.id
+        || "").toLowerCase();
+    const firstDoorExplicitWallPatternDetected =
+      /\bfirst-door.*wall-pattern\b|\bfirst-door-wall\b|\bdoor-wall-pattern\b/.test(firstDoorVisionBoxKind)
+      || (Array.isArray(state?.activeDetections) && state.activeDetections.some(detection => {
+        const text = [
+          detection?.kind,
+          detection?.label,
+          detection?.name,
+          detection?.id
+        ].join(" ").toLowerCase();
+        return text.indexOf("first-door-wall-pattern") >= 0
+          || text.indexOf("first-door-wall") >= 0
+          || text.indexOf("door-wall-pattern") >= 0;
+      }));
+    const firstDoorHeuristicWallPatternDetected = firstDoorVisionScore >= 0.30
+        && firstDoorVisionRedScore <= 0.08
+        && useProbeScore <= 0.04
+        && bridgeDoorScore <= 0.14
+        && terminalSurface <= 0.30
+        && computerRoomConfidence <= 0.32
+        && computerPanelScore <= 0.40
+        && computerDarkPanelScore <= 0.30;
+    const firstDoorWallPatternDetected = firstDoorExplicitWallPatternDetected
+      || firstDoorHeuristicWallPatternDetected;
     const useProbeAlignment = Math.max(0, 1 - (Math.abs(qDelta) / Math.max(1, doorSoftAimToleranceDegrees)));
     const gapVector = (spawnGapTurn === "right" ? 1 : (spawnGapTurn === "left" ? -1 : 0)) * Math.min(1, Math.max(spawnGapScore, spawnGapLockFrames > 0 ? 0.38 : 0));
     const corridorVector = (spawnLandmarkRouteTurn === "right" ? 1 : (spawnLandmarkRouteTurn === "left" ? -1 : 0)) * Math.min(1, spawnLandmarkRouteEvidence);
@@ -530,7 +1006,37 @@
       || routeTextureWallOcclusion;
     const routeOpenSpaceLowGapScan = Boolean(routePlan.routeOpenSpaceLowGapScan);
     const routeOpenSpaceLowGapEscape = Boolean(routePlan.routeOpenSpaceLowGapEscape);
-    const currentRouteRaw = routePlan.currentRoute || "open-space-cruise";
+    const semanticMemory = state?.semanticMemory || state?.autoplayState?.semanticMemory || {};
+    const semanticSymbols = semanticMemory?.symbols || {};
+    const semanticRoutePlan = semanticMemory?.route || {};
+    const semanticRouteText = String([
+      semanticRoutePlan.currentRoute,
+      semanticRoutePlan.route,
+      semanticRoutePlan.objective,
+      semanticRoutePlan.routeObjective
+    ].join(" ")).toLowerCase();
+    const semanticLandmarkText = String([
+      semanticRoutePlan.currentLandmark,
+      semanticRoutePlan.routeLandmark
+    ].join(" ")).toLowerCase();
+    const semanticHintText = String([
+      semanticRoutePlan.routeActionHint,
+      semanticRoutePlan.routeHint
+    ].join(" ")).toLowerCase();
+    const semanticCentralDoorRouteReady = doorOpenedCount > 0
+      && !centralHallEntered
+      && (
+        semanticRouteText.indexOf("central-hall") >= 0
+        || semanticLandmarkText.indexOf("central-hall-door") >= 0
+        || semanticHintText.indexOf("central-door") >= 0
+        || semanticHintText.indexOf("open-central-hall") >= 0
+      )
+      && Math.max(bridgeConfidence, number(semanticSymbols.bridge, 0)) >= 0.48
+      && bridgeDoorScore >= 0.24
+      && terminalSurface >= 0.28;
+    const currentRouteRaw = semanticCentralDoorRouteReady
+      ? "central-hall-route"
+      : (routePlan.currentRoute || "open-space-cruise");
     const spawnSecretRouteEscapeGuard = routeFootObstacle
       || (spawnGapTurn === "none"
         && spawnLandmarkRouteEvidence >= 0.40
@@ -539,12 +1045,130 @@
     const firstDoorRouteEvidence = number(routePlan.firstDoorRouteEvidence, 0);
     const firstDoorRouteEvidenceReady = Boolean(routePlan.firstDoorRouteEvidenceReady);
     const eastWindowRouteEvidenceReady = Boolean(routePlan.eastWindowRouteEvidenceReady);
-    const previousRouteMode = state?.previousRouteMode || state?.routeMode || state?.autoplayState?.routeMode || "none";
-    const routeMode = determineRouteMode(doorOpenedCount, useProbeScore, firstDoorVisionScore, firstDoorRouteEvidenceReady, currentRouteRaw, previousRouteMode, spawnGapScore, spawnLandmarkRouteEvidence, spawnSecretDoorScore);
-    const currentRoute = resolvePhaseCurrentRoute(routeMode, currentRouteRaw, {
+    const previousRouteMode = sanitizePreviousRouteMode(
+      doorOpenedCount,
+      state?.previousRouteMode || state?.routeMode || state?.autoplayState?.routeMode || "none");
+    const semanticDoor = number(semanticSymbols.door, 0);
+    const semanticCorridor = number(semanticSymbols.corridor, 0);
+    const firstDoorContactMemoryReady = previousRouteMode === "door-approach"
+      && predictions >= 1800
+      && useProbeScore < 0.12
+      && firstDoorVisionRedScore < 0.06
+      && bridgeDoorScore < 0.18
+      && Math.max(footObstacleScore, motionObstacleScore) >= 0.58
+      && motionForwardProgress >= 0
+      && motionForwardProgress <= 0.30
+      && semanticDoor >= 0.42
+      && semanticCorridor >= 0.48;
+    const firstDoorLeftPanelMemoryReady = previousRouteMode === "door-approach"
+      && predictions >= 1440
+      && useProbeScore < 0.12
+      && firstDoorVisionRedScore < 0.06
+      && firstDoorVisionScore < 0.24
+      && bridgeDoorScore >= 0.20
+      && courtyardScore >= 0.30
+      && state?.courtyardTurn === "left"
+      && Math.max(footObstacleScore, motionObstacleScore) >= 0.58
+      && semanticDoor >= 0.48;
+    const firstDoorWeakGapLoopMemoryReady = previousRouteMode === "door-approach"
+      && useProbeScore < 0.12
+      && firstDoorVisionScore < 0.12
+      && firstDoorVisionRedScore < 0.04
+      && bridgeDoorScore < 0.08
+      && spawnGapScore >= 0.18
+      && spawnGapScore < 0.28
+      && spawnGapTurn === "right"
+      && (predictions >= 5000 || turnRepeatFrames >= 160 || actionRepeatFrames >= 8)
+      && Math.abs(wall) >= 0.50
+      && Math.max(footObstacleScore, motionObstacleScore) >= 0.56
+      && semanticDoor >= 0.45;
+    const firstDoorLateAmbiguousMemoryReady = previousRouteMode === "door-approach"
+      && predictions >= 3600
+      && useProbeScore < 0.12
+      && firstDoorVisionScore < 0.12
+      && firstDoorVisionRedScore < 0.06
+      && bridgeDoorScore < 0.08
+      && spawnGapScore >= 0.18
+      && spawnGapScore < 0.26
+      && spawnGapTurn === "right"
+      && spawnLandmarkRouteEvidence >= 0.30
+      && Math.abs(wall) >= 0.45
+      && Math.max(footObstacleScore, motionObstacleScore) >= 0.56
+      && semanticDoor >= 0.48;
+    const wallDepthOnlyWithoutDoorIdentity = context === "wall"
+      && footObstacleScore < 0.20
+      && motionObstacleScore < 0.20
+      && useProbeScore < 0.12
+      && firstDoorVisionScore < 0.24
+      && bridgeDoorScore < 0.12;
+    const previousDoorApproachStickyReady = previousRouteMode === "door-approach"
+      && !wallDepthOnlyWithoutDoorIdentity
+      && (spawnGapScore >= 0.18
+        || spawnLandmarkRouteEvidence >= 0.36
+        || firstDoorContactMemoryReady
+        || firstDoorLeftPanelMemoryReady
+        || firstDoorWeakGapLoopMemoryReady
+        || firstDoorLateAmbiguousMemoryReady
+        || firstDoorRouteEvidenceReady);
+    const routeFootClearOnly = String(routePlan.routeActionHint || "").toLowerCase() === "clear-foot"
+      && useProbeScore < 0.12
+      && firstDoorVisionRedScore < 0.08
+      && bridgeDoorScore < 0.18;
+    const closeWallWithoutFootObstacle = context === "wall"
+      && depthSig <= 0.10
+      && footObstacleScore < 0.20
+      && motionObstacleScore < 0.20;
+    const firstDoorVisualIdentityReady = firstDoorVisionScore >= 0.38
+      && (firstDoorVisionRedScore >= 0.04
+        || (useProbeScore >= 0.08 && !closeWallWithoutFootObstacle)
+        || bridgeDoorScore >= 0.08
+        || firstDoorExplicitWallPatternDetected);
+    const firstDoorWallPatternPhaseReady = firstDoorExplicitWallPatternDetected
+      || (firstDoorWallPatternDetected && !routeFootClearOnly);
+    const firstDoorCorridorPhaseReady = context === "corridor"
+      && firstDoorRouteEvidenceReady
+      && spawnLandmarkRouteEvidence >= 0.44
+      && spawnGapScore >= 0.30
+      && spawnSecretDoorScore < 0.42;
+    const firstDoorPhaseReady = useProbeScore >= 0.22
+      || firstDoorVisualIdentityReady
+      || firstDoorWallPatternPhaseReady
+      || firstDoorCorridorPhaseReady
+      || previousDoorApproachStickyReady;
+    const routeMode = determineRouteMode(doorOpenedCount, useProbeScore, firstDoorVisionScore, firstDoorRouteEvidenceReady, firstDoorPhaseReady, currentRouteRaw, previousRouteMode, spawnGapScore, spawnLandmarkRouteEvidence, spawnSecretDoorScore, firstDoorContactMemoryReady || firstDoorLeftPanelMemoryReady || firstDoorWeakGapLoopMemoryReady || firstDoorLateAmbiguousMemoryReady);
+    const doorApproachRoute = resolveDoorApproachCurrentRoute(routeMode, currentRouteRaw, {
+      doorOpenedCount,
+      firstDoorPhaseReady,
+      firstDoorContactMemoryReady,
+      firstDoorVisionScore,
+      bridgeDoorScore,
+      spawnLandmarkRouteEvidence,
+      spawnCorridorGapScore: spawnGapScore
+    });
+    const resolvedCurrentRoute = resolvePhaseCurrentRoute(routeMode, doorApproachRoute, {
       centralHallEntered,
+      centralHallConfidence,
       bridgeLaneVisible,
       bridgeConfidence,
+      bridgeDoorScore,
+      computerRoomEntered,
+      computerRoomConfidence,
+      postDoorTerminalSurface
+    });
+    const currentRoute = semanticCentralDoorRouteReady
+      ? "central-hall-route"
+      : resolvedCurrentRoute;
+    const phaseRouteHint = semanticCentralDoorRouteReady
+      ? {
+        currentLandmark: "central-hall-door",
+        routeActionHint: "advance-central-hall"
+      }
+      : resolvePhaseRouteHint(routeMode, currentRoute, routePlan, {
+      centralHallEntered,
+      centralHallConfidence,
+      bridgeLaneVisible,
+      bridgeConfidence,
+      bridgeDoorScore,
       computerRoomEntered,
       computerRoomConfidence,
       postDoorTerminalSurface
@@ -657,8 +1281,36 @@
     const spawnGapYaw = number(navigator.spawnCorridorGapYaw, 0);
     const landmarkRouteYaw = number(navigator.landmarkRouteYaw, 0);
     const wallAwayYaw = number(navigator.wallAwayYaw, 0);
-    const routeRecommendedYaw = number(navigator.recommendedYaw, 0) || number(routePlan.recommendedYaw, 0);
-    const routeFallbackYaw = routeRecommendedYaw || number(navigator.routeFallbackYaw, 0);
+    const explicitRecommendedYaw = number(readStateValue(state, state?.autoplayState, state?.milestones, [
+      "recommendedYaw",
+      "RecommendedYaw",
+      "routeRecommendedYaw",
+      "RouteRecommendedYaw"
+    ]), NaN);
+    const explicitRouteFallbackYaw = number(readStateValue(state, state?.autoplayState, state?.milestones, [
+      "routeFallbackYaw",
+      "RouteFallbackYaw"
+    ]), NaN);
+    const routeRecommendedYaw = Number.isFinite(explicitRecommendedYaw)
+      ? explicitRecommendedYaw
+      : (number(navigator.recommendedYaw, 0) || number(routePlan.recommendedYaw, 0));
+    const routeFallbackYaw = Number.isFinite(explicitRouteFallbackYaw)
+      ? explicitRouteFallbackYaw
+      : (routeRecommendedYaw || number(navigator.routeFallbackYaw, 0));
+    const firstDoorUseAimReady = useProbeScore >= 0.22
+      && (firstDoorUseTurn !== "none" || useProbeScore >= 0.34);
+    const firstDoorVisionAimReady = firstDoorVisionScore >= 0.38
+      && firstDoorVisionRedScore >= 0.05
+      && (firstDoorVisionTurn !== "none" || firstDoorVisionBox);
+    const explicitFirstDoorApproachYaw = number(readStateValue(state, state?.autoplayState, state?.milestones, [
+      "firstDoorApproachYaw",
+      "FirstDoorApproachYaw"
+    ]), NaN);
+    const firstDoorApproachYaw = Number.isFinite(explicitFirstDoorApproachYaw)
+      ? explicitFirstDoorApproachYaw
+      : (firstDoorUseAimReady
+        ? firstDoorUseYaw
+        : (firstDoorVisionAimReady ? firstDoorVisionYaw : (routeRecommendedYaw || routeFallbackYaw)));
     const visibleSpawnGapYaw = spawnGapScore >= 0.16
       ? turnYaw(spawnGapTurn, Math.max(6, spawnGapYawDegrees))
       : 0;
@@ -710,6 +1362,9 @@
         bloodDangerScore,
         healthBloodDangerScore: bloodDangerScore,
         healthDangerReason,
+        healthThreatEvidenceTrusted,
+        preDoorHealthDangerSuppressed,
+        healthDeathOrRetry,
         lowHealthGoalFirst,
         survivalGoalFirst,
         lowHealthThreshold,
@@ -719,6 +1374,14 @@
         faceFixedFrames,
         faceHeartbeatAlive,
         faceLifePattern,
+        faceLifePhase,
+        faceLifeLevel,
+        faceLifeQuantizedPhase,
+        faceLifeQuantizedLevel,
+        faceLifeTemplatePhase,
+        faceLifeTemplateLevel,
+        faceLifeTemplateConfidence,
+        faceLifeTemplateAuthoritative,
         lethalRisk,
         depthSig,
         depthEstimate,
@@ -732,6 +1395,8 @@
         stairsEntered,
         enemyDefeatedCount,
         combatFireFrames,
+        centralHallCombatFireBudget,
+        combatRouteEngageAllowed,
         combatBurstFrames,
         combatBurstShots,
         ammoLikelyEmpty,
@@ -767,6 +1432,10 @@
         visualEnemyYaw,
         stuckTicks: number(state?.stuckTicks, 0),
         doorOpenedCount,
+        doorOpenedContradicted: Boolean(state?.doorOpenedContradicted),
+        activeDetections: Array.isArray(state?.activeDetections)
+          ? state.activeDetections
+          : (Array.isArray(state?.detections) ? state.detections : []),
         computerRoomConfidence,
         computerRoomScore,
         computerPanelScore,
@@ -821,9 +1490,19 @@
         routePostDoorBridgeDoorMemoryFrames,
         doorApproachRouteEvidenceStable,
         weakRearLandmarkResetAllowed,
+        semanticMemory,
         currentRoute,
         previousRouteMode,
         routeMode,
+        openingResetProjectionActive: Boolean(state?.openingResetProjectionActive || state?.autoplayState?.openingResetProjectionActive),
+        postRetryOpeningGuardFrames: number(
+          state?.postRetryOpeningGuardFrames
+            ?? state?.autoplayState?.postRetryOpeningGuardFrames,
+          0),
+        firstDoorContactMemoryReady,
+        firstDoorLeftPanelMemoryReady,
+        firstDoorWeakGapLoopMemoryReady,
+        firstDoorLateAmbiguousMemoryReady,
         routeLoopKind: routeLoopBudget.loopKind,
         routeAbortHint: routeLoopBudget.routeAbortHint,
         routeLoopBudgetSource: routeLoopBudget.source,
@@ -852,8 +1531,8 @@
         routeArcUsed: routeLoopBudget.arcUsed,
         routeArcBudget: routeLoopBudget.arcBudget,
         routeArcExceeded: routeLoopBudget.arcExceeded,
-        currentLandmark: routePlan.currentLandmark || "none",
-        routeActionHint: routePlan.routeActionHint || "cruise",
+        currentLandmark: phaseRouteHint.currentLandmark,
+        routeActionHint: phaseRouteHint.routeActionHint,
         routePlannerAdvanceReady,
         routeConfidence: number(routePlan.routeConfidence, 0),
         recommendedYaw: routeRecommendedYaw,
@@ -862,6 +1541,7 @@
         corridorVector,
         wallFlowVector,
         spawnCorridorGapScore: spawnGapScore,
+        spawnCorridorGapFrames: spawnGapFrames,
         spawnCorridorSustainAllowed,
         spawnCorridorGapTurn: spawnGapTurn,
         spawnCorridorGapTurnNone: spawnGapTurn === "none",
@@ -877,7 +1557,10 @@
         firstDoorVision9x9Heatmap: Array.isArray(state?.milestones?.firstDoorVision9x9Heatmap)
           ? state.milestones.firstDoorVision9x9Heatmap
           : (Array.isArray(state?.firstDoorVision9x9Heatmap) ? state.firstDoorVision9x9Heatmap : []),
-        firstDoorVision9x9Box: state?.milestones?.firstDoorVision9x9Box || state?.firstDoorVision9x9Box || null,
+        firstDoorVision9x9Box: firstDoorVisionBox,
+        firstDoorVision9x9BoxKind: firstDoorVisionBoxKind,
+        firstDoorWallPatternDetected,
+        firstDoorPhaseReady,
         vision9x9Signature: state?.vision9x9Signature || state?.visionSensor?.signature || "",
         firstDoorUse3x3Score: useProbeScore,
         bridgeBrownScore,
@@ -909,7 +1592,7 @@
         spawnCenterAnchorTurn: state?.spawnCenterAnchorTurn === "left" || state?.spawnCenterAnchorTurn === "right" ? state.spawnCenterAnchorTurn : "none",
         firstDoorUseTurn,
         firstDoorUseYaw,
-        firstDoorApproachYaw: firstDoorUseYaw || firstDoorVisionYaw || routeRecommendedYaw || routeFallbackYaw,
+        firstDoorApproachYaw,
         escapeYaw: wall > 0
           ? -number(readParameter(parameters, "emergencyEscapeYawDegrees"), 34)
           : number(readParameter(parameters, "emergencyEscapeYawDegrees"), 34),

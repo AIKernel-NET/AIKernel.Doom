@@ -32,6 +32,54 @@
       return Math.max(-1, Math.min(1, number));
     }
 
+    function audioLevelFromPeak(peakEnergy) {
+      return clamp01(Math.sqrt(Math.max(0, clamp01(peakEnergy)) * 2.25));
+    }
+
+    function audioAttenuationFromLevel(level) {
+      return clamp01(1 - clamp01(level));
+    }
+
+    function finiteAudioNumber(value, fallback = 0) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
+    function audioFeatureFields(snapshot, peakEnergy, defaults = {}) {
+      const peak = clamp01(peakEnergy);
+      const suppliedLevel = Number(snapshot?.level);
+      const level = Number.isFinite(suppliedLevel)
+        ? clamp01(suppliedLevel)
+        : audioLevelFromPeak(peak);
+      const suppliedAttenuation = Number(snapshot?.attenuation);
+      const attenuation = Number.isFinite(suppliedAttenuation)
+        ? clamp01(suppliedAttenuation)
+        : audioAttenuationFromLevel(level);
+      const rmsEnergy = clamp01(finiteAudioNumber(snapshot?.rmsEnergy, defaults.rmsEnergy ?? peak * 0.58));
+      const meanAbsEnergy = clamp01(finiteAudioNumber(snapshot?.meanAbsEnergy, defaults.meanAbsEnergy ?? Math.min(peak, rmsEnergy * 0.88)));
+      const crestFactor = Math.max(0, Math.min(12, finiteAudioNumber(snapshot?.crestFactor, rmsEnergy > 0.0001 ? peak / rmsEnergy : 0)));
+      const zeroCrossingRate = clamp01(finiteAudioNumber(snapshot?.zeroCrossingRate, defaults.zeroCrossingRate ?? 0));
+      const bandHighRatio = clamp01(finiteAudioNumber(snapshot?.bandHighRatio, defaults.bandHighRatio ?? zeroCrossingRate));
+      const bandLowRatio = clamp01(finiteAudioNumber(snapshot?.bandLowRatio, defaults.bandLowRatio ?? (1 - bandHighRatio)));
+      const bandMidRatio = clamp01(finiteAudioNumber(snapshot?.bandMidRatio, defaults.bandMidRatio ?? (1 - Math.abs(0.5 - bandHighRatio) * 1.4)));
+      return {
+        peakEnergy: peak,
+        level,
+        attenuation,
+        waveformPeak: clamp01(finiteAudioNumber(snapshot?.waveformPeak, defaults.waveformPeak ?? peak)),
+        rmsEnergy,
+        meanAbsEnergy,
+        crestFactor,
+        zeroCrossingRate,
+        transientScore: clamp01(finiteAudioNumber(snapshot?.transientScore, defaults.transientScore ?? Math.max(0, peak - meanAbsEnergy))),
+        bandLowRatio,
+        bandMidRatio,
+        bandHighRatio,
+        spectralCentroidProxy: clamp01(finiteAudioNumber(snapshot?.spectralCentroidProxy, defaults.spectralCentroidProxy ?? bandHighRatio)),
+        dynamicRange: clamp01(finiteAudioNumber(snapshot?.dynamicRange, defaults.dynamicRange ?? Math.max(0, peak - rmsEnergy)))
+      };
+    }
+
     function ensureContext() {
       if (audioContext) {
         return audioContext;
@@ -92,12 +140,25 @@
         : 260 + energy * 520;
       const duration = options?.duration ?? 0.22;
       const volume = Math.max(0.18, Math.min(0.68, 0.22 + energy * 0.38));
+      const peakEnergy = clamp01(Math.max(left, right, energy));
+      const features = audioFeatureFields(snapshot, peakEnergy, {
+        rmsEnergy: peakEnergy * 0.58,
+        meanAbsEnergy: peakEnergy * 0.42,
+        bandLowRatio: 0.34,
+        bandMidRatio: 0.52,
+        bandHighRatio: 0.14
+      });
       lastSnapshot = {
         active: true,
         leftEnergy: left,
         rightEnergy: right,
         balance,
         dominantFreq: frequency,
+        lowEnergy: clamp01(finiteAudioNumber(snapshot?.lowEnergy, peakEnergy * 0.38)),
+        midEnergy: clamp01(finiteAudioNumber(snapshot?.midEnergy, peakEnergy * 0.72)),
+        highEnergy: clamp01(finiteAudioNumber(snapshot?.highEnergy, peakEnergy * 0.28)),
+        ...features,
+        dominantBand: snapshot?.dominantBand || "mid",
         eventDetected: true,
         eventType: snapshot?.eventType || "debug-audio-cue",
         timestamp: new Date().toISOString(),
@@ -246,12 +307,23 @@
       const rightEnergy = frames > 0
         ? Math.max(clamp01(snapshot.rightEnergy * adaptiveGain), clamp01(scaledRightEnergy / frames))
         : clamp01(snapshot.rightEnergy);
+      const peakEnergy = clamp01(Math.max(leftEnergy, rightEnergy, scaledPeak, Number(snapshot.peakEnergy || 0), Number(snapshot.waveformPeak || 0)));
+      const features = audioFeatureFields(snapshot, peakEnergy, {
+        waveformPeak: scaledPeak,
+        rmsEnergy: Math.max(leftEnergy, rightEnergy) * 0.7,
+        meanAbsEnergy: Math.max(leftEnergy, rightEnergy) * 0.58
+      });
       lastSnapshot = {
         active: true,
         leftEnergy,
         rightEnergy,
         balance: clampPan(snapshot.balance),
         dominantFreq: Number(snapshot.dominantFreq || 0),
+        lowEnergy: clamp01(Number(snapshot.lowEnergy || 0)),
+        midEnergy: clamp01(Number(snapshot.midEnergy || 0)),
+        highEnergy: clamp01(Number(snapshot.highEnergy || 0)),
+        ...features,
+        dominantBand: snapshot.dominantBand || "none",
         eventDetected: true,
         eventType: snapshot.eventType || "doom-native-sfx",
         timestamp: new Date().toISOString(),
@@ -416,7 +488,13 @@
 
     startWorker(canvas, gpuMode) {
       this.gpuResourcesReleasePosted = false;
-      this.worker = new Worker(`${this.scriptBase}doom-worker.js?v=${encodeURIComponent(this.cacheKey)}`, { name: "AIKernel.Doom" });
+      this.workerHostReady = false;
+      this.pendingWorkerInit = { canvas, gpuMode };
+      const cacheKey = this.cacheKey;
+      this.worker = new Worker(`${this.scriptBase}doom-worker.js?v=${encodeURIComponent(cacheKey)}`, {
+        name: "AIKernel.Doom",
+        type: "module"
+      });
       this.ready = new Promise((resolve, reject) => {
         this.resolveReady = resolve;
         this.rejectReady = reject;
@@ -434,15 +512,6 @@
         this.onStatusChange(this.statusCache, "worker-error");
       };
 
-      const offscreen = canvas.transferControlToOffscreen();
-      this.worker.postMessage({
-        type: "init",
-        canvas: offscreen,
-        moduleUrl: this.moduleUrl,
-        modelManifestUrl: this.modelManifestUrl,
-        autoplayProfileUrl: this.autoplayProfileUrl,
-        gpuMode
-      }, [offscreen]);
     }
 
     postGpuMode(mode) {
@@ -452,7 +521,7 @@
         this.cpuFallbackRecoveredReason = "";
         this.cpuFallbackSuppressLoggedReason = "";
       }
-      if (this.worker) {
+      if (this.worker && this.workerHostReady) {
         this.worker.postMessage({
           type: "gpu-mode",
           gpuMode: this.gpuModeState
@@ -476,6 +545,33 @@
     }
 
     handleMessage(message) {
+      if (message.type === "host-ready") {
+        const pendingInit = this.pendingWorkerInit;
+        if (!pendingInit || !this.worker) {
+          return;
+        }
+
+        try {
+          const offscreen = pendingInit.canvas.transferControlToOffscreen();
+          this.workerHostReady = true;
+          this.pendingWorkerInit = null;
+          this.worker.postMessage({
+            type: "init",
+            canvas: offscreen,
+            moduleUrl: this.moduleUrl,
+            modelManifestUrl: this.modelManifestUrl,
+            autoplayProfileUrl: this.autoplayProfileUrl,
+            gpuMode: pendingInit.gpuMode
+          }, [offscreen]);
+        } catch (error) {
+          const text = error instanceof Error ? error.message : String(error);
+          this.statusCache = Object.assign({}, this.statusCache, { state: "failed", lastError: text });
+          this.rejectReady?.(new Error(text));
+          this.onStatusChange(this.statusCache, "worker-host-init-error");
+        }
+        return;
+      }
+
       if (message.type === "ready") {
         this.statusCache = this.normalizeStatus(message.status || {});
         this.resolveReady?.(this.statusCache);
@@ -793,6 +889,14 @@
       return this.call("setAutoplaySenseOnly", [enabled]);
     }
 
+    setAutoplayInvulnerableHint(frames = 1800) {
+      return this.call("setAutoplayInvulnerableHint", [frames]);
+    }
+
+    resetAutoplaySensorState(reason = "sensor-reset") {
+      return this.call("resetAutoplaySensorState", [reason]);
+    }
+
     setAudioPlayback(enabled) {
       ensureAIKernelDoomAudioBridge().setEnabled(Boolean(enabled));
       return this.call("setAudioPlayback", [enabled]);
@@ -819,6 +923,10 @@
       }
 
       return capture;
+    }
+
+    captureHealthFaceDiagnostics(options = {}) {
+      return this.call("captureHealthFaceDiagnostics", [options]);
     }
 
     status() {
@@ -868,8 +976,9 @@
       return new AIKernelDoomWorkerProxy(options);
     }
 
-    if (window.AIKernelDoomRuntime) {
-      return new window.AIKernelDoomRuntime(options);
+    const RuntimeCtor = window.AIKernelDoomRuntimeClass;
+    if (RuntimeCtor) {
+      return new RuntimeCtor(options);
     }
 
     return null;

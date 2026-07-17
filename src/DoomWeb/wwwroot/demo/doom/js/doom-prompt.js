@@ -4034,7 +4034,7 @@
     }
 
     function ensureDoomToposHud() {
-      if (doomToposHud || !doomScreen) {
+      if (!doomScreen) {
         return;
       }
 
@@ -4053,11 +4053,18 @@
         host.style.position = "relative";
       }
 
-      doomToposHud = document.createElement("div");
+      doomToposHud = doomToposHud || host.querySelector?.(".doom-topos-hud") || document.createElement("div");
       doomToposHud.className = "doom-topos-hud";
       doomToposHud.setAttribute("aria-label", "Topos and CTG observed carrier");
-      doomToposHud.style.cssText = "position:absolute;right:10px;top:10px;z-index:160;width:240px;max-width:32vw;margin:0;padding:7px 9px;border:1px solid rgba(255,225,122,.48);background:rgba(10,12,8,.07);color:#ffeaa0;font:10px/1.28 ui-monospace,Consolas,monospace;text-shadow:0 1px 2px #000;white-space:pre-wrap;pointer-events:none;overflow:hidden;";
-      host.appendChild(doomToposHud);
+      doomToposHud.setAttribute("aria-hidden", "true");
+      doomToposHud.dataset.pipelinePanelPending = "true";
+      doomToposHud.hidden = true;
+      doomToposHud.textContent = "";
+      doomToposHud.style.cssText = "display:none;";
+      if (doomToposHud.parentElement !== host) {
+        host.appendChild(doomToposHud);
+      }
+      loadDoomPipelinePanelScript();
     }
 
     function updateDoomToposHud(status) {
@@ -4069,10 +4076,14 @@
       if (typeof pipelinePanel?.renderToposHud === "function") {
         pipelinePanel.renderToposHud(doomToposHud, status, { detail: doomToposDetailEnabled });
       } else {
-        doomToposHud.textContent = "[CTG]\n  panel module loading\n\n[Topos]\n  waiting for pipeline view";
+        doomToposHud.hidden = true;
+        doomToposHud.textContent = "";
+        doomToposHud.style.cssText = "display:none;";
         loadDoomPipelinePanelScript()?.then(() => {
-          if (self.AIKernelDoomPipelinePanel?.renderToposHud) {
-            self.AIKernelDoomPipelinePanel.renderToposHud(doomToposHud, status, { detail: doomToposDetailEnabled });
+          const loadedPanel = self.AIKernelDoomPipelinePanel;
+          if (loadedPanel?.ensureToposHud && loadedPanel?.renderToposHud) {
+            doomToposHud = loadedPanel.ensureToposHud({ doomScreen, doomScreenPanel, node: doomToposHud });
+            loadedPanel.renderToposHud(doomToposHud, status, { detail: doomToposDetailEnabled });
           }
         });
       }
@@ -4482,8 +4493,15 @@
         const zeroCrossing = clampHud01(Number(audio.zeroCrossingRate || 0));
         const crestFactor = Math.max(0, Number(audio.crestFactor || 0));
         const semanticLabel = resolveHudAudioSemanticLabel(audio, statusAudio, autoplay);
+        const catalogObservation = statusAudio.audioCatalogObservation
+          || statusAudio.audioCatalogLastObservation;
+        const catalogObservationKind = statusAudio.audioCatalogObservation ? "current" : "last";
+        const catalogAge = Math.max(-1, Number(statusAudio.catalogLastAgeControlTicks ?? -1));
+        const catalogDiagnostic = catalogObservation && typeof catalogObservation === "object"
+          ? ` catalogSfx=${catalogObservationKind}:${String(catalogObservation.sfxId)}:${String(catalogObservation.rawSfxName || "")}${catalogObservationKind === "last" && catalogAge >= 0 ? `:ageTicks=${catalogAge}` : ""}`
+          : "";
         doomAudioReadout.textContent = `L ${leftRaw.toFixed(3)} R ${rightRaw.toFixed(3)}\nLv ${level.toFixed(2)} Att ${attenuation.toFixed(2)}\nRms ${rmsEnergy.toFixed(2)} Zc ${zeroCrossing.toFixed(2)}\n${semanticLabel}`;
-        doomAudioReadout.title = `audio peak=${audioPeakRaw.toFixed(4)} sourceLevel=${audioLevelRaw.toFixed(3)} level=${level.toFixed(3)} sourceAttenuation=${audioAttenuationRaw.toFixed(3)} attenuation=${attenuation.toFixed(3)} balance=${balance.toFixed(3)} rms=${rmsEnergy.toFixed(3)} crest=${crestFactor.toFixed(3)} zeroCrossing=${zeroCrossing.toFixed(3)} transient=${Number(audio.transientScore || 0).toFixed(3)} bands=${Number(audio.bandLowRatio || 0).toFixed(3)}/${Number(audio.bandMidRatio || 0).toFixed(3)}/${Number(audio.bandHighRatio || 0).toFixed(3)}`;
+        doomAudioReadout.title = `audio peak=${audioPeakRaw.toFixed(4)} sourceLevel=${audioLevelRaw.toFixed(3)} level=${level.toFixed(3)} sourceAttenuation=${audioAttenuationRaw.toFixed(3)} attenuation=${attenuation.toFixed(3)} balance=${balance.toFixed(3)} rms=${rmsEnergy.toFixed(3)} crest=${crestFactor.toFixed(3)} zeroCrossing=${zeroCrossing.toFixed(3)} transient=${Number(audio.transientScore || 0).toFixed(3)} bands=${Number(audio.bandLowRatio || 0).toFixed(3)}/${Number(audio.bandMidRatio || 0).toFixed(3)}/${Number(audio.bandHighRatio || 0).toFixed(3)}${catalogDiagnostic}`;
       }
       updateAudioBandBars(audio);
 
@@ -5299,6 +5317,20 @@
     }
 
     function resolveHudAudioSemanticLabel(audio = {}, statusAudio = {}, autoplay = {}) {
+      if (statusAudio.catalogSource === "csharp-native-sfx-catalog") {
+        if (statusAudio.audioCatalogObservation) {
+          return String(statusAudio.semanticLabel || "No audio event").trim() || "No audio event";
+        }
+
+        const lastObservation = statusAudio.audioCatalogLastObservation;
+        if (lastObservation && typeof lastObservation === "object") {
+          const meaning = String(lastObservation.meaningLabel || "Catalogued audio event").trim() || "Catalogued audio event";
+          return `Last: ${meaning}`;
+        }
+
+        return "No audio event";
+      }
+
       const candidates = [
         statusAudio.semanticLabel,
         autoplay.doorOpenAudioEvidence?.semanticLabel,

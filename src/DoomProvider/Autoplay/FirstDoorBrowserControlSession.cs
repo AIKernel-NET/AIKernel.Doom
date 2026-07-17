@@ -427,6 +427,7 @@ internal sealed class FirstDoorBrowserControlSession
     private const float AlignmentToleranceDegrees = 4f;
     private const int DefaultAlignYaw = 6;
     private const int MaximumNativeAudioEventsPerPacket = 256;
+    private const int NativeAudioCatalogTraceCapacity = 32;
     private const int RequiredNativeDeathGametics = 3;
 
     private readonly FirstDoorControlPolicy _policy;
@@ -649,9 +650,11 @@ internal sealed class FirstDoorBrowserControlSession
             input.ManualUseSequence,
             controlTick);
         TrackManualUseOverlap(input.ManualUseSequence);
+        var newNativeAudioEvents = ExtractNewNativeAudioEvents(audio);
+        var audioCatalogTrace = CreateAudioCatalogTrace(newNativeAudioEvents, controlTick);
         var (openEvidence, failedUseEvidence, evidenceObservationCode, manualOverlap, outcomeRejectionCode) = ResolveRawNativeEvidence(
             input,
-            audio,
+            newNativeAudioEvents,
             controlTick,
             prediction,
             ackEvaluation);
@@ -698,6 +701,7 @@ internal sealed class FirstDoorBrowserControlSession
         var decision = controllerDecision with
         {
             AcquisitionTrace = _frozenAcquisitionTrace ?? currentAcquisitionTrace,
+            AudioCatalogTrace = audioCatalogTrace,
             VitalityTrace = vitalityTrace,
             NativeDeathConfirmed = vitalityTrace.NativeDeathConfirmed,
             RestartRequested = vitalityTrace.RestartRequested,
@@ -727,6 +731,9 @@ internal sealed class FirstDoorBrowserControlSession
         var retainedAcquisitionTrace = _frozenAcquisitionTrace
             ?? _lastDecision?.AcquisitionTrace
             ?? new FirstDoorAcquisitionTrace();
+        var rejectedAudioCatalogTrace = CreateAudioCatalogTrace(
+            Array.Empty<BrowserNativeAudioEventInput>(),
+            controlTick);
         var lifecycleState = NormalizeText(input.LifecycleState);
         var modelState = NormalizeText(input.ModelState);
         var rejectedProximity = IsControlReady(lifecycleState, modelState)
@@ -767,6 +774,7 @@ internal sealed class FirstDoorBrowserControlSession
         }) with
         {
             AcquisitionTrace = retainedAcquisitionTrace,
+            AudioCatalogTrace = rejectedAudioCatalogTrace,
             VitalityTrace = vitalityTrace,
             NativeDeathConfirmed = vitalityTrace.NativeDeathConfirmed,
             RestartRequested = vitalityTrace.RestartRequested,
@@ -1819,17 +1827,8 @@ internal sealed class FirstDoorBrowserControlSession
             : FirstDoorAcquisitionBlockCode.CurrentObservationNotYes;
     }
 
-    private (
-        FirstDoorOpenEvidence Open,
-        FirstDoorFailedUseEvidence Failed,
-        string ObservationCode,
-        bool ManualOverlap,
-        string OutcomeRejectionCode) ResolveRawNativeEvidence(
-        BrowserFirstDoorControlInput input,
-        BrowserFirstDoorAudioInput audio,
-        long controlTick,
-        int prediction,
-        AppliedActionAckEvaluation ackEvaluation)
+    private BrowserNativeAudioEventInput[] ExtractNewNativeAudioEvents(
+        BrowserFirstDoorAudioInput audio)
     {
         var newEvents = (audio.Events ?? Array.Empty<BrowserNativeAudioEventInput>())
             .Where(item => item is not null && item.Sequence > _lastNativeAudioSequence)
@@ -1840,8 +1839,61 @@ internal sealed class FirstDoorBrowserControlSession
             _lastNativeAudioSequence = newEvents[^1].Sequence;
         }
 
+        return newEvents;
+    }
+
+    private FirstDoorAudioCatalogTrace CreateAudioCatalogTrace(
+        IReadOnlyList<BrowserNativeAudioEventInput> newEvents,
+        long controlTick)
+    {
+        var classifiedEvents = new DoomNativeSfxCatalogObservation[newEvents.Count];
+        for (var index = 0; index < newEvents.Count; index++)
+        {
+            var nativeEvent = newEvents[index];
+            classifiedEvents[index] = DoomNativeSfxCatalog.Classify(
+                nativeEvent.Sequence,
+                nativeEvent.SfxId,
+                nativeEvent.SfxName,
+                _sessionId,
+                _runId,
+                _runGeneration,
+                controlTick);
+        }
+
+        var truncated = classifiedEvents.Length > NativeAudioCatalogTraceCapacity;
+        var retainedEvents = truncated
+            ? classifiedEvents[^NativeAudioCatalogTraceCapacity..]
+            : classifiedEvents;
+        return new FirstDoorAudioCatalogTrace
+        {
+            SessionId = _sessionId,
+            RunId = _runId,
+            RunGeneration = _runGeneration,
+            EvaluatedAtControlTick = controlTick,
+            LatestObservedSequence = _lastNativeAudioSequence,
+            Capacity = NativeAudioCatalogTraceCapacity,
+            TotalNewEventCount = classifiedEvents.Length,
+            RetainedEventCount = retainedEvents.Length,
+            UnknownEventCount = classifiedEvents.Count(item => !item.Catalogued),
+            Truncated = truncated,
+            Events = retainedEvents
+        };
+    }
+
+    private (
+        FirstDoorOpenEvidence Open,
+        FirstDoorFailedUseEvidence Failed,
+        string ObservationCode,
+        bool ManualOverlap,
+        string OutcomeRejectionCode) ResolveRawNativeEvidence(
+        BrowserFirstDoorControlInput input,
+        IReadOnlyList<BrowserNativeAudioEventInput> newEvents,
+        long controlTick,
+        int prediction,
+        AppliedActionAckEvaluation ackEvaluation)
+    {
         var visualOnly = VisualOnlyOpenEvidence();
-        if (newEvents.Length == 0)
+        if (newEvents.Count == 0)
         {
             return (visualOnly, new FirstDoorFailedUseEvidence(), "none", false, string.Empty);
         }

@@ -13,6 +13,127 @@ function assert(condition, message) {
   }
 }
 
+function createFakeDocument() {
+  const documentRef = {
+    createElement(tagName) {
+      return createFakeElement(tagName, documentRef);
+    }
+  };
+  return documentRef;
+}
+
+function createFakeElement(tagName, ownerDocument) {
+  const classes = new Set();
+  const element = {
+    tagName: String(tagName || "div").toUpperCase(),
+    ownerDocument,
+    parentNode: null,
+    children: [],
+    attributes: {},
+    dataset: {},
+    style: { cssText: "" },
+    className: "",
+    hidden: false,
+    classList: {
+      add(...names) {
+        names.forEach(name => classes.add(name));
+      },
+      remove(...names) {
+        names.forEach(name => classes.delete(name));
+      },
+      toggle(name, force) {
+        const enabled = force === undefined ? !classes.has(name) : Boolean(force);
+        if (enabled) {
+          classes.add(name);
+        } else {
+          classes.delete(name);
+        }
+        return enabled;
+      },
+      contains(name) {
+        return classes.has(name);
+      }
+    },
+    appendChild(child) {
+      if (child.parentNode && child.parentNode !== element) {
+        child.parentNode.removeChild(child);
+      }
+      child.parentNode = element;
+      if (!element.children.includes(child)) {
+        element.children.push(child);
+      }
+      return child;
+    },
+    append(...children) {
+      children.forEach(child => element.appendChild(child));
+    },
+    removeChild(child) {
+      const index = element.children.indexOf(child);
+      if (index >= 0) {
+        element.children.splice(index, 1);
+        child.parentNode = null;
+      }
+      return child;
+    },
+    remove() {
+      element.parentNode?.removeChild(element);
+    },
+    setAttribute(name, value) {
+      element.attributes[name] = String(value);
+    },
+    removeAttribute(name) {
+      delete element.attributes[name];
+      if (name === "data-pipeline-panel-pending") {
+        delete element.dataset.pipelinePanelPending;
+      }
+    },
+    getAttribute(name) {
+      return element.attributes[name] ?? null;
+    },
+    querySelectorAll(selector) {
+      const className = String(selector || "").startsWith(".")
+        ? String(selector).slice(1)
+        : "";
+      const matches = [];
+      const visit = candidate => {
+        const declaredClasses = String(candidate.className || "").split(/\s+/).filter(Boolean);
+        if (className && (declaredClasses.includes(className) || candidate.classList?.contains(className))) {
+          matches.push(candidate);
+        }
+        candidate.children?.forEach(visit);
+      };
+      element.children.forEach(visit);
+      return matches;
+    },
+    querySelector(selector) {
+      return element.querySelectorAll(selector)[0] || null;
+    }
+  };
+  Object.defineProperty(element, "parentElement", {
+    get() {
+      return element.parentNode;
+    }
+  });
+  let ownText = "";
+  Object.defineProperty(element, "firstChild", {
+    get() {
+      return element.children[0] || null;
+    }
+  });
+  Object.defineProperty(element, "textContent", {
+    get() {
+      return ownText + element.children.map(child => child.textContent || "").join("");
+    },
+    set(value) {
+      ownText = String(value ?? "");
+      if (ownText === "") {
+        element.children.length = 0;
+      }
+    }
+  });
+  return element;
+}
+
 const sandbox = {
   self: {},
   console,
@@ -34,6 +155,44 @@ const panel = context.self.AIKernelDoomPipelinePanel;
 assert(panel?.formatToposHud, "Pipeline panel should expose formatToposHud");
 assert(panel?.resolveObservedScores, "Pipeline panel should expose observed score projection");
 assert(panel?.resolveEnemyCue, "Pipeline panel should expose structured enemy cue projection");
+
+const ownerTestDocument = createFakeDocument();
+context.document = ownerTestDocument;
+context.self.document = ownerTestDocument;
+const hudHost = createFakeElement("div", ownerTestDocument);
+const hudScreen = createFakeElement("canvas", ownerTestDocument);
+hudHost.appendChild(hudScreen);
+const pendingHud = createFakeElement("div", ownerTestDocument);
+pendingHud.className = "doom-topos-hud";
+pendingHud.dataset.pipelinePanelPending = "true";
+pendingHud.style.cssText = "position:absolute;right:10px;top:10px;";
+pendingHud.textContent = "[CTG] legacy prompt placeholder";
+hudHost.appendChild(pendingHud);
+const duplicateHud = createFakeElement("div", ownerTestDocument);
+duplicateHud.className = "doom-topos-hud";
+hudHost.appendChild(duplicateHud);
+const ownedHud = panel.ensureToposHud({ doomScreen: hudScreen, node: pendingHud });
+assert(ownedHud === pendingHud, "Pipeline panel should adopt the pre-module carrier as its sole owner");
+assert(hudHost.querySelectorAll(".doom-topos-hud").length === 1, "Pipeline panel should remove duplicate CTG carriers");
+assert(ownedHud.dataset.pipelinePanelOwner === "true", "Canonical CTG carrier should identify the pipeline panel as its owner");
+assert(ownedHud.dataset.pipelinePanelPending === undefined, "Pipeline ownership should clear the prompt-pending marker");
+
+panel.renderToposHud(ownedHud, { autoplay: { enabled: true, pipelineState: null } }, { force: true });
+assert(ownedHud.hidden === true, "No-projection CTG state must remain hidden");
+assert(ownedHud.getAttribute("aria-hidden") === "true", "No-projection CTG state must be hidden from accessibility output");
+assert(ownedHud.dataset.ctgLayout === "none", "No-projection CTG state must not retain a legacy panel layout");
+assert(ownedHud.textContent === "", "No-projection CTG state must not retain a boxed [CTG] placeholder");
+assert(!ownedHud.style.cssText.includes("right:10px") && !ownedHud.style.cssText.includes("top:10px"), "No-projection CTG state must not use the legacy upper-right position");
+
+const promptSource = readFileSync(path.join(repoRoot, "src", "DoomWeb", "wwwroot", "demo", "doom", "js", "doom-prompt.js"), "utf8");
+const promptOwnerStart = promptSource.indexOf("function ensureDoomToposHud()");
+const promptOwnerEnd = promptSource.indexOf("function createSensorToggleButton", promptOwnerStart);
+const promptOwnerSource = promptSource.slice(promptOwnerStart, promptOwnerEnd);
+assert(promptOwnerStart >= 0 && promptOwnerEnd > promptOwnerStart, "Prompt CTG ownership block should remain discoverable");
+assert(promptOwnerSource.includes("doomToposHud.hidden = true"), "Pre-module prompt carrier must stay hidden until the pipeline panel owns rendering");
+assert(promptOwnerSource.includes('doomToposHud.style.cssText = "display:none;"'), "Pre-module prompt carrier must have no visible fallback style");
+assert(!promptOwnerSource.includes("right:10px;top:10px"), "Prompt must not recreate the legacy upper-right CTG panel");
+assert(!promptOwnerSource.includes("panel module loading"), "Prompt must not publish a visible boxed loading placeholder");
 
 const status = {
   autoplay: {
@@ -516,5 +675,312 @@ const invulnerablePanel = panel.formatToposHud({
   }
 }, { detail: false });
 assert(invulnerablePanel.includes("heart ∞ hb"), "Explicit canonical invulnerability should retain its infinity heartbeat glyph");
+
+const csharpOnlyStatus = {
+  autoplay: {
+    enabled: true,
+    controller: "csharp-post-computer-room",
+    objective: "reach-central-hall",
+    pipelineState: null,
+    csharpFirstDoor: {
+      state: "Complete",
+      ownerId: "first-door.computer-room-confirmation",
+      ownershipDisposition: "Completed",
+      nativeDeathConfirmed: false,
+      restartRequested: false,
+      vitalityTrace: {
+        available: true,
+        fresh: true,
+        playerHealth: 17,
+        playerState: 0
+      }
+    },
+    csharpPostComputerRoom: {
+      state: "Navigate",
+      ownerId: "post-computer-room.main-route",
+      ownershipDisposition: "Exclusive",
+      reasonCode: "canonical-waypoint-advance",
+      exclusive: true,
+      runRequested: true,
+      action: {
+        moveForward: true,
+        moveBackward: false,
+        strafeLeft: false,
+        strafeRight: false,
+        turnYaw: -6,
+        useKey: false,
+        attackKey: false
+      },
+      semanticProjection: {
+        telos: "CentralHall",
+        objective: "reach-central-hall",
+        computerRoomEntered: true,
+        centralHallEntered: false
+      },
+      navigation: {
+        status: "Active",
+        nativeGametic: 2456,
+        playerSectorIndex: 71,
+        targetDistance: 48.5,
+        poseMissingFrames: 0,
+        legIndex: 7,
+        legId: "sector-71-south-lane",
+        routeFrames: 599,
+        routeTimeoutFrames: 900,
+        legFrames: 172,
+        legTimeoutFrames: 180,
+        nativeActorTargetIdentity: 1234,
+        nativeActorTargetSectorIndex: 60,
+        nativeActorTargetHealth: 5,
+        nativeActorTargetRetained: true,
+        nativeActorTargetLineOfSight: true,
+        nativeActorKillConfirmed: false,
+        nativeWeaponFireOpportunity: false,
+        nativeActorCombatReason: "weapon-cycle-busy"
+      }
+    }
+  }
+};
+const csharpProjection = panel.resolveCSharpHudProjection(csharpOnlyStatus.autoplay);
+assert(csharpProjection?.source === "post-computer-room", "C# HUD projection should mechanically prefer the current post-COMPUTERROOM decision");
+assert(csharpProjection?.decision === csharpOnlyStatus.autoplay.csharpPostComputerRoom, "C# HUD projection must retain the authoritative decision object without recomputing behavior");
+
+panel.renderToposHud(ownedHud, csharpOnlyStatus, { force: true });
+assert(ownedHud.hidden === false, "An active C# projection must reveal the pipeline-owned lower CTG carrier");
+assert(ownedHud.getAttribute("aria-hidden") === "false", "An active C# projection must restore the lower CTG to accessibility output");
+assert(ownedHud.dataset.ctgLayout === "gpu-panel", "The adopted prompt carrier must switch directly from hidden to the lower CTG layout");
+assert(!ownedHud.style.cssText.includes("right:10px;top:10px"), "The adopted prompt carrier must never pass through the legacy upper-right layout");
+
+const fakeDocument = createFakeDocument();
+const csharpHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(csharpHudNode, csharpOnlyStatus, { force: true });
+assert(csharpHudNode.dataset.ctgLayout === "gpu-panel", "C# exact control without PipelineState must retain the lower GPU-panel layout");
+assert(csharpHudNode.dataset.ctgSource === "csharp-post-computer-room", "C# HUD should identify its mechanical source decision");
+assert(csharpHudNode.classList.contains("is-thought-grid"), "C# exact control should render the thought-grid container");
+assert(csharpHudNode.style.cssText.includes("position:absolute;inset:0"), "C# exact control should occupy the canonical full overlay used by the lower panel cards");
+assert(!csharpHudNode.style.cssText.includes("right:10px;top:10px"), "C# exact control must not fall back to the legacy upper-right CTG panel");
+const csharpCards = csharpHudNode.children.filter(child => child.dataset?.hudPanel);
+assert(csharpCards.length === 7, "C# exact control should render all seven lower HUD cards");
+const cardByKey = key => csharpCards.find(card => card.dataset.hudPanel === key);
+assert(cardByKey("aisthesis")?.textContent.includes("sector=71 distance=48.5"), "Aisthesis card should transport native C# navigation facts");
+assert(cardByKey("noesis")?.textContent.includes("TELOS=CentralHall objective=reach-central-hall"), "Noesis card should transport the C# semantic projection without inference");
+assert(cardByKey("krisis")?.textContent.includes("owner=post-computer-room.main-route"), "Krisis card should transport C# ownership facts");
+assert(cardByKey("kinesis")?.textContent.includes("forward yaw=-6"), "Kinesis card should transport the authoritative C# action");
+assert(cardByKey("route")?.textContent.includes("route=599/900"), "Route card should transport the unchanged C# route budget");
+assert(cardByKey("route")?.textContent.includes("legFrames=172/180"), "Route card should transport the unchanged C# leg budget");
+assert(cardByKey("combat")?.textContent.includes("retained=true los=true kill=false"), "Combat card should transport retained-target C# facts");
+assert(cardByKey("combat")?.textContent.includes("fireOpportunity=false reason=weapon-cycle-busy"), "Combat card should transport the native weapon-cycle decision facts");
+assert(cardByKey("zoe")?.textContent.includes("health=17 playerState=0"), "Zoe card should transport authoritative C# vitality facts");
+
+const continuationDecision = {
+  state: "NavigateExitDoor",
+  ownerId: "e1m1-continuation.exclusive",
+  ownershipDisposition: "Exclusive",
+  reasonCode: "exit-door-canonical-route",
+  exclusive: true,
+  runRequested: true,
+  nativeGametic: 3012,
+  nativeDeathConfirmed: false,
+  restartRequested: false,
+  action: {
+    moveForward: true,
+    moveBackward: false,
+    strafeLeft: false,
+    strafeRight: false,
+    turnYaw: 0,
+    useKey: false,
+    attackKey: false
+  },
+  navigation: {
+    active: true,
+    legIndex: 10,
+    legId: "sector-74-south-clearance",
+    targetDistance: 31.5,
+    routeFrames: 412,
+    routeTimeoutFrames: 900,
+    legFrames: 28,
+    legTimeoutFrames: 180,
+    poseMissingFrames: 0,
+    pose: {
+      nativeGametic: 3012,
+      playerSectorIndex: 74
+    }
+  },
+  semanticProjection: {
+    telos: "ExitRoom",
+    objective: "reach-exit-door",
+    doorOpenedCount: 2
+  },
+  gatekeeperTrace: {
+    acquiredAlive: true,
+    identity: 4321,
+    expectedSectorIndex: 74,
+    health: -10,
+    lineOfSight: false,
+    killed: true,
+    reason: "canonical-gatekeeper-death-and-killcount-confirmed"
+  },
+  threatTrace: {
+    threatMatched: false,
+    identity: 0,
+    sectorIndex: -1,
+    health: 0,
+    lineOfSight: false,
+    stationaryFireAuthorized: false,
+    reason: "fresh-route-threat-not-present"
+  },
+  vitalityTrace: {
+    available: true,
+    fresh: true,
+    playerHealth: 41,
+    playerState: 0
+  }
+};
+const continuationStatus = {
+  autoplay: Object.assign({}, csharpOnlyStatus.autoplay, {
+    csharpE1M1Continuation: continuationDecision
+  })
+};
+const continuationProjection = panel.resolveCSharpHudProjection(continuationStatus.autoplay);
+assert(continuationProjection?.source === "e1m1-continuation", "The lower CTG must prefer the active C# E1M1 continuation owner");
+assert(continuationProjection?.decision === continuationDecision, "The continuation HUD must retain the exact authoritative C# decision object");
+const continuationHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(continuationHudNode, continuationStatus, { force: true });
+assert(continuationHudNode.dataset.ctgLayout === "gpu-panel", "E1M1 continuation must retain the lower GPU-panel layout");
+assert(continuationHudNode.dataset.ctgSource === "csharp-e1m1-continuation", "The lower CTG must identify the continuation decision source");
+assert(!continuationHudNode.style.cssText.includes("right:10px;top:10px"), "E1M1 continuation must not resurrect the legacy upper-right CTG panel");
+const continuationCards = continuationHudNode.children.filter(child => child.dataset?.hudPanel);
+assert(continuationCards.length === 7, "E1M1 continuation must render all seven lower CTG cards");
+const continuationCard = key => continuationCards.find(card => card.dataset.hudPanel === key);
+assert(continuationCard("aisthesis")?.textContent.includes("sector=74 distance=31.5"), "Continuation Aisthesis must project nested native pose facts");
+assert(continuationCard("noesis")?.textContent.includes("TELOS=ExitRoom objective=reach-exit-door"), "Continuation Noesis must project C# TELOS without inference");
+assert(continuationCard("combat")?.textContent.includes("target=n/a sector=n/a hp=n/a"), "A killed gatekeeper with no retained threat must not remain an active HUD target");
+assert(continuationCard("combat")?.textContent.includes("kill=true"), "Continuation Combat must retain the required gatekeeper kill proof");
+assert(continuationCard("zoe")?.textContent.includes("health=41 playerState=0"), "Continuation Zoe must project current native C# vitality");
+
+const completedContinuationStatus = {
+  autoplay: Object.assign({}, continuationStatus.autoplay, {
+    pipelineState: pipelineStateStatus.autoplay.pipelineState,
+    csharpE1M1Continuation: Object.assign({}, continuationDecision, {
+      state: "Complete",
+      ownerId: "e1m1-continuation.completed",
+      ownershipDisposition: "Completed",
+      reasonCode: "e1m1-level-completion-confirmed",
+      exclusive: false,
+      runRequested: false,
+      navigation: Object.assign({}, continuationDecision.navigation, { active: false }),
+      semanticProjection: {
+        telos: "E1M1Complete",
+        objective: "level-completed",
+        doorOpenedCount: 3,
+        levelCompleted: true
+      }
+    })
+  })
+};
+const completedContinuationHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(completedContinuationHudNode, completedContinuationStatus, { force: true });
+assert(completedContinuationHudNode.dataset.ctgSource === "csharp-e1m1-continuation", "terminal E1M1 completion must keep the C# continuation in the lower CTG instead of reviving a stale legacy panel");
+assert(completedContinuationHudNode.dataset.ctgLayout === "gpu-panel", "terminal E1M1 completion must retain the canonical lower CTG layout");
+assert(!completedContinuationHudNode.style.cssText.includes("right:10px;top:10px"), "terminal E1M1 completion must not revive the upper-right CTG fallback");
+
+const csharpWithLatchedLegacyPipeline = {
+  autoplay: Object.assign({}, csharpOnlyStatus.autoplay, {
+    pipelineState: pipelineStateStatus.autoplay.pipelineState
+  })
+};
+const latchedPipelineHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(latchedPipelineHudNode, csharpWithLatchedLegacyPipeline, { force: true });
+assert(latchedPipelineHudNode.dataset.ctgSource === "csharp-post-computer-room", "An authoritative C# decision must replace a latched legacy PipelineState in the lower HUD");
+assert(latchedPipelineHudNode.children.filter(child => child.dataset?.hudPanel).length === 7, "Latched legacy PipelineState must not hide the seven C# decision cards");
+
+const legacyOwnedPipelineStatus = {
+  autoplay: Object.assign({}, csharpWithLatchedLegacyPipeline.autoplay, {
+    csharpPostComputerRoom: null,
+    csharpFirstDoor: Object.assign({}, csharpOnlyStatus.autoplay.csharpFirstDoor, {
+      ownershipDisposition: "NotAcquired"
+    })
+  })
+};
+const legacyOwnedHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(legacyOwnedHudNode, legacyOwnedPipelineStatus, { force: true });
+assert(legacyOwnedHudNode.dataset.ctgSource !== "csharp-first-door", "A NotAcquired C# decision must not displace the active legacy PipelineState HUD owner");
+
+const completedHandoffPipelineStatus = {
+  autoplay: Object.assign({}, csharpWithLatchedLegacyPipeline.autoplay, {
+    csharpPostComputerRoom: Object.assign({}, csharpOnlyStatus.autoplay.csharpPostComputerRoom, {
+      state: "Complete",
+      ownershipDisposition: "Completed",
+      exclusive: false,
+      completed: true,
+      action: {
+        moveForward: false,
+        moveBackward: false,
+        strafeLeft: false,
+        strafeRight: false,
+        turnYaw: 0,
+        useKey: false,
+        attackKey: false
+      }
+    })
+  })
+};
+const completedHandoffHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(completedHandoffHudNode, completedHandoffPipelineStatus, { force: true });
+assert(completedHandoffHudNode.dataset.ctgSource !== "csharp-post-computer-room", "A Completed C# handoff must not hide the current next-owner PipelineState/action");
+
+const firstDoorOnlyStatus = {
+  autoplay: {
+    enabled: true,
+    controller: "csharp-first-door",
+    pipelineState: null,
+    csharpFirstDoor: {
+      state: "Approach",
+      ownerId: "first-door.opening-transit",
+      ownershipDisposition: "Exclusive",
+      reasonCode: "opening-navigation-advance",
+      exclusive: true,
+      runRequested: false,
+      action: {
+        moveForward: true,
+        moveBackward: false,
+        strafeLeft: false,
+        strafeRight: false,
+        turnYaw: 0,
+        useKey: false,
+        attackKey: false
+      },
+      openingNavigation: {
+        status: "Navigating",
+        nativeGametic: 412,
+        playerSectorIndex: 1,
+        targetDistance: 96,
+        poseMissingFrames: 0,
+        legIndex: 2,
+        legId: "opening-corridor",
+        routeFrames: 88,
+        routeTimeoutFrames: 256,
+        legFrames: 44,
+        legTimeoutFrames: 96
+      },
+      vitalityTrace: {
+        available: true,
+        fresh: true,
+        playerHealth: 100,
+        playerState: 0
+      },
+      nativeDeathConfirmed: false,
+      restartRequested: false
+    }
+  }
+};
+const firstDoorHudNode = createFakeElement("div", fakeDocument);
+panel.renderToposHud(firstDoorHudNode, firstDoorOnlyStatus, { force: true });
+assert(firstDoorHudNode.dataset.ctgLayout === "gpu-panel", "C# FirstDoor exact control without PipelineState must retain the lower GPU-panel layout");
+assert(firstDoorHudNode.dataset.ctgSource === "csharp-first-door", "FirstDoor HUD should identify the authoritative C# source");
+const firstDoorCards = firstDoorHudNode.children.filter(child => child.dataset?.hudPanel);
+assert(firstDoorCards.length === 7, "C# FirstDoor exact control should render all seven lower HUD cards");
+assert(!firstDoorHudNode.style.cssText.includes("right:10px;top:10px"), "C# FirstDoor exact control must not use the legacy upper-right CTG panel");
+assert(firstDoorCards.find(card => card.dataset.hudPanel === "combat")?.textContent.includes("target=n/a sector=n/a hp=n/a"), "Missing C# combat facts must remain unavailable instead of being synthesized as zero");
 
 console.log("DOOM_PIPELINE_PANEL_VM_TEST_OK", { simple, detail });

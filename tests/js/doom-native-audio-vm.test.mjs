@@ -19,6 +19,14 @@ function loadScript(context, relativePath) {
   vm.runInContext(source, context, { filename: filePath });
 }
 
+let float32Allocations = 0;
+class TrackedFloat32Array extends Float32Array {
+  constructor(...args) {
+    super(...args);
+    float32Allocations += 1;
+  }
+}
+
 function createRuntime({ muted = false, consumeResult = 2 } = {}) {
   const memory = { buffer: new ArrayBuffer(4096) };
   const bufferPtr = 256;
@@ -125,7 +133,7 @@ const sandbox = {
   console,
   Array,
   Date,
-  Float32Array,
+  Float32Array: TrackedFloat32Array,
   Int16Array,
   Uint8Array,
   Math,
@@ -145,7 +153,10 @@ assert(nativeAudio?.readAudioEvents, "native audio module should export raw even
 assert(nativeAudio?.readRunFacts, "native audio module should export raw run-fact reader");
 assert(nativeAudio?.readPlayerFacts, "native audio module should export raw player-fact reader");
 assert(nativeAudio?.readActorFacts, "native audio module should export raw actor-fact reader");
+assert(nativeAudio?.readFirstDoorFacts, "native audio module should export selective FirstDoor facts");
+assert(nativeAudio?.readPostComputerRoomFacts, "native audio module should export selective post-COMPUTERROOM facts");
 assert(nativeAudio?.readNativeFacts, "native audio module should export combined raw-fact reader");
+assert(nativeAudio?.readE1M1ContinuationFacts, "native audio module should export E1M1 continuation facts");
 assert(nativeAudio.isAvailable({}) === false, "incomplete exports should not be available");
 assert(nativeAudio.status({}) === 0, "incomplete exports should report inactive status");
 assert(nativeAudio.eventCount({}) === 0, "incomplete exports should report zero events");
@@ -182,7 +193,36 @@ assert(nativeAudio.status(runtime.exports) === 1, "complete native audio exports
 assert(nativeAudio.eventCount(runtime.exports) === 7, "event count should be read when optional export exists");
 assert(nativeAudio.availableFrames(runtime.exports) === 2, "available frame count should be read");
 
+const firstDoorRuntime = createRuntime();
+for (const name of Object.keys(firstDoorRuntime.exports).filter(name => name.startsWith("doom_actor_"))) {
+  firstDoorRuntime.exports[name] = () => {
+    throw new Error(`selective FirstDoor facts must not call ${name}`);
+  };
+}
+const firstDoorFacts = nativeAudio.readFirstDoorFacts(firstDoorRuntime.exports, 6);
+assert(firstDoorFacts.run.available === true, "selective FirstDoor facts should include run facts");
+assert(firstDoorFacts.player.available === true, "selective FirstDoor facts should include player facts");
+assert(firstDoorFacts.audio.events.length === 1 && firstDoorFacts.audio.events[0].sequence === 7, "selective FirstDoor facts should honor the audio sequence cursor");
+assert(!("actorSnapshot" in firstDoorFacts), "selective FirstDoor facts should omit actor snapshots");
+
+const postComputerRoomRuntime = createRuntime();
+for (const name of Object.keys(postComputerRoomRuntime.exports).filter(name => name.startsWith("doom_audio_"))) {
+  postComputerRoomRuntime.exports[name] = () => {
+    throw new Error(`selective post-COMPUTERROOM facts must not call ${name}`);
+  };
+}
+const postComputerRoomFacts = nativeAudio.readPostComputerRoomFacts(postComputerRoomRuntime.exports);
+assert(postComputerRoomFacts.run.available === true, "selective post-COMPUTERROOM facts should include run facts");
+assert(postComputerRoomFacts.player.available === true, "selective post-COMPUTERROOM facts should include player facts");
+assert(postComputerRoomFacts.actorSnapshot.count === 2, "selective post-COMPUTERROOM facts should include actor snapshots");
+assert(!("audio" in postComputerRoomFacts), "selective post-COMPUTERROOM facts should omit audio events");
+
 const rawFacts = nativeAudio.readNativeFacts(runtime.exports, 4);
+const continuationFacts = nativeAudio.readE1M1ContinuationFacts(createRuntime().exports, 4);
+assert(
+  JSON.stringify(continuationFacts) === JSON.stringify(rawFacts),
+  "E1M1 continuation facts should reuse the aggregate fact range, ordering, and audio cursor"
+);
 assert(rawFacts.run.available === true, "native run facts should preserve availability");
 assert(rawFacts.run.gametic === 412, "native gametic should be copied without reinterpretation");
 assert(rawFacts.run.leveltime === 377, "native leveltime should be copied without reinterpretation");
@@ -336,6 +376,7 @@ for (const [name, mutate, pattern] of [
   assert(thrown && pattern.test(thrown.message), `malformed native ${name} must fail strict wire validation`);
 }
 
+const allocationsBeforePlayback = float32Allocations;
 const result = nativeAudio.drain(runtime, {
   bridge: {
     playPcm(payload) {
@@ -354,6 +395,7 @@ assert(runtime.nativeAudioLastSnapshot?.eventType === "native-sfx", "drain shoul
 assert(runtime.autoplayAuditorySnapshot === runtime.nativeAudioLastSnapshot, "drain should mirror snapshot to autoplay audio");
 assert(runtime.logs.length === 1 && runtime.logs[0].tag === "[AUDIO]", "drain should log first activation");
 assert(played.length === 1, "bridge should receive one PCM packet");
+assert(float32Allocations === allocationsBeforePlayback + 1, "unmuted native audio should allocate one playback PCM buffer");
 assert(played[0].samples instanceof Float32Array, "bridge PCM packet should contain Float32 samples");
 assert(played[0].frames === 2 && played[0].channels === 2, "bridge PCM packet should preserve shape");
 assert(Math.abs(played[0].snapshot.leftEnergy - 0.5) <= 0.001, "left energy should be normalized");
@@ -368,6 +410,7 @@ assert(played[0].snapshot.bandLowRatio >= 0 && played[0].snapshot.bandHighRatio 
 assert(Number.isFinite(played[0].snapshot.timestampMs), "snapshot should expose timestampMs");
 
 const mutedRuntime = createRuntime({ muted: true });
+const allocationsBeforeMutedDrain = float32Allocations;
 const mutedResult = nativeAudio.drain(mutedRuntime, {
   bridge: {
     playPcm() {
@@ -376,7 +419,37 @@ const mutedResult = nativeAudio.drain(mutedRuntime, {
   }
 });
 assert(mutedResult?.played === false, "muted native audio should still drain without playback");
+assert(float32Allocations === allocationsBeforeMutedDrain, "muted native audio should not allocate a playback PCM buffer");
+assert(mutedRuntime.consumeCalls === 1, "muted native audio should still consume the native ring once");
 assert(mutedRuntime.nativeAudioFramesDrained === 2, "muted native audio should still count drained frames");
+for (const key of [
+  "leftEnergy",
+  "rightEnergy",
+  "balance",
+  "dominantFreq",
+  "lowEnergy",
+  "midEnergy",
+  "highEnergy",
+  "peakEnergy",
+  "level",
+  "attenuation",
+  "waveformPeak",
+  "rmsEnergy",
+  "meanAbsEnergy",
+  "crestFactor",
+  "zeroCrossingRate",
+  "transientScore",
+  "bandLowRatio",
+  "bandMidRatio",
+  "bandHighRatio",
+  "spectralCentroidProxy",
+  "dynamicRange",
+  "dominantBand",
+  "eventDetected",
+  "eventType"
+]) {
+  assert(mutedRuntime.nativeAudioLastSnapshot?.[key] === runtime.nativeAudioLastSnapshot?.[key], `muted native audio should preserve ${key}`);
+}
 
 const blockedRuntime = createRuntime({ consumeResult: 0 });
 assert(nativeAudio.drain(blockedRuntime) === null, "zero-consume native audio should not publish snapshots");

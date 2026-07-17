@@ -1,7 +1,7 @@
 export const config = /*json-start*/{
   "mainAssemblyName": "AIKernel.Doom.ControlBrowser.dll",
   "resources": {
-    "hash": "sha256-ysdEVjVE3x+L+UYLJEIUPrNhzVGVbEsDesF7NbVZA1s=",
+    "hash": "sha256-3kjnuwlfG1VTdasdhyeEQZ9oPan78t7mTRIutvLA4R0=",
     "jsModuleNative": [
       {
         "name": "dotnet.native.js"
@@ -15,7 +15,7 @@ export const config = /*json-start*/{
     "wasmNative": [
       {
         "name": "dotnet.native.wasm",
-        "hash": "sha256-nu6spCEGZvO+APtF43INySU2l4dpdsuxRMfFPmKLp+c="
+        "hash": "sha256-qmKTGe4rT5O8AYI5i++98X/109/vIwqWPuafWO0iF6k="
       }
     ],
     "wasmSymbols": [
@@ -27,7 +27,7 @@ export const config = /*json-start*/{
       {
         "virtualPath": "System.Private.CoreLib.wasm",
         "name": "System.Private.CoreLib.wasm",
-        "hash": "sha256-H+AJlcYh9wiLvnl1rMyELADDiuV5qdOjm6mOMlQsKr4="
+        "hash": "sha256-IKVUxsErEeV+wRUQAVFxzub/Eueffe40P/DJYhMctMI="
       },
       {
         "virtualPath": "System.Runtime.InteropServices.JavaScript.wasm",
@@ -39,7 +39,7 @@ export const config = /*json-start*/{
       {
         "virtualPath": "AIKernel.Doom.ControlBrowser.wasm",
         "name": "AIKernel.Doom.ControlBrowser.wasm",
-        "hash": "sha256-7ngMB15onPWp3mWCZ/yQ3PBSledjtFLDbd6RLMtqSUo="
+        "hash": "sha256-lY2XRjH0q4J/2cC8eA057s1vJRqWR1I66mSZOgu8qaE="
       },
       {
         "virtualPath": "System.Collections.Concurrent.wasm",
@@ -59,7 +59,7 @@ export const config = /*json-start*/{
       {
         "virtualPath": "System.Linq.wasm",
         "name": "System.Linq.wasm",
-        "hash": "sha256-l5zCta61+j7ZZFWPeS9lJ3I7H1CiHQEsKU5QufmIwlY="
+        "hash": "sha256-OtWNPWu+xC881EqKXjnC74sMCniub2A23169MlPrLkU="
       },
       {
         "virtualPath": "System.Memory.wasm",

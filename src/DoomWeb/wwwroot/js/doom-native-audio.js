@@ -359,6 +359,22 @@
     };
   }
 
+  function readFirstDoorFacts(exports, afterAudioSequence = 0) {
+    return {
+      run: readRunFacts(exports),
+      player: readPlayerFacts(exports),
+      audio: readAudioEvents(exports, afterAudioSequence)
+    };
+  }
+
+  function readPostComputerRoomFacts(exports) {
+    return {
+      run: readRunFacts(exports),
+      player: readPlayerFacts(exports),
+      actorSnapshot: readActorFacts(exports)
+    };
+  }
+
   function readNativeFacts(exports, afterAudioSequence = 0) {
     return {
       run: readRunFacts(exports),
@@ -366,6 +382,10 @@
       actorSnapshot: readActorFacts(exports),
       audio: readAudioEvents(exports, afterAudioSequence)
     };
+  }
+
+  function readE1M1ContinuationFacts(exports, afterAudioSequence = 0) {
+    return readNativeFacts(exports, afterAudioSequence);
   }
 
   function clamp01(value) {
@@ -417,7 +437,9 @@
     const sampleCount = frames * channels;
     const byteOffset = bufferPtr + (readOffset * channels * 2);
     const source = new Int16Array(exports.memory.buffer, byteOffset, sampleCount);
-    const samples = new Float32Array(sampleCount);
+    const samples = runtime.audioPlaybackMuted
+      ? null
+      : new Float32Array(sampleCount);
     let leftEnergy = 0;
     let rightEnergy = 0;
     let monoAbsEnergy = 0;
@@ -431,9 +453,11 @@
     for (let i = 0, j = 0; i < frames; i += 1, j += channels) {
       const left = source[j] / 32768;
       const right = channels > 1 ? source[j + 1] / 32768 : left;
-      samples[j] = left;
-      if (channels > 1) {
-        samples[j + 1] = right;
+      if (samples) {
+        samples[j] = left;
+        if (channels > 1) {
+          samples[j + 1] = right;
+        }
       }
       leftEnergy += Math.abs(left);
       rightEnergy += Math.abs(right);
@@ -559,7 +583,10 @@
     readRunFacts,
     readPlayerFacts,
     readActorFacts,
+    readFirstDoorFacts,
+    readPostComputerRoomFacts,
     readNativeFacts,
+    readE1M1ContinuationFacts,
     drain
   });
 })();

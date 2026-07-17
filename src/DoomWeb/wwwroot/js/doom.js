@@ -14,12 +14,20 @@
   const MAX_TARGET_FPS = 30;
   const MIN_TARGET_FPS = 5;
   const TARGET_FPS_STEP = 5;
+  const TARGET_FPS_RECOVERY_SAMPLES = 6;
+  const AUTOPLAY_PREDICTED_STATUS_MIN_INTERVAL_MS = 125;
+  const CSHARP_NATIVE_DEATH_AUTHORITY_DISPOSITIONS = new Set([
+    "Exclusive", "FailedSafeStop", "HandOff", "Completed"
+  ]);
   const MIN_UI_YIELD_MS = 16;
   const LONG_FRAME_MS = 50;
-  const EMERGENCY_UI_YIELD_MS = 120;
   const MAX_FRAME_DELAY_MS = 1000;
+  const GPU_QUEUE_STALL_WARN_MS = 48;
   const WATCHDOG_INTERVAL_MS = 1000;
   const WATCHDOG_STALL_MS = 2000;
+  const WATCHDOG_REQUIRED_VISIBLE_STALLS = 2;
+  const WATCHDOG_RECOVERY_FRAME_TIMEOUT_MS = WATCHDOG_STALL_MS * WATCHDOG_REQUIRED_VISIBLE_STALLS;
+  const GPU_QUEUE_HARD_TIMEOUT_MS = WATCHDOG_RECOVERY_FRAME_TIMEOUT_MS;
   const WATCHDOG_RESTART_DELAY_MS = 250;
   const AUTOPLAY_KEYS = {
     forward: 0xad,
@@ -513,6 +521,14 @@
       this.watchdogRestarting = false;
       this.watchdogRestarts = 0;
       this.watchdogLastStallMs = 0;
+      this.watchdogVisibleStallSamples = 0;
+      this.watchdogSuspendedForVisibility = false;
+      this.watchdogVisibilityHandler = null;
+      this.watchdogRestartArmed = true;
+      this.watchdogRecoveryPending = false;
+      this.watchdogRecoveryKind = "";
+      this.watchdogRecoveryReason = "";
+      this.watchdogRecoveryStartedAt = 0;
       this.selfHealCount = 0;
       this.lastSelfHealKind = "none";
       this.lastSelfHealReason = "";
@@ -526,12 +542,23 @@
       this.gpuFlushCount = 0;
       this.lastGpuWaitMs = 0;
       this.gpuWaitTimeouts = 0;
+      this.gpuQueueFencePending = null;
+      this.gpuQueueFenceGeneration = 0;
+      this.gpuQueueFenceStartedAt = 0;
+      this.gpuQueueStaleCompletions = 0;
+      this.gpuQueueHardTimeouts = 0;
       this.fpsSampleFrames = 0;
       this.fpsSampleStartedAt = 0;
       this.noWaitSampleFrames = 0;
       this.targetFps = MAX_TARGET_FPS;
+      this.targetFpsRecoverySamples = 0;
       this.lastFrameWorkMs = 0;
       this.uiYieldMs = MIN_UI_YIELD_MS;
+      this.autoplayPredictedStatusLastEmittedAt = 0;
+      this.autoplayPredictedStatusCriticalFingerprint = "";
+      this.autoplayPredictedStatusActionFingerprint = "";
+      this.autoplayPredictedStatusEmitted = 0;
+      this.autoplayPredictedStatusSuppressed = 0;
       this.stableLogged = false;
       this.moduleConfig = null;
       this.modelManifest = null;
@@ -558,6 +585,10 @@
       this.autoplayCSharpPostComputerRoomDecision = null;
       this.autoplayCSharpPostComputerRoomDispatchMode = "none";
       this.autoplayCSharpPostComputerRoomSemanticState = null;
+      this.autoplayCSharpE1M1ContinuationActive = false;
+      this.autoplayCSharpE1M1ContinuationDecision = null;
+      this.autoplayCSharpE1M1ContinuationDispatchMode = "none";
+      this.autoplayCSharpE1M1ContinuationSemanticState = null;
       this.autoplayCSharpDecisionSnapshot = null;
       this.autoplayCSharpAppliedActionSnapshot = null;
       this.autoplayCSharpSemanticState = null;
@@ -643,6 +674,9 @@
       this.nativeAudioLastSnapshot = null;
       this.autoplayDoorOpenAudioBaselineEvents = 0;
       this.autoplayDoorOpenAudioEvidence = null;
+      this.autoplayCSharpLatestAudioCatalogObservation = null;
+      this.autoplayCSharpLatestAudioCatalogScopeKey = "";
+      this.autoplayCSharpLatestAudioCatalogControlTick = -1;
       this.autoplayDoorOpenAudioConfirmedPrediction = -9999;
       this.autoplayDoorOpenedAudioConfirmed = false;
       this.visualSensorEnabled = true;
@@ -1138,14 +1172,23 @@
     }
 
     resolveCurrentCSharpNativeHealth() {
-      const decision = this.autoplayCSharpFirstDoorDecision;
-      const vitalityTrace = decision?.vitalityTrace;
-      const proximity = decision?.proximity;
-      const candidates = [
-        vitalityTrace?.available === true ? {
-          health: vitalityTrace.playerHealth,
-          nativeGametic: vitalityTrace.nativeGametic,
-          provenance: vitalityTrace.provenance
+      const continuationDecision = this.autoplayCSharpE1M1ContinuationDecision;
+      const firstDoorDecision = this.autoplayCSharpFirstDoorDecision;
+      const continuationVitality = continuationDecision?.vitalityTrace;
+      const firstDoorVitality = firstDoorDecision?.vitalityTrace;
+      const proximity = firstDoorDecision?.proximity;
+      const continuationOwnsHealth = this.autoplayCSharpE1M1ContinuationActive === true
+        || Boolean(continuationDecision);
+      const candidates = continuationOwnsHealth
+        ? [continuationVitality?.available === true ? {
+          health: continuationVitality.playerHealth,
+          nativeGametic: continuationVitality.nativeGametic,
+          provenance: continuationVitality.provenance
+        } : null]
+        : [firstDoorVitality?.available === true ? {
+          health: firstDoorVitality.playerHealth,
+          nativeGametic: firstDoorVitality.nativeGametic,
+          provenance: firstDoorVitality.provenance
         } : null,
         proximity?.available === true && proximity?.playerVitalityFactsAvailable === true ? {
           health: proximity.playerHealth,
@@ -1170,6 +1213,124 @@
       }
 
       return null;
+    }
+
+    currentCSharpAudioCatalogScopeKey() {
+      return [
+        String(this.autoplayCSharpSessionId || ""),
+        String(this.autoplayCSharpRunId || ""),
+        Math.max(0, Math.trunc(Number(this.autoplayCSharpRunGeneration || 0)))
+      ].join("|");
+    }
+
+    clearLatestCSharpAudioCatalogObservation() {
+      this.autoplayCSharpLatestAudioCatalogObservation = null;
+      this.autoplayCSharpLatestAudioCatalogScopeKey = "";
+      this.autoplayCSharpLatestAudioCatalogControlTick = -1;
+    }
+
+    isValidatedCSharpAudioCatalogObservation(observation) {
+      return Boolean(observation)
+        && typeof observation === "object"
+        && observation.catalogued === true
+        && observation.diagnosticOnly === true
+        && Number.isInteger(Number(observation.sfxId))
+        && Number(observation.sfxId) >= 0
+        && String(observation.meaningCode || "") !== ""
+        && String(observation.meaningCode || "") !== "unclassified-sfx"
+        && /^[0-9a-f]{64}$/i.test(String(observation.eventIdentityHash || ""));
+    }
+
+    resolveCurrentCSharpAudioCatalogProjection() {
+      const decisions = [
+        this.autoplayCSharpE1M1ContinuationDecision,
+        this.autoplayCSharpPostComputerRoomDecision,
+        this.autoplayCSharpFirstDoorDecision
+      ];
+      const traceDecision = decisions.find(decision =>
+        decision && typeof decision === "object"
+          && decision.audioCatalogTrace
+          && typeof decision.audioCatalogTrace === "object");
+      const decision = traceDecision || decisions.find(candidate =>
+        candidate && typeof candidate === "object");
+      if (!decision) {
+        this.clearLatestCSharpAudioCatalogObservation();
+        return null;
+      }
+
+      const trace = traceDecision?.audioCatalogTrace || null;
+      const controlActive = this.autoplayEnabled === true
+        && this.state === "running"
+        && this.autoplayMode !== "error"
+        && this.autoplayCSharpFirstDoorFaulted !== true
+        && !String(this.autoplayLastError || "")
+        && !String(this.wasmAutoplayLastError || "");
+      if (!controlActive) {
+        this.clearLatestCSharpAudioCatalogObservation();
+      }
+      const scopeKey = this.currentCSharpAudioCatalogScopeKey();
+      if (this.autoplayCSharpLatestAudioCatalogScopeKey
+        && this.autoplayCSharpLatestAudioCatalogScopeKey !== scopeKey) {
+        this.clearLatestCSharpAudioCatalogObservation();
+      }
+      const traceFresh = controlActive
+        && Boolean(trace)
+        && trace.evaluatedAtControlTick === decision.controlTick
+        && Number(trace.totalNewEventCount) > 0;
+      const events = Array.isArray(trace?.events) ? trace.events : [];
+      const latestObservation = traceFresh && events.length > 0
+        ? events[events.length - 1]
+        : null;
+      if (traceFresh) {
+        for (let index = events.length - 1; index >= 0; index -= 1) {
+          if (!this.isValidatedCSharpAudioCatalogObservation(events[index])) {
+            continue;
+          }
+
+          this.autoplayCSharpLatestAudioCatalogObservation = events[index];
+          this.autoplayCSharpLatestAudioCatalogScopeKey = scopeKey;
+          this.autoplayCSharpLatestAudioCatalogControlTick = Number(trace.evaluatedAtControlTick);
+          break;
+        }
+      }
+      const lastObservation = controlActive
+        && this.autoplayCSharpLatestAudioCatalogScopeKey === scopeKey
+        ? this.autoplayCSharpLatestAudioCatalogObservation
+        : null;
+      const lastObservedAtControlTick = lastObservation
+        ? Number(this.autoplayCSharpLatestAudioCatalogControlTick)
+        : -1;
+      const lastAgeControlTicks = lastObservation
+        && Number.isFinite(Number(decision.controlTick))
+        && Number.isFinite(lastObservedAtControlTick)
+        && Number(decision.controlTick) >= lastObservedAtControlTick
+        ? Number(decision.controlTick) - lastObservedAtControlTick
+        : -1;
+      return {
+        source: "csharp-native-sfx-catalog",
+        fresh: Boolean(latestObservation),
+        trace,
+        latestObservation,
+        lastObservation,
+        lastObservedAtControlTick,
+        lastAgeControlTicks,
+        semanticEventType: latestObservation
+          ? String(latestObservation.meaningCode || "none")
+          : "none",
+        semanticLabel: latestObservation
+          ? String(latestObservation.meaningLabel || "No audio event")
+          : "No audio event",
+        sfxId: latestObservation ? latestObservation.sfxId : -1,
+        rawSfxName: latestObservation ? String(latestObservation.rawSfxName ?? "") : "",
+        normalizedSfxName: latestObservation ? String(latestObservation.normalizedSfxName ?? "") : "",
+        catalogued: latestObservation?.catalogued === true,
+        classificationReason: latestObservation
+          ? String(latestObservation.classificationReason || "")
+          : "",
+        eventIdentityHash: latestObservation
+          ? String(latestObservation.eventIdentityHash || "")
+          : ""
+      };
     }
 
     status() {
@@ -1321,6 +1482,7 @@
       }
       faceHeartbeatAlive = healthSensorStatus.faceHeartbeatAlive === true;
       this.autoplayDoorOpenAudioEvidence = this.resolveDoorOpenAudioEvidence(null, this.autoplayAuditorySnapshot || {});
+      const csharpAudioCatalog = this.resolveCurrentCSharpAudioCatalogProjection();
       const audioSnapshot = this.autoplayAuditorySnapshot || {};
       const audioLeftEnergy = Number(audioSnapshot.leftEnergy || 0);
       const audioRightEnergy = Number(audioSnapshot.rightEnergy || 0);
@@ -1362,11 +1524,24 @@
         gpuFlushCount: this.gpuFlushCount,
         lastGpuWaitMs: this.lastGpuWaitMs,
         gpuWaitTimeouts: this.gpuWaitTimeouts,
+        gpuQueueFenceGeneration: this.gpuQueueFenceGeneration,
+        gpuQueueFencePending: Boolean(this.gpuQueueFencePending),
+        gpuQueueFenceAgeMs: this.gpuQueueFencePending && this.gpuQueueFenceStartedAt
+          ? Math.max(0, Math.round((window.performance?.now?.() || Date.now()) - this.gpuQueueFenceStartedAt))
+          : 0,
+        gpuQueueStaleCompletions: this.gpuQueueStaleCompletions,
+        gpuQueueHardTimeouts: this.gpuQueueHardTimeouts,
         hudFlowControl: this.createHudFlowControlStatus(),
         gpuHud: gpuHudStatus,
         watchdogRestarting: this.watchdogRestarting,
         watchdogRestarts: this.watchdogRestarts,
         watchdogLastStallMs: this.watchdogLastStallMs,
+        watchdogVisibleStallSamples: this.watchdogVisibleStallSamples,
+        watchdogSuspendedForVisibility: this.watchdogSuspendedForVisibility,
+        watchdogRestartArmed: this.watchdogRestartArmed,
+        watchdogRecoveryPending: this.watchdogRecoveryPending,
+        watchdogRecoveryKind: this.watchdogRecoveryKind,
+        watchdogRecoveryReason: this.watchdogRecoveryReason,
         selfHeal: {
           count: this.selfHealCount,
           kind: this.lastSelfHealKind,
@@ -1394,12 +1569,12 @@
           stuckFrames: this.autoplayStuckFrames,
           recoveryFrames: this.autoplayRecoveryFrames,
           loopEscapeFrames: this.autoplayLoopEscapeFrames,
-          useCooldown: this.bonsaiSupervisor?.status?.().useCooldown || 0,
-          firstDoorUseLatchFrames: this.bonsaiSupervisor?.status?.().firstDoorUseLatchFrames || 0,
-          firstDoorUsePulsed: Boolean(this.bonsaiSupervisor?.status?.().firstDoorUsePulsed),
-          firstDoorLockedUseCycles: this.bonsaiSupervisor?.status?.().firstDoorLockedUseCycles || 0,
-          firstDoorReprobeFrames: this.bonsaiSupervisor?.status?.().firstDoorReprobeFrames || 0,
-          firstDoorReprobeTurn: this.bonsaiSupervisor?.status?.().firstDoorReprobeTurn || "none",
+          useCooldown: supervisorStatus.useCooldown || 0,
+          firstDoorUseLatchFrames: supervisorStatus.firstDoorUseLatchFrames || 0,
+          firstDoorUsePulsed: Boolean(supervisorStatus.firstDoorUsePulsed),
+          firstDoorLockedUseCycles: supervisorStatus.firstDoorLockedUseCycles || 0,
+          firstDoorReprobeFrames: supervisorStatus.firstDoorReprobeFrames || 0,
+          firstDoorReprobeTurn: supervisorStatus.firstDoorReprobeTurn || "none",
           mobilityMode: this.autoplayMobilityMode,
           wallHugSide: this.autoplayWallHugSide,
           targetConfidence: this.autoplayTargetConfidence,
@@ -1431,7 +1606,12 @@
             nativeFramesDrained: this.nativeAudioFramesDrained,
             nativeAvailableFrames: this.nativeAudioAvailableFrames()
           },
-          doorOpenAudioEvidence: this.autoplayDoorOpenAudioEvidence,
+          doorOpenAudioEvidence: csharpAudioCatalog ? null : this.autoplayDoorOpenAudioEvidence,
+          audioCatalogTrace: csharpAudioCatalog?.trace || null,
+          audioCatalogObservation: csharpAudioCatalog?.latestObservation || null,
+          audioCatalogLastObservation: csharpAudioCatalog?.lastObservation || null,
+          audioCatalogLastObservedAtControlTick: csharpAudioCatalog?.lastObservedAtControlTick ?? -1,
+          audioCatalogLastAgeControlTicks: csharpAudioCatalog?.lastAgeControlTicks ?? -1,
           sensorInputs: this.createSensorStatusMap(),
           actionSignature: this.autoplayActionSignature,
           actionRepeatFrames: this.autoplayActionRepeatFrames,
@@ -1569,11 +1749,23 @@
           csharpPostComputerRoomOwnerId: this.autoplayCSharpPostComputerRoomDecision?.ownerId || "post-computer-room.waiting",
           csharpPostComputerRoomDispatchMode: this.autoplayCSharpPostComputerRoomDispatchMode || "none",
           csharpPostComputerRoomSemanticState: this.autoplayCSharpPostComputerRoomSemanticState || null,
+          csharpE1M1Continuation: this.autoplayCSharpE1M1ContinuationDecision || null,
+          csharpE1M1ContinuationActive: this.autoplayCSharpE1M1ContinuationActive === true,
+          csharpE1M1ContinuationState: this.autoplayCSharpE1M1ContinuationDecision?.state || "unknown",
+          csharpE1M1ContinuationOwnerId: this.autoplayCSharpE1M1ContinuationDecision?.ownerId || "e1m1-continuation.waiting",
+          csharpE1M1ContinuationDispatchMode: this.autoplayCSharpE1M1ContinuationDispatchMode || "none",
+          csharpE1M1ContinuationSemanticState: this.autoplayCSharpE1M1ContinuationSemanticState || null,
           csharpFirstDoorDecisionSnapshot: this.autoplayCSharpDecisionSnapshot || null,
           csharpFirstDoorAppliedActionSnapshot: this.autoplayCSharpAppliedActionSnapshot || null,
           csharpFirstDoorCommittedSemanticState: this.autoplayCSharpSemanticState || null,
           csharpFirstDoorSemanticState: this.autoplayCSharpSemanticState || null,
           csharpFirstDoorDispatchMode: this.autoplayCSharpDispatchMode || "none",
+          statusTransport: {
+            source: "runtime-predicted-boundary-coalescer",
+            predictedMinIntervalMs: AUTOPLAY_PREDICTED_STATUS_MIN_INTERVAL_MS,
+            predictedEmitted: Math.max(0, Number(this.autoplayPredictedStatusEmitted || 0)),
+            predictedSuppressed: Math.max(0, Number(this.autoplayPredictedStatusSuppressed || 0))
+          },
           csharpFirstDoorNativeRunBoundary: this.autoplayCSharpNativeRunBoundary || null,
           phasePipelineId: this.autoplayCSharpExactAction
             ? (this.autoplayLastAction?.phasePipelineId
@@ -1608,8 +1800,29 @@
           balance: Number(audioSnapshot.balance || 0),
           eventDetected: Boolean(audioSnapshot.eventDetected),
           eventType: audioSnapshot.eventType || "none",
-          semanticEventType: this.autoplayDoorOpenAudioEvidence?.semanticClass || "none",
-          semanticLabel: this.autoplayDoorOpenAudioEvidence?.semanticLabel || "No audio event",
+          semanticEventType: csharpAudioCatalog?.semanticEventType
+            ?? this.autoplayDoorOpenAudioEvidence?.semanticClass
+            ?? "none",
+          semanticLabel: csharpAudioCatalog?.semanticLabel
+            ?? this.autoplayDoorOpenAudioEvidence?.semanticLabel
+            ?? "No audio event",
+          catalogSource: csharpAudioCatalog?.source || "legacy-door-open-audio-evidence",
+          catalogFresh: csharpAudioCatalog?.fresh === true,
+          audioCatalogTrace: csharpAudioCatalog?.trace || null,
+          audioCatalogObservation: csharpAudioCatalog?.latestObservation || null,
+          audioCatalogLastObservation: csharpAudioCatalog?.lastObservation || null,
+          catalogLastObservedAtControlTick: csharpAudioCatalog?.lastObservedAtControlTick ?? -1,
+          catalogLastAgeControlTicks: csharpAudioCatalog?.lastAgeControlTicks ?? -1,
+          catalogLastMeaningCode: csharpAudioCatalog?.lastObservation?.meaningCode || "none",
+          catalogLastMeaningLabel: csharpAudioCatalog?.lastObservation?.meaningLabel || "No catalogued audio event",
+          catalogLastSfxId: csharpAudioCatalog?.lastObservation?.sfxId ?? -1,
+          catalogLastRawSfxName: csharpAudioCatalog?.lastObservation?.rawSfxName || "",
+          catalogSfxId: csharpAudioCatalog?.sfxId ?? -1,
+          catalogRawSfxName: csharpAudioCatalog?.rawSfxName || "",
+          catalogNormalizedSfxName: csharpAudioCatalog?.normalizedSfxName || "",
+          catalogued: csharpAudioCatalog?.catalogued === true,
+          catalogClassificationReason: csharpAudioCatalog?.classificationReason || "",
+          catalogEventIdentityHash: csharpAudioCatalog?.eventIdentityHash || "",
           lowEnergy: audioLowEnergy,
           midEnergy: audioMidEnergy,
           highEnergy: audioHighEnergy,
@@ -2140,6 +2353,61 @@
       this.lastSelfHealAt = Date.now();
     }
 
+    clearWatchdogRecovery() {
+      this.watchdogRecoveryPending = false;
+      this.watchdogRecoveryKind = "";
+      this.watchdogRecoveryReason = "";
+      this.watchdogRecoveryStartedAt = 0;
+    }
+
+    beginWatchdogRecovery(kind, reason) {
+      this.watchdogRecoveryPending = true;
+      this.watchdogRecoveryKind = String(kind || "runtime");
+      this.watchdogRecoveryReason = String(reason || "");
+      this.watchdogRecoveryStartedAt = window.performance?.now?.() || Date.now();
+      this.watchdogRestartArmed = false;
+    }
+
+    completeWatchdogRecovery() {
+      this.watchdogRestartArmed = true;
+      if (!this.watchdogRecoveryPending) {
+        return false;
+      }
+
+      const kind = this.watchdogRecoveryKind || "runtime";
+      const reason = this.watchdogRecoveryReason || "";
+      this.clearWatchdogRecovery();
+      this.recordSelfHeal(kind, reason);
+      if (kind === "gpu-fallback") {
+        this.log("[ WDT ]", "log-ok", `GPU fallback recovery frame completed: CPU render loop active (${reason}).`);
+        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU fault contained, CPU renderer and control loop produced a complete frame; recoveries=${this.selfHealCount}.`);
+      } else {
+        this.log("[ WATCH]", "log-ok", `watchdog recovery frame completed; restarts=${this.watchdogRestarts}.`);
+        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: frame watchdog produced a complete replacement frame; recoveries=${this.selfHealCount}.`);
+      }
+      this.emitStatus("watchdog-recovered");
+      return true;
+    }
+
+    failWatchdogRecovery(now = window.performance?.now?.() || Date.now()) {
+      if (!this.watchdogRecoveryPending) {
+        return false;
+      }
+
+      const kind = this.watchdogRecoveryKind || "runtime";
+      const reason = this.watchdogRecoveryReason || "";
+      const elapsed = Math.max(0, Math.round(now - Number(this.watchdogRecoveryStartedAt || now)));
+      this.clearWatchdogRecovery();
+      this.watchdogRestartArmed = false;
+      this.lastError = `${kind} recovery failed: no complete frame within ${elapsed}ms${reason ? ` (${reason})` : ""}.`;
+      this.releaseAutoplayInputs();
+      this.state = "failed";
+      this.stopLoop();
+      this.log("[ FAIL ]", "log-fail", this.lastError);
+      this.emitStatus("failed");
+      return true;
+    }
+
     async restartAfterGpuFallback(reason = "gpu-fallback") {
       if (this.gpuFallbackRestarting || this.watchdogRestarting) {
         return;
@@ -2160,9 +2428,9 @@
 
         if (!this.instance || !this.exports || !this.initialized) {
           const status = await this.start();
-          this.recordSelfHeal("gpu-fallback", reason);
-          this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU path disabled, CPU renderer rebuilt, control loop resumed; recoveries=${this.selfHealCount}.`);
-          this.emitStatus("gpu-fallback-restart");
+          this.beginWatchdogRecovery("gpu-fallback", reason);
+          this.log("[ WDT ]", "log-info", "GPU fallback restart is awaiting its first complete CPU frame.");
+          this.emitStatus("gpu-fallback-recovery-pending");
           return status;
         }
 
@@ -2176,12 +2444,12 @@
         this.state = "running";
         this.nextFrameDueAt = 0;
         this.lastFrameAt = window.performance?.now?.() || Date.now();
-        this.startLoop();
-        this.recordSelfHeal("gpu-fallback", reason);
-        this.log("[ WDT ]", "log-ok", `GPU fallback watchdog reboot complete: CPU render loop active (${reason}).`);
-        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: GPU fault contained, CPU renderer active, Autoplay ${resumeAutoplay ? "restored" : "left off"}; recoveries=${this.selfHealCount}.`);
-        this.emitStatus("gpu-fallback-restart");
+        this.startLoop({ preservePerformance: true, watchdogRestartArmed: false });
+        this.beginWatchdogRecovery("gpu-fallback", reason);
+        this.log("[ WDT ]", "log-info", `GPU fallback restart is awaiting its first complete CPU frame; Autoplay ${resumeAutoplay ? "restored" : "left off"}.`);
+        this.emitStatus("gpu-fallback-recovery-pending");
       } catch (error) {
+        this.clearWatchdogRecovery();
         this.state = "failed";
         this.lastError = error instanceof Error ? error.message : String(error);
         this.stopLoop();
@@ -2852,18 +3120,32 @@
       this.initialized = true;
     }
 
-    startLoop() {
+    startLoop(options = {}) {
+      const preservePerformance = options.preservePerformance === true;
       this.stopLoop();
       this.stableLogged = false;
       this.loopActive = true;
-      this.targetFps = MAX_TARGET_FPS;
-      this.fps = 0;
+      if (!preservePerformance) {
+        this.clearWatchdogRecovery();
+        this.targetFps = MAX_TARGET_FPS;
+        this.fps = 0;
+        this.lastFrameWorkMs = 0;
+        this.targetFpsRecoverySamples = 0;
+        this.autoplayPredictedStatusLastEmittedAt = 0;
+        this.autoplayPredictedStatusCriticalFingerprint = "";
+        this.autoplayPredictedStatusActionFingerprint = "";
+        this.autoplayPredictedStatusEmitted = 0;
+        this.autoplayPredictedStatusSuppressed = 0;
+      }
       this.fpsSampleFrames = 0;
       this.fpsSampleStartedAt = 0;
       this.noWaitSampleFrames = 0;
       this.nextFrameDueAt = 0;
-      this.lastFrameWorkMs = 0;
       this.uiYieldMs = MIN_UI_YIELD_MS;
+      this.lastFrameAt = window.performance?.now?.() || Date.now();
+      this.watchdogVisibleStallSamples = 0;
+      this.watchdogSuspendedForVisibility = false;
+      this.watchdogRestartArmed = options.watchdogRestartArmed !== false;
       this.log("[ RENDER ]", "log-ok", `framebuffer active (${this.renderer}, ${WIDTH}x${HEIGHT}, paletted 8bit, target ${this.targetFps}fps, min UI yield ${MIN_UI_YIELD_MS}ms).`);
       const token = ++this.loopToken;
       this.emitStatus("loop-start");
@@ -2883,7 +3165,8 @@
         }, boundedDelay);
       };
 
-      this.startWatchdog(token, scheduleNext);
+      this.startWatchdogVisibilityObserver(token);
+      this.startWatchdog(token);
 
       const frame = async (timestamp) => {
         if (token !== this.loopToken || this.state !== "running") {
@@ -2906,6 +3189,9 @@
 
           const renderResult = this.exports.doom_render();
           await this.drawFrame(renderResult);
+          if (token !== this.loopToken || this.state !== "running") {
+            return;
+          }
           this.drainNativeAudio();
           this.runAutoplay(renderResult);
           this.frameCount += 1;
@@ -2916,12 +3202,15 @@
             ? Math.max(this.nextFrameDueAt + interval, frameStartedAt + interval)
             : frameStartedAt + interval;
           const waitMs = Math.max(0, this.nextFrameDueAt - frameEndedAt);
-          this.uiYieldMs = this.lastFrameWorkMs >= LONG_FRAME_MS ? EMERGENCY_UI_YIELD_MS : MIN_UI_YIELD_MS;
+          this.uiYieldMs = MIN_UI_YIELD_MS;
           if (waitMs <= MIN_UI_YIELD_MS) {
             this.noWaitSampleFrames += 1;
           }
 
           this.lastFrameAt = frameEndedAt;
+          this.watchdogVisibleStallSamples = 0;
+          this.watchdogSuspendedForVisibility = false;
+          this.completeWatchdogRecovery();
           this.updateFps(frameEndedAt);
           if (!this.stableLogged) {
             this.stableLogged = true;
@@ -2929,15 +3218,8 @@
             this.emitStatus("stable");
           }
         } catch (error) {
-          const provider = resolveWebGpuProvider();
-          const providerFallback = Boolean(provider?.status?.().usingCpuFallback);
-          const gpuFallbackActive = providerFallback || !isDoomGpuRenderingEnabled() || this.gpuFallbackHandled;
+          this.clearWatchdogRecovery();
           this.lastError = error instanceof Error ? error.message : String(error);
-          if (gpuFallbackActive) {
-            this.handleGpuLost("frame-loop", error, { fromProvider: true });
-            return;
-          }
-
           this.state = "failed";
           this.stopLoop();
           this.log("[ FAIL ]", "log-fail", this.lastError);
@@ -2954,7 +3236,84 @@
       scheduleNext(0);
     }
 
-    startWatchdog(token, scheduleNext) {
+    isWatchdogPageVisible() {
+      if (typeof document === "undefined") {
+        return true;
+      }
+
+      if (document.visibilityState === "hidden") {
+        return false;
+      }
+
+      try {
+        if (typeof document.hasFocus === "function" && document.hasFocus() === false) {
+          return false;
+        }
+      } catch {
+      }
+
+      return true;
+    }
+
+    syncWatchdogVisibilityState(now = window.performance?.now?.() || Date.now()) {
+      if (!this.isWatchdogPageVisible()) {
+        this.watchdogVisibleStallSamples = 0;
+        this.watchdogSuspendedForVisibility = true;
+        if (this.gpuQueueFencePending) {
+          this.gpuQueueFenceStartedAt = now;
+        }
+        if (this.watchdogRecoveryPending) {
+          this.watchdogRecoveryStartedAt = now;
+        }
+        return false;
+      }
+
+      if (this.watchdogSuspendedForVisibility) {
+        this.watchdogSuspendedForVisibility = false;
+        this.watchdogVisibleStallSamples = 0;
+        this.lastFrameAt = now;
+        if (this.gpuQueueFencePending) {
+          this.gpuQueueFenceStartedAt = now;
+        }
+        if (this.watchdogRecoveryPending) {
+          this.watchdogRecoveryStartedAt = now;
+        }
+        return false;
+      }
+
+      return true;
+    }
+
+    startWatchdogVisibilityObserver(token) {
+      this.stopWatchdogVisibilityObserver();
+      const handler = () => {
+        if (token !== this.loopToken || this.state !== "running") {
+          return;
+        }
+        this.syncWatchdogVisibilityState(window.performance?.now?.() || Date.now());
+      };
+      this.watchdogVisibilityHandler = handler;
+      if (typeof document !== "undefined") {
+        document.addEventListener?.("visibilitychange", handler);
+      }
+      window.addEventListener?.("blur", handler);
+      window.addEventListener?.("focus", handler);
+    }
+
+    stopWatchdogVisibilityObserver() {
+      const handler = this.watchdogVisibilityHandler;
+      if (!handler) {
+        return;
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener?.("visibilitychange", handler);
+      }
+      window.removeEventListener?.("blur", handler);
+      window.removeEventListener?.("focus", handler);
+      this.watchdogVisibilityHandler = null;
+    }
+
+    startWatchdog(token) {
       if (this.watchdogTimer) {
         window.clearInterval(this.watchdogTimer);
         this.watchdogTimer = 0;
@@ -2966,13 +3325,44 @@
         }
 
         const now = window.performance?.now?.() || Date.now();
+        if (!this.syncWatchdogVisibilityState(now)) {
+          return;
+        }
+
+        if (this.handleGpuQueueHardTimeout(now)) {
+          return;
+        }
+
+        if (this.watchdogRecoveryPending) {
+          if (!this.watchdogRecoveryStartedAt) {
+            this.watchdogRecoveryStartedAt = now;
+          }
+          if (now - this.watchdogRecoveryStartedAt >= WATCHDOG_RECOVERY_FRAME_TIMEOUT_MS) {
+            this.failWatchdogRecovery(now);
+          }
+          return;
+        }
+
+        if (!this.watchdogRestartArmed || this.watchdogRestarting || this.gpuFallbackRestarting) {
+          return;
+        }
+
         if (this.lastFrameAt && now - this.lastFrameAt > WATCHDOG_STALL_MS) {
           const stallMs = Math.round(now - this.lastFrameAt);
           this.watchdogLastStallMs = stallMs;
+          this.watchdogVisibleStallSamples += 1;
+          if (this.watchdogVisibleStallSamples < WATCHDOG_REQUIRED_VISIBLE_STALLS) {
+            return;
+          }
+
+          this.watchdogRestartArmed = false;
           this.log("[ WATCH]", "log-warn", `frame watchdog restart: no frame for ${stallMs}ms; lastError=${this.lastError || "none"}.`);
           this.emitStatus("watchdog");
           this.restartAfterWatchdog(stallMs);
+          return;
         }
+
+        this.watchdogVisibleStallSamples = 0;
       }, WATCHDOG_INTERVAL_MS);
     }
 
@@ -2994,6 +3384,9 @@
 
         if (!this.instance || !this.exports || !this.initialized) {
           await this.start();
+          this.beginWatchdogRecovery("frame-watchdog", `stall:${stallMs}ms`);
+          this.log("[ WATCH]", "log-info", "watchdog restart is awaiting its first complete frame.");
+          this.emitStatus("watchdog-recovery-pending");
           return;
         }
 
@@ -3006,12 +3399,12 @@
         this.state = "running";
         this.nextFrameDueAt = 0;
         this.lastFrameAt = window.performance?.now?.() || Date.now();
-        this.startLoop();
-        this.recordSelfHeal("frame-watchdog", `stall:${stallMs}ms`);
-        this.log("[ WATCH]", "log-ok", `runtime restarted after watchdog stall; restarts=${this.watchdogRestarts}.`);
-        this.log("[ SELF-HEAL ]", "log-ok", `AIKernel.Doom self-healed: frame watchdog rebooted the render loop after ${stallMs}ms stall; recoveries=${this.selfHealCount}.`);
-        this.emitStatus("watchdog-restart");
+        this.startLoop({ preservePerformance: true, watchdogRestartArmed: false });
+        this.beginWatchdogRecovery("frame-watchdog", `stall:${stallMs}ms`);
+        this.log("[ WATCH]", "log-info", `watchdog restart is awaiting its first complete frame after ${stallMs}ms stall.`);
+        this.emitStatus("watchdog-recovery-pending");
       } catch (error) {
+        this.clearWatchdogRecovery();
         this.state = "failed";
         this.lastError = error instanceof Error ? error.message : String(error);
         this.stopLoop();
@@ -3068,6 +3461,10 @@
         }
       }
 
+      if (this.runCSharpE1M1ContinuationFastPath()) {
+        return;
+      }
+
       const frameIndices = this.resolveLatestFramebufferIndices(renderResult);
       this.updateWebGpuFrameState(frameIndices);
       const gpuVision = self.AIKernelBonsai?.resolveGpuVisionSource?.() || null;
@@ -3080,7 +3477,8 @@
       if (!this.autoplayPending) {
         const state = this.createAutoplayState(this.visualSensorEnabled ? frameIndices : null, useGpuVision ? gpuVision : null);
         this.publishAutoplayFrameHealth(state);
-        if (this.scheduleAutoplayFrameRetryDispatch(state)) {
+        if (!this.csharpNativeDeathAuthorityActive()
+          && this.scheduleAutoplayFrameRetryDispatch(state)) {
           this.processAutoplayRetryDispatch();
           this.autoplayCSharpRetryHandled = true;
           return;
@@ -3135,6 +3533,195 @@
       });
     }
 
+    runCSharpE1M1ContinuationFastPath() {
+      if (this.autoplayCSharpE1M1ContinuationActive !== true) {
+        return false;
+      }
+
+      this.autoplayVisionMode = "csharp-native-continuation";
+      this.autoplayVisionZeroCopy = false;
+      if (this.autoplayPending) {
+        this.autoplayReused += 1;
+      } else {
+        this.autoplayPending = true;
+        this.autoplayMode = "predicting";
+        let accepted = false;
+        try {
+          accepted = this.tryRunWasmAutoplay(null);
+        } finally {
+          this.autoplayPending = false;
+        }
+        if (!accepted) {
+          throw new Error("Active C# E1M1 continuation owner rejected its native-only frame.");
+        }
+
+        this.autoplayMode = "idle";
+        this.emitStatus("autoplay-predicted");
+      }
+
+      if (!this.autoplayCSharpRetryHandled) {
+        this.applyAutoplayAction(this.autoplayLastAction, {
+          exactAction: true
+        });
+      }
+      return true;
+    }
+
+    csharpNativeDeathAuthorityActive() {
+      const decisions = [
+        this.autoplayCSharpE1M1ContinuationDecision,
+        this.autoplayCSharpPostComputerRoomDecision,
+        this.autoplayCSharpFirstDoorDecision
+      ];
+      return decisions.some(decision => CSHARP_NATIVE_DEATH_AUTHORITY_DISPOSITIONS.has(
+        String(decision?.ownershipDisposition || "")));
+    }
+
+    evaluateCSharpE1M1Continuation(validatedPostDecision, suppliedNativeFacts = null) {
+      const continuation = self.AIKernelDoomCSharpE1M1Continuation;
+      if (!continuation
+        || typeof continuation.createInput !== "function"
+        || typeof continuation.evaluate !== "function"
+        || typeof continuation.dispatch !== "function") {
+        const unavailable = new Error("C# E1M1 continuation adapter is unavailable.");
+        unavailable.aikernelCSharpNextOwner = true;
+        throw unavailable;
+      }
+
+      try {
+        const cursor = this.autoplayCSharpNativeAudioCursor;
+        const cursorMatchesScope = cursor
+          && cursor.sessionId === this.autoplayCSharpSessionId
+          && cursor.runId === this.autoplayCSharpRunId
+          && cursor.runGeneration === this.autoplayCSharpRunGeneration;
+        const afterAudioSequence = cursorMatchesScope
+          ? Math.max(0, Math.trunc(Number(cursor.afterSequence || 0)))
+          : 0;
+        const nativeFacts = suppliedNativeFacts || requireDoomNativeAudio("readE1M1ContinuationFacts")(
+          this.exports,
+          afterAudioSequence);
+        const input = continuation.createInput(this, validatedPostDecision, nativeFacts);
+        const decision = continuation.evaluate(input, this);
+        const dispatch = continuation.dispatch(decision);
+        return { input, decision, dispatch };
+      } catch (error) {
+        if (error && (typeof error === "object" || typeof error === "function")) {
+          error.aikernelCSharpNextOwner = true;
+          throw error;
+        }
+
+        const wrapped = new Error(String(error));
+        wrapped.aikernelCSharpNextOwner = true;
+        throw wrapped;
+      }
+    }
+
+    applyCSharpE1M1Continuation(result, state) {
+      const input = result?.input || {};
+      const decision = result?.decision || {};
+      const dispatch = result?.dispatch || {};
+      const projection = dispatch.semanticState || {};
+      this.autoplayCSharpE1M1ContinuationActive = true;
+      this.autoplayCSharpE1M1ContinuationDecision = decision;
+      this.autoplayCSharpE1M1ContinuationDispatchMode = dispatch.mode || "none";
+      this.autoplayCSharpE1M1ContinuationSemanticState = projection;
+      this.autoplayCSharpDispatchMode = dispatch.mode || "none";
+      this.autoplayCSharpExactAction = dispatch.exact === true;
+      this.autoplayCSharpAppliedActionSnapshot = null;
+      this.autoplayCSharpDecisionSnapshot = Object.assign({}, decision, {
+        observedAtFrame: this.frameCount,
+        inputScope: {
+          contractVersion: input.contractVersion,
+          sessionId: input.sessionId,
+          runId: input.runId,
+          runGeneration: input.runGeneration,
+          expectedPostComputerRoomControlTick: input.expectedPostComputerRoomControlTick
+        }
+      });
+      this.autoplayDecisionTrace = this.autoplayCSharpDecisionSnapshot;
+      this.autoplayControllerKind = "csharp-e1m1-continuation";
+      this.autoplayLastAction = dispatch.action;
+      this.updateAutoplayKinesisActionLoop(dispatch.action, { exactAction: true });
+      this.autoplayStrategyName = decision.implementationVersion || "csharp-e1m1-continuation";
+      this.autoplayStrategyContext = String(decision.state || "unknown");
+      this.autoplayObjective = projection.objective || decision.ownerId;
+      this.autoplayControlPipeline = decision.ownerId;
+      this.autoplayDecisionStage = decision.reasonCode;
+      this.autoplaySafetyReason = decision.reasonCode;
+      this.autoplayMilestones = Object.assign({}, this.autoplayMilestones || {}, {
+        doorOpened: projection.doorOpenedCount,
+        doorOpenedCount: projection.doorOpenedCount,
+        firstDoorOpened: true,
+        computerRoomEntered: true,
+        centralHallEntered: true,
+        secondDoorTraversed: projection.secondDoorTraversed === true,
+        gatekeeperKilled: projection.gatekeeperKilled === true,
+        exitDoorTraversed: projection.exitDoorTraversed === true,
+        exitSwitchUsed: projection.exitSwitchUsed === true,
+        levelCompleted: projection.levelCompleted === true
+      });
+      this.autoplayGoalState = Object.assign({}, this.autoplayGoalState || {}, {
+        enabled: true,
+        telos: projection.telos,
+        objective: projection.objective
+      });
+      if (this.scheduleCSharpNativeRestartDispatch(decision)) {
+        this.autoplayCSharpDispatchMode = "native-retry";
+        this.autoplayCSharpE1M1ContinuationDispatchMode = "native-retry";
+      }
+      if (state) {
+        this.updateGpuHudOverlayState(state);
+      }
+      this.handleDebugAudioPlayback();
+      return true;
+    }
+
+    createCSharpFirstDoorContractFaultSnapshot(contractError) {
+      const previous = this.autoplayCSharpFirstDoorDecision
+        || this.autoplayCSharpDecisionSnapshot
+        || {};
+      const previousScope = this.autoplayCSharpFirstDoorScope || {};
+      const sessionId = String(previous.sessionId
+        || previousScope.sessionId
+        || this.autoplayCSharpSessionId
+        || "");
+      const runId = String(previous.runId
+        || previousScope.runId
+        || this.autoplayCSharpRunId
+        || "");
+      const runGenerationCandidates = [
+        previous.runGeneration,
+        previousScope.runGeneration,
+        this.autoplayCSharpRunGeneration
+      ].map(Number);
+      const runGeneration = runGenerationCandidates.find(value =>
+        Number.isSafeInteger(value) && value >= 1) ?? 0;
+      const nativeSequenceCandidates = [
+        previous.nativeLevelLoadSequence,
+        previousScope.nativeLevelLoadSequence,
+        this.autoplayCSharpNativeLevelLoadSequence
+      ].map(Number);
+      const nativeLevelLoadSequence = nativeSequenceCandidates.find(value =>
+        Number.isSafeInteger(value) && value >= 1) ?? -1;
+      const error = String(contractError || "C# FirstDoor contract fault");
+      return {
+        contractFault: true,
+        error,
+        contractError: error,
+        frameCount: Math.max(0, Math.trunc(Number(this.frameCount || 0))),
+        sessionId,
+        runId,
+        runGeneration,
+        nativeLevelLoadSequence,
+        scope: Object.assign({}, previousScope, {
+          sessionId,
+          runId,
+          runGeneration,
+          nativeLevelLoadSequence
+        })
+      };
+    }
+
     tryRunWasmAutoplay(state) {
       if (!this.wasmAutoplayReady) {
         return false;
@@ -3170,6 +3757,12 @@
       }
 
       try {
+        if (this.autoplayCSharpE1M1ContinuationActive) {
+          const continuationResult = this.evaluateCSharpE1M1Continuation(
+            this.autoplayCSharpPostComputerRoomDecision);
+          return this.applyCSharpE1M1Continuation(continuationResult, state);
+        }
+
         let wasmState = this.enrichWasmAutoplayStateWithFrame(this.createWasmAutoplayState(state), state);
         const wasmStatus = this.readWasmAutoplayStatus() || {};
         const csharpFirstDoor = self.AIKernelDoomCSharpFirstDoor;
@@ -3261,14 +3854,11 @@
 
         let postComputerRoomDecision = null;
         let postComputerRoomDispatch = null;
+        let e1m1ContinuationResult = null;
         const dispatch = csharpFirstDoor.dispatch(csharpFirstDoorPacket, {
           runtime: this,
           wasmState,
           legacyPredict: legacyState => {
-            if (!this.controlRuntime || typeof this.controlRuntime.predict !== "function") {
-              throw new Error("AIKernel.Control runtime shim is unavailable.");
-            }
-
             const postRouteEligible = csharpFirstDoorDecision.openConfirmed === true
               && (csharpFirstDoorDecision.ownershipDisposition === "HandOff"
                 || csharpFirstDoorDecision.ownershipDisposition === "Completed");
@@ -3283,9 +3873,8 @@
                 throw error;
               }
 
-              const postNativeFacts = requireDoomNativeAudio("readNativeFacts")(
-                this.exports,
-                0);
+              const postNativeFacts = requireDoomNativeAudio("readPostComputerRoomFacts")(
+                this.exports);
               const postInput = postRoute.createInput(
                 this,
                 csharpFirstDoorPacket,
@@ -3295,9 +3884,18 @@
               postComputerRoomDecision = postRoute.evaluate(postInput);
               postComputerRoomDispatch = postRoute.dispatch(postComputerRoomDecision, {
                 legacyState,
-                legacyPredict: nextState => this.controlRuntime.predict(nextState)
+                legacyPredict: () => {
+                  e1m1ContinuationResult = this.evaluateCSharpE1M1Continuation(
+                    postComputerRoomDecision,
+                    postNativeFacts);
+                  return e1m1ContinuationResult.dispatch.action;
+                }
               });
               return postComputerRoomDispatch.action;
+            }
+
+            if (!this.controlRuntime || typeof this.controlRuntime.predict !== "function") {
+              throw new Error("AIKernel.Control runtime shim is unavailable.");
             }
 
             return this.controlRuntime.predict(legacyState);
@@ -3308,6 +3906,9 @@
         this.autoplayCSharpPostComputerRoomDispatchMode = postComputerRoomDispatch?.mode || "none";
         this.autoplayCSharpSemanticState = dispatch.semanticState || this.autoplayCSharpSemanticState;
         this.autoplayCSharpPostComputerRoomSemanticState = postComputerRoomDispatch?.semanticState || null;
+        if (e1m1ContinuationResult) {
+          return this.applyCSharpE1M1Continuation(e1m1ContinuationResult, state);
+        }
         this.autoplayCSharpExactAction = postComputerRoomDispatch?.exact === true
           || dispatch.mode === "exclusive"
           || dispatch.mode === "failed-safe-stop";
@@ -3435,6 +4036,10 @@
           this.autoplayCSharpPostComputerRoomDecision = null;
           this.autoplayCSharpPostComputerRoomDispatchMode = "none";
           this.autoplayCSharpPostComputerRoomSemanticState = null;
+          this.autoplayCSharpE1M1ContinuationActive = false;
+          this.autoplayCSharpE1M1ContinuationDecision = null;
+          this.autoplayCSharpE1M1ContinuationDispatchMode = "none";
+          this.autoplayCSharpE1M1ContinuationSemanticState = null;
           this.autoplayControllerKind = "csharp-first-door-next-owner-error";
           this.wasmAutoplayLastError = error instanceof Error ? error.message : String(error);
           this.wasmAutoplayLastErrorStack = error instanceof Error && error.stack ? String(error.stack) : "";
@@ -3475,20 +4080,21 @@
           this.wasmAutoplayLastError = error instanceof Error ? error.message : String(error);
           this.wasmAutoplayLastErrorStack = error instanceof Error && error.stack ? String(error.stack) : "";
           this.autoplaySafetyReason = "csharp-first-door-contract-fault";
+          const contractFaultSnapshot = this.createCSharpFirstDoorContractFaultSnapshot(
+            this.wasmAutoplayLastError);
           this.autoplayCSharpFirstDoorDecision = null;
           this.autoplayCSharpPostComputerRoomDecision = null;
           this.autoplayCSharpPostComputerRoomDispatchMode = "none";
           this.autoplayCSharpPostComputerRoomSemanticState = null;
+          this.autoplayCSharpE1M1ContinuationActive = false;
+          this.autoplayCSharpE1M1ContinuationDecision = null;
+          this.autoplayCSharpE1M1ContinuationDispatchMode = "none";
+          this.autoplayCSharpE1M1ContinuationSemanticState = null;
           this.autoplayCSharpSemanticState = null;
           this.autoplayCSharpDispatchMode = "contract-fault";
           this.autoplayCSharpExactAction = true;
           this.autoplayCSharpRetryHandled = false;
-          this.autoplayCSharpDecisionSnapshot = {
-            contractFault: true,
-            error: this.wasmAutoplayLastError,
-            frameCount: this.frameCount,
-            scope: Object.assign({}, this.autoplayCSharpFirstDoorScope || {})
-          };
+          this.autoplayCSharpDecisionSnapshot = contractFaultSnapshot;
           const neutralAction = {
             move: "none",
             turn: "none",
@@ -7234,6 +7840,10 @@
       this.autoplayCSharpPostComputerRoomDecision = null;
       this.autoplayCSharpPostComputerRoomDispatchMode = "none";
       this.autoplayCSharpPostComputerRoomSemanticState = null;
+      this.autoplayCSharpE1M1ContinuationActive = false;
+      this.autoplayCSharpE1M1ContinuationDecision = null;
+      this.autoplayCSharpE1M1ContinuationDispatchMode = "none";
+      this.autoplayCSharpE1M1ContinuationSemanticState = null;
       this.autoplayCSharpDecisionSnapshot = null;
       this.autoplayCSharpAppliedActionSnapshot = null;
       this.autoplayCSharpSemanticState = null;
@@ -7241,6 +7851,7 @@
       this.autoplayCSharpExactAction = false;
       this.autoplayCSharpRetryHandled = false;
       this.autoplayCSharpFirstDoorFaulted = false;
+      this.clearLatestCSharpAudioCatalogObservation();
       this.autoplayCSharpNativeRunBoundary = {
         source: "native-level-load-sequence",
         previousSequence,
@@ -7280,6 +7891,10 @@
         this.autoplayCSharpPostComputerRoomDecision = null;
         this.autoplayCSharpPostComputerRoomDispatchMode = "none";
         this.autoplayCSharpPostComputerRoomSemanticState = null;
+        this.autoplayCSharpE1M1ContinuationActive = false;
+        this.autoplayCSharpE1M1ContinuationDecision = null;
+        this.autoplayCSharpE1M1ContinuationDispatchMode = "none";
+        this.autoplayCSharpE1M1ContinuationSemanticState = null;
         this.autoplayCSharpDecisionSnapshot = null;
         this.autoplayCSharpAppliedActionSnapshot = null;
         this.autoplayCSharpSemanticState = null;
@@ -7314,6 +7929,7 @@
       this.autoplaySoundCueActive = false;
       this.autoplayDoorOpenAudioBaselineEvents = 0;
       this.autoplayDoorOpenAudioEvidence = null;
+      this.clearLatestCSharpAudioCatalogObservation();
       this.autoplayDoorOpenAudioConfirmedPrediction = -9999;
       this.autoplayDoorOpenedAudioConfirmed = false;
       this.autoplayAuditorySnapshot = null;
@@ -8091,14 +8707,17 @@
         playDebugAudio: () => this.handleDebugAudioPlayback()
       });
       if (exactAction) {
+        const exactDecision = this.autoplayCSharpE1M1ContinuationDecision
+          || this.autoplayCSharpPostComputerRoomDecision
+          || this.autoplayCSharpFirstDoorDecision;
         this.autoplayCSharpAppliedActionSnapshot = Object.assign({}, result?.appliedAction || {}, {
-          sessionId: this.autoplayCSharpFirstDoorDecision?.sessionId || "",
-          runId: this.autoplayCSharpFirstDoorDecision?.runId || "",
-          runGeneration: this.autoplayCSharpFirstDoorDecision?.runGeneration || 0,
-          controlTick: this.autoplayCSharpFirstDoorDecision?.controlTick || 0,
-          useAttemptId: this.autoplayCSharpFirstDoorDecision?.useAttemptId || 0,
-          ownershipDisposition: this.autoplayCSharpFirstDoorDecision?.ownershipDisposition || "",
-          decisionState: this.autoplayCSharpFirstDoorDecision?.state || "unknown",
+          sessionId: exactDecision?.sessionId || "",
+          runId: exactDecision?.runId || "",
+          runGeneration: exactDecision?.runGeneration || 0,
+          controlTick: exactDecision?.controlTick || 0,
+          useAttemptId: exactDecision?.useAttemptId || 0,
+          ownershipDisposition: exactDecision?.ownershipDisposition || "",
+          decisionState: exactDecision?.state || "unknown",
           queuedUseInputEventSequence: result?.appliedAction?.use?.eventQueued === true
             ? this.lastQueuedUseInputEventSequence
             : 0,
@@ -8178,6 +8797,10 @@
 
     stopLoop() {
       this.loopToken += 1;
+      this.stopWatchdogVisibilityObserver();
+      this.gpuQueueFenceGeneration = Math.max(0, Math.trunc(Number(this.gpuQueueFenceGeneration || 0))) + 1;
+      this.gpuQueueFencePending = null;
+      this.gpuQueueFenceStartedAt = 0;
       if (this.frameTimer) {
         window.clearTimeout(this.frameTimer);
         this.frameTimer = 0;
@@ -8206,17 +8829,18 @@
       if (this.webGpuFrameRenderer && isDoomGpuRenderingEnabled() && typeof provider?.renderPalettedFrame === "function") {
         try {
           if (provider.renderPalettedFrame(indices)) {
-            await this.waitForGpuQueue();
-            await yieldToUi();
+            this.waitForGpuQueue();
             return;
           }
         } catch (error) {
           this.handleGpuLost("render", error);
+          return;
         }
       }
 
       if (this.webGpuFrameRenderer && typeof provider?.status === "function" && provider.status()?.usingCpuFallback) {
         this.handleGpuLost("provider-fallback", provider.status()?.lastError || null, { fromProvider: true });
+        return;
       }
 
       this.ensureCpuCanvasContext("frame-cpu-fallback");
@@ -8238,8 +8862,6 @@
       }
 
       this.context.putImageData(this.frameImage, 0, 0);
-      await this.waitForGpuQueue();
-      await yieldToUi();
     }
 
     resolveFramebufferIndices(renderResult) {
@@ -8358,9 +8980,13 @@
       return rows;
     }
 
-    async waitForGpuQueue() {
+    waitForGpuQueue() {
       if (!isDoomGpuRenderingEnabled()) {
         this.lastGpuWaitMs = 0;
+        return;
+      }
+
+      if (this.gpuQueueFencePending) {
         return;
       }
 
@@ -8371,27 +8997,236 @@
       }
 
       const startedAt = window.performance?.now?.() || Date.now();
-      const timedOut = Symbol("gpu-timeout");
-      let result = null;
-      try {
-        result = await Promise.race([
-          queue.onSubmittedWorkDone(),
-          delay(48).then(() => timedOut)
-        ]);
-      } catch (error) {
-        this.handleGpuLost("queue", error);
+      const fenceGeneration = this.gpuQueueFenceGeneration;
+      this.gpuQueueFenceStartedAt = startedAt;
+      let pendingFence = null;
+      let timeoutId = window.setTimeout(() => {
+        if (this.gpuQueueFenceGeneration !== fenceGeneration
+          || this.gpuQueueFencePending !== pendingFence) {
+          return;
+        }
+
+        this.gpuWaitTimeouts += 1;
         this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
+      }, GPU_QUEUE_STALL_WARN_MS);
+      let queueFence;
+      try {
+        queueFence = queue.onSubmittedWorkDone();
+      } catch (error) {
+        window.clearTimeout(timeoutId);
+        timeoutId = 0;
+        this.gpuQueueFenceStartedAt = 0;
+        if (this.gpuQueueFenceGeneration === fenceGeneration) {
+          this.handleGpuLost("queue", error);
+          this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
+        } else {
+          this.gpuQueueStaleCompletions += 1;
+        }
         return;
       }
-      if (result === timedOut) {
-        this.gpuWaitTimeouts += 1;
+
+      pendingFence = Promise.resolve(queueFence)
+        .then(() => {
+          if (this.gpuQueueFenceGeneration !== fenceGeneration
+            || this.gpuQueueFencePending !== pendingFence) {
+            this.gpuQueueStaleCompletions += 1;
+            return;
+          }
+
+          this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
+          this.gpuFlushCount += 1;
+        })
+        .catch(error => {
+          if (this.gpuQueueFenceGeneration !== fenceGeneration
+            || this.gpuQueueFencePending !== pendingFence) {
+            this.gpuQueueStaleCompletions += 1;
+            return;
+          }
+
+          this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
+          this.handleGpuLost("queue", error);
+        })
+        .finally(() => {
+          if (timeoutId) {
+            window.clearTimeout(timeoutId);
+          }
+          if (this.gpuQueueFenceGeneration === fenceGeneration
+            && this.gpuQueueFencePending === pendingFence) {
+            this.gpuQueueFencePending = null;
+            this.gpuQueueFenceStartedAt = 0;
+          }
+        });
+      this.gpuQueueFencePending = pendingFence;
+    }
+
+    handleGpuQueueHardTimeout(now = window.performance?.now?.() || Date.now()) {
+      if (!this.gpuQueueFencePending) {
+        this.gpuQueueFenceStartedAt = 0;
+        return false;
       }
-      this.lastGpuWaitMs = Math.round((window.performance?.now?.() || Date.now()) - startedAt);
-      this.gpuFlushCount += 1;
+
+      if (!this.gpuQueueFenceStartedAt) {
+        this.gpuQueueFenceStartedAt = now;
+        return false;
+      }
+
+      const elapsed = Math.max(0, Math.round(now - this.gpuQueueFenceStartedAt));
+      if (elapsed < GPU_QUEUE_HARD_TIMEOUT_MS) {
+        return false;
+      }
+
+      this.gpuQueueHardTimeouts += 1;
+      this.lastGpuWaitMs = elapsed;
+      this.gpuQueueFenceGeneration = Math.max(0,
+        Math.trunc(Number(this.gpuQueueFenceGeneration || 0))) + 1;
+      this.gpuQueueFencePending = null;
+      this.gpuQueueFenceStartedAt = 0;
+      const error = new Error(`WebGPU queue fence produced no completion within ${elapsed}ms.`);
+      this.log("[ GPU ]", "log-warn", `${error.message} Retiring the fence generation and entering CPU fallback.`);
+      this.handleGpuLost("queue-timeout", error);
+      return true;
+    }
+
+    createAutoplayPredictedStatusBoundary() {
+      const firstDoor = this.autoplayCSharpFirstDoorDecision || {};
+      const postComputerRoom = this.autoplayCSharpPostComputerRoomDecision || {};
+      const e1m1Continuation = this.autoplayCSharpE1M1ContinuationDecision || {};
+      const action = this.autoplayLastAction || {};
+      const appliedAction = this.autoplayCSharpAppliedActionSnapshot || {};
+      const health = this.autoplayHealthSensor || {};
+      const retry = this.autoplayRetryDispatch || {};
+      const audioTrace = e1m1Continuation.audioCatalogTrace
+        || postComputerRoom.audioCatalogTrace
+        || firstDoor.audioCatalogTrace
+        || {};
+      const milestones = this.autoplayMilestones || {};
+      const stringify = value => String(value ?? "");
+      const flag = value => {
+        if (value && typeof value === "object") {
+          return value.requested === true
+            || value.active === true
+            || value.pressed === true
+            || value.eventQueued === true
+            || value.applied === true
+            ? 1
+            : 0;
+        }
+
+        return value === true || Number(value) > 0 ? 1 : 0;
+      };
+      const direction = (...values) => {
+        for (const value of values) {
+          const numeric = Number(value);
+          if (Number.isFinite(numeric) && Math.abs(numeric) >= 0.01) {
+            return numeric > 0 ? 1 : -1;
+          }
+
+          const text = stringify(value).toLowerCase();
+          if (/^(forward|right|clockwise|positive)$/.test(text)) {
+            return 1;
+          }
+          if (/^(back|backward|left|counterclockwise|negative)$/.test(text)) {
+            return -1;
+          }
+        }
+
+        return 0;
+      };
+      const actionMove = appliedAction.move || action.move;
+      const actionTurn = appliedAction.turn || action.turn || action.yaw;
+      const actionStrafe = appliedAction.strafe || action.strafe;
+      const actionUse = appliedAction.use ?? action.use ?? action.activate;
+      const actionFire = appliedAction.fire ?? action.fire ?? action.attack;
+      const critical = [
+        this.state,
+        this.autoplayMode,
+        firstDoor.ownerId,
+        firstDoor.ownershipDisposition,
+        firstDoor.state,
+        firstDoor.reasonCode,
+        flag(firstDoor.restartRequested),
+        firstDoor.restartRequestId,
+        postComputerRoom.ownerId,
+        postComputerRoom.ownershipDisposition,
+        postComputerRoom.state,
+        postComputerRoom.reasonCode,
+        flag(postComputerRoom.restartRequested),
+        postComputerRoom.restartRequestId,
+        e1m1Continuation.ownerId,
+        e1m1Continuation.ownershipDisposition,
+        e1m1Continuation.state,
+        e1m1Continuation.reasonCode,
+        flag(e1m1Continuation.restartRequested),
+        e1m1Continuation.restartRequestId,
+        this.autoplayCSharpDispatchMode,
+        this.autoplayCSharpPostComputerRoomDispatchMode,
+        this.autoplayCSharpE1M1ContinuationDispatchMode,
+        this.autoplayCSharpLifecycleEvent,
+        this.autoplayCSharpResetOperationId,
+        flag(retry.active),
+        retry.requestId || retry.restartRequestId,
+        flag(health.likelyDead || this.autoplayHealthLikelyDead),
+        flag(health.retryRequested),
+        flag(health.nativeDeathConfirmed
+          || firstDoor.nativeDeathConfirmed
+          || postComputerRoom.nativeDeathConfirmed
+          || e1m1Continuation.nativeDeathConfirmed),
+        health.nativePlayerHealth ?? health.playerHealth,
+        health.nativePlayerState ?? health.playerState,
+        health.nativePlayerKillCount ?? health.playerKillCount ?? milestones.playerKillCount ?? milestones.killCount,
+        audioTrace.latestObservedSequence ?? audioTrace.nativeAudioEvents,
+        this.lastQueuedUseInputEventSequence,
+        this.lastPumpedUseInputEventSequence,
+        flag(actionUse),
+        flag(actionFire)
+      ].map(stringify).join("|");
+      const actionFingerprint = [
+        action.phasePipelineId,
+        action.pipeline,
+        action.stage,
+        action.actionSequenceStepId,
+        direction(actionMove?.value, actionMove?.direction, actionMove),
+        direction(actionTurn?.value, actionTurn?.direction, actionTurn),
+        direction(actionStrafe?.value, actionStrafe?.direction, actionStrafe),
+        flag(actionUse),
+        flag(actionFire)
+      ].map(stringify).join("|");
+
+      return { critical, action: actionFingerprint };
+    }
+
+    shouldEmitAutoplayPredictedStatus(now) {
+      const boundary = this.createAutoplayPredictedStatusBoundary();
+      const firstEmission = !this.autoplayPredictedStatusCriticalFingerprint
+        && !this.autoplayPredictedStatusActionFingerprint;
+      const criticalChanged = boundary.critical !== this.autoplayPredictedStatusCriticalFingerprint;
+      const actionChanged = boundary.action !== this.autoplayPredictedStatusActionFingerprint;
+      const elapsed = Math.max(0, now - Number(this.autoplayPredictedStatusLastEmittedAt || 0));
+      this.autoplayPredictedStatusCriticalFingerprint = boundary.critical;
+      this.autoplayPredictedStatusActionFingerprint = boundary.action;
+
+      if (firstEmission
+        || criticalChanged
+        || (actionChanged && elapsed >= AUTOPLAY_PREDICTED_STATUS_MIN_INTERVAL_MS)) {
+        this.autoplayPredictedStatusLastEmittedAt = now;
+        this.autoplayPredictedStatusEmitted = Math.max(0, Number(this.autoplayPredictedStatusEmitted || 0)) + 1;
+        return true;
+      }
+
+      this.autoplayPredictedStatusSuppressed = Math.max(0, Number(this.autoplayPredictedStatusSuppressed || 0)) + 1;
+      return false;
     }
 
     emitStatus(reason) {
+      if (reason === "autoplay-predicted") {
+        const now = window.performance?.now?.() || Date.now();
+        if (!this.shouldEmitAutoplayPredictedStatus(now)) {
+          return false;
+        }
+      }
+
       this.onStatusChange(this.status(), reason);
+      return true;
     }
 
     updateFps(now) {
@@ -8416,21 +9251,38 @@
     }
 
     adjustTargetFps() {
-      if (this.targetFps <= MIN_TARGET_FPS || this.fpsSampleFrames <= 0) {
+      if (this.fpsSampleFrames <= 0) {
         return;
       }
 
       const noWaitRatio = this.noWaitSampleFrames / this.fpsSampleFrames;
       const belowCap = this.fps < this.targetFps * 0.9;
-      if (!belowCap || noWaitRatio < 0.5) {
+      if (belowCap && noWaitRatio >= 0.5 && this.targetFps > MIN_TARGET_FPS) {
+        const previous = this.targetFps;
+        this.targetFps = Math.max(MIN_TARGET_FPS, this.targetFps - TARGET_FPS_STEP);
+        this.targetFpsRecoverySamples = 0;
+        this.nextFrameDueAt = 0;
+        this.log("[ RENDER ]", "log-warn", `framebuffer cap reduced: ${previous}fps -> ${this.targetFps}fps (measured ${this.fps}fps without idle wait).`);
+        this.emitStatus("cap-reduced");
+        return;
+      }
+
+      const sustainedHeadroom = this.targetFps < MAX_TARGET_FPS
+        && this.fps >= this.targetFps * 0.95
+        && noWaitRatio <= 0.25;
+      this.targetFpsRecoverySamples = sustainedHeadroom
+        ? this.targetFpsRecoverySamples + 1
+        : 0;
+      if (this.targetFpsRecoverySamples < TARGET_FPS_RECOVERY_SAMPLES) {
         return;
       }
 
       const previous = this.targetFps;
-      this.targetFps = Math.max(MIN_TARGET_FPS, this.targetFps - TARGET_FPS_STEP);
+      this.targetFps = Math.min(MAX_TARGET_FPS, this.targetFps + TARGET_FPS_STEP);
+      this.targetFpsRecoverySamples = 0;
       this.nextFrameDueAt = 0;
-      this.log("[ RENDER ]", "log-warn", `framebuffer cap reduced: ${previous}fps -> ${this.targetFps}fps (measured ${this.fps}fps without idle wait).`);
-      this.emitStatus("cap-reduced");
+      this.log("[ RENDER ]", "log-ok", `framebuffer cap recovered: ${previous}fps -> ${this.targetFps}fps (measured ${this.fps}fps with sustained scheduler headroom).`);
+      this.emitStatus("cap-recovered");
     }
 
     createImports() {

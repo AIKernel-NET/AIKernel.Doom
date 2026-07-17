@@ -14,6 +14,7 @@ public static partial class FirstDoorControlBrowserBridge
     private const int MaximumBrowserSessions = 16;
     private const int MaximumInputJsonCharacters = 64 * 1024;
     private const int MaximumNativeAudioEventsPerPacket = 256;
+    private const int MaximumNativeActorFactsPerPacket = 64;
     private static readonly object SyncRoot = new();
     private static readonly Dictionary<string, BrowserSessionEntry> Sessions =
         new(StringComparer.Ordinal);
@@ -95,6 +96,47 @@ public static partial class FirstDoorControlBrowserBridge
     }
 
     /// <summary>
+    /// Evaluates the canonical E1M1 continuation only from the same C# session's
+    /// immutable post-COMPUTERROOM completion trace. Browser completion claims are not accepted.
+    /// </summary>
+    [JSExport]
+    public static string EvaluateBrowserE1M1Continuation(string inputJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inputJson);
+        if (inputJson.Length > MaximumInputJsonCharacters)
+        {
+            throw new JsonException(
+                $"Browser E1M1 continuation input exceeds {MaximumInputJsonCharacters} characters.");
+        }
+
+        var browserInput = JsonSerializer.Deserialize(
+                inputJson,
+                FirstDoorControlJsonContext.Default.BrowserE1M1ContinuationInput)
+            ?? throw new JsonException("Browser E1M1 continuation input must not be JSON null.");
+        ValidatePacketBounds(browserInput);
+        var sessionId = NormalizeSessionId(browserInput.SessionId);
+
+        E1M1ContinuationDecision decision;
+        lock (SyncRoot)
+        {
+            if (!Sessions.TryGetValue(sessionId, out var entry))
+            {
+                throw new InvalidOperationException(
+                    "E1M1 continuation requires an existing FirstDoor browser session.");
+            }
+
+            var proof = entry.PostRouteSession.TryCreateE1M1ContinuationActivationProof(
+                browserInput.ExpectedPostComputerRoomControlTick);
+            decision = entry.E1M1ContinuationSession.Evaluate(browserInput, proof);
+            entry.LastAccessSequence = NextAccessSequence();
+        }
+
+        return JsonSerializer.Serialize(
+            decision,
+            FirstDoorControlJsonContext.Default.E1M1ContinuationDecision);
+    }
+
+    /// <summary>
     /// Releases one browser-scoped controller without affecting any other Doom runtime.
     /// </summary>
     [JSExport]
@@ -145,6 +187,21 @@ public static partial class FirstDoorControlBrowserBridge
         }
     }
 
+    private static void ValidatePacketBounds(BrowserE1M1ContinuationInput input)
+    {
+        if ((input.Audio?.Events?.Count ?? 0) > MaximumNativeAudioEventsPerPacket)
+        {
+            throw new JsonException(
+                $"Browser E1M1 native audio event count exceeds {MaximumNativeAudioEventsPerPacket}.");
+        }
+
+        if ((input.ActorSnapshot?.Actors?.Count ?? 0) > MaximumNativeActorFactsPerPacket)
+        {
+            throw new JsonException(
+                $"Browser E1M1 native actor fact count exceeds {MaximumNativeActorFactsPerPacket}.");
+        }
+    }
+
     private static long NextAccessSequence()
     {
         _accessSequence = _accessSequence == long.MaxValue ? 1 : _accessSequence + 1;
@@ -174,6 +231,8 @@ public static partial class FirstDoorControlBrowserBridge
         internal FirstDoorBrowserControlSession Session { get; } = session;
 
         internal PostComputerRoomBrowserControlSession PostRouteSession { get; } = new();
+
+        internal E1M1ContinuationBrowserControlSession E1M1ContinuationSession { get; } = new();
 
         internal long LastAccessSequence { get; set; } = lastAccessSequence;
     }

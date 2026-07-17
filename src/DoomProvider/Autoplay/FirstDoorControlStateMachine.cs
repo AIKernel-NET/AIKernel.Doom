@@ -672,6 +672,8 @@ internal sealed record FirstDoorControlDecision
 
     public FirstDoorAcquisitionTrace AcquisitionTrace { get; init; } = new();
 
+    public FirstDoorAudioCatalogTrace AudioCatalogTrace { get; init; } = new();
+
     public FirstDoorComputerRoomConfirmationTrace ComputerRoomTrace { get; init; } = new();
 
     public FirstDoorProximityObservation Proximity { get; init; } = new();

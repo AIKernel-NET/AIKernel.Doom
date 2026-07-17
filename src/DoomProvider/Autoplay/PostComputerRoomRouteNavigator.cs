@@ -53,7 +53,7 @@ internal sealed record PostComputerRoomRoutePolicy
 {
     internal const string GeometryVersion = "e1m1-post-computer-room-main-route-v2";
 
-    public string PolicyVersion { get; init; } = "post-computer-room-route-policy-v6";
+    public string PolicyVersion { get; init; } = "post-computer-room-route-policy-v8";
 
     public double WaypointCompletionRadius { get; init; } = 24d;
 
@@ -125,7 +125,7 @@ internal sealed record PostComputerRoomRoutePolicy
 
 internal sealed record PostComputerRoomRouteNavigationSnapshot
 {
-    public int SnapshotVersion { get; init; } = 5;
+    public int SnapshotVersion { get; init; } = 7;
 
     public string GeometryVersion { get; init; } = PostComputerRoomRoutePolicy.GeometryVersion;
 
@@ -265,6 +265,16 @@ internal sealed record PostComputerRoomRouteNavigationSnapshot
 
     public bool NativeWeaponFireOpportunity { get; init; }
 
+    public bool NativeWeaponContinuationArmed { get; init; }
+
+    public long NativeWeaponContinuationTargetIdentity { get; init; }
+
+    public int NativeWeaponContinuationReadyWeapon { get; init; } = -1;
+
+    public long NativeWeaponContinuationAuthorizedAtControlTick { get; init; } = -1;
+
+    public bool NativeWeaponAttackContinuation { get; init; }
+
     public string NativeWeaponReason { get; init; } = "native-weapon-not-evaluated";
 
     public string FailureCode { get; init; } = string.Empty;
@@ -306,6 +316,8 @@ internal sealed record PostComputerRoomRouteReplayEntry
 
     public bool NativeActorTargetLineOfSight { get; init; }
 
+    public double NativeActorTargetBearingErrorDegrees { get; init; }
+
     public int NativeActorEngagementFrames { get; init; }
 
     public string NativeActorCombatReason { get; init; } = string.Empty;
@@ -315,6 +327,16 @@ internal sealed record PostComputerRoomRouteReplayEntry
     public bool NativeWeaponSnapshotFresh { get; init; }
 
     public bool NativeWeaponFireOpportunity { get; init; }
+
+    public bool NativeWeaponContinuationArmed { get; init; }
+
+    public long NativeWeaponContinuationTargetIdentity { get; init; }
+
+    public int NativeWeaponContinuationReadyWeapon { get; init; } = -1;
+
+    public long NativeWeaponContinuationAuthorizedAtControlTick { get; init; } = -1;
+
+    public bool NativeWeaponAttackContinuation { get; init; }
 
     public int NativeWeaponStateCount { get; init; } = -1;
 
@@ -351,6 +373,28 @@ internal sealed record PostComputerRoomFailureTrace
         = Array.Empty<PostComputerRoomRouteReplayEntry>();
 }
 
+internal sealed record PostComputerRoomCompletionTrace
+{
+    public const int ReplayCapacity = 32;
+
+    public bool Completed { get; init; }
+
+    public string SessionId { get; init; } = string.Empty;
+
+    public string RunId { get; init; } = string.Empty;
+
+    public long RunGeneration { get; init; }
+
+    public long CompletionAtControlTick { get; init; } = -1;
+
+    public string CompletionCode { get; init; } = string.Empty;
+
+    public PostComputerRoomRouteReplayEntry? CompletionSnapshot { get; init; }
+
+    public IReadOnlyList<PostComputerRoomRouteReplayEntry> Replay { get; init; }
+        = Array.Empty<PostComputerRoomRouteReplayEntry>();
+}
+
 internal sealed record PostComputerRoomRouteSemanticProjection
 {
     public string Telos { get; init; } = "PostDoor";
@@ -366,7 +410,7 @@ internal sealed record PostComputerRoomRouteSemanticProjection
 
 internal sealed record PostComputerRoomRouteDecision
 {
-    public string ImplementationVersion { get; init; } = "post-computer-room-route-v6";
+    public string ImplementationVersion { get; init; } = "post-computer-room-route-v8";
 
     public string PolicyVersion { get; init; } = string.Empty;
 
@@ -413,6 +457,8 @@ internal sealed record PostComputerRoomRouteDecision
     public PostComputerRoomRouteSemanticProjection SemanticProjection { get; init; } = new();
 
     public PostComputerRoomFailureTrace FailureTrace { get; init; } = new();
+
+    public PostComputerRoomCompletionTrace CompletionTrace { get; init; } = new();
 
     public string ContractError { get; init; } = string.Empty;
 
@@ -464,7 +510,20 @@ internal sealed class PostComputerRoomRouteNavigator
     private long _lastNativeWeaponSnapshotGametic = -1;
     private NativeWeaponCycleEvaluation _nativeWeaponCycle = NativeWeaponCycleEvaluation.Unavailable(
         "native-weapon-not-evaluated");
+    private bool _nativeWeaponContinuationArmed;
+    private long _nativeWeaponContinuationTargetIdentity;
+    private int _nativeWeaponContinuationReadyWeapon = -1;
+    private long _nativeWeaponContinuationAuthorizedAtControlTick = -1;
+    private bool _nativeWeaponAttackContinuation;
     private readonly List<PostComputerRoomRouteReplayEntry> _routeReplay = new();
+    private string _completionSessionId = string.Empty;
+    private string _completionRunId = string.Empty;
+    private long _completionRunGeneration;
+    private long _completionAtControlTick = -1;
+    private string _completionCode = string.Empty;
+    private PostComputerRoomRouteReplayEntry? _completionSnapshot;
+    private IReadOnlyList<PostComputerRoomRouteReplayEntry> _completionReplay
+        = Array.Empty<PostComputerRoomRouteReplayEntry>();
     private long _failureAtControlTick = -1;
     private PostComputerRoomRouteReplayEntry? _failureSnapshot;
     private IReadOnlyList<PostComputerRoomRouteReplayEntry> _failureReplay
@@ -505,6 +564,7 @@ internal sealed class PostComputerRoomRouteNavigator
         PostComputerRoomActivationProof? proof,
         BrowserPostComputerRoomRouteInput input)
     {
+        _nativeWeaponAttackContinuation = false;
         var combat = input.CombatObservation ?? new PostComputerRoomCombatObservation();
         var previousNativeActorCombat = _nativeActorCombat;
         _structuredCombat = StructuredCombatEvaluation.Unavailable(
@@ -515,11 +575,13 @@ internal sealed class PostComputerRoomRouteNavigator
             "native-weapon-not-evaluated");
         if (proof is null)
         {
+            ClearNativeWeaponContinuation();
             return ProjectWaiting(input, combat, "first-door-handoff-proof-unavailable");
         }
 
         if (!ScopeMatches(proof, input))
         {
+            ClearNativeWeaponContinuation();
             return ProjectWaiting(input, combat, "first-door-handoff-scope-mismatch");
         }
 
@@ -531,6 +593,7 @@ internal sealed class PostComputerRoomRouteNavigator
         var proximity = proof.Proximity;
         if (_completed)
         {
+            ClearNativeWeaponContinuation();
             return Project(
                 proof,
                 input,
@@ -544,12 +607,14 @@ internal sealed class PostComputerRoomRouteNavigator
 
         if (_failed)
         {
+            ClearNativeWeaponContinuation();
             return ProjectFailed(proof, input, combat);
         }
 
         BeginConfirmedMainRouteLeg(proof, proximity);
         if (!FreshCanonicalPose(proximity))
         {
+            ClearNativeWeaponContinuation();
             if (_targetActorIdentity > 0)
             {
                 _nativeActorCombat = previousNativeActorCombat with
@@ -704,11 +769,37 @@ internal sealed class PostComputerRoomRouteNavigator
             && _nativeWeaponCycle.InputAccepted
             && _nativeWeaponCycle.Fresh
             && !_nativeWeaponCycle.FireOpportunity;
+        var actorAligned = _nativeActorCombat.TargetRetained
+            && Math.Abs(_nativeActorCombat.TargetBearingErrorDegrees)
+                <= _policy.AlignmentToleranceDegrees;
+        var nativePlayerDead = proximity.PlayerVitalityFactsAvailable
+            && (proximity.PlayerHealth <= 0 || proximity.PlayerState == 1);
+        if (nativePlayerDead
+            || !_nativeActorCombat.TargetRetained
+            || (_nativeWeaponContinuationArmed
+                && !NativeWeaponContinuationContextValid(actorAligned)))
+        {
+            ClearNativeWeaponContinuation();
+        }
 
         if (_nativeActorCombat.TargetRetained)
         {
+            if (nativePlayerDead)
+            {
+                return Project(
+                    proof,
+                    input,
+                    combat,
+                    PostComputerRoomRouteState.InterceptEnemy,
+                    PostComputerRoomOwnershipDisposition.Exclusive,
+                    NeutralAction(),
+                    false,
+                    "native-player-death-fire-release");
+            }
+
             if (!_nativeActorCombat.Trusted || !_nativeActorCombat.TopologyAccepted)
             {
+                ClearNativeWeaponContinuation();
                 return Project(
                     proof,
                     input,
@@ -723,6 +814,7 @@ internal sealed class PostComputerRoomRouteNavigator
             if (_nativeActorCombat.TargetLineOfSight
                 && (!_nativeWeaponCycle.InputAccepted || !_nativeWeaponCycle.Fresh))
             {
+                ClearNativeWeaponContinuation();
                 return Project(
                     proof,
                     input,
@@ -737,23 +829,47 @@ internal sealed class PostComputerRoomRouteNavigator
             if (_nativeActorCombat.TargetLineOfSight
                 && _nativeWeaponCycle.FireOpportunity)
             {
-                var aligned = Math.Abs(_nativeActorCombat.TargetBearingErrorDegrees)
-                    <= _policy.AlignmentToleranceDegrees;
+                if (actorAligned)
+                {
+                    ArmNativeWeaponContinuation(proof.ControlTick);
+                }
+                else
+                {
+                    ClearNativeWeaponContinuation();
+                }
+
                 return Project(
                     proof,
                     input,
                     combat,
-                    aligned
+                    actorAligned
                         ? PostComputerRoomRouteState.FireReady
                         : PostComputerRoomRouteState.InterceptEnemy,
                     PostComputerRoomOwnershipDisposition.Exclusive,
-                    aligned
+                    actorAligned
                         ? AttackAction()
                         : TurnAction(_nativeActorCombat.TargetBearingErrorDegrees),
                     false,
-                    aligned
+                    actorAligned
                         ? "native-live-target-fire-opportunity"
                         : "native-live-target-fire-opportunity-bearing-intercept");
+            }
+
+            if (proximity.PlayerSectorIndex == 60
+                && NativeWeaponContinuationContextValid(actorAligned)
+                && !_nativeWeaponCycle.FireOpportunity
+                && _nativeWeaponCycle.WeaponState != _nativeWeaponCycle.WeaponReadyState)
+            {
+                _nativeWeaponAttackContinuation = true;
+                return Project(
+                    proof,
+                    input,
+                    combat,
+                    PostComputerRoomRouteState.FireReady,
+                    PostComputerRoomOwnershipDisposition.Exclusive,
+                    AttackAction(),
+                    false,
+                    "native-live-target-fire-cycle-continuation");
             }
         }
 
@@ -1014,11 +1130,49 @@ internal sealed class PostComputerRoomRouteNavigator
         _lastNativeWeaponSnapshotGametic = -1;
         _nativeWeaponCycle = NativeWeaponCycleEvaluation.Unavailable(
             "native-weapon-run-start");
+        ClearNativeWeaponContinuation();
         _routeReplay.Clear();
+        _completionSessionId = string.Empty;
+        _completionRunId = string.Empty;
+        _completionRunGeneration = 0;
+        _completionAtControlTick = -1;
+        _completionCode = string.Empty;
+        _completionSnapshot = null;
+        _completionReplay = Array.Empty<PostComputerRoomRouteReplayEntry>();
         _failureAtControlTick = -1;
         _failureSnapshot = null;
         _failureReplay = Array.Empty<PostComputerRoomRouteReplayEntry>();
     }
+
+    private void ArmNativeWeaponContinuation(long controlTick)
+    {
+        _nativeWeaponContinuationArmed = true;
+        _nativeWeaponContinuationTargetIdentity = _nativeActorCombat.TargetIdentity;
+        _nativeWeaponContinuationReadyWeapon = _nativeWeaponCycle.ReadyWeapon;
+        _nativeWeaponContinuationAuthorizedAtControlTick = controlTick;
+    }
+
+    private void ClearNativeWeaponContinuation()
+    {
+        _nativeWeaponContinuationArmed = false;
+        _nativeWeaponContinuationTargetIdentity = 0;
+        _nativeWeaponContinuationReadyWeapon = -1;
+        _nativeWeaponContinuationAuthorizedAtControlTick = -1;
+        _nativeWeaponAttackContinuation = false;
+    }
+
+    private bool NativeWeaponContinuationContextValid(bool actorAligned)
+        => _nativeWeaponContinuationArmed
+            && _nativeActorCombat.TargetRetained
+            && _nativeActorCombat.Trusted
+            && _nativeActorCombat.TopologyAccepted
+            && _nativeActorCombat.TargetLineOfSight
+            && actorAligned
+            && _nativeWeaponCycle.InputAccepted
+            && _nativeWeaponCycle.Fresh
+            && _nativeWeaponCycle.PendingWeapon == NoPendingWeapon
+            && _nativeWeaponContinuationTargetIdentity == _nativeActorCombat.TargetIdentity
+            && _nativeWeaponContinuationReadyWeapon == _nativeWeaponCycle.ReadyWeapon;
 
     private void InferForwardLeg(FirstDoorProximityObservation proximity, long controlTick)
     {
@@ -1258,6 +1412,7 @@ internal sealed class PostComputerRoomRouteNavigator
         string failureCode,
         PostComputerRoomRouteWaypoint? failureTarget = null)
     {
+        ClearNativeWeaponContinuation();
         _failed = true;
         _failureCode = failureCode;
         if (failureTarget is not null)
@@ -1283,8 +1438,14 @@ internal sealed class PostComputerRoomRouteNavigator
             ?? _policy.Waypoints[Math.Clamp(_legIndex, 0, _policy.Waypoints.Count - 1)];
         _lastNavigationTarget = target;
         metrics ??= Metrics(proof.Proximity, target.X, target.Y);
-        var routeFrames = Frames(proof.ControlTick, _routeStartedAtControlTick);
-        var legFrames = Frames(proof.ControlTick, _legStartedAtControlTick);
+        var routeFrames = state == PostComputerRoomRouteState.Complete
+            && _completionSnapshot is not null
+                ? _completionSnapshot.RouteFrames
+                : Frames(proof.ControlTick, _routeStartedAtControlTick);
+        var legFrames = state == PostComputerRoomRouteState.Complete
+            && _completionSnapshot is not null
+                ? _completionSnapshot.LegFrames
+                : Frames(proof.ControlTick, _legStartedAtControlTick);
         CaptureReplay(new PostComputerRoomRouteReplayEntry
         {
             ControlTick = proof.ControlTick,
@@ -1304,11 +1465,18 @@ internal sealed class PostComputerRoomRouteNavigator
             NativeActorTopologyReason = _nativeActorCombat.TopologyReason,
             NativeActorTargetHealth = _nativeActorCombat.TargetHealth,
             NativeActorTargetLineOfSight = _nativeActorCombat.TargetLineOfSight,
+            NativeActorTargetBearingErrorDegrees = _nativeActorCombat.TargetBearingErrorDegrees,
             NativeActorEngagementFrames = _nativeActorCombat.EngagementFrames,
             NativeActorCombatReason = _nativeActorCombat.Reason,
             NativeWeaponSnapshotAccepted = _nativeWeaponCycle.InputAccepted,
             NativeWeaponSnapshotFresh = _nativeWeaponCycle.Fresh,
             NativeWeaponFireOpportunity = _nativeWeaponCycle.FireOpportunity,
+            NativeWeaponContinuationArmed = _nativeWeaponContinuationArmed,
+            NativeWeaponContinuationTargetIdentity = _nativeWeaponContinuationTargetIdentity,
+            NativeWeaponContinuationReadyWeapon = _nativeWeaponContinuationReadyWeapon,
+            NativeWeaponContinuationAuthorizedAtControlTick =
+                _nativeWeaponContinuationAuthorizedAtControlTick,
+            NativeWeaponAttackContinuation = _nativeWeaponAttackContinuation,
             NativeWeaponStateCount = _nativeWeaponCycle.StateCount,
             NativeReadyWeapon = _nativeWeaponCycle.ReadyWeapon,
             NativePendingWeapon = _nativeWeaponCycle.PendingWeapon,
@@ -1418,6 +1586,12 @@ internal sealed class PostComputerRoomRouteNavigator
                 NativeWeaponReadyState = _nativeWeaponCycle.WeaponReadyState,
                 NativeWeaponRefire = _nativeWeaponCycle.Refire,
                 NativeWeaponFireOpportunity = _nativeWeaponCycle.FireOpportunity,
+                NativeWeaponContinuationArmed = _nativeWeaponContinuationArmed,
+                NativeWeaponContinuationTargetIdentity = _nativeWeaponContinuationTargetIdentity,
+                NativeWeaponContinuationReadyWeapon = _nativeWeaponContinuationReadyWeapon,
+                NativeWeaponContinuationAuthorizedAtControlTick =
+                    _nativeWeaponContinuationAuthorizedAtControlTick,
+                NativeWeaponAttackContinuation = _nativeWeaponAttackContinuation,
                 NativeWeaponReason = _nativeWeaponCycle.Reason,
                 FailureCode = _failureCode
             },
@@ -1432,13 +1606,14 @@ internal sealed class PostComputerRoomRouteNavigator
                 CentralHallEntered = _completed
             },
             FailureTrace = CreateFailureTrace(),
+            CompletionTrace = CreateCompletionTrace(),
             ContractError = proof.ContractError
         };
     }
 
     private void CaptureReplay(PostComputerRoomRouteReplayEntry entry)
     {
-        if (_failureAtControlTick >= 0)
+        if (_failureAtControlTick >= 0 || _completionAtControlTick >= 0)
         {
             return;
         }
@@ -1453,6 +1628,18 @@ internal sealed class PostComputerRoomRouteNavigator
         while (_routeReplay.Count > PostComputerRoomFailureTrace.ReplayCapacity)
         {
             _routeReplay.RemoveAt(0);
+        }
+
+        if (_completed)
+        {
+            _completionSessionId = _sessionId;
+            _completionRunId = _runId;
+            _completionRunGeneration = _runGeneration;
+            _completionAtControlTick = entry.ControlTick;
+            _completionCode = entry.ReasonCode;
+            _completionSnapshot = entry;
+            _completionReplay = _routeReplay.ToArray();
+            return;
         }
 
         if (!_failed)
@@ -1473,6 +1660,19 @@ internal sealed class PostComputerRoomRouteNavigator
             FailureCode = _failureAtControlTick >= 0 ? _failureCode : string.Empty,
             FailureSnapshot = _failureSnapshot,
             Replay = _failureReplay.ToArray()
+        };
+
+    private PostComputerRoomCompletionTrace CreateCompletionTrace()
+        => new()
+        {
+            Completed = _completionAtControlTick >= 0,
+            SessionId = _completionAtControlTick >= 0 ? _completionSessionId : string.Empty,
+            RunId = _completionAtControlTick >= 0 ? _completionRunId : string.Empty,
+            RunGeneration = _completionAtControlTick >= 0 ? _completionRunGeneration : 0,
+            CompletionAtControlTick = _completionAtControlTick,
+            CompletionCode = _completionAtControlTick >= 0 ? _completionCode : string.Empty,
+            CompletionSnapshot = _completionSnapshot,
+            Replay = _completionReplay.ToArray()
         };
 
     private static bool ScopeMatches(

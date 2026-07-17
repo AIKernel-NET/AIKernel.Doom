@@ -112,9 +112,9 @@ public sealed class PostComputerRoomRouteNavigatorTests
         Assert.True(decision.Action.MoveForward);
         Assert.False(decision.Action.AttackKey);
         Assert.Equal("computer-room-entry-center", decision.Navigation.LegId);
-        Assert.Equal("post-computer-room-route-v6", decision.ImplementationVersion);
-        Assert.Equal("post-computer-room-route-policy-v6", decision.PolicyVersion);
-        Assert.Equal(5, decision.Navigation.SnapshotVersion);
+        Assert.Equal("post-computer-room-route-v8", decision.ImplementationVersion);
+        Assert.Equal("post-computer-room-route-policy-v8", decision.PolicyVersion);
+        Assert.Equal(7, decision.Navigation.SnapshotVersion);
         Assert.Equal("CentralHall", decision.SemanticProjection.Telos);
         Assert.Equal("reach-central-hall", decision.SemanticProjection.Objective);
     }
@@ -1423,7 +1423,7 @@ public sealed class PostComputerRoomRouteNavigatorTests
     }
 
     [Fact]
-    public void RetainedLosTarget_MissingWeaponFactsFailsClosedAndSector60BusyCycleHoldsCompletion()
+    public void RetainedLosTarget_MissingWeaponFactsFailsClosedAndSector60BusyCycleContinuesArmedFire()
     {
         var pose = Pose(1760, -2512, 0, 7) with { NativeGametic = 101 };
         var missingNavigator = new PostComputerRoomRouteNavigator();
@@ -1451,10 +1451,15 @@ public sealed class PostComputerRoomRouteNavigatorTests
         Assert.Equal("native-weapon-snapshot-unavailable", missing.ReasonCode);
         Assert.True(IsNeutral(missing.Action));
         Assert.True(missing.Navigation.NativeActorTargetRetained);
+        Assert.False(missing.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(missing.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(0, missing.Navigation.NativeWeaponContinuationTargetIdentity);
+        Assert.Equal(-1, missing.Navigation.NativeWeaponContinuationReadyWeapon);
+        Assert.Equal(-1, missing.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
 
         var sector60Pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 201 };
         var sector60Navigator = new PostComputerRoomRouteNavigator();
-        sector60Navigator.Evaluate(
+        var armed = sector60Navigator.Evaluate(
             ProofWithRaw(1, sector60Pose),
             CombatInput(
                 1,
@@ -1478,10 +1483,251 @@ public sealed class PostComputerRoomRouteNavigatorTests
                 WeaponSnapshot = WeaponSnapshot(202, weaponState: 101)
             });
 
-        Assert.Equal(PostComputerRoomRouteState.InterceptEnemy, held.State);
-        Assert.Equal("native-live-target-weapon-cycle-central-hall-hold", held.ReasonCode);
+        Assert.Equal(PostComputerRoomRouteState.FireReady, armed.State);
+        Assert.True(armed.Action.AttackKey);
+        Assert.True(armed.Navigation.NativeWeaponFireOpportunity);
+        Assert.True(armed.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(armed.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(7, armed.Navigation.NativeWeaponContinuationTargetIdentity);
+        Assert.Equal(1, armed.Navigation.NativeWeaponContinuationReadyWeapon);
+        Assert.Equal(1, armed.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
+
+        Assert.Equal(PostComputerRoomRouteState.FireReady, held.State);
+        Assert.Equal("native-live-target-fire-cycle-continuation", held.ReasonCode);
         Assert.False(held.Completed);
-        Assert.True(IsNeutral(held.Action));
+        Assert.True(held.Action.AttackKey);
+        Assert.True(IsStationary(held.Action));
+        Assert.False(held.Navigation.NativeWeaponFireOpportunity);
+        Assert.True(held.Navigation.NativeWeaponContinuationArmed);
+        Assert.True(held.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(7, held.Navigation.NativeWeaponContinuationTargetIdentity);
+        Assert.Equal(1, held.Navigation.NativeWeaponContinuationReadyWeapon);
+        Assert.Equal(1, held.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
+
+        var refirePose = sector60Pose with { NativeGametic = 203 };
+        var refiring = sector60Navigator.Evaluate(
+            ProofWithRaw(3, refirePose),
+            CombatInput(
+                3,
+                refirePose,
+                new(),
+                Actor(7, 2944, -3120, sectorIndex: 60)) with
+            {
+                WeaponSnapshot = WeaponSnapshot(203, weaponState: 101, refire: 1)
+            });
+        Assert.Equal(PostComputerRoomRouteState.FireReady, refiring.State);
+        Assert.True(refiring.Action.AttackKey);
+        Assert.False(refiring.Navigation.NativeWeaponFireOpportunity);
+        Assert.True(refiring.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(1, refiring.Navigation.NativeWeaponRefire);
+    }
+
+    [Fact]
+    public void Sector60BusyWeaponWithoutPriorExactReadyAttackRemainsNeutral()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 201 };
+        var decision = navigator.Evaluate(
+            ProofWithRaw(1, pose),
+            CombatInput(
+                1,
+                pose,
+                new PostComputerRoomCombatObservation
+                {
+                    VisualEnemyVisible = true,
+                    VisualEnemyCentered = true,
+                    EnemyConfidence = 0.42
+                },
+                Actor(7, 2944, -3120, sectorIndex: 60)) with
+            {
+                WeaponSnapshot = WeaponSnapshot(201, weaponState: 101)
+            });
+
+        Assert.Equal(PostComputerRoomRouteState.InterceptEnemy, decision.State);
+        Assert.Equal("native-live-target-weapon-cycle-central-hall-hold", decision.ReasonCode);
+        Assert.True(IsNeutral(decision.Action));
+        Assert.False(decision.Navigation.NativeWeaponFireOpportunity);
+        Assert.False(decision.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(decision.Navigation.NativeWeaponAttackContinuation);
+    }
+
+    [Theory]
+    [InlineData("target-missing")]
+    [InlineData("weapon-change")]
+    [InlineData("pending-weapon")]
+    [InlineData("no-los")]
+    [InlineData("remote-topology")]
+    [InlineData("misaligned")]
+    [InlineData("stale-weapon")]
+    [InlineData("invalid-weapon")]
+    [InlineData("player-death")]
+    public void Sector60FireContinuation_ClearsAtEveryAuthorityBoundary(string boundary)
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 201 };
+        var actor = Actor(7, 2944, -3120, sectorIndex: 60);
+        var armed = navigator.Evaluate(
+            ProofWithRaw(1, pose),
+            CombatInput(
+                1,
+                pose,
+                new PostComputerRoomCombatObservation
+                {
+                    VisualEnemyVisible = true,
+                    VisualEnemyCentered = true,
+                    EnemyConfidence = 0.42
+                },
+                actor));
+        Assert.True(armed.Action.AttackKey);
+        Assert.True(armed.Navigation.NativeWeaponContinuationArmed);
+
+        var nextPose = pose with { NativeGametic = 202 };
+        var nextActor = actor;
+        var actors = new[] { nextActor };
+        var weapon = WeaponSnapshot(202, weaponState: 101);
+        switch (boundary)
+        {
+            case "target-missing":
+                actors = new[] { actor with { Identity = 8 } };
+                break;
+            case "weapon-change":
+                weapon = weapon with { ReadyWeapon = 2 };
+                break;
+            case "pending-weapon":
+                weapon = weapon with { PendingWeapon = 2 };
+                break;
+            case "no-los":
+                actors = new[] { actor with { LineOfSight = false } };
+                break;
+            case "remote-topology":
+                actors = new[] { actor with { SectorIndex = 59 } };
+                break;
+            case "misaligned":
+                actors = new[]
+                {
+                    ActorAtBearingError(7, nextPose, 6, 96) with { SectorIndex = 60 }
+                };
+                break;
+            case "stale-weapon":
+                weapon = weapon with { Gametic = 201 };
+                break;
+            case "invalid-weapon":
+                weapon = weapon with { StateCount = 0 };
+                break;
+            case "player-death":
+                nextPose = nextPose with { PlayerHealth = 0, PlayerState = 1 };
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown boundary {boundary}");
+        }
+
+        var invalidated = navigator.Evaluate(
+            ProofWithRaw(2, nextPose),
+            CombatInput(2, nextPose, new(), actors) with
+            {
+                ActorSnapshot = ActorSnapshot(202, actors),
+                WeaponSnapshot = weapon
+            });
+
+        Assert.False(invalidated.Action.AttackKey);
+        Assert.False(invalidated.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(invalidated.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(0, invalidated.Navigation.NativeWeaponContinuationTargetIdentity);
+        Assert.Equal(-1, invalidated.Navigation.NativeWeaponContinuationReadyWeapon);
+        Assert.Equal(-1, invalidated.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
+    }
+
+    [Fact]
+    public void Sector60FireContinuation_AfterClearRequiresAnotherExactReadyAttack()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 201 };
+        var actor = Actor(7, 2944, -3120, sectorIndex: 60);
+        navigator.Evaluate(
+            ProofWithRaw(1, pose),
+            CombatInput(
+                1,
+                pose,
+                new PostComputerRoomCombatObservation
+                {
+                    VisualEnemyVisible = true,
+                    VisualEnemyCentered = true,
+                    EnemyConfidence = 0.42
+                },
+                actor));
+
+        var stalePose = pose with { NativeGametic = 202 };
+        var cleared = navigator.Evaluate(
+            ProofWithRaw(2, stalePose),
+            CombatInput(2, stalePose, new(), actor) with
+            {
+                WeaponSnapshot = WeaponSnapshot(201, weaponState: 101)
+            });
+        Assert.False(cleared.Navigation.NativeWeaponContinuationArmed);
+
+        var busyPose = pose with { NativeGametic = 203 };
+        var stillReleased = navigator.Evaluate(
+            ProofWithRaw(3, busyPose),
+            CombatInput(3, busyPose, new(), actor) with
+            {
+                WeaponSnapshot = WeaponSnapshot(203, weaponState: 101)
+            });
+        Assert.False(stillReleased.Action.AttackKey);
+        Assert.False(stillReleased.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(stillReleased.Navigation.NativeWeaponAttackContinuation);
+
+        var readyPose = pose with { NativeGametic = 204 };
+        var rearmed = navigator.Evaluate(
+            ProofWithRaw(4, readyPose),
+            CombatInput(4, readyPose, new(), actor));
+        Assert.True(rearmed.Action.AttackKey);
+        Assert.True(rearmed.Navigation.NativeWeaponFireOpportunity);
+        Assert.True(rearmed.Navigation.NativeWeaponContinuationArmed);
+        Assert.Equal(4, rearmed.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
+    }
+
+    [Fact]
+    public void Sector60FireContinuation_RunScopeChangeClearsAuthorization()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 201 };
+        var actor = Actor(7, 2944, -3120, sectorIndex: 60);
+        var armed = navigator.Evaluate(
+            ProofWithRaw(1, pose),
+            CombatInput(
+                1,
+                pose,
+                new PostComputerRoomCombatObservation
+                {
+                    VisualEnemyVisible = true,
+                    VisualEnemyCentered = true,
+                    EnemyConfidence = 0.42
+                },
+                actor));
+        Assert.True(armed.Navigation.NativeWeaponContinuationArmed);
+
+        var nextPose = pose with { NativeGametic = 1 };
+        var nextProof = ProofWithRaw(1, nextPose) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2
+        };
+        var nextInput = Input(1) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2,
+            ActorSnapshot = ActorSnapshot(1),
+            WeaponSnapshot = WeaponSnapshot(1)
+        };
+        var reset = navigator.Evaluate(nextProof, nextInput);
+
+        Assert.False(reset.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(reset.Navigation.NativeWeaponAttackContinuation);
+        Assert.Equal(0, reset.Navigation.NativeWeaponContinuationTargetIdentity);
+        Assert.Equal(-1, reset.Navigation.NativeWeaponContinuationReadyWeapon);
+        Assert.Equal(-1, reset.Navigation.NativeWeaponContinuationAuthorizedAtControlTick);
     }
 
     [Theory]
@@ -1851,6 +2097,8 @@ public sealed class PostComputerRoomRouteNavigatorTests
         Assert.True(completed.Completed);
         Assert.True(completed.Navigation.NativeActorKillConfirmed);
         Assert.Equal(179, completed.Navigation.NativeActorEngagementFrames);
+        Assert.False(completed.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(completed.Navigation.NativeWeaponAttackContinuation);
 
         var failingNavigator = new PostComputerRoomRouteNavigator();
         AcquireAtSector60(failingNavigator, pose);
@@ -1878,6 +2126,61 @@ public sealed class PostComputerRoomRouteNavigatorTests
         Assert.True(failed.Navigation.NativeActorKillConfirmed);
         Assert.Equal(180, failed.Navigation.NativeActorEngagementFrames);
         Assert.False(failed.Completed);
+        Assert.False(failed.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(failed.Navigation.NativeWeaponAttackContinuation);
+    }
+
+    [Fact]
+    public void Sector60FireContinuation_AliveAt180StillFreezesNeutralFailureEvidence()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var pose = Pose(2944, -3024, 270, 60) with { NativeGametic = 101 };
+        var actor = Actor(7, 2944, -3120, health: 5, sectorIndex: 60);
+        navigator.Evaluate(
+            ProofWithRaw(1, pose),
+            CombatInput(
+                1,
+                pose,
+                new PostComputerRoomCombatObservation
+                {
+                    VisualEnemyVisible = true,
+                    VisualEnemyCentered = true,
+                    EnemyConfidence = 0.42
+                },
+                actor));
+        var busyPose = pose with { NativeGametic = 102 };
+        var continued = navigator.Evaluate(
+            ProofWithRaw(2, busyPose),
+            CombatInput(2, busyPose, new(), actor) with
+            {
+                WeaponSnapshot = WeaponSnapshot(102, weaponState: 101)
+            });
+        Assert.True(continued.Navigation.NativeWeaponAttackContinuation);
+
+        var deadlinePose = pose with { NativeGametic = 281 };
+        var failed = navigator.Evaluate(
+            ProofWithRaw(181, deadlinePose),
+            CombatInput(181, deadlinePose, new(), actor) with
+            {
+                WeaponSnapshot = WeaponSnapshot(281, weaponState: 101)
+            });
+
+        Assert.Equal(PostComputerRoomRouteState.FailedSafeStop, failed.State);
+        Assert.Equal("post-computer-room-combat-budget-exhausted", failed.ReasonCode);
+        Assert.Equal(180, failed.Navigation.NativeActorEngagementFrames);
+        Assert.True(IsNeutral(failed.Action));
+        Assert.False(failed.Navigation.NativeWeaponContinuationArmed);
+        Assert.False(failed.Navigation.NativeWeaponAttackContinuation);
+        Assert.Contains(
+            failed.FailureTrace.Replay,
+            entry => entry.ControlTick == 2
+                && entry.NativeWeaponContinuationArmed
+                && entry.NativeWeaponAttackContinuation
+                && entry.Action.AttackKey
+                && Math.Abs(entry.NativeActorTargetBearingErrorDegrees) <= 0.001);
+        Assert.False(failed.FailureTrace.FailureSnapshot!.NativeWeaponContinuationArmed);
+        Assert.False(failed.FailureTrace.FailureSnapshot.NativeWeaponAttackContinuation);
+        Assert.True(IsNeutral(failed.FailureTrace.FailureSnapshot.Action));
     }
 
     [Theory]
@@ -2199,6 +2502,223 @@ public sealed class PostComputerRoomRouteNavigatorTests
         Assert.Equal(PostComputerRoomRouteState.RecoverEnemyAlcove, sector7.State);
         Assert.Equal("enemy-alcove-south-clearance", sector7.Navigation.LegId);
         Assert.Equal(-1, sector7.Navigation.LegIndex);
+    }
+
+    [Fact]
+    public void CompletionAtRoute899AndLeg179_FreezesTerminalClockSnapshotAndReplay()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var holdPose = Pose(1760, -2512, 0, 7) with { NativeGametic = 101 };
+        navigator.Evaluate(
+            ProofWithRaw(1, holdPose, computerRoomConfirmed: false),
+            CombatInput(1, holdPose, new PostComputerRoomCombatObservation()));
+
+        var legStartPose = Pose(2880, -2928, 270, 71) with { NativeGametic = 821 };
+        var legStart = navigator.Evaluate(
+            ProofWithRaw(721, legStartPose),
+            CombatInput(721, legStartPose, new PostComputerRoomCombatObservation()));
+        Assert.Equal(720, legStart.Navigation.RouteFrames);
+        Assert.Equal(0, legStart.Navigation.LegFrames);
+        Assert.Equal("central-hall-entry", legStart.Navigation.LegId);
+
+        var completionPose = Pose(2944, -3024, 270, 60) with { NativeGametic = 1_000 };
+        var completed = navigator.Evaluate(
+            ProofWithRaw(900, completionPose),
+            CombatInput(900, completionPose, new PostComputerRoomCombatObservation()));
+
+        Assert.Equal(PostComputerRoomRouteState.Complete, completed.State);
+        Assert.True(completed.Completed);
+        Assert.Equal(899, completed.Navigation.RouteFrames);
+        Assert.Equal(1, completed.Navigation.RouteRemainingFrames);
+        Assert.Equal(179, completed.Navigation.LegFrames);
+        Assert.Equal(1, completed.Navigation.LegRemainingFrames);
+        Assert.True(completed.CompletionTrace.Completed);
+        Assert.Equal("session-1", completed.CompletionTrace.SessionId);
+        Assert.Equal("run-1", completed.CompletionTrace.RunId);
+        Assert.Equal(1, completed.CompletionTrace.RunGeneration);
+        Assert.Equal(900, completed.CompletionTrace.CompletionAtControlTick);
+        Assert.Equal("central-hall-entry-confirmed", completed.CompletionTrace.CompletionCode);
+        Assert.NotNull(completed.CompletionTrace.CompletionSnapshot);
+        Assert.Equal(900, completed.CompletionTrace.CompletionSnapshot!.ControlTick);
+        Assert.Equal(899, completed.CompletionTrace.CompletionSnapshot.RouteFrames);
+        Assert.Equal(179, completed.CompletionTrace.CompletionSnapshot.LegFrames);
+        Assert.InRange(
+            completed.CompletionTrace.Replay.Count,
+            1,
+            PostComputerRoomCompletionTrace.ReplayCapacity);
+        Assert.Equal(
+            completed.CompletionTrace.CompletionSnapshot,
+            completed.CompletionTrace.Replay[^1]);
+        Assert.False(completed.FailureTrace.Failed);
+
+        var currentPose = Pose(3040, -3024, 0, 59) with { NativeGametic = 1_300 };
+        var currentProof = ProofWithRaw(1_200, currentPose);
+        var currentInput = CombatInput(
+            1_200,
+            currentPose,
+            new PostComputerRoomCombatObservation());
+        var projected = navigator.Evaluate(currentProof, currentInput);
+        var duplicate = navigator.Evaluate(currentProof, currentInput);
+
+        Assert.Same(projected, duplicate);
+        Assert.Equal(1_200, projected.ControlTick);
+        Assert.Equal(1_300, projected.NativeGametic);
+        Assert.Equal(1_300, projected.Navigation.NativeGametic);
+        Assert.Equal(currentPose.PlayerX, projected.Proximity.PlayerX);
+        Assert.Equal(currentPose.PlayerY, projected.Navigation.PlayerY);
+        Assert.Equal(59, projected.Proximity.PlayerSectorIndex);
+        Assert.Equal(59, projected.Navigation.PlayerSectorIndex);
+        Assert.Equal(60, projected.CompletionTrace.CompletionSnapshot!.PlayerSectorIndex);
+        Assert.Equal(899, projected.Navigation.RouteFrames);
+        Assert.Equal(1, projected.Navigation.RouteRemainingFrames);
+        Assert.Equal(179, projected.Navigation.LegFrames);
+        Assert.Equal(1, projected.Navigation.LegRemainingFrames);
+        Assert.Equal(
+            completed.CompletionTrace.CompletionSnapshot,
+            projected.CompletionTrace.CompletionSnapshot);
+        Assert.Equal("session-1", projected.CompletionTrace.SessionId);
+        Assert.Equal("run-1", projected.CompletionTrace.RunId);
+        Assert.Equal(1, projected.CompletionTrace.RunGeneration);
+        Assert.Equal(
+            completed.CompletionTrace.Replay.ToArray(),
+            projected.CompletionTrace.Replay.ToArray());
+        Assert.DoesNotContain(
+            projected.CompletionTrace.Replay,
+            entry => entry.ControlTick == 1_200);
+    }
+
+    [Fact]
+    public void Sector60AtRoute900AndLeg180_FailsBeforeCompletionWithoutCompletionTrace()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var holdPose = Pose(1760, -2512, 0, 7) with { NativeGametic = 101 };
+        navigator.Evaluate(
+            ProofWithRaw(1, holdPose, computerRoomConfirmed: false),
+            CombatInput(1, holdPose, new PostComputerRoomCombatObservation()));
+
+        var legStartPose = Pose(2880, -2928, 270, 71) with { NativeGametic = 821 };
+        navigator.Evaluate(
+            ProofWithRaw(721, legStartPose),
+            CombatInput(721, legStartPose, new PostComputerRoomCombatObservation()));
+
+        var deadlinePose = Pose(2944, -3024, 270, 60) with { NativeGametic = 1_001 };
+        var failed = navigator.Evaluate(
+            ProofWithRaw(901, deadlinePose),
+            CombatInput(901, deadlinePose, new PostComputerRoomCombatObservation()));
+
+        Assert.Equal(PostComputerRoomRouteState.FailedSafeStop, failed.State);
+        Assert.Equal("post-computer-room-route-budget-exhausted", failed.ReasonCode);
+        Assert.Equal(900, failed.Navigation.RouteFrames);
+        Assert.Equal(180, failed.Navigation.LegFrames);
+        Assert.True(failed.FailureTrace.Failed);
+        Assert.False(failed.CompletionTrace.Completed);
+        Assert.Equal(string.Empty, failed.CompletionTrace.SessionId);
+        Assert.Equal(string.Empty, failed.CompletionTrace.RunId);
+        Assert.Equal(0, failed.CompletionTrace.RunGeneration);
+        Assert.Equal(-1, failed.CompletionTrace.CompletionAtControlTick);
+        Assert.Equal(string.Empty, failed.CompletionTrace.CompletionCode);
+        Assert.Null(failed.CompletionTrace.CompletionSnapshot);
+        Assert.Empty(failed.CompletionTrace.Replay);
+    }
+
+    [Fact]
+    public void Sector60AtLeg180_FailsBeforeCompletionWithoutCompletionTrace()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var legStartPose = Pose(2880, -2928, 270, 71) with { NativeGametic = 101 };
+        var legStart = navigator.Evaluate(
+            ProofWithRaw(1, legStartPose),
+            CombatInput(1, legStartPose, new PostComputerRoomCombatObservation()));
+        Assert.Equal("central-hall-entry", legStart.Navigation.LegId);
+        Assert.Equal(0, legStart.Navigation.LegFrames);
+
+        var deadlinePose = Pose(2944, -3024, 270, 60) with { NativeGametic = 281 };
+        var failed = navigator.Evaluate(
+            ProofWithRaw(181, deadlinePose),
+            CombatInput(181, deadlinePose, new PostComputerRoomCombatObservation()));
+
+        Assert.Equal(PostComputerRoomRouteState.FailedSafeStop, failed.State);
+        Assert.Equal(
+            "post-computer-room-leg-budget-exhausted:central-hall-entry",
+            failed.ReasonCode);
+        Assert.Equal(180, failed.Navigation.RouteFrames);
+        Assert.Equal(180, failed.Navigation.LegFrames);
+        Assert.True(failed.FailureTrace.Failed);
+        Assert.False(failed.CompletionTrace.Completed);
+        Assert.Null(failed.CompletionTrace.CompletionSnapshot);
+        Assert.Empty(failed.CompletionTrace.Replay);
+    }
+
+    [Fact]
+    public void NewRunResetsFrozenCompletionTraceAndTerminalClock()
+    {
+        var navigator = new PostComputerRoomRouteNavigator();
+        var completedPose = Pose(2944, -3024, 270, 60) with { NativeGametic = 101 };
+        var completed = navigator.Evaluate(
+            ProofWithRaw(1, completedPose),
+            CombatInput(1, completedPose, new PostComputerRoomCombatObservation()));
+        Assert.True(completed.CompletionTrace.Completed);
+        Assert.False(completed.FailureTrace.Failed);
+
+        var resetPose = Pose(1760, -2512, 0, 7) with { NativeGametic = 1 };
+        var resetProof = ProofWithRaw(1, resetPose) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2
+        };
+        var resetInput = CombatInput(
+            1,
+            resetPose,
+            new PostComputerRoomCombatObservation()) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2
+        };
+        var reset = navigator.Evaluate(resetProof, resetInput);
+
+        Assert.False(reset.Completed);
+        Assert.False(reset.CompletionTrace.Completed);
+        Assert.Equal(string.Empty, reset.CompletionTrace.SessionId);
+        Assert.Equal(string.Empty, reset.CompletionTrace.RunId);
+        Assert.Equal(0, reset.CompletionTrace.RunGeneration);
+        Assert.Equal(-1, reset.CompletionTrace.CompletionAtControlTick);
+        Assert.Equal(string.Empty, reset.CompletionTrace.CompletionCode);
+        Assert.Null(reset.CompletionTrace.CompletionSnapshot);
+        Assert.Empty(reset.CompletionTrace.Replay);
+        Assert.False(reset.FailureTrace.Failed);
+        Assert.Equal(0, reset.Navigation.RouteFrames);
+        Assert.Equal(0, reset.Navigation.LegFrames);
+
+        var nextCompletionPose = Pose(2944, -3024, 270, 60) with { NativeGametic = 2 };
+        var nextCompletionProof = ProofWithRaw(2, nextCompletionPose) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2
+        };
+        var nextCompletionInput = CombatInput(
+            2,
+            nextCompletionPose,
+            new PostComputerRoomCombatObservation()) with
+        {
+            SessionId = "session-2",
+            RunId = "run-2",
+            RunGeneration = 2
+        };
+        var recompleted = navigator.Evaluate(nextCompletionProof, nextCompletionInput);
+
+        Assert.True(recompleted.Completed);
+        Assert.True(recompleted.CompletionTrace.Completed);
+        Assert.Equal("session-2", recompleted.CompletionTrace.SessionId);
+        Assert.Equal("run-2", recompleted.CompletionTrace.RunId);
+        Assert.Equal(2, recompleted.CompletionTrace.RunGeneration);
+        Assert.Equal(2, recompleted.CompletionTrace.CompletionAtControlTick);
+        Assert.Equal(
+            2,
+            recompleted.CompletionTrace.CompletionSnapshot!.ControlTick);
+        Assert.False(recompleted.FailureTrace.Failed);
     }
 
     [Fact]

@@ -14,6 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\DoomProvider\Autoplay\DoomNativeSfxCatalog.cs"
+             Link="Shared\DoomNativeSfxCatalog.cs" />
     <Compile Include="..\DoomProvider\Autoplay\FirstDoorControlStateMachine.cs"
              Link="Shared\FirstDoorControlStateMachine.cs" />
     <Compile Include="..\DoomProvider\Autoplay\FirstDoorBrowserControlSession.cs"
@@ -28,6 +30,10 @@
              Link="Shared\PostComputerRoomBrowserControlSession.cs" />
     <Compile Include="..\DoomProvider\Autoplay\PostComputerRoomRouteNavigator.cs"
              Link="Shared\PostComputerRoomRouteNavigator.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\E1M1ContinuationBrowserControlSession.cs"
+             Link="Shared\E1M1ContinuationBrowserControlSession.cs" />
+    <Compile Include="..\DoomProvider\Autoplay\E1M1ContinuationNavigator.cs"
+             Link="Shared\E1M1ContinuationNavigator.cs" />
     <Compile Include="..\DoomProvider\Autoplay\AutoplayActionContracts.cs"
              Link="Shared\AutoplayActionContracts.cs" />
     <Compile Include="..\DoomProvider\Autoplay\AutoplaySensorFusion.cs"

@@ -17,7 +17,22 @@
   const RAW_SAMPLE_ROWS = 13;
   const RAW_SAMPLE_LENGTH = RAW_SAMPLE_COLUMNS * RAW_SAMPLE_ROWS;
   const RAW_PALETTE_LENGTH = 256 * 4;
+  const AUDIO_CATALOG_TRACE_VERSION = 1;
+  const AUDIO_CATALOG_VERSION = "doom-native-sfx-catalog-v1";
+  const AUDIO_CATALOG_SOURCE_REVISION = "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284";
+  const AUDIO_CATALOG_IDENTITY_HASH = "2fd2ba92b0ac0761b4c60ea636532420e71475adfb49f33ac1994c37009dd756";
+  const AUDIO_CATALOG_TRACE_CAPACITY = 32;
+  const MAX_NATIVE_AUDIO_EVENTS_PER_PACKET = 256;
+  const MAX_NATIVE_SFX_ID = 108;
+  const UNKNOWN_SFX_MEANING_CODE = "unknown-sfx";
+  const UNKNOWN_SFX_MEANING_LABEL = "Unknown SFX";
   const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const AUDIO_CATALOG_CLASSIFICATION_REASONS = new Set([
+    "exact-id-name-pair",
+    "empty-sfx-name",
+    "sfx-id-out-of-range",
+    "id-name-mismatch"
+  ]);
   const OWNERSHIP_DISPOSITIONS = new Set([
     "NotAcquired",
     "Exclusive",
@@ -407,14 +422,56 @@
     };
   }
 
-  function readNativeFacts(runtime) {
+  function nativeAudioCursorForScope(runtime, scope) {
+    const cursor = runtime?.autoplayCSharpNativeAudioCursor;
+    if (!isRecord(cursor)
+      || cursor.sessionId !== scope.sessionId
+      || cursor.runId !== scope.runId
+      || cursor.runGeneration !== scope.runGeneration) {
+      return 0;
+    }
+
+    return boundedInteger(cursor.afterSequence, 0, 0, MAX_WIRE_INT);
+  }
+
+  function readNativeFacts(runtime, scope) {
     const reader = self.AIKernelDoomNativeAudio;
-    if (typeof reader?.readNativeFacts !== "function") {
+    const read = typeof reader?.readFirstDoorFacts === "function"
+      ? reader.readFirstDoorFacts
+      : reader?.readNativeFacts;
+    if (typeof read !== "function") {
       return unavailableNativeFacts();
     }
 
-    const facts = reader.readNativeFacts(runtime?.exports, 0);
+    const facts = read.call(
+      reader,
+      runtime?.exports,
+      nativeAudioCursorForScope(runtime, scope));
     return isRecord(facts) ? facts : unavailableNativeFacts();
+  }
+
+  function commitNativeAudioCursor(runtime, input, decision) {
+    if (!isRecord(runtime)
+      || !isRecord(input)
+      || !isRecord(decision)
+      || decision.sessionId !== input.sessionId
+      || decision.runId !== input.runId
+      || decision.runGeneration !== input.runGeneration) {
+      return;
+    }
+
+    const latestSequence = boundedInteger(
+      decision.audioCatalogTrace.latestObservedSequence,
+      0,
+      0,
+      MAX_WIRE_INT);
+    const currentSequence = nativeAudioCursorForScope(runtime, input);
+    runtime.autoplayCSharpNativeAudioCursor = {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      runGeneration: input.runGeneration,
+      afterSequence: Math.max(currentSequence, latestSequence)
+    };
   }
 
   function copyNativeAudio(audio) {
@@ -582,7 +639,7 @@
       const state = isRecord(wasmState) ? wasmState : {};
       const status = isRecord(previousStatus) ? previousStatus : {};
       const scope = resolveControlScope(runtime);
-      const nativeFacts = readNativeFacts(runtime);
+      const nativeFacts = readNativeFacts(runtime, scope);
       const nativeRun = isRecord(nativeFacts.run) ? nativeFacts.run : {};
       const nativePlayer = copyNativePlayer(nativeFacts.player);
       const nativeRunAvailable = nativeRun.available === true;
@@ -1016,6 +1073,202 @@
     requireWire(decision.restartRequested === trace.restartRequested, "restartRequested does not match vitalityTrace");
     requireWire(decision.restartRequestId === trace.restartRequestId, "restartRequestId does not match vitalityTrace");
     requireWire(decision.restartReason === trace.restartReason, "restartReason does not match vitalityTrace");
+  }
+
+  function normalizeWireSfxName(value) {
+    const normalized = value.trim().toLowerCase();
+    return normalized.startsWith("sfx_") ? normalized.slice(4) : normalized;
+  }
+
+  function validateAudioCatalogObservation(observation, index, trace, decision) {
+    const name = `audioCatalogTrace.events[${index}]`;
+    requireWire(isRecord(observation), `${name} must be an object`);
+    requireWire(
+      observation.catalogVersion === AUDIO_CATALOG_VERSION,
+      `${name}.catalogVersion is unsupported`);
+    requireWire(
+      observation.sourceRevision === AUDIO_CATALOG_SOURCE_REVISION,
+      `${name}.sourceRevision is unsupported`);
+    requireCanonicalSha256(observation.catalogIdentityHash, `${name}.catalogIdentityHash`);
+    requireWire(
+      observation.catalogIdentityHash === trace.catalogIdentityHash,
+      `${name}.catalogIdentityHash does not match trace`);
+    requireNonEmptyString(observation.sessionId, `${name}.sessionId`);
+    requireNonEmptyString(observation.runId, `${name}.runId`);
+    requireSafeInteger(observation.runGeneration, `${name}.runGeneration`, 1);
+    requireSafeInteger(observation.observedAtControlTick, `${name}.observedAtControlTick`, 1);
+    requireWire(observation.sessionId === decision.sessionId, `${name}.sessionId does not match decision`);
+    requireWire(observation.runId === decision.runId, `${name}.runId does not match decision`);
+    requireWire(
+      observation.runGeneration === decision.runGeneration,
+      `${name}.runGeneration does not match decision`);
+    requireWire(
+      observation.observedAtControlTick === decision.controlTick,
+      `${name}.observedAtControlTick does not match decision`);
+    requireSafeInteger(observation.sequence, `${name}.sequence`, 1);
+    requireIntegerRange(observation.sfxId, `${name}.sfxId`, -1, MAX_WIRE_INT);
+    for (const property of ["rawSfxName", "normalizedSfxName", "expectedSfxName"]) {
+      requireWire(
+        typeof observation[property] === "string",
+        `${name}.${property} must be a string`);
+    }
+    requireBoolean(observation.catalogued, `${name}.catalogued`);
+    requireNonEmptyString(observation.meaningCode, `${name}.meaningCode`);
+    requireNonEmptyString(observation.meaningLabel, `${name}.meaningLabel`);
+    requireWire(
+      AUDIO_CATALOG_CLASSIFICATION_REASONS.has(observation.classificationReason),
+      `${name}.classificationReason is unknown`);
+    requireCanonicalSha256(observation.eventIdentityHash, `${name}.eventIdentityHash`);
+    requireWire(observation.diagnosticOnly === true, `${name}.diagnosticOnly must be true`);
+
+    const normalizedRawName = normalizeWireSfxName(observation.rawSfxName);
+    requireWire(
+      observation.normalizedSfxName === normalizedRawName,
+      `${name}.normalizedSfxName is not the canonical raw name`);
+    const exactPair = observation.classificationReason === "exact-id-name-pair";
+    requireWire(
+      observation.catalogued === exactPair,
+      `${name}.catalogued does not match classificationReason`);
+    const idInCatalog = observation.sfxId >= 0 && observation.sfxId <= MAX_NATIVE_SFX_ID;
+    const rawNameEmpty = observation.rawSfxName.trim().length === 0;
+
+    if (exactPair) {
+      requireWire(idInCatalog, `${name} exact pair requires a catalog SFX id`);
+      requireWire(!rawNameEmpty, `${name} exact pair requires a raw SFX name`);
+      requireNonEmptyString(observation.expectedSfxName, `${name}.expectedSfxName`);
+      requireWire(
+        observation.normalizedSfxName === observation.expectedSfxName,
+        `${name} exact pair requires the expected normalized SFX name`);
+      requireWire(
+        observation.meaningCode !== UNKNOWN_SFX_MEANING_CODE,
+        `${name} catalogued pair cannot use the unknown meaning code`);
+      requireWire(
+        observation.meaningLabel !== UNKNOWN_SFX_MEANING_LABEL,
+        `${name} catalogued pair cannot use the unknown meaning label`);
+      return;
+    }
+
+    requireWire(
+      observation.meaningCode === UNKNOWN_SFX_MEANING_CODE,
+      `${name} unknown pair must use the unknown meaning code`);
+    requireWire(
+      observation.meaningLabel === UNKNOWN_SFX_MEANING_LABEL,
+      `${name} unknown pair must use the unknown meaning label`);
+    if (observation.classificationReason === "empty-sfx-name") {
+      requireWire(rawNameEmpty, `${name} empty-name classification requires an empty raw name`);
+      requireWire(
+        observation.normalizedSfxName.length === 0,
+        `${name} empty-name classification requires an empty normalized name`);
+      return;
+    }
+    if (observation.classificationReason === "sfx-id-out-of-range") {
+      requireWire(!rawNameEmpty, `${name} out-of-range classification requires a raw name`);
+      requireWire(!idInCatalog, `${name} out-of-range classification requires an out-of-range id`);
+      requireWire(
+        observation.expectedSfxName.length === 0,
+        `${name} out-of-range classification cannot claim an expected name`);
+      return;
+    }
+
+    requireWire(!rawNameEmpty, `${name} id/name mismatch requires a raw name`);
+    requireWire(idInCatalog, `${name} id/name mismatch requires a catalog SFX id`);
+    requireNonEmptyString(observation.expectedSfxName, `${name}.expectedSfxName`);
+    requireWire(
+      observation.normalizedSfxName !== observation.expectedSfxName,
+      `${name} id/name mismatch cannot contain an exact normalized pair`);
+  }
+
+  function validateAudioCatalogTrace(trace, decision) {
+    requireWire(isRecord(trace), "audioCatalogTrace must be an object");
+    requireWire(
+      trace.traceVersion === AUDIO_CATALOG_TRACE_VERSION,
+      `audioCatalogTrace.traceVersion must be ${AUDIO_CATALOG_TRACE_VERSION}`);
+    requireWire(
+      trace.catalogVersion === AUDIO_CATALOG_VERSION,
+      "audioCatalogTrace.catalogVersion is unsupported");
+    requireWire(
+      trace.sourceRevision === AUDIO_CATALOG_SOURCE_REVISION,
+      "audioCatalogTrace.sourceRevision is unsupported");
+    requireCanonicalSha256(trace.catalogIdentityHash, "audioCatalogTrace.catalogIdentityHash");
+    requireWire(
+      trace.catalogIdentityHash === AUDIO_CATALOG_IDENTITY_HASH,
+      "audioCatalogTrace.catalogIdentityHash is unsupported");
+    requireNonEmptyString(trace.sessionId, "audioCatalogTrace.sessionId");
+    requireNonEmptyString(trace.runId, "audioCatalogTrace.runId");
+    requireSafeInteger(trace.runGeneration, "audioCatalogTrace.runGeneration", 1);
+    requireSafeInteger(trace.evaluatedAtControlTick, "audioCatalogTrace.evaluatedAtControlTick", 1);
+    requireWire(trace.sessionId === decision.sessionId, "audioCatalogTrace.sessionId does not match decision");
+    requireWire(trace.runId === decision.runId, "audioCatalogTrace.runId does not match decision");
+    requireWire(
+      trace.runGeneration === decision.runGeneration,
+      "audioCatalogTrace.runGeneration does not match decision");
+    requireWire(
+      trace.evaluatedAtControlTick === decision.controlTick,
+      "audioCatalogTrace tick does not match decision");
+    requireSafeInteger(trace.latestObservedSequence, "audioCatalogTrace.latestObservedSequence", 0);
+    requireWire(
+      trace.capacity === AUDIO_CATALOG_TRACE_CAPACITY,
+      `audioCatalogTrace.capacity must be ${AUDIO_CATALOG_TRACE_CAPACITY}`);
+    requireIntegerRange(
+      trace.totalNewEventCount,
+      "audioCatalogTrace.totalNewEventCount",
+      0,
+      MAX_NATIVE_AUDIO_EVENTS_PER_PACKET);
+    requireIntegerRange(
+      trace.retainedEventCount,
+      "audioCatalogTrace.retainedEventCount",
+      0,
+      AUDIO_CATALOG_TRACE_CAPACITY);
+    requireIntegerRange(
+      trace.unknownEventCount,
+      "audioCatalogTrace.unknownEventCount",
+      0,
+      MAX_NATIVE_AUDIO_EVENTS_PER_PACKET);
+    requireBoolean(trace.truncated, "audioCatalogTrace.truncated");
+    requireWire(trace.diagnosticOnly === true, "audioCatalogTrace.diagnosticOnly must be true");
+    requireWire(Array.isArray(trace.events), "audioCatalogTrace.events must be an array");
+    requireWire(
+      trace.retainedEventCount === trace.events.length,
+      "audioCatalogTrace.retainedEventCount does not match events length");
+    requireWire(
+      trace.retainedEventCount === Math.min(trace.totalNewEventCount, AUDIO_CATALOG_TRACE_CAPACITY),
+      "audioCatalogTrace retained count is inconsistent with total count");
+    requireWire(
+      trace.truncated === (trace.totalNewEventCount > AUDIO_CATALOG_TRACE_CAPACITY),
+      "audioCatalogTrace.truncated is inconsistent with total count");
+    requireWire(
+      trace.unknownEventCount <= trace.totalNewEventCount,
+      "audioCatalogTrace.unknownEventCount exceeds total count");
+
+    let previousSequence = 0;
+    let retainedUnknownCount = 0;
+    for (let index = 0; index < trace.events.length; index += 1) {
+      const observation = trace.events[index];
+      validateAudioCatalogObservation(observation, index, trace, decision);
+      requireWire(
+        observation.sequence > previousSequence,
+        `audioCatalogTrace.events[${index}].sequence must be strictly increasing`);
+      requireWire(
+        observation.sequence <= trace.latestObservedSequence,
+        `audioCatalogTrace.events[${index}].sequence exceeds latestObservedSequence`);
+      previousSequence = observation.sequence;
+      if (!observation.catalogued) {
+        retainedUnknownCount += 1;
+      }
+    }
+
+    if (trace.totalNewEventCount > 0) {
+      requireWire(
+        previousSequence === trace.latestObservedSequence,
+        "audioCatalogTrace latest retained sequence does not match latestObservedSequence");
+    }
+    const omittedCount = trace.totalNewEventCount - trace.retainedEventCount;
+    requireWire(
+      trace.unknownEventCount >= retainedUnknownCount,
+      "audioCatalogTrace.unknownEventCount omits a retained unknown event");
+    requireWire(
+      trace.unknownEventCount <= retainedUnknownCount + omittedCount,
+      "audioCatalogTrace.unknownEventCount cannot be produced by retained and omitted events");
   }
 
   function validateOpeningNavigation(snapshot, name) {
@@ -1536,6 +1789,7 @@
     validateAcceptedEvidence(decision);
     validateReplayFields(decision);
     validateVitalityTrace(decision.vitalityTrace, decision);
+    validateAudioCatalogTrace(decision.audioCatalogTrace, decision);
     validateDisposition(decision);
 
     const input = options.input;
@@ -1578,6 +1832,7 @@
         input,
         previousDecision: runtime?.autoplayCSharpFirstDoorDecision
       });
+      commitNativeAudioCursor(runtime, input, decision);
       return { input, decision };
     } catch (error) {
       throw taggedError("C# FirstDoor evaluation failed", error);

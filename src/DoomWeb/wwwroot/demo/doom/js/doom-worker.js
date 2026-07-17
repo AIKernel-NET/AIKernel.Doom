@@ -17,8 +17,9 @@ const pendingWorkerMessages = [];
       moduleUrl.search = `?v=${encodeURIComponent(workerCacheKey)}`;
       csharpControlReady = import(moduleUrl.href).then(() => {
         if (typeof self.aiKernelDoomControl?.evaluateBrowserFirstDoor !== "function"
-          || typeof self.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function") {
-          throw new Error("C# FirstDoor/post-COMPUTERROOM control bridge is unavailable in worker.");
+          || typeof self.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function"
+          || typeof self.aiKernelDoomControl?.evaluateBrowserE1M1Continuation !== "function") {
+          throw new Error("C# FirstDoor/post-COMPUTERROOM/E1M1 continuation control bridge is unavailable in worker.");
         }
 
         return true;
@@ -116,6 +117,7 @@ const pendingWorkerMessages = [];
     scriptUrl("/js/autoplay/control-runtime.js"),
     scriptUrl("/js/autoplay/csharp-first-door-adapter.js"),
     scriptUrl("/js/autoplay/csharp-post-computer-room-route-adapter.js"),
+    scriptUrl("/js/autoplay/csharp-e1m1-continuation-adapter.js"),
     scriptUrl("/js/autoplay/doom-sensor-inputs.js"),
     scriptUrl("/js/autoplay/doom-action-adapter.js"),
     scriptUrl("/js/autoplay/doom-retry-dispatch.js"),
@@ -315,6 +317,7 @@ const pendingWorkerMessages = [];
   post("host-ready", {
     csharpControlReady: typeof self.aiKernelDoomControl?.evaluateBrowserFirstDoor === "function"
       && typeof self.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute === "function"
+      && typeof self.aiKernelDoomControl?.evaluateBrowserE1M1Continuation === "function"
   });
 
   self.onerror = function (message, source, lineno, colno, error) {

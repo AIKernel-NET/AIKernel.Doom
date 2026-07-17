@@ -8,6 +8,7 @@
   const MAX_ACTOR_SNAPSHOT_CAPACITY = 64;
   const NUMBER_OF_WEAPONS = 9;
   const NO_PENDING_WEAPON = 10;
+  const NATIVE_ATTACK_ALIGNMENT_TOLERANCE_DEGREES = 5;
   const STATES = new Set([
     "WaitingForFirstDoorHandoff",
     "EnterComputerRoom",
@@ -336,6 +337,16 @@
       "Attack must be stationary");
   }
 
+  function isNeutralAction(action) {
+    return action.moveForward === false
+      && action.moveBackward === false
+      && action.strafeLeft === false
+      && action.strafeRight === false
+      && action.turnYaw === 0
+      && action.useKey === false
+      && action.attackKey === false;
+  }
+
   function validateCombatObservation(combat, expected) {
     requireWire(isRecord(combat), "combatObservation is required");
     requireWire(
@@ -520,6 +531,116 @@
     }
   }
 
+  function exactNativeWeaponFireOpportunity(evidence) {
+    return evidence.nativeWeaponSnapshotAccepted
+      && evidence.nativeWeaponSnapshotFresh
+      && evidence.nativeReadyWeapon >= 0
+      && evidence.nativePendingWeapon === NO_PENDING_WEAPON
+      && evidence.nativeWeaponStateCount > 0
+      && evidence.nativeWeaponState >= 0
+      && evidence.nativeWeaponState < evidence.nativeWeaponStateCount
+      && evidence.nativeWeaponReadyState >= 0
+      && evidence.nativeWeaponReadyState < evidence.nativeWeaponStateCount
+      && evidence.nativeWeaponState === evidence.nativeWeaponReadyState
+      && evidence.nativeWeaponRefire === 0;
+  }
+
+  function validateNativeWeaponContinuation(
+    evidence,
+    name,
+    controlTick,
+    action,
+    requireCurrentActorAuthority = false) {
+    for (const field of [
+      "nativeWeaponContinuationArmed",
+      "nativeWeaponAttackContinuation"
+    ]) {
+      requireWire(typeof evidence[field] === "boolean", `${name}.${field} must be boolean`);
+    }
+    integerRange(
+      evidence.nativeWeaponContinuationTargetIdentity,
+      `${name}.nativeWeaponContinuationTargetIdentity`,
+      0,
+      MAX_UINT32);
+    integerRange(
+      evidence.nativeWeaponContinuationReadyWeapon,
+      `${name}.nativeWeaponContinuationReadyWeapon`,
+      -1,
+      NUMBER_OF_WEAPONS - 1);
+    safeInteger(
+      evidence.nativeWeaponContinuationAuthorizedAtControlTick,
+      `${name}.nativeWeaponContinuationAuthorizedAtControlTick`,
+      -1);
+
+    if (evidence.nativeWeaponContinuationArmed) {
+      requireWire(
+        evidence.nativeWeaponSnapshotAccepted
+          && evidence.nativeWeaponSnapshotFresh
+          && evidence.nativePendingWeapon === NO_PENDING_WEAPON,
+        `${name} armed native weapon continuation requires fresh accepted facts with no pending change`);
+      requireWire(
+        evidence.nativeWeaponContinuationTargetIdentity > 0
+          && evidence.nativeWeaponContinuationTargetIdentity === evidence.nativeActorTargetIdentity,
+        `${name} armed native weapon continuation must retain the same native actor target`);
+      requireWire(
+        evidence.nativeWeaponContinuationReadyWeapon >= 0
+          && evidence.nativeWeaponContinuationReadyWeapon === evidence.nativeReadyWeapon,
+        `${name} armed native weapon continuation must retain the same ready weapon`);
+      requireWire(
+        evidence.nativeWeaponContinuationAuthorizedAtControlTick >= 1
+          && evidence.nativeWeaponContinuationAuthorizedAtControlTick <= controlTick,
+        `${name} armed native weapon continuation authorization tick is not current`);
+      requireWire(
+        evidence.nativeActorTargetHealth > 0
+          && evidence.nativeActorTargetLineOfSight
+          && evidence.nativeActorTopologyAccepted
+          && evidence.nativeActorTopologyReason === "native-actor-topology-local"
+          && Number.isFinite(evidence.nativeActorTargetBearingErrorDegrees)
+          && Math.abs(evidence.nativeActorTargetBearingErrorDegrees)
+            <= NATIVE_ATTACK_ALIGNMENT_TOLERANCE_DEGREES,
+        `${name} armed native weapon continuation lacks current actor proof`);
+      if (requireCurrentActorAuthority) {
+        requireWire(
+          evidence.nativeActorSnapshotAccepted
+            && evidence.nativeActorSnapshotFresh
+            && evidence.nativeActorMatched
+            && evidence.nativeActorTargetRetained
+            && evidence.nativeActorCombatTrusted
+            && !evidence.nativeActorKillConfirmed,
+          `${name} armed native weapon continuation lacks current actor authority`);
+      }
+    } else {
+      requireWire(
+        evidence.nativeWeaponContinuationTargetIdentity === 0
+          && evidence.nativeWeaponContinuationReadyWeapon === -1
+          && evidence.nativeWeaponContinuationAuthorizedAtControlTick === -1,
+        `${name} unarmed native weapon continuation must use canonical sentinels`);
+    }
+
+    const exactFireOpportunity = exactNativeWeaponFireOpportunity(evidence);
+    requireWire(
+      evidence.nativeWeaponFireOpportunity === exactFireOpportunity,
+      `${name} native weapon fire opportunity does not match exact fresh engine proof`);
+    if (evidence.nativeWeaponAttackContinuation) {
+      requireWire(
+        evidence.nativeWeaponContinuationArmed
+          && evidence.playerSectorIndex === 60
+          && evidence.nativeActorTargetSectorIndex === 60
+          && !exactFireOpportunity
+          && evidence.nativeWeaponState !== evidence.nativeWeaponReadyState,
+        `${name}.nativeWeaponAttackContinuation lacks a current player-and-actor sector-60 busy-cycle continuation`);
+    }
+    requireWire(
+      evidence.nativeWeaponAttackContinuation
+        === (action.attackKey && !exactFireOpportunity),
+      `${name}.nativeWeaponAttackContinuation does not match the current C# Attack decision`);
+    requireWire(
+      !action.attackKey
+        || exactFireOpportunity
+        || evidence.nativeWeaponAttackContinuation,
+      `${name}.action Attack requires an exact fire opportunity or current C# continuation`);
+  }
+
   function validateReplayEntry(entry, name) {
     requireWire(isRecord(entry), `${name} must be an object`);
     safeInteger(entry.controlTick, `${name}.controlTick`, 1);
@@ -540,6 +661,9 @@
       typeof entry.nativeActorTargetLineOfSight === "boolean",
       `${name}.nativeActorTargetLineOfSight must be boolean`);
     requireWire(
+      Number.isFinite(entry.nativeActorTargetBearingErrorDegrees),
+      `${name}.nativeActorTargetBearingErrorDegrees must be finite`);
+    requireWire(
       typeof entry.nativeActorTopologyAccepted === "boolean",
       `${name}.nativeActorTopologyAccepted must be boolean`);
     requireWire(
@@ -554,7 +678,9 @@
     for (const field of [
       "nativeWeaponSnapshotAccepted",
       "nativeWeaponSnapshotFresh",
-      "nativeWeaponFireOpportunity"
+      "nativeWeaponFireOpportunity",
+      "nativeWeaponContinuationArmed",
+      "nativeWeaponAttackContinuation"
     ]) {
       requireWire(typeof entry[field] === "boolean", `${name}.${field} must be boolean`);
     }
@@ -596,23 +722,7 @@
         `${name} unavailable weapon snapshot must use canonical sentinels`);
     }
     validateAction(entry.action);
-    const exactFireOpportunity = entry.nativeWeaponSnapshotAccepted
-      && entry.nativeWeaponSnapshotFresh
-      && entry.nativeReadyWeapon >= 0
-      && entry.nativePendingWeapon === NO_PENDING_WEAPON
-      && entry.nativeWeaponStateCount > 0
-      && entry.nativeWeaponState >= 0
-      && entry.nativeWeaponState < entry.nativeWeaponStateCount
-      && entry.nativeWeaponReadyState >= 0
-      && entry.nativeWeaponReadyState < entry.nativeWeaponStateCount
-      && entry.nativeWeaponState === entry.nativeWeaponReadyState
-      && entry.nativeWeaponRefire === 0;
-    requireWire(
-      entry.nativeWeaponFireOpportunity === exactFireOpportunity,
-      `${name}.nativeWeaponFireOpportunity does not match exact fresh engine proof`);
-    requireWire(
-      !entry.action.attackKey || entry.nativeWeaponFireOpportunity,
-      `${name}.action Attack requires a fresh native weapon fire opportunity`);
+    validateNativeWeaponContinuation(entry, name, entry.controlTick, entry.action);
     requireWire(typeof entry.runRequested === "boolean", `${name}.runRequested must be boolean`);
   }
 
@@ -632,23 +742,41 @@
       previousTick = entry.controlTick;
     }
 
+    requireWire(
+      trace.failed === (decision.state === "FailedSafeStop")
+        && trace.failed === (decision.ownershipDisposition === "FailedSafeStop"),
+      "failureTrace.failed does not match the FailedSafeStop terminal decision");
+
     if (!trace.failed) {
       requireWire(trace.failureAtControlTick === -1, "non-failed failureTrace must use tick -1");
       requireWire(trace.failureCode.length === 0, "non-failed failureTrace cannot carry a failure code");
       requireWire(trace.failureSnapshot === null, "non-failed failureTrace cannot carry a failure snapshot");
+      requireWire(trace.replay.length === 0, "non-failed failureTrace cannot carry replay evidence");
       return;
     }
 
     requireWire(trace.failureAtControlTick >= 1, "failed failureTrace requires a positive failure tick");
     requireWire(trace.failureAtControlTick <= decision.controlTick, "failure tick cannot lead the decision tick");
     requireWire(trace.failureCode.length > 0, "failed failureTrace requires a failure code");
+    requireWire(
+      decision.ownerId === "post-computer-room.failed-safe-stop"
+        && decision.exclusive === true
+        && decision.completed === false
+        && decision.reasonCode === trace.failureCode
+        && decision.navigation.failureCode === trace.failureCode
+        && isNeutralAction(decision.action)
+        && decision.runRequested === false,
+      "failed decision lacks the canonical FailedSafeStop ownership and neutral action proof");
     validateReplayEntry(trace.failureSnapshot, "failureTrace.failureSnapshot");
     requireWire(
       trace.failureSnapshot.controlTick === trace.failureAtControlTick,
       "failureSnapshot tick must equal failureAtControlTick");
     requireWire(
-      trace.failureSnapshot.reasonCode === trace.failureCode,
-      "failureSnapshot reason must equal failureCode");
+      trace.failureSnapshot.state === "FailedSafeStop"
+        && trace.failureSnapshot.reasonCode === trace.failureCode
+        && isNeutralAction(trace.failureSnapshot.action)
+        && trace.failureSnapshot.runRequested === false,
+      "failureSnapshot must preserve the canonical FailedSafeStop neutral terminal proof");
     requireWire(trace.replay.length > 0, "failed failureTrace requires bounded replay evidence");
     const finalReplay = trace.replay[trace.replay.length - 1];
     requireWire(
@@ -657,9 +785,173 @@
       "failureSnapshot must be the immutable terminal replay entry");
   }
 
-  function validateNavigation(navigation, expectedWeaponSnapshot) {
+  function validateCompletionTrace(trace, decision) {
+    requireWire(isRecord(trace), "completionTrace is required");
+    requireWire(typeof trace.completed === "boolean", "completionTrace.completed must be boolean");
+    requireWire(
+      typeof trace.sessionId === "string",
+      "completionTrace.sessionId must be a string");
+    requireWire(
+      typeof trace.runId === "string",
+      "completionTrace.runId must be a string");
+    safeInteger(trace.runGeneration, "completionTrace.runGeneration");
+    safeInteger(
+      trace.completionAtControlTick,
+      "completionTrace.completionAtControlTick",
+      -1);
+    requireWire(
+      typeof trace.completionCode === "string",
+      "completionTrace.completionCode must be a string");
+    requireWire(Array.isArray(trace.replay), "completionTrace.replay must be an array");
+    requireWire(trace.replay.length <= 32, "completionTrace.replay exceeds its bounded capacity");
+
+    let previousTick = 0;
+    for (let index = 0; index < trace.replay.length; index += 1) {
+      const entry = trace.replay[index];
+      validateReplayEntry(entry, `completionTrace.replay[${index}]`);
+      requireWire(
+        entry.controlTick > previousTick,
+        "completionTrace.replay control ticks must strictly increase");
+      requireWire(
+        entry.controlTick <= decision.controlTick,
+        "completionTrace.replay cannot lead the decision tick");
+      previousTick = entry.controlTick;
+    }
+
+    requireWire(
+      trace.completed === (decision.state === "Complete")
+        && trace.completed === (decision.ownershipDisposition === "Completed")
+        && trace.completed === (decision.completed === true),
+      "completionTrace.completed does not match the terminal decision");
+    requireWire(
+      !(trace.completed && decision.failureTrace?.failed),
+      "completionTrace and failureTrace are mutually exclusive");
+
+    if (!trace.completed) {
+      requireWire(
+        trace.sessionId.length === 0
+          && trace.runId.length === 0
+          && trace.runGeneration === 0,
+        "non-complete completionTrace must use empty run-scope sentinels");
+      requireWire(
+        trace.completionAtControlTick === -1,
+        "non-complete completionTrace must use tick -1");
+      requireWire(
+        trace.completionCode.length === 0,
+        "non-complete completionTrace cannot carry a completion code");
+      requireWire(
+        trace.completionSnapshot === null,
+        "non-complete completionTrace cannot carry a completion snapshot");
+      requireWire(
+        trace.replay.length === 0,
+        "non-complete completionTrace cannot carry replay evidence");
+      return;
+    }
+
+    requireWire(
+      trace.sessionId === decision.sessionId
+        && trace.runId === decision.runId
+        && trace.runGeneration === decision.runGeneration
+        && trace.runGeneration > 0,
+      "completionTrace run scope must exactly match the current Complete decision");
+    requireWire(
+      decision.state === "Complete"
+        && decision.ownershipDisposition === "Completed"
+        && decision.ownerId === "post-computer-room.central-hall"
+        && decision.reasonCode === "central-hall-entry-confirmed"
+        && decision.completed === true
+        && decision.exclusive === false,
+      "current Complete decision lacks the canonical terminal ownership proof");
+    requireWire(
+      isRecord(decision.semanticProjection)
+        && decision.semanticProjection.computerRoomEntered === true
+        && decision.semanticProjection.centralHallEntered === true,
+      "current Complete decision lacks the canonical COMPUTERROOM and central-hall semantics");
+    requireWire(
+      trace.completionAtControlTick >= 1
+        && trace.completionAtControlTick <= decision.controlTick,
+      "completion tick must be positive and cannot lead the decision tick");
+    validateReplayEntry(trace.completionSnapshot, "completionTrace.completionSnapshot");
+    const snapshot = trace.completionSnapshot;
+    requireWire(
+      snapshot.controlTick === trace.completionAtControlTick,
+      "completionSnapshot tick must equal completionAtControlTick");
+    requireWire(
+      trace.completionCode === "central-hall-entry-confirmed"
+        && snapshot.reasonCode === trace.completionCode,
+      "completionSnapshot reason must equal the canonical completion code");
+    requireWire(trace.replay.length > 0, "completed completionTrace requires bounded replay evidence");
+    const finalReplay = trace.replay[trace.replay.length - 1];
+    requireWire(
+      finalReplay.controlTick === trace.completionAtControlTick
+        && JSON.stringify(finalReplay) === JSON.stringify(snapshot),
+      "completionSnapshot must be the immutable terminal replay entry");
+    requireWire(
+      snapshot.state === "Complete"
+        && snapshot.reasonCode === "central-hall-entry-confirmed"
+        && snapshot.playerSectorIndex === 60
+        && snapshot.legIndex === 8
+        && snapshot.legId === "central-hall-entry",
+      "completionSnapshot lacks the canonical sector-60 terminal route proof");
+    requireWire(
+      Number.isSafeInteger(snapshot.routeFrames)
+        && snapshot.routeFrames >= 0
+        && snapshot.routeFrames < 900
+        && Number.isSafeInteger(snapshot.legFrames)
+        && snapshot.legFrames >= 0
+        && snapshot.legFrames < 180,
+      "completionSnapshot exceeds the unchanged route or leg deadline");
+    requireWire(
+      isNeutralAction(snapshot.action) && snapshot.runRequested === false,
+      "completionSnapshot must preserve a neutral no-run terminal action");
+    requireWire(
+      decision.reasonCode === snapshot.reasonCode
+        && isNeutralAction(decision.action)
+        && decision.runRequested === false,
+      "current Complete decision must preserve the frozen terminal semantics");
+
+    const navigation = decision.navigation;
+    requireWire(
+      navigation.active === true
+        && navigation.recoveringEnemyAlcove === false
+        && navigation.legIndex === snapshot.legIndex
+        && navigation.legId === snapshot.legId
+        && navigation.targetX === 2944
+        && navigation.targetY === -3024
+        && Array.isArray(navigation.allowedSectors)
+        && navigation.allowedSectors.length === 2
+        && navigation.allowedSectors[0] === 60
+        && navigation.allowedSectors[1] === 71
+        && navigation.failureCode === "",
+      "current Complete navigation does not match the frozen terminal route");
+    requireWire(
+      isRecord(decision.proximity)
+        && Number.isSafeInteger(decision.proximity.playerSectorIndex)
+        && decision.proximity.playerSectorIndex >= -1
+        && navigation.playerSectorIndex === decision.proximity.playerSectorIndex,
+      "current Complete navigation sector must echo the current proximity sector");
+    requireWire(
+      navigation.routeTimeoutFrames === 900
+        && navigation.legTimeoutFrames === 180,
+      "current Complete navigation changed the route or leg deadline");
+    requireWire(
+      navigation.routeFrames === snapshot.routeFrames
+        && navigation.legFrames === snapshot.legFrames,
+      "current Complete navigation counters must equal the frozen completion counters");
+    requireWire(
+      navigation.routeRemainingFrames === 900 - snapshot.routeFrames
+        && navigation.legRemainingFrames === 180 - snapshot.legFrames,
+      "current Complete navigation remaining budgets do not match the frozen completion counters");
+  }
+
+  function validateNavigation(navigation, expectedWeaponSnapshot, action, controlTick) {
     requireWire(isRecord(navigation), "navigation is required");
-    requireWire(navigation.snapshotVersion === 5, "navigation.snapshotVersion mismatch");
+    requireWire(navigation.snapshotVersion === 7, "navigation.snapshotVersion mismatch");
+    integerRange(
+      navigation.playerSectorIndex,
+      "navigation.playerSectorIndex",
+      -1,
+      MAX_INT32);
     for (const name of [
       "trustedCombatEvidence",
       "legacyTrustedCombatEvidence",
@@ -679,7 +971,9 @@
       "nativeActorTopologyAccepted",
       "nativeWeaponSnapshotAccepted",
       "nativeWeaponSnapshotFresh",
-      "nativeWeaponFireOpportunity"
+      "nativeWeaponFireOpportunity",
+      "nativeWeaponContinuationArmed",
+      "nativeWeaponAttackContinuation"
     ]) {
       requireWire(typeof navigation[name] === "boolean", `navigation.${name} must be boolean`);
     }
@@ -800,27 +1094,19 @@
           && navigation.nativeWeaponRefire === -1,
         "unavailable navigation weapon facts must use canonical sentinels");
     }
-    const exactFireOpportunity = navigation.nativeWeaponSnapshotAccepted
-      && navigation.nativeWeaponSnapshotFresh
-      && navigation.nativeReadyWeapon >= 0
-      && navigation.nativePendingWeapon === NO_PENDING_WEAPON
-      && navigation.nativeWeaponStateCount > 0
-      && navigation.nativeWeaponState >= 0
-      && navigation.nativeWeaponState < navigation.nativeWeaponStateCount
-      && navigation.nativeWeaponReadyState >= 0
-      && navigation.nativeWeaponReadyState < navigation.nativeWeaponStateCount
-      && navigation.nativeWeaponState === navigation.nativeWeaponReadyState
-      && navigation.nativeWeaponRefire === 0;
-    requireWire(
-      navigation.nativeWeaponFireOpportunity === exactFireOpportunity,
-      "native weapon fire opportunity does not match exact fresh engine proof");
+    validateNativeWeaponContinuation(
+      navigation,
+      "navigation",
+      controlTick,
+      action,
+      true);
     requireWire(typeof navigation.failureCode === "string", "navigation.failureCode must be a string");
   }
 
   function validateDecision(decision, input) {
     requireWire(isRecord(decision), "decision must be an object");
-    requireWire(decision.implementationVersion === "post-computer-room-route-v6", "implementationVersion mismatch");
-    requireWire(decision.policyVersion === "post-computer-room-route-policy-v6", "policyVersion mismatch");
+    requireWire(decision.implementationVersion === "post-computer-room-route-v8", "implementationVersion mismatch");
+    requireWire(decision.policyVersion === "post-computer-room-route-policy-v8", "policyVersion mismatch");
     requireWire(decision.contractVersion === CONTRACT_VERSION, "contractVersion mismatch");
     requireWire(decision.sessionId === input.sessionId, "sessionId mismatch");
     requireWire(decision.runId === input.runId, "runId mismatch");
@@ -840,11 +1126,13 @@
     validateCombatObservation(decision.combatObservation, input.combatObservation);
     validateActorSnapshot(decision.actorSnapshot, input.actorSnapshot);
     validateWeaponSnapshot(decision.weaponSnapshot, input.weaponSnapshot);
-    validateNavigation(decision.navigation, decision.weaponSnapshot);
-    requireWire(
-      !decision.action.attackKey || decision.navigation.nativeWeaponFireOpportunity,
-      "Attack requires a fresh native weapon fire opportunity");
+    validateNavigation(
+      decision.navigation,
+      decision.weaponSnapshot,
+      decision.action,
+      decision.controlTick);
     validateFailureTrace(decision.failureTrace, decision);
+    validateCompletionTrace(decision.completionTrace, decision);
     requireWire(isRecord(decision.semanticProjection), "semanticProjection is required");
     requireWire(typeof decision.semanticProjection.computerRoomEntered === "boolean", "computerRoomEntered must be boolean");
     requireWire(typeof decision.semanticProjection.centralHallEntered === "boolean", "centralHallEntered must be boolean");

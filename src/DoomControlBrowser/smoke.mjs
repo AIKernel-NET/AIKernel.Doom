@@ -1,5 +1,7 @@
 if (!globalThis.aiKernelDoomControl) {
-    const configuration = process.env.DOOM_CONTROL_BROWSER_CONFIGURATION || "Debug";
+    const configuration = process.argv[2]
+        || process.env.DOOM_CONTROL_BROWSER_CONFIGURATION
+        || "Debug";
     await import(`./bin/${configuration}/net10.0/browser-wasm/AppBundle/main.js`);
 }
 
@@ -10,6 +12,11 @@ if (typeof evaluate !== "function") {
 const evaluatePostComputerRoom = globalThis.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute;
 if (typeof evaluatePostComputerRoom !== "function") {
     throw new Error("C# browser post-COMPUTERROOM route bridge was not exported.");
+}
+
+const evaluateE1M1Continuation = globalThis.aiKernelDoomControl?.evaluateBrowserE1M1Continuation;
+if (typeof evaluateE1M1Continuation !== "function") {
+    throw new Error("C# browser E1M1 continuation bridge was not exported.");
 }
 const releaseSession = globalThis.aiKernelDoomControl?.releaseBrowserFirstDoorSession;
 if (typeof releaseSession !== "function") {
@@ -27,6 +34,9 @@ const RAW_PALETTE_LENGTH = 256 * 4;
 const LOADING_CONTROL_TICKS = 2405;
 const FIXED_UNIT = 65536;
 const NATIVE_STATE_COUNT = 967;
+const NATIVE_SFX_CATALOG_VERSION = "doom-native-sfx-catalog-v1";
+const NATIVE_SFX_SOURCE_REVISION = "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284";
+const NATIVE_SFX_CATALOG_IDENTITY = "2fd2ba92b0ac0761b4c60ea636532420e71475adfb49f33ac1994c37009dd756";
 
 let sessionId = "browser-smoke-session";
 let runId = "browser-smoke-run-1";
@@ -287,6 +297,18 @@ function evaluateChecked(prediction, options = {}) {
         && decision.vitalityTrace.runGeneration === decision.runGeneration
         && decision.vitalityTrace.evaluatedAtControlTick === decision.controlTick,
     "Decision did not publish its deterministic native-vitality trace", decision);
+    assert(decision.audioCatalogTrace?.traceVersion === 1
+        && decision.audioCatalogTrace.catalogVersion === NATIVE_SFX_CATALOG_VERSION
+        && decision.audioCatalogTrace.sourceRevision === NATIVE_SFX_SOURCE_REVISION
+        && decision.audioCatalogTrace.catalogIdentityHash === NATIVE_SFX_CATALOG_IDENTITY
+        && decision.audioCatalogTrace.sessionId === decision.sessionId
+        && decision.audioCatalogTrace.runId === decision.runId
+        && decision.audioCatalogTrace.runGeneration === decision.runGeneration
+        && decision.audioCatalogTrace.evaluatedAtControlTick === decision.controlTick
+        && decision.audioCatalogTrace.capacity === 32
+        && decision.audioCatalogTrace.retainedEventCount === decision.audioCatalogTrace.events?.length
+        && decision.audioCatalogTrace.diagnosticOnly === true,
+    "Decision did not publish its current-scope diagnostic native-SFX catalog trace", decision);
     lastControlTick = decision.controlTick;
     return decision;
 }
@@ -512,7 +534,7 @@ const opened = evaluateChecked(prediction++, {
     audio: {
         nativeEvents: 1,
         events: [
-            { sequence: 1, sfxId: 26, sfxName: "doropn" }
+            { sequence: 1, sfxId: 20, sfxName: "doropn" }
         ]
     }
 });
@@ -710,8 +732,8 @@ let postRoute = evaluatePostChecked(
     structuredCombatObservation(completed, structuredEnemy47),
     actorSnapshot(completed, [nativeActor(7, 1856, -2512, 7)]));
 assert(postRoute.state === "NavigateMainRoute"
-    && postRoute.implementationVersion === "post-computer-room-route-v6"
-    && postRoute.policyVersion === "post-computer-room-route-policy-v6"
+    && postRoute.implementationVersion === "post-computer-room-route-v8"
+    && postRoute.policyVersion === "post-computer-room-route-policy-v8"
     && postRoute.ownershipDisposition === "Exclusive"
     && postRoute.action?.moveForward
     && postRoute.navigation?.legId === "computer-room-east-lane"
@@ -719,7 +741,8 @@ assert(postRoute.state === "NavigateMainRoute"
     && postRoute.semanticProjection?.computerRoomEntered
     && postRoute.combatObservation?.rawFrameSequence === lastControlInput.rawObservation.frameSequence
     && postRoute.combatObservation?.enemyRegion9Sample?.length === 9
-    && postRoute.navigation?.snapshotVersion === 5
+    && postRoute.navigation?.snapshotVersion === 7
+    && postRoute.completionTrace?.completed === false
     && postRoute.weaponSnapshot?.stateCount === NATIVE_STATE_COUNT
     && postRoute.navigation?.nativeWeaponStateCount === NATIVE_STATE_COUNT
     && postRoute.navigation.structuredCombatInputAccepted
@@ -739,14 +762,21 @@ postRoute = evaluatePostChecked(
 assert(postRoute.state === "FireReady"
     && postRoute.action?.attackKey
     && !postRoute.action.moveForward
-    && postRoute.navigation?.snapshotVersion === 5
+    && postRoute.navigation?.snapshotVersion === 7
     && postRoute.navigation.structuredCombatTrusted
     && postRoute.navigation.structuredCombatCentered
     && postRoute.navigation.structuredCombatDistinctFrames === 2
     && postRoute.navigation.structuredCombatReason === "structured-combat-two-distinct-frames"
     && postRoute.navigation.nativeActorMatched
-    && postRoute.navigation.nativeActorCombatTrusted,
+    && postRoute.navigation.nativeActorCombatTrusted
+    && postRoute.navigation.nativeWeaponFireOpportunity
+    && postRoute.navigation.nativeWeaponContinuationArmed
+    && postRoute.navigation.nativeWeaponContinuationTargetIdentity === 7
+    && postRoute.navigation.nativeWeaponContinuationReadyWeapon === 1
+    && postRoute.navigation.nativeWeaponContinuationAuthorizedAtControlTick === postRoute.controlTick
+    && !postRoute.navigation.nativeWeaponAttackContinuation,
 "Two fresh structured enemy frames did not round-trip through C# into FireReady", postRoute);
+const sector7AuthorizationTick = postRoute.navigation.nativeWeaponContinuationAuthorizedAtControlTick;
 
 current = evaluateChecked(prediction++, Object.assign(
     { rawKind: "room" },
@@ -761,6 +791,11 @@ assert(postRoute.state === "NavigateMainRoute"
     && postRoute.navigation?.nativeActorTargetRetained
     && !postRoute.navigation?.nativeWeaponFireOpportunity
     && postRoute.navigation?.nativeWeaponReason === "native-weapon-cycle-busy"
+    && postRoute.navigation.nativeWeaponContinuationArmed
+    && postRoute.navigation.nativeWeaponContinuationTargetIdentity === 7
+    && postRoute.navigation.nativeWeaponContinuationReadyWeapon === 1
+    && postRoute.navigation.nativeWeaponContinuationAuthorizedAtControlTick === sector7AuthorizationTick
+    && !postRoute.navigation.nativeWeaponAttackContinuation
     && postRoute.action?.moveForward
     && !postRoute.action?.attackKey,
 "Non-fireable weapon cycle did not preserve the target while advancing only the canonical route", postRoute);
@@ -904,7 +939,17 @@ assert(postRoute.state === "Complete"
     && postRoute.ownershipDisposition === "Completed"
     && postRoute.completed
     && !postRoute.exclusive
-    && postRoute.semanticProjection?.centralHallEntered,
+    && postRoute.semanticProjection?.centralHallEntered
+    && postRoute.completionTrace?.completed
+    && postRoute.completionTrace.sessionId === postRoute.sessionId
+    && postRoute.completionTrace.runId === postRoute.runId
+    && postRoute.completionTrace.runGeneration === postRoute.runGeneration
+    && postRoute.completionTrace.completionAtControlTick === postRoute.controlTick
+    && postRoute.completionTrace.completionCode === "central-hall-entry-confirmed"
+    && postRoute.completionTrace.completionSnapshot?.state === "Complete"
+    && postRoute.completionTrace.completionSnapshot?.routeFrames < 900
+    && postRoute.completionTrace.completionSnapshot?.legFrames < 180
+    && postRoute.completionTrace.replay?.at(-1)?.controlTick === postRoute.controlTick,
 "Post-COMPUTERROOM Gate G did not complete at the canonical sector-60 hall", postRoute);
 
 runId = "browser-smoke-run-2";
@@ -1106,7 +1151,8 @@ console.log(JSON.stringify({
         state: postRoute.state,
         disposition: postRoute.ownershipDisposition,
         centralHallEntered: postRoute.semanticProjection.centralHallEntered,
-        structuredCombatSnapshotVersion: 5
+        navigationSnapshotVersion: postRoute.navigation.snapshotVersion,
+        completionAtControlTick: postRoute.completionTrace.completionAtControlTick
     },
     reset: reset.state,
     missingPose: missingPose.acquisitionTrace.blockCode,

@@ -193,7 +193,7 @@ function wasmStateFixture() {
 let nativeReadCalls = 0;
 let nativeReadArguments = null;
 const availableNativeReader = {
-  readNativeFacts(exports, afterSequence) {
+  readFirstDoorFacts(exports, afterSequence) {
     nativeReadCalls += 1;
     nativeReadArguments = { exports, afterSequence };
     return {
@@ -229,6 +229,9 @@ const availableNativeReader = {
         ]
       }
     };
+  },
+  readNativeFacts() {
+    throw new Error("FirstDoor must use the selective native reader");
   }
 };
 context.self.AIKernelDoomNativeAudio = availableNativeReader;
@@ -1040,6 +1043,56 @@ function unavailableVitalityTrace(scope = {}) {
   };
 }
 
+const audioCatalogIdentityHash = "2fd2ba92b0ac0761b4c60ea636532420e71475adfb49f33ac1994c37009dd756";
+
+function audioCatalogTraceFixture(scope = {}, overrides = {}) {
+  const base = {
+    traceVersion: 1,
+    catalogVersion: "doom-native-sfx-catalog-v1",
+    sourceRevision: "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284",
+    catalogIdentityHash: audioCatalogIdentityHash,
+    sessionId: scope.sessionId || "browser-session",
+    runId: scope.runId || "browser-run-1",
+    runGeneration: scope.runGeneration || 1,
+    evaluatedAtControlTick: scope.controlTick || 1,
+    latestObservedSequence: 0,
+    capacity: 32,
+    totalNewEventCount: 0,
+    retainedEventCount: 0,
+    unknownEventCount: 0,
+    truncated: false,
+    diagnosticOnly: true,
+    events: []
+  };
+  return Object.assign({}, base, overrides, {
+    events: Array.isArray(overrides.events) ? overrides.events : base.events
+  });
+}
+
+function audioCatalogObservationFixture(scope = {}, overrides = {}) {
+  const base = {
+    catalogVersion: "doom-native-sfx-catalog-v1",
+    sourceRevision: "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284",
+    catalogIdentityHash: audioCatalogIdentityHash,
+    sessionId: scope.sessionId || "browser-session",
+    runId: scope.runId || "browser-run-1",
+    runGeneration: scope.runGeneration || 1,
+    observedAtControlTick: scope.controlTick || 1,
+    sequence: 1,
+    sfxId: 20,
+    rawSfxName: " SFX_DOROPN ",
+    normalizedSfxName: "doropn",
+    expectedSfxName: "doropn",
+    catalogued: true,
+    meaningCode: "mechanism-door-open",
+    meaningLabel: "Door open",
+    classificationReason: "exact-id-name-pair",
+    eventIdentityHash: "b".repeat(64),
+    diagnosticOnly: true
+  };
+  return Object.assign({}, base, overrides);
+}
+
 function baseDecision(overrides = {}) {
   const base = {
     implementationVersion: "first-door-control-v6",
@@ -1105,6 +1158,7 @@ function baseDecision(overrides = {}) {
     doorIdentityConfidence: 0.55,
     proximity: unavailableProximity(),
     vitalityTrace: null,
+    audioCatalogTrace: null,
     nativeDeathConfirmed: false,
     restartRequested: false,
     restartRequestId: "",
@@ -1151,6 +1205,9 @@ function baseDecision(overrides = {}) {
   result.vitalityTrace = Object.assign(
     unavailableVitalityTrace(result),
     overrides.vitalityTrace || {});
+  result.audioCatalogTrace = audioCatalogTraceFixture(
+    result,
+    overrides.audioCatalogTrace || {});
   return result;
 }
 
@@ -1272,6 +1329,67 @@ const exclusive = exclusiveDecision();
 const handoff = handoffDecision();
 const completed = handoffDecision("Completed");
 const failedSafe = failedSafeDecision();
+const freshAudioCatalogDecision = baseDecision({
+  controlTick: 4,
+  semanticDelta: { controlTick: 4 }
+});
+freshAudioCatalogDecision.audioCatalogTrace = audioCatalogTraceFixture(
+  freshAudioCatalogDecision,
+  {
+    latestObservedSequence: 12,
+    totalNewEventCount: 2,
+    retainedEventCount: 2,
+    unknownEventCount: 1,
+    events: [
+      audioCatalogObservationFixture(freshAudioCatalogDecision, {
+        sequence: 11
+      }),
+      audioCatalogObservationFixture(freshAudioCatalogDecision, {
+        sequence: 12,
+        sfxId: 20,
+        rawSfxName: "wrong",
+        normalizedSfxName: "wrong",
+        expectedSfxName: "doropn",
+        catalogued: false,
+        meaningCode: "unknown-sfx",
+        meaningLabel: "Unknown SFX",
+        classificationReason: "id-name-mismatch",
+        eventIdentityHash: "c".repeat(64)
+      })
+    ]
+  });
+assert(adapter.validateDecision(freshAudioCatalogDecision) === freshAudioCatalogDecision,
+  "a fresh C# audio catalog trace should cross the JS wire unchanged");
+assertEqual(
+  freshAudioCatalogDecision.audioCatalogTrace.events[0].meaningCode,
+  "mechanism-door-open",
+  "JS validation must preserve the C# catalog meaning without reclassifying it");
+assertEqual(
+  freshAudioCatalogDecision.audioCatalogTrace.events[1].meaningCode,
+  "unknown-sfx",
+  "JS validation must preserve the C# unknown classification without inferring a meaning");
+const truncatedAudioCatalogDecision = baseDecision({
+  controlTick: 5,
+  semanticDelta: { controlTick: 5 }
+});
+truncatedAudioCatalogDecision.audioCatalogTrace = audioCatalogTraceFixture(
+  truncatedAudioCatalogDecision,
+  {
+    latestObservedSequence: 35,
+    totalNewEventCount: 35,
+    retainedEventCount: 32,
+    unknownEventCount: 3,
+    truncated: true,
+    events: Array.from({ length: 32 }, (_, index) => {
+      const sequence = index + 4;
+      return audioCatalogObservationFixture(truncatedAudioCatalogDecision, {
+        sequence,
+        eventIdentityHash: sequence.toString(16).padStart(64, "0")
+      });
+    })
+  });
+assert(adapter.validateDecision(truncatedAudioCatalogDecision) === truncatedAudioCatalogDecision,
+  "a canonical bounded C# audio trace should retain the newest 32 of 35 events");
 const readinessLoss = failedSafeDecision({
   previousState: "OpeningNavigate",
   ownershipUnit: "OpeningTransit",
@@ -1301,7 +1419,9 @@ context.self.aiKernelDoomControl = {
   evaluateBrowserFirstDoor(value) {
     bridgeCalls += 1;
     bridgedInput = value;
-    return baseDecision();
+    return baseDecision({
+      audioCatalogTrace: { latestObservedSequence: 5 }
+    });
   }
 };
 const evaluatedRuntime = runtimeFixture();
@@ -1309,6 +1429,31 @@ const evaluated = adapter.evaluate(evaluatedRuntime, inputState, { predictions: 
 assertEqual(bridgeCalls, 1, "evaluate should call the C# bridge exactly once");
 assert(evaluated.input === bridgedInput, "evaluate should return the exact input sent to C#");
 assertEqual(evaluated.decision.ownershipDisposition, "NotAcquired", "evaluate should return the validated decision packet");
+assertEqual(bridgedInput.audio.nativeEvents, 7,
+  "the synthetic cursor test requires input audio to be newer than the C# acknowledgement");
+assertJsonEqual(evaluatedRuntime.autoplayCSharpNativeAudioCursor, {
+  sessionId: "browser-session",
+  runId: "browser-run-1",
+  runGeneration: 1,
+  afterSequence: 5
+}, "a validated C# response should commit only the C#-acknowledged native-audio cursor");
+adapter.createInput(evaluatedRuntime, inputState, { predictions: 43 }, rawStateFixture({ frame: 38 }));
+assertEqual(nativeReadArguments.afterSequence, 5,
+  "the next FirstDoor read must preserve events newer than the C#-acknowledged cursor");
+
+const nextRunRuntime = runtimeFixture();
+nextRunRuntime.autoplayCSharpNativeAudioCursor = {
+  sessionId: "browser-session",
+  runId: "browser-run-1",
+  runGeneration: 1,
+  afterSequence: 7
+};
+nextRunRuntime.autoplayCSharpFirstDoorScope = Object.assign(
+  {},
+  nextRunRuntime.autoplayCSharpFirstDoorScope,
+  { runId: "browser-run-2", runGeneration: 2 });
+adapter.createInput(nextRunRuntime, inputState, {}, rawStateFixture());
+assertEqual(nativeReadArguments.afterSequence, 0, "a real run boundary must reset the native-audio cursor");
 
 context.self.aiKernelDoomControl = {
   evaluateBrowserFirstDoor() {
@@ -1333,6 +1478,8 @@ assertTaggedThrow(
   "monotonically",
   "evaluate should reject a duplicate C# control tick");
 assertEqual(monotonicBridgeCalls, 1, "monotonic validation must still use one bridge call");
+assert(monotonicRuntime.autoplayCSharpNativeAudioCursor === undefined,
+  "a rejected C# response must not acknowledge native audio events");
 
 context.self.aiKernelDoomControl = {
   evaluateBrowserFirstDoor() {
@@ -1859,6 +2006,131 @@ function malformedCase(name, decision, fragment, checkDecisionOnly = true) {
     fragment,
     name);
   assertEqual(calls, 0, `${name}: validation must happen before any legacy callback`);
+}
+
+function malformedAudioCatalogDecision(mutate) {
+  const decision = clone(freshAudioCatalogDecision);
+  mutate(decision.audioCatalogTrace, decision);
+  return decision;
+}
+
+for (const [name, decision, fragment] of [
+  [
+    "missing audio catalog trace",
+    Object.assign({}, baseDecision(), { audioCatalogTrace: null }),
+    "audioCatalogTrace must be an object"
+  ],
+  [
+    "unsupported audio catalog trace version",
+    malformedAudioCatalogDecision(trace => { trace.traceVersion = 2; }),
+    "audioCatalogTrace.traceVersion"
+  ],
+  [
+    "unsupported audio catalog version",
+    malformedAudioCatalogDecision(trace => { trace.catalogVersion = "doom-native-sfx-catalog-v2"; }),
+    "audioCatalogTrace.catalogVersion"
+  ],
+  [
+    "unsupported audio catalog source revision",
+    malformedAudioCatalogDecision(trace => { trace.sourceRevision = "0".repeat(40); }),
+    "audioCatalogTrace.sourceRevision"
+  ],
+  [
+    "noncanonical audio catalog identity hash",
+    malformedAudioCatalogDecision(trace => { trace.catalogIdentityHash = "A".repeat(64); }),
+    "audioCatalogTrace.catalogIdentityHash"
+  ],
+  [
+    "unsupported canonical audio catalog identity hash",
+    malformedAudioCatalogDecision(trace => { trace.catalogIdentityHash = "0".repeat(64); }),
+    "audioCatalogTrace.catalogIdentityHash is unsupported"
+  ],
+  [
+    "audio catalog decision tick mismatch",
+    malformedAudioCatalogDecision(trace => { trace.evaluatedAtControlTick -= 1; }),
+    "audioCatalogTrace tick does not match decision"
+  ],
+  [
+    "audio catalog trace capacity drift",
+    malformedAudioCatalogDecision(trace => { trace.capacity = 31; }),
+    "audioCatalogTrace.capacity"
+  ],
+  [
+    "audio catalog retained count mismatch",
+    malformedAudioCatalogDecision(trace => { trace.retainedEventCount = 1; }),
+    "retainedEventCount does not match events length"
+  ],
+  [
+    "audio catalog truncation mismatch",
+    malformedAudioCatalogDecision(trace => { trace.truncated = true; }),
+    "audioCatalogTrace.truncated"
+  ],
+  [
+    "audio catalog unknown count omits retained unknown",
+    malformedAudioCatalogDecision(trace => { trace.unknownEventCount = 0; }),
+    "omits a retained unknown event"
+  ],
+  [
+    "audio catalog event sequence is not ordered",
+    malformedAudioCatalogDecision(trace => { trace.events[1].sequence = trace.events[0].sequence; }),
+    "sequence must be strictly increasing"
+  ],
+  [
+    "audio catalog event metadata mismatch",
+    malformedAudioCatalogDecision(trace => { trace.events[0].catalogVersion = "doom-native-sfx-catalog-v2"; }),
+    "events[0].catalogVersion"
+  ],
+  [
+    "audio catalog event scope mismatch",
+    malformedAudioCatalogDecision(trace => { trace.events[0].runId = "other-run"; }),
+    "events[0].runId does not match decision"
+  ],
+  [
+    "noncanonical audio catalog event identity hash",
+    malformedAudioCatalogDecision(trace => { trace.events[0].eventIdentityHash = "B".repeat(64); }),
+    "events[0].eventIdentityHash"
+  ],
+  [
+    "audio catalog event gains behavior authority",
+    malformedAudioCatalogDecision(trace => { trace.events[0].diagnosticOnly = false; }),
+    "events[0].diagnosticOnly must be true"
+  ],
+  [
+    "unknown audio catalog classification reason",
+    malformedAudioCatalogDecision(trace => { trace.events[0].classificationReason = "guessed-meaning"; }),
+    "classificationReason is unknown"
+  ],
+  [
+    "exact audio catalog reason is not catalogued",
+    malformedAudioCatalogDecision(trace => { trace.events[0].catalogued = false; }),
+    "catalogued does not match classificationReason"
+  ],
+  [
+    "exact audio catalog pair uses unknown meaning",
+    malformedAudioCatalogDecision(trace => {
+      trace.events[0].meaningCode = "unknown-sfx";
+      trace.events[0].meaningLabel = "Unknown SFX";
+    }),
+    "catalogued pair cannot use the unknown meaning code"
+  ],
+  [
+    "unknown audio catalog pair claims a catalog meaning",
+    malformedAudioCatalogDecision(trace => {
+      trace.events[1].meaningCode = "mechanism-door-open";
+      trace.events[1].meaningLabel = "Door open";
+    }),
+    "unknown pair must use the unknown meaning code"
+  ],
+  [
+    "audio catalog mismatch contains an exact normalized pair",
+    malformedAudioCatalogDecision(trace => {
+      trace.events[1].rawSfxName = "SFX_DOROPN";
+      trace.events[1].normalizedSfxName = "doropn";
+    }),
+    "id/name mismatch cannot contain an exact normalized pair"
+  ]
+]) {
+  malformedCase(name, decision, fragment);
 }
 
 malformedCase(

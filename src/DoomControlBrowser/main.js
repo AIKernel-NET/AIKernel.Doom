@@ -20,6 +20,12 @@ globalThis.aiKernelDoomControl = Object.freeze({
         const decisionJson = bridge.EvaluateBrowserPostComputerRoomRoute(inputJson);
         return returnsJson ? decisionJson : JSON.parse(decisionJson);
     },
+    evaluateBrowserE1M1Continuation(input) {
+        const returnsJson = typeof input === "string";
+        const inputJson = returnsJson ? input : JSON.stringify(input);
+        const decisionJson = bridge.EvaluateBrowserE1M1Continuation(inputJson);
+        return returnsJson ? decisionJson : JSON.parse(decisionJson);
+    },
     releaseBrowserFirstDoorSession(sessionId) {
         return bridge.ReleaseBrowserSession(String(sessionId || ""));
     }

@@ -7,6 +7,10 @@
 
   function isUrgentReason(reason = "") {
     const value = String(reason || "");
+    if (value === "autoplay-predicted") {
+      return false;
+    }
+
     return /^(ready|running|stopped|failed|worker-|autoplay-|manual-move-|sense-only-|phase-check|download|audio-)/.test(value)
       || value.indexOf("approved") >= 0;
   }
@@ -51,6 +55,7 @@
     let pendingStatus = null;
     let pendingReason = "status";
     let frameHandle = 0;
+    let flushGeneration = 0;
     let lastPaintAt = 0;
     let droppedFrames = 0;
 
@@ -72,7 +77,14 @@
         return;
       }
 
-      frameHandle = schedule(() => flush(callbacks), delayMs);
+      const generation = ++flushGeneration;
+      frameHandle = schedule(() => {
+        if (generation !== flushGeneration) {
+          return snapshot();
+        }
+
+        return flush(callbacks);
+      }, delayMs);
     }
 
     function queue(status, reason = "status", callbacks = {}) {
@@ -81,8 +93,19 @@
         return snapshot();
       }
 
+      const queuedReason = reason || "status";
+      if (isUrgentReason(queuedReason)) {
+        pendingStatus = null;
+        pendingReason = "status";
+        flushGeneration += 1;
+        frameHandle = 0;
+        lastPaintAt = now();
+        callbacks.update?.(status, queuedReason);
+        return snapshot();
+      }
+
       pendingStatus = status;
-      pendingReason = reason || "status";
+      pendingReason = queuedReason;
       scheduleFlush(callbacks);
       return snapshot();
     }

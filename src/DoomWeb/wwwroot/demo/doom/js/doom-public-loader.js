@@ -59,6 +59,7 @@
     "autoplay/control-runtime.js",
     "autoplay/csharp-first-door-adapter.js",
     "autoplay/csharp-post-computer-room-route-adapter.js",
+    "autoplay/csharp-e1m1-continuation-adapter.js",
     "autoplay/doom-sensor-inputs.js",
     "autoplay/doom-action-adapter.js",
     "autoplay/doom-retry-dispatch.js",
@@ -170,8 +171,9 @@
     window.AIKernelDoomCSharpControlHost = "main-thread";
     window.AIKernelDoomCSharpControlReady = import(moduleUrl.href).then(() => {
       if (typeof window.aiKernelDoomControl?.evaluateBrowserFirstDoor !== "function"
-        || typeof window.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function") {
-        throw new Error("C# FirstDoor/post-COMPUTERROOM control bridge is unavailable on main thread.");
+        || typeof window.aiKernelDoomControl?.evaluateBrowserPostComputerRoomRoute !== "function"
+        || typeof window.aiKernelDoomControl?.evaluateBrowserE1M1Continuation !== "function") {
+        throw new Error("C# FirstDoor/post-COMPUTERROOM/E1M1 continuation control bridge is unavailable on main thread.");
       }
 
       return true;

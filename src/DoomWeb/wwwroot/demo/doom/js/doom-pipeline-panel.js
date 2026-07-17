@@ -259,6 +259,121 @@
     return autoplay?.pipelineState || autoplay?.PipelineState || null;
   }
 
+  function resolveCSharpHudProjection(autoplay) {
+    const continuationDecision = readObjectCaseInsensitive(autoplay, [
+      "csharpE1M1Continuation",
+      "CsharpE1M1Continuation",
+      "CSharpE1M1Continuation"
+    ]);
+    const postDecision = readObjectCaseInsensitive(autoplay, [
+      "csharpPostComputerRoom",
+      "CsharpPostComputerRoom",
+      "CSharpPostComputerRoom"
+    ]);
+    const firstDoorDecision = readObjectCaseInsensitive(autoplay, [
+      "csharpFirstDoor",
+      "CsharpFirstDoor",
+      "CSharpFirstDoor"
+    ]);
+    const decision = continuationDecision || postDecision || firstDoorDecision;
+    if (!decision || typeof decision !== "object") {
+      return null;
+    }
+
+    const navigation = continuationDecision
+      ? readObjectCaseInsensitive(continuationDecision, ["navigation", "Navigation"])
+      : (postDecision
+        ? readObjectCaseInsensitive(postDecision, ["navigation", "Navigation"])
+        : readObjectCaseInsensitive(firstDoorDecision, ["openingNavigation", "OpeningNavigation"]));
+    const semanticProjection = continuationDecision
+      ? readObjectCaseInsensitive(continuationDecision, ["semanticProjection", "SemanticProjection"])
+      : (postDecision
+        ? readObjectCaseInsensitive(postDecision, ["semanticProjection", "SemanticProjection"])
+        : null);
+    const vitalityTrace = continuationDecision
+      ? readObjectCaseInsensitive(continuationDecision, ["vitalityTrace", "VitalityTrace"])
+      : readObjectCaseInsensitive(firstDoorDecision, ["vitalityTrace", "VitalityTrace"]);
+    const action = readObjectCaseInsensitive(decision, ["action", "Action"])
+      || readObjectCaseInsensitive(navigation, ["action", "Action"])
+      || {};
+
+    return {
+      source: continuationDecision
+        ? "e1m1-continuation"
+        : (postDecision ? "post-computer-room" : "first-door"),
+      decision,
+      firstDoorDecision: firstDoorDecision || null,
+      navigation: navigation || {},
+      semanticProjection: semanticProjection || {},
+      vitalityTrace: vitalityTrace || {},
+      gatekeeperTrace: continuationDecision
+        ? readObjectCaseInsensitive(continuationDecision, ["gatekeeperTrace", "GatekeeperTrace"]) || {}
+        : {},
+      threatTrace: continuationDecision
+        ? readObjectCaseInsensitive(continuationDecision, ["threatTrace", "ThreatTrace"]) || {}
+        : {},
+      action
+    };
+  }
+
+  function csharpProjectionOwnsHud(projection) {
+    const disposition = readObjectCaseInsensitive(
+      projection?.decision,
+      ["ownershipDisposition", "OwnershipDisposition"]);
+    return disposition === "Exclusive"
+      || disposition === "FailedSafeStop"
+      || (projection?.source === "e1m1-continuation" && disposition === "Completed");
+  }
+
+  function formatCSharpFact(value, fallback = "n/a") {
+    if (value === undefined || value === null || value === "") {
+      return fallback;
+    }
+
+    return String(value);
+  }
+
+  function formatCSharpNumber(value, digits = 0) {
+    if (value === undefined || value === null || value === "") {
+      return "n/a";
+    }
+
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return "n/a";
+    }
+
+    return digits > 0 ? number.toFixed(digits) : String(Math.round(number));
+  }
+
+  function formatCSharpBoolean(value) {
+    return value === true ? "true" : (value === false ? "false" : "n/a");
+  }
+
+  function formatCSharpAction(action, runRequested) {
+    const movements = [];
+    if (action?.moveForward === true || action?.MoveForward === true) {
+      movements.push("forward");
+    }
+    if (action?.moveBackward === true || action?.MoveBackward === true) {
+      movements.push("back");
+    }
+    if (action?.strafeLeft === true || action?.StrafeLeft === true) {
+      movements.push("strafe-left");
+    }
+    if (action?.strafeRight === true || action?.StrafeRight === true) {
+      movements.push("strafe-right");
+    }
+
+    const turnYaw = action?.turnYaw ?? action?.TurnYaw;
+    const useKey = action?.useKey ?? action?.UseKey;
+    const attackKey = action?.attackKey ?? action?.AttackKey;
+    return [
+      `${movements.length > 0 ? movements.join("+") : "stationary"} yaw=${formatCSharpNumber(turnYaw)}`,
+      `use=${formatCSharpBoolean(useKey)} attack=${formatCSharpBoolean(attackKey)} run=${formatCSharpBoolean(runRequested)}`
+    ].join("\n");
+  }
+
   function resolveDebugOverlay(autoplay) {
     return autoplay?.debugOverlay
       || autoplay?.DebugOverlay
@@ -1118,7 +1233,10 @@
       host.style.position = "relative";
     }
 
-    let node = options.node || host.querySelector?.(".doom-topos-hud") || null;
+    const candidates = Array.from(host.querySelectorAll?.(".doom-topos-hud") || []);
+    let node = options.node && (options.node.parentElement === host || options.node.parentNode === host)
+      ? options.node
+      : (candidates[0] || null);
     if (!node) {
       node = document.createElement("div");
       node.className = "doom-topos-hud";
@@ -1126,7 +1244,19 @@
       host.appendChild(node);
     }
 
+    for (const candidate of candidates) {
+      if (candidate !== node) {
+        candidate.remove?.();
+        if (candidate.parentNode) {
+          candidate.parentNode.removeChild(candidate);
+        }
+      }
+    }
+
+    node.className = "doom-topos-hud";
+    node.removeAttribute?.("data-pipeline-panel-pending");
     node.dataset.pipelinePanelVersion = version;
+    node.dataset.pipelinePanelOwner = "true";
     return node;
   }
 
@@ -1135,6 +1265,8 @@
     node.classList.toggle("is-detail-overlay", Boolean(detail));
     node.classList.toggle("is-simple-summary", !detail);
     if (detail) {
+      node.hidden = false;
+      node.setAttribute?.("aria-hidden", "false");
       const vetoed = node.classList.contains("is-zoe-veto");
       const warning = node.classList.contains("is-zoe-warning");
       const border = vetoed ? "rgba(255,73,73,.78)" : (warning ? "rgba(255,189,87,.66)" : "rgba(255,225,122,.52)");
@@ -1143,9 +1275,12 @@
       return;
     }
 
-    const vetoed = node.classList.contains("is-zoe-veto");
-    const warning = node.classList.contains("is-zoe-warning");
-    node.style.cssText = `position:absolute;right:10px;top:10px;z-index:160;width:232px;max-width:32vw;margin:0;padding:7px 9px;border:1px solid ${vetoed ? "rgba(255,73,73,.82)" : (warning ? "rgba(255,189,87,.58)" : "rgba(255,225,122,.34)")};background:${vetoed ? "rgba(56,5,7,.26)" : (warning ? "rgba(45,30,8,.23)" : "rgba(5,7,8,.22)")};color:${vetoed ? "#ffd2d2" : "#ffeaa0"};font:9.5px/1.48 ui-monospace,Consolas,monospace;font-weight:400;text-shadow:0 1px 3px #000;white-space:pre-wrap;pointer-events:none;overflow:hidden;box-shadow:${vetoed ? "0 0 16px rgba(255,36,36,.38)" : (warning ? "0 0 12px rgba(255,180,60,.18)" : "none")};transition:opacity .24s ease,background-color .24s ease,border-color .24s ease;`;
+    node.hidden = true;
+    node.setAttribute?.("aria-hidden", "true");
+    node.dataset.ctgHudMode = "hidden";
+    node.dataset.ctgLayout = "none";
+    node.dataset.ctgSource = "none";
+    node.style.cssText = "display:none;";
   }
 
   function splitHudSections(text) {
@@ -1175,6 +1310,7 @@
     while (node.firstChild) {
       node.removeChild(node.firstChild);
     }
+    node.textContent = "";
   }
 
   function cssRect(rect) {
@@ -1281,6 +1417,190 @@
     status.style.cssText = "min-width:0;color:#8ee4ff;font:10px/1.15 ui-monospace,Consolas,monospace;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
     header.append(title, status);
     node.appendChild(header);
+  }
+
+  function appendCSharpThoughtGridHeader(documentRef, node, projection) {
+    const layout = resolveHudPanelRects();
+    const header = documentRef.createElement("div");
+    header.className = "doom-thought-grid-title";
+    header.style.cssText = `${cssRect(layout.title)};min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 7px;border:0;background:transparent;border-radius:0;color:#fff7c0;font:700 9.5px/1.05 system-ui,sans-serif;text-transform:uppercase;letter-spacing:0;text-shadow:0 1px 3px #000;overflow:hidden;box-sizing:border-box;`;
+
+    const title = documentRef.createElement("span");
+    title.textContent = "AIKernel Pipeline";
+    const status = documentRef.createElement("span");
+    const decision = projection?.decision || {};
+    const semanticProjection = projection?.semanticProjection || {};
+    const objective = readObjectCaseInsensitive(semanticProjection, ["objective", "Objective"]);
+    const ownerId = readObjectCaseInsensitive(decision, ["ownerId", "OwnerId"]);
+    status.textContent = `C# ${formatCSharpFact(projection?.source)} · ${formatCSharpFact(objective ?? ownerId)}`;
+    status.style.cssText = "min-width:0;color:#8ee4ff;font:10px/1.15 ui-monospace,Consolas,monospace;text-transform:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    header.append(title, status);
+    node.appendChild(header);
+  }
+
+  function renderCSharpThoughtGridHud(node, projection) {
+    const documentRef = node.ownerDocument || self.document;
+    if (!documentRef?.createElement) {
+      node.textContent = `[C# CONTROL]\n${formatCSharpFact(projection?.decision?.ownerId ?? projection?.decision?.OwnerId)}`;
+      return;
+    }
+
+    const decision = projection.decision || {};
+    const navigation = projection.navigation || {};
+    const semanticProjection = projection.semanticProjection || {};
+    const vitalityTrace = projection.vitalityTrace || {};
+    const gatekeeperTrace = projection.gatekeeperTrace || {};
+    const threatTrace = projection.threatTrace || {};
+    const firstDoorDecision = projection.firstDoorDecision || {};
+    const pose = readObjectCaseInsensitive(navigation, ["pose", "Pose"]) || {};
+    const nativeGametic = readObjectCaseInsensitive(navigation, ["nativeGametic", "NativeGametic"])
+      ?? readObjectCaseInsensitive(pose, ["nativeGametic", "NativeGametic"])
+      ?? readObjectCaseInsensitive(decision, ["nativeGametic", "NativeGametic"]);
+    const playerSectorIndex = readObjectCaseInsensitive(navigation, ["playerSectorIndex", "PlayerSectorIndex"])
+      ?? readObjectCaseInsensitive(pose, ["playerSectorIndex", "PlayerSectorIndex"]);
+    const targetDistance = readObjectCaseInsensitive(navigation, ["targetDistance", "TargetDistance"]);
+    const poseMissingFrames = readObjectCaseInsensitive(navigation, ["poseMissingFrames", "PoseMissingFrames"]);
+    const navigationStatus = readObjectCaseInsensitive(navigation, ["status", "Status", "active", "Active"]);
+    const state = readObjectCaseInsensitive(decision, ["state", "State"]);
+    const reasonCode = readObjectCaseInsensitive(decision, ["reasonCode", "ReasonCode"]);
+    const ownerId = readObjectCaseInsensitive(decision, ["ownerId", "OwnerId"]);
+    const disposition = readObjectCaseInsensitive(decision, ["ownershipDisposition", "OwnershipDisposition"]);
+    const exclusive = readObjectCaseInsensitive(decision, ["exclusive", "Exclusive"]);
+    const runRequested = readObjectCaseInsensitive(decision, ["runRequested", "RunRequested"]);
+    const telos = readObjectCaseInsensitive(semanticProjection, ["telos", "Telos"]);
+    const objective = readObjectCaseInsensitive(semanticProjection, ["objective", "Objective"]);
+    const legIndex = readObjectCaseInsensitive(navigation, ["legIndex", "LegIndex"]);
+    const legId = readObjectCaseInsensitive(navigation, ["legId", "LegId"]);
+    const routeFrames = readObjectCaseInsensitive(navigation, ["routeFrames", "RouteFrames"]);
+    const routeTimeoutFrames = readObjectCaseInsensitive(navigation, ["routeTimeoutFrames", "RouteTimeoutFrames"]);
+    const legFrames = readObjectCaseInsensitive(navigation, ["legFrames", "LegFrames"]);
+    const legTimeoutFrames = readObjectCaseInsensitive(navigation, ["legTimeoutFrames", "LegTimeoutFrames"]);
+    const gatekeeperAcquired = readObjectCaseInsensitive(gatekeeperTrace, ["acquiredAlive", "AcquiredAlive"]) === true;
+    const gatekeeperKilled = readObjectCaseInsensitive(gatekeeperTrace, ["killed", "Killed"]) === true;
+    const threatMatched = readObjectCaseInsensitive(threatTrace, ["threatMatched", "ThreatMatched"]) === true;
+    const continuationTarget = gatekeeperAcquired && !gatekeeperKilled
+      ? gatekeeperTrace
+      : (threatMatched ? threatTrace : null);
+    const targetIdentity = continuationTarget
+      ? readObjectCaseInsensitive(continuationTarget, ["identity", "Identity"])
+      : readObjectCaseInsensitive(navigation, ["nativeActorTargetIdentity", "NativeActorTargetIdentity"]);
+    const targetSector = continuationTarget
+      ? readObjectCaseInsensitive(continuationTarget, ["sectorIndex", "SectorIndex", "expectedSectorIndex", "ExpectedSectorIndex"])
+      : readObjectCaseInsensitive(navigation, ["nativeActorTargetSectorIndex", "NativeActorTargetSectorIndex"]);
+    const targetHealth = continuationTarget
+      ? readObjectCaseInsensitive(continuationTarget, ["health", "Health"])
+      : readObjectCaseInsensitive(navigation, ["nativeActorTargetHealth", "NativeActorTargetHealth"]);
+    const targetRetained = continuationTarget
+      ? true
+      : readObjectCaseInsensitive(navigation, ["nativeActorTargetRetained", "NativeActorTargetRetained"]);
+    const targetLineOfSight = continuationTarget
+      ? readObjectCaseInsensitive(continuationTarget, ["lineOfSight", "LineOfSight"])
+      : readObjectCaseInsensitive(navigation, ["nativeActorTargetLineOfSight", "NativeActorTargetLineOfSight"]);
+    const killConfirmed = projection.source === "e1m1-continuation"
+      ? gatekeeperKilled
+      : readObjectCaseInsensitive(navigation, ["nativeActorKillConfirmed", "NativeActorKillConfirmed"]);
+    const projectedAttack = readObjectCaseInsensitive(projection.action, ["attackKey", "AttackKey"]);
+    const fireOpportunity = projection.source === "e1m1-continuation"
+      ? projectedAttack
+      : readObjectCaseInsensitive(navigation, ["nativeWeaponFireOpportunity", "NativeWeaponFireOpportunity"]);
+    const combatReason = continuationTarget
+      ? readObjectCaseInsensitive(continuationTarget, ["reason", "Reason"])
+      : readObjectCaseInsensitive(navigation, ["nativeActorCombatReason", "NativeActorCombatReason"]);
+    const vitalityAvailable = readObjectCaseInsensitive(vitalityTrace, ["available", "Available"]);
+    const vitalityFresh = readObjectCaseInsensitive(vitalityTrace, ["fresh", "Fresh"]);
+    const playerHealth = readObjectCaseInsensitive(vitalityTrace, ["playerHealth", "PlayerHealth"]);
+    const playerState = readObjectCaseInsensitive(vitalityTrace, ["playerState", "PlayerState"]);
+    const nativeDeathConfirmed = readObjectCaseInsensitive(decision, ["nativeDeathConfirmed", "NativeDeathConfirmed"])
+      ?? readObjectCaseInsensitive(firstDoorDecision, ["nativeDeathConfirmed", "NativeDeathConfirmed"]);
+    const restartRequested = readObjectCaseInsensitive(decision, ["restartRequested", "RestartRequested"])
+      ?? readObjectCaseInsensitive(firstDoorDecision, ["restartRequested", "RestartRequested"]);
+
+    clearNode(node);
+    node.hidden = false;
+    node.setAttribute?.("aria-hidden", "false");
+    node.dataset.ctgHudMode = "simple";
+    node.dataset.ctgLayout = "gpu-panel";
+    node.dataset.ctgSource = `csharp-${projection.source}`;
+    node.dataset.zoeVeto = "false";
+    node.dataset.zoeWarning = "false";
+    node.classList.add("is-thought-grid");
+    node.classList.remove("is-detail-overlay", "is-simple-summary", "is-zoe-veto", "is-zoe-warning");
+    node.style.cssText = "position:absolute;inset:0;z-index:160;margin:0;padding:0;border:0;background:transparent;color:#ffeaa0;pointer-events:none;display:block;overflow:hidden;border-radius:0;box-shadow:none;transition:opacity .24s ease,box-shadow .24s ease;";
+
+    appendCSharpThoughtGridHeader(documentRef, node, projection);
+    const cards = [
+      {
+        key: "aisthesis",
+        title: "Aisthesis",
+        body: [
+          `source=C# ${projection.source}`,
+          `nav=${formatCSharpFact(navigationStatus)} tic=${formatCSharpNumber(nativeGametic)}`,
+          `sector=${formatCSharpNumber(playerSectorIndex)} distance=${formatCSharpNumber(targetDistance, 1)}`,
+          `poseMissing=${formatCSharpNumber(poseMissingFrames)}`
+        ].join("\n"),
+        color: "#8ee4ff",
+        bodyFont: "400 clamp(6.1px,.47vw,7.3px)/1.05"
+      },
+      {
+        key: "noesis",
+        title: "Noesis",
+        body: [
+          `state=${formatCSharpFact(state)}`,
+          `reason=${formatCSharpFact(reasonCode)}`,
+          `TELOS=${formatCSharpFact(telos)} objective=${formatCSharpFact(objective)}`
+        ].join("\n"),
+        color: "#95ffd0"
+      },
+      {
+        key: "krisis",
+        title: "Krisis",
+        body: [
+          `owner=${formatCSharpFact(ownerId)}`,
+          `disposition=${formatCSharpFact(disposition)}`,
+          `exclusive=${formatCSharpBoolean(exclusive)}`
+        ].join("\n"),
+        color: "#ffe17a"
+      },
+      {
+        key: "kinesis",
+        title: "Kinesis",
+        body: formatCSharpAction(projection.action, runRequested),
+        color: "#ffb48e"
+      },
+      {
+        key: "route",
+        title: "Route",
+        body: [
+          `leg=${formatCSharpNumber(legIndex)} ${formatCSharpFact(legId)}`,
+          `route=${formatCSharpNumber(routeFrames)}/${formatCSharpNumber(routeTimeoutFrames)}`,
+          `legFrames=${formatCSharpNumber(legFrames)}/${formatCSharpNumber(legTimeoutFrames)}`
+        ].join("\n"),
+        color: "#ffeaa0"
+      },
+      {
+        key: "combat",
+        title: "Combat",
+        body: [
+          `target=${formatCSharpFact(targetIdentity)} sector=${formatCSharpNumber(targetSector)} hp=${formatCSharpNumber(targetHealth)}`,
+          `retained=${formatCSharpBoolean(targetRetained)} los=${formatCSharpBoolean(targetLineOfSight)} kill=${formatCSharpBoolean(killConfirmed)}`,
+          `fireOpportunity=${formatCSharpBoolean(fireOpportunity)} reason=${formatCSharpFact(combatReason)}`
+        ].join("\n"),
+        color: "#ff9a8f"
+      },
+      {
+        key: "zoe",
+        title: "Zoe",
+        body: [
+          `vitality=${formatCSharpBoolean(vitalityAvailable)}/${formatCSharpBoolean(vitalityFresh)}`,
+          `health=${formatCSharpNumber(playerHealth)} playerState=${formatCSharpNumber(playerState)}`,
+          `death=${formatCSharpBoolean(nativeDeathConfirmed)} restart=${formatCSharpBoolean(restartRequested)}`
+        ].join("\n"),
+        color: "#ffeaa0"
+      }
+    ];
+    for (let index = 0; index < cards.length; index += 1) {
+      appendThoughtGridCard(documentRef, node, cards[index]);
+    }
   }
 
   function resolveDebugOverlayPacket(autoplay) {
@@ -1494,6 +1814,8 @@
     const zoeRiskText = smoothThoughtScore(smoothing, "zoeRisk", zoe.lethalRisk ?? zoe.LethalRisk, 280);
 
     clearNode(node);
+    node.hidden = false;
+    node.setAttribute?.("aria-hidden", "false");
     setZoeVetoHudState(node, pipelineState, autoplay);
     node.dataset.ctgHudMode = "simple";
     node.dataset.ctgLayout = "gpu-panel";
@@ -1595,24 +1917,37 @@
         || null
     });
     const pipelineState = autoplay.enabled ? resolvePipelineState(autoplay) : null;
-    const mode = options.detail && pipelineState ? "detail" : (pipelineState ? "thought-grid" : "text");
-    if (shouldSkipPanelRender(node, mode, autoplay, pipelineState, options)) {
+    const csharpProjection = autoplay.enabled
+      ? resolveCSharpHudProjection(autoplay)
+      : null;
+    const displayedPipelineState = csharpProjectionOwnsHud(csharpProjection)
+      ? null
+      : pipelineState;
+    const mode = options.detail && displayedPipelineState
+      ? "detail"
+      : (displayedPipelineState ? "thought-grid" : (csharpProjection ? "csharp-thought-grid" : "text"));
+    if (shouldSkipPanelRender(node, mode, autoplay, displayedPipelineState, options)) {
       return;
     }
 
-    if (options.detail && pipelineState) {
-      renderPipelineDetailGrid(node, pipelineState, autoplay);
+    if (options.detail && displayedPipelineState) {
+      renderPipelineDetailGrid(node, displayedPipelineState, autoplay);
       return;
     }
 
-    if (pipelineState) {
-      renderThoughtGridHud(node, pipelineState, autoplay);
+    if (displayedPipelineState) {
+      renderThoughtGridHud(node, displayedPipelineState, autoplay);
       return;
     }
 
-    setZoeVetoHudState(node, pipelineState, autoplay);
+    if (csharpProjection) {
+      renderCSharpThoughtGridHud(node, csharpProjection);
+      return;
+    }
+
+    clearNode(node);
+    setZoeVetoHudState(node, displayedPipelineState, autoplay);
     applyToposHudMode(node, false);
-    node.textContent = formatToposHud(status, options);
   }
 
   if (self.document?.documentElement?.dataset) {
@@ -1624,6 +1959,7 @@
     ensureToposHud,
     formatToposHud,
     renderToposHud,
+    resolveCSharpHudProjection,
     resolveObservedScores,
     resolveEnemyCue,
     formatFourLayerPipelineState

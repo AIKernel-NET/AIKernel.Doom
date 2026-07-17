@@ -487,6 +487,136 @@ public sealed class FirstDoorBrowserControlSessionTests
     }
 
     [Fact]
+    public void NativeAudioCatalogTrace_ClassifiesNewEventsOnceWithoutGrantingDoorAuthority()
+    {
+        var session = new FirstDoorBrowserControlSession(FastPolicy());
+        session.Evaluate(ReadyInput(0));
+        var audio = RawAudio(
+            CatalogEvent(1, 1, "pistol"),
+            CatalogEvent(2, 32, "itemup"));
+
+        var observed = session.Evaluate(ReadyInput(1) with { Audio = audio });
+        var repeated = session.Evaluate(ReadyInput(2) with { Audio = audio });
+
+        Assert.Equal(observed.SessionId, observed.AudioCatalogTrace.SessionId);
+        Assert.Equal(observed.RunId, observed.AudioCatalogTrace.RunId);
+        Assert.Equal(observed.RunGeneration, observed.AudioCatalogTrace.RunGeneration);
+        Assert.Equal(observed.ControlTick, observed.AudioCatalogTrace.EvaluatedAtControlTick);
+        Assert.Equal(2, observed.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(2, observed.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Equal(2, observed.AudioCatalogTrace.RetainedEventCount);
+        Assert.Equal(0, observed.AudioCatalogTrace.UnknownEventCount);
+        Assert.False(observed.AudioCatalogTrace.Truncated);
+        Assert.True(observed.AudioCatalogTrace.DiagnosticOnly);
+        Assert.Equal(
+            new[] { "weapon-fire-pistol", "pickup-item" },
+            observed.AudioCatalogTrace.Events.Select(item => item.MeaningCode));
+        Assert.All(observed.AudioCatalogTrace.Events, item => Assert.True(item.Catalogued));
+        Assert.All(observed.AudioCatalogTrace.Events, item => Assert.True(item.DiagnosticOnly));
+        Assert.False(observed.OpenConfirmed);
+        Assert.False(observed.FailedUseEvidenceAccepted);
+
+        Assert.Equal(2, repeated.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(0, repeated.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Empty(repeated.AudioCatalogTrace.Events);
+    }
+
+    [Fact]
+    public void NativeAudioCatalogTrace_BoundsRetainedEventsAndCountsAllUnknownEvents()
+    {
+        var session = new FirstDoorBrowserControlSession(FastPolicy());
+        session.Evaluate(ReadyInput(0));
+        var events = Enumerable.Range(1, 35)
+            .Select(sequence => CatalogEvent(
+                sequence,
+                200 + sequence,
+                $"uncatalogued-{sequence}"))
+            .ToArray();
+
+        var decision = session.Evaluate(ReadyInput(1) with { Audio = RawAudio(events) });
+
+        Assert.Equal(32, decision.AudioCatalogTrace.Capacity);
+        Assert.Equal(35, decision.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Equal(32, decision.AudioCatalogTrace.RetainedEventCount);
+        Assert.Equal(35, decision.AudioCatalogTrace.UnknownEventCount);
+        Assert.True(decision.AudioCatalogTrace.Truncated);
+        Assert.Equal(
+            Enumerable.Range(4, 32).Select(value => (long)value),
+            decision.AudioCatalogTrace.Events.Select(item => item.Sequence));
+        Assert.All(decision.AudioCatalogTrace.Events, item =>
+        {
+            Assert.False(item.Catalogued);
+            Assert.Equal("sfx-id-out-of-range", item.ClassificationReason);
+        });
+        Assert.False(decision.OpenConfirmed);
+        Assert.False(decision.FailedUseEvidenceAccepted);
+    }
+
+    [Fact]
+    public void RejectedPacket_EmitsCurrentTickEmptyTraceWithoutConsumingInputAudio()
+    {
+        var session = new FirstDoorBrowserControlSession(FastPolicy());
+        session.Evaluate(ReadyInput(0));
+        var observed = session.Evaluate(ReadyInput(1) with
+        {
+            Audio = RawAudio(CatalogEvent(1, 1, "pistol"))
+        });
+        var pendingAudio = RawAudio(CatalogEvent(2, 32, "itemup"));
+
+        var rejected = session.Evaluate(ReadyInput(2) with
+        {
+            SessionId = string.Empty,
+            Audio = pendingAudio
+        });
+        var acceptedAfterRejection = session.Evaluate(ReadyInput(3) with
+        {
+            Audio = pendingAudio
+        });
+
+        Assert.Equal("missing-session-id", rejected.ContractError);
+        Assert.Equal(rejected.SessionId, rejected.AudioCatalogTrace.SessionId);
+        Assert.Equal(rejected.RunId, rejected.AudioCatalogTrace.RunId);
+        Assert.Equal(rejected.RunGeneration, rejected.AudioCatalogTrace.RunGeneration);
+        Assert.Equal(rejected.ControlTick, rejected.AudioCatalogTrace.EvaluatedAtControlTick);
+        Assert.Equal(1, rejected.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(0, rejected.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Equal(0, rejected.AudioCatalogTrace.RetainedEventCount);
+        Assert.Equal(0, rejected.AudioCatalogTrace.UnknownEventCount);
+        Assert.False(rejected.AudioCatalogTrace.Truncated);
+        Assert.Empty(rejected.AudioCatalogTrace.Events);
+
+        Assert.Equal(2, acceptedAfterRejection.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(1, acceptedAfterRejection.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Equal(2, Assert.Single(acceptedAfterRejection.AudioCatalogTrace.Events).Sequence);
+        Assert.Equal(observed.RunGeneration, acceptedAfterRejection.RunGeneration);
+    }
+
+    [Fact]
+    public void RunBoundary_BaselinesExistingRingAndObservesTheNextSequence()
+    {
+        var session = new FirstDoorBrowserControlSession(FastPolicy());
+        var baselineAudio = RawAudio(CatalogEvent(40, 1, "pistol"));
+
+        var baseline = session.Evaluate(ReadyInput(0) with { Audio = baselineAudio });
+        var next = session.Evaluate(ReadyInput(1) with
+        {
+            Audio = RawAudio(
+                CatalogEvent(40, 1, "pistol"),
+                CatalogEvent(41, 32, "itemup"))
+        });
+
+        Assert.True(baseline.RunBoundaryApplied);
+        Assert.Equal(40, baseline.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(0, baseline.AudioCatalogTrace.TotalNewEventCount);
+        Assert.Empty(baseline.AudioCatalogTrace.Events);
+        Assert.Equal(41, next.AudioCatalogTrace.LatestObservedSequence);
+        Assert.Equal(1, next.AudioCatalogTrace.TotalNewEventCount);
+        var observed = Assert.Single(next.AudioCatalogTrace.Events);
+        Assert.Equal(41, observed.Sequence);
+        Assert.Equal("pickup-item", observed.MeaningCode);
+    }
+
+    [Fact]
     public void RawContract_DoesNotAcceptJsSemanticAudioClassification()
     {
         var audioProperties = typeof(BrowserFirstDoorAudioInput)
@@ -2231,6 +2361,17 @@ public sealed class FirstDoorBrowserControlSessionTests
         {
             Sequence = sequence,
             SfxId = checked((int)sequence + 100),
+            SfxName = sfxName
+        };
+
+    private static BrowserNativeAudioEventInput CatalogEvent(
+        long sequence,
+        int sfxId,
+        string sfxName)
+        => new()
+        {
+            Sequence = sequence,
+            SfxId = sfxId,
             SfxName = sfxName
         };
 

@@ -232,12 +232,32 @@ internal static class FirstDoorRawPaletteObserver
         double footObstacleMax = 0;
         var footObstacleCount = 0;
 
+        // The full-grid scores depend only on the color, not the sample position.
+        // Keep the cache local to this observation so palette changes cannot carry stale scores.
+        Span<CellPaletteScores> paletteScores = stackalloc CellPaletteScores[PaletteEntryCount];
+        Span<bool> scored = stackalloc bool[PaletteEntryCount];
+        scored.Clear();
+        var palette = input.PaletteRgbaBytes;
         for (var row = 0; row < SampleRows; row++)
         {
             for (var column = 0; column < SampleColumns; column++)
             {
                 var value = input.PaletteIndices[(row * SampleColumns) + column];
-                var dark = ScoreDarkPaletteIndex(value, input.PaletteRgbaBytes);
+                if (!scored[value])
+                {
+                    paletteScores[value] = new CellPaletteScores(
+                        ScoreDarkPaletteIndex(value, palette),
+                        Math.Max(
+                            ScoreBridgeDoorPanelPaletteIndex(value, palette),
+                            Math.Max(
+                                ScoreBridgeBrownPaletteIndex(value, palette) * 0.64,
+                                ScoreSpawnCorridorPillarPaletteIndex(value, palette) * 0.34)),
+                        ScoreFirstDoorRedAccentPaletteIndex(value, palette));
+                    scored[value] = true;
+                }
+
+                ref readonly var score = ref paletteScores[value];
+                var dark = score.Dark;
                 darkAreaTotal += dark.Score;
                 if (dark.Luma > 0)
                 {
@@ -289,12 +309,8 @@ internal static class FirstDoorRawPaletteObserver
                 visionTotals[visionIndex] += value;
                 visionCounts[visionIndex]++;
 
-                var doorScore = Math.Max(
-                    ScoreBridgeDoorPanelPaletteIndex(value, input.PaletteRgbaBytes),
-                    Math.Max(
-                        ScoreBridgeBrownPaletteIndex(value, input.PaletteRgbaBytes) * 0.64,
-                        ScoreSpawnCorridorPillarPaletteIndex(value, input.PaletteRgbaBytes) * 0.34));
-                var redScore = ScoreFirstDoorRedAccentPaletteIndex(value, input.PaletteRgbaBytes);
+                var doorScore = score.Door;
+                var redScore = score.Red;
                 doorTotals[visionIndex] += doorScore;
                 doorCounts[visionIndex]++;
                 doorMax[visionIndex] = Math.Max(doorMax[visionIndex], doorScore);
@@ -1305,6 +1321,8 @@ internal static class FirstDoorRawPaletteObserver
         string Kind,
         double Confidence,
         FirstDoorRawPaletteBox? AlignmentBox);
+
+    private readonly record struct CellPaletteScores(DarkPaletteScore Dark, double Door, double Red);
 
     private readonly record struct DarkPaletteScore(double Score, double Luma);
 

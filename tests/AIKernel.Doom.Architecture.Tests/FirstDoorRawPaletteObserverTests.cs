@@ -585,6 +585,30 @@ public sealed class FirstDoorRawPaletteObserverTests
         Assert.Matches("^[0-9a-f]{64}$", first.VisualContentHash);
     }
 
+    [Fact]
+    public void RepeatedPaletteIndex_UsesTheCurrentObservationColors()
+    {
+        var indices = Enumerable.Repeat((byte)42, FirstDoorRawPaletteObserver.SampleCount).ToArray();
+        var input = ValidObservation(indices);
+        var redPalette = EmptyPalette();
+        SetPalette(redPalette, 42, 110, 35, 30);
+
+        var original = FirstDoorRawPaletteObserver.Observe(input);
+        var recolored = FirstDoorRawPaletteObserver.Observe(input with
+        {
+            FrameSequence = input.FrameSequence + 1,
+            PaletteGeneration = input.PaletteGeneration + 1,
+            PaletteRgbaBytes = redPalette
+        });
+        var replay = FirstDoorRawPaletteObserver.Observe(input);
+
+        Assert.All(original.Red9x9, value => Assert.Equal(0d, value));
+        Assert.All(recolored.Red9x9, value => Assert.True(value > 0d));
+        Assert.Equal(original.Red9x9.ToArray(), replay.Red9x9.ToArray());
+        Assert.Equal(original.ObservationHash, replay.ObservationHash);
+        Assert.NotEqual(original.VisualContentHash, recolored.VisualContentHash);
+    }
+
     private static FirstDoorRawPaletteObservation ValidObservation(
         IReadOnlyList<byte> indices,
         IReadOnlyList<byte>? palette = null)

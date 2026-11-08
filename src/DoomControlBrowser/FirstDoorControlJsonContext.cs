@@ -8,7 +8,6 @@ namespace AIKernel.Doom.ControlBrowser;
     PropertyNameCaseInsensitive = true,
     UseStringEnumConverter = true,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(FirstDoorControlDecision))]
 [JsonSerializable(typeof(FirstDoorAcquisitionTrace))]
 [JsonSerializable(typeof(FirstDoorAudioCatalogTrace))]
 [JsonSerializable(typeof(DoomNativeSfxCatalogObservation))]
@@ -63,3 +62,12 @@ namespace AIKernel.Doom.ControlBrowser;
 [JsonSerializable(typeof(FirstDoorAcquisitionBlockCode))]
 [JsonSerializable(typeof(ActionCommand))]
 internal sealed partial class FirstDoorControlJsonContext : JsonSerializerContext;
+
+// Generate writers for the whole FirstDoor response graph without changing input
+// deserialization or the serialization path for the other browser endpoints.
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UseStringEnumConverter = true,
+    GenerationMode = JsonSourceGenerationMode.Metadata | JsonSourceGenerationMode.Serialization)]
+[JsonSerializable(typeof(FirstDoorControlDecision))]
+internal sealed partial class FirstDoorDecisionJsonContext : JsonSerializerContext;

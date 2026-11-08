@@ -52,7 +52,7 @@ public static partial class FirstDoorControlBrowserBridge
 
         return JsonSerializer.Serialize(
             decision,
-            FirstDoorControlJsonContext.Default.FirstDoorControlDecision);
+            FirstDoorDecisionJsonContext.Default.FirstDoorControlDecision);
     }
 
     /// <summary>

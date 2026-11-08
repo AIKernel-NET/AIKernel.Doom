@@ -14,6 +14,7 @@
   const MAX_TARGET_FPS = 30;
   const MIN_TARGET_FPS = 5;
   const TARGET_FPS_STEP = 5;
+  const TARGET_FPS_REDUCTION_SAMPLES = 2;
   const TARGET_FPS_RECOVERY_SAMPLES = 6;
   const AUTOPLAY_PREDICTED_STATUS_MIN_INTERVAL_MS = 125;
   const CSHARP_NATIVE_DEATH_AUTHORITY_DISPOSITIONS = new Set([
@@ -550,7 +551,10 @@
       this.fpsSampleFrames = 0;
       this.fpsSampleStartedAt = 0;
       this.noWaitSampleFrames = 0;
+      this.overBudgetSampleFrames = 0;
+      this.nextCapHeadroomFrames = 0;
       this.targetFps = MAX_TARGET_FPS;
+      this.targetFpsOverloadSamples = 0;
       this.targetFpsRecoverySamples = 0;
       this.lastFrameWorkMs = 0;
       this.uiYieldMs = MIN_UI_YIELD_MS;
@@ -3140,6 +3144,9 @@
       this.fpsSampleFrames = 0;
       this.fpsSampleStartedAt = 0;
       this.noWaitSampleFrames = 0;
+      this.overBudgetSampleFrames = 0;
+      this.nextCapHeadroomFrames = 0;
+      this.targetFpsOverloadSamples = 0;
       this.nextFrameDueAt = 0;
       this.uiYieldMs = MIN_UI_YIELD_MS;
       this.lastFrameAt = window.performance?.now?.() || Date.now();
@@ -3188,12 +3195,16 @@
           }
 
           const renderResult = this.exports.doom_render();
-          await this.drawFrame(renderResult);
+          const submittedGpuFrame = await this.drawFrame(renderResult);
           if (token !== this.loopToken || this.state !== "running") {
             return;
           }
           this.drainNativeAudio();
           this.runAutoplay(renderResult);
+          if (submittedGpuFrame) {
+            // Do not charge this frame's synchronous CPU work to the GPU queue wait.
+            this.waitForGpuQueue();
+          }
           this.frameCount += 1;
           const frameEndedAt = window.performance?.now?.() || Date.now();
           this.lastFrameWorkMs = Math.max(0, frameEndedAt - workStartedAt);
@@ -3205,6 +3216,14 @@
           this.uiYieldMs = MIN_UI_YIELD_MS;
           if (waitMs <= MIN_UI_YIELD_MS) {
             this.noWaitSampleFrames += 1;
+          }
+          // A late animation callback can consume deadline slack without adding frame work.
+          if (this.lastFrameWorkMs + MIN_UI_YIELD_MS >= interval) {
+            this.overBudgetSampleFrames += 1;
+          }
+          const nextCap = Math.min(MAX_TARGET_FPS, this.targetFps + TARGET_FPS_STEP);
+          if (this.lastFrameWorkMs + MIN_UI_YIELD_MS <= 1000 / nextCap) {
+            this.nextCapHeadroomFrames += 1;
           }
 
           this.lastFrameAt = frameEndedAt;
@@ -8829,8 +8848,7 @@
       if (this.webGpuFrameRenderer && isDoomGpuRenderingEnabled() && typeof provider?.renderPalettedFrame === "function") {
         try {
           if (provider.renderPalettedFrame(indices)) {
-            this.waitForGpuQueue();
-            return;
+            return true;
           }
         } catch (error) {
           this.handleGpuLost("render", error);
@@ -9241,6 +9259,8 @@
         this.adjustTargetFps();
         this.fpsSampleFrames = 0;
         this.noWaitSampleFrames = 0;
+        this.overBudgetSampleFrames = 0;
+        this.nextCapHeadroomFrames = 0;
         this.fpsSampleStartedAt = now;
         this.emitStatus("fps");
       }
@@ -9257,18 +9277,25 @@
 
       const noWaitRatio = this.noWaitSampleFrames / this.fpsSampleFrames;
       const belowCap = this.fps < this.targetFps * 0.9;
-      if (belowCap && noWaitRatio >= 0.5 && this.targetFps > MIN_TARGET_FPS) {
+      const overloaded = belowCap && this.overBudgetSampleFrames / this.fpsSampleFrames >= 0.5
+        && this.targetFps > MIN_TARGET_FPS;
+      this.targetFpsOverloadSamples = overloaded ? this.targetFpsOverloadSamples + 1 : 0;
+      // Do not lower the cap for a single startup or transient load sample.
+      if (this.targetFpsOverloadSamples >= TARGET_FPS_REDUCTION_SAMPLES) {
         const previous = this.targetFps;
         this.targetFps = Math.max(MIN_TARGET_FPS, this.targetFps - TARGET_FPS_STEP);
+        this.targetFpsOverloadSamples = 0;
         this.targetFpsRecoverySamples = 0;
         this.nextFrameDueAt = 0;
-        this.log("[ RENDER ]", "log-warn", `framebuffer cap reduced: ${previous}fps -> ${this.targetFps}fps (measured ${this.fps}fps without idle wait).`);
+        this.log("[ RENDER ]", "log-warn", `framebuffer cap reduced: ${previous}fps -> ${this.targetFps}fps (measured ${this.fps}fps with sustained frame work over budget).`);
         this.emitStatus("cap-reduced");
         return;
       }
 
+      // Timer and animation-frame alignment can keep observed FPS below the cap
+      // even when the active work and UI yield fit the next step.
       const sustainedHeadroom = this.targetFps < MAX_TARGET_FPS
-        && this.fps >= this.targetFps * 0.95
+        && this.nextCapHeadroomFrames / this.fpsSampleFrames >= 0.75
         && noWaitRatio <= 0.25;
       this.targetFpsRecoverySamples = sustainedHeadroom
         ? this.targetFpsRecoverySamples + 1

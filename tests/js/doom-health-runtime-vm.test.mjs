@@ -15,7 +15,7 @@ function assert(condition, message) {
 
 function loadScript(context, relativePath) {
   const filePath = path.join(repoRoot, relativePath);
-  const source = readFileSync(filePath, "utf8");
+  const source = readFileSync(filePath, "utf8").replaceAll("\r\n", "\n");
   vm.runInContext(source, context, { filename: filePath });
   return source;
 }
@@ -1115,30 +1115,61 @@ Object.assign(reducedCapRuntime, {
   fps: 20,
   fpsSampleFrames: 10,
   noWaitSampleFrames: 6,
+  overBudgetSampleFrames: 0,
+  targetFpsOverloadSamples: 0,
   targetFpsRecoverySamples: 4,
   nextFrameDueAt: 100,
   log() {},
   emitStatus(reason) { reducedCapEvents.push(reason); }
 });
 reducedCapRuntime.adjustTargetFps();
-assert(reducedCapRuntime.targetFps === 25 && reducedCapEvents.at(-1) === "cap-reduced", "sustained no-wait overload must still reduce the adaptive cap once");
+assert(reducedCapRuntime.targetFps === 30 && reducedCapRuntime.targetFpsOverloadSamples === 0,
+  "insufficient deadline slack alone must not reduce the adaptive cap");
+reducedCapRuntime.overBudgetSampleFrames = 6;
+reducedCapRuntime.adjustTargetFps();
+assert(reducedCapRuntime.targetFps === 30 && reducedCapRuntime.targetFpsOverloadSamples === 1,
+  "one over-budget startup sample must not lower the cap");
+reducedCapRuntime.overBudgetSampleFrames = 0;
+reducedCapRuntime.adjustTargetFps();
+assert(reducedCapRuntime.targetFpsOverloadSamples === 0,
+  "an intervening in-budget sample must clear the overload streak");
+reducedCapRuntime.overBudgetSampleFrames = 6;
+reducedCapRuntime.adjustTargetFps();
+assert(reducedCapRuntime.targetFps === 30, "overload samples separated by headroom must not accumulate");
+reducedCapRuntime.adjustTargetFps();
+assert(reducedCapRuntime.targetFps === 25 && reducedCapEvents.at(-1) === "cap-reduced",
+  "two consecutive over-budget samples must still lower the cap once");
+assert(reducedCapRuntime.targetFpsOverloadSamples === 0, "a reduced cap must start a fresh overload streak");
 assert(reducedCapRuntime.targetFpsRecoverySamples === 0, "an overload reduction must clear recovery hysteresis");
 
 const recoveredCapEvents = [];
 const recoveredCapRuntime = Object.create(Runtime.prototype);
 Object.assign(recoveredCapRuntime, {
-  targetFps: 15,
-  fps: 15,
+  targetFps: 5,
+  fps: 4.6,
   fpsSampleFrames: 10,
   noWaitSampleFrames: 0,
+  nextCapHeadroomFrames: 8,
   targetFpsRecoverySamples: 5,
   nextFrameDueAt: 100,
   log() {},
   emitStatus(reason) { recoveredCapEvents.push(reason); }
 });
 recoveredCapRuntime.adjustTargetFps();
-assert(recoveredCapRuntime.targetFps === 20 && recoveredCapEvents.at(-1) === "cap-recovered", "six sustained headroom samples must recover one adaptive-cap step");
+assert(recoveredCapRuntime.targetFps === 10 && recoveredCapEvents.at(-1) === "cap-recovered",
+  "six samples with enough active-work headroom must recover the 5fps cap despite timer/RAF losses");
 assert(recoveredCapRuntime.targetFpsRecoverySamples === 0 && recoveredCapRuntime.nextFrameDueAt === 0, "cap recovery must reset its hysteresis and scheduler deadline");
+
+Object.assign(recoveredCapRuntime, {
+  fps: 9.9,
+  fpsSampleFrames: 10,
+  noWaitSampleFrames: 0,
+  nextCapHeadroomFrames: 7,
+  targetFpsRecoverySamples: 5
+});
+recoveredCapRuntime.adjustTargetFps();
+assert(recoveredCapRuntime.targetFps === 10 && recoveredCapRuntime.targetFpsRecoverySamples === 0,
+  "observed FPS alone must not recover the cap when active work cannot reliably fit the next budget");
 
 const watchdogVisibilityRuntime = Object.create(Runtime.prototype);
 context.document.visibilityState = "hidden";
@@ -1241,6 +1272,99 @@ context.document.removeEventListener = (type, handler) => {
     visibilityChangeHandler = null;
   }
 };
+
+const originalRequestAnimationFrame = context.requestAnimationFrame;
+const originalCancelAnimationFrame = context.cancelAnimationFrame;
+const gpuFrameOrder = [];
+let scheduledFrameTimer;
+let scheduledAnimationFrame;
+let gpuWarningTimer;
+let completeFrameFence;
+let autoplayWorkMs = 120;
+context.setTimeout = (callback, milliseconds) => {
+  if (milliseconds === 48) {
+    gpuWarningTimer = callback;
+  } else {
+    scheduledFrameTimer = callback;
+  }
+  return 92;
+};
+context.requestAnimationFrame = callback => {
+  scheduledAnimationFrame = callback;
+  return 93;
+};
+context.cancelAnimationFrame = () => {};
+context.WebGpuComputeProvider = {
+  renderPalettedFrame() {
+    gpuFrameOrder.push("submit");
+    return true;
+  },
+  queue: {
+    onSubmittedWorkDone() {
+      gpuFrameOrder.push("fence");
+      return new Promise(resolve => { completeFrameFence = resolve; });
+    }
+  }
+};
+watchdogClock = 500;
+const gpuFrameRuntime = Object.assign(Object.create(Runtime.prototype), {
+  state: "running",
+  loopToken: 0,
+  frameCount: 0,
+  gpuWaitTimeouts: 0,
+  gpuFlushCount: 0,
+  webGpuFrameRenderer: true,
+  exports: { doom_tick: () => 0, doom_render: () => 1 },
+  resolveLatestFramebufferIndices: () => new Uint8Array(320 * 200),
+  pumpInput() {},
+  drainNativeAudio() {},
+  runAutoplay() {
+    gpuFrameOrder.push("autoplay");
+    watchdogClock += autoplayWorkMs;
+  },
+  startWatchdogVisibilityObserver() {},
+  startWatchdog() {},
+  updateFps() {},
+  log() {},
+  emitStatus() {}
+});
+gpuFrameRuntime.startLoop();
+scheduledFrameTimer();
+await scheduledAnimationFrame(watchdogClock);
+assert(gpuFrameOrder.join(",") === "submit,autoplay,fence" && gpuFrameRuntime.gpuQueueFenceStartedAt === 620,
+  "the 120ms synchronous autoplay phase must run before starting the GPU fence clock");
+watchdogClock = 625;
+completeFrameFence();
+await gpuFrameRuntime.gpuQueueFencePending;
+assert(gpuFrameRuntime.lastGpuWaitMs === 5 && gpuFrameRuntime.gpuWaitTimeouts === 0,
+  "a promptly resolving GPU fence must not inherit CPU work from the same frame");
+watchdogClock = 700;
+scheduledFrameTimer();
+await scheduledAnimationFrame(watchdogClock);
+watchdogClock = 868;
+gpuWarningTimer();
+assert(gpuFrameRuntime.gpuWaitTimeouts === 1 && gpuFrameRuntime.lastGpuWaitMs === 48,
+  "outstanding GPU work must still warn at the unchanged 48ms deadline");
+completeFrameFence();
+await gpuFrameRuntime.gpuQueueFencePending;
+autoplayWorkMs = 4;
+watchdogClock = 900;
+const noWaitBeforeLateFrame = gpuFrameRuntime.noWaitSampleFrames;
+const overBudgetBeforeLateFrame = gpuFrameRuntime.overBudgetSampleFrames;
+assert(overBudgetBeforeLateFrame === 2, "the two 120ms active frames must both count as over budget");
+scheduledFrameTimer();
+await scheduledAnimationFrame(880);
+assert(gpuFrameRuntime.noWaitSampleFrames === noWaitBeforeLateFrame + 1
+  && gpuFrameRuntime.overBudgetSampleFrames === overBudgetBeforeLateFrame,
+  "a 20ms callback delay with 4ms of active work must not count as an over-budget frame");
+completeFrameFence();
+await gpuFrameRuntime.gpuQueueFencePending;
+gpuFrameRuntime.stopLoop();
+context.WebGpuComputeProvider = originalGpuProvider;
+context.setTimeout = () => 90;
+context.requestAnimationFrame = originalRequestAnimationFrame;
+context.cancelAnimationFrame = originalCancelAnimationFrame;
+watchdogClock = 100;
 
 let startupWatchdogRestarts = 0;
 const startupWatchdogRuntime = Object.create(Runtime.prototype);

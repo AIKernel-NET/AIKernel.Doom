@@ -344,7 +344,7 @@ function navigation(overrides = {}) {
   return {
     snapshotVersion: 1,
     geometryVersion: "e1m1-continuation-canonical-route-v2",
-    policyVersion: "e1m1-continuation-policy-v2",
+    policyVersion: "e1m1-continuation-policy-v2.1",
     active: true,
     legIndex: 0,
     legId: "zigzag-entry-east",
@@ -368,8 +368,8 @@ function navigation(overrides = {}) {
     targetBearingDegrees: 0,
     bearingErrorDegrees: -90,
     routeFrames: 1,
-    routeTimeoutFrames: 900,
-    routeRemainingFrames: 899,
+    routeTimeoutFrames: 1020,
+    routeRemainingFrames: 1019,
     legFrames: 1,
     legTimeoutFrames: 180,
     legRemainingFrames: 179,
@@ -587,7 +587,7 @@ function decision(overrides = {}) {
   const controlTick = overrides.controlTick ?? 11;
   return {
     implementationVersion: "e1m1-continuation-v2",
-    policyVersion: "e1m1-continuation-policy-v2",
+    policyVersion: "e1m1-continuation-policy-v2.1",
     contractVersion: 1,
     sessionId: "session-1",
     runId: "run-1",
@@ -915,7 +915,7 @@ bridgeDecision = decision({
       stationary: true
     },
     routeFrames: 19,
-    routeRemainingFrames: 881,
+    routeRemainingFrames: 1001,
     legFrames: 1,
     legRemainingFrames: 179,
     combatFrames: 4,
@@ -1056,7 +1056,7 @@ bridgeDecision = decision({
   navigation: navigation({
     active: false,
     routeFrames: 29,
-    routeRemainingFrames: 871,
+    routeRemainingFrames: 991,
     legFrames: 29,
     legRemainingFrames: 151,
     failureCode
@@ -1125,7 +1125,7 @@ const restartNavigation = navigation({
     nativeGametic: 602
   },
   routeFrames: 42,
-  routeRemainingFrames: 858,
+  routeRemainingFrames: 978,
   legFrames: 42,
   legRemainingFrames: 138
 });
@@ -1342,7 +1342,7 @@ assert.throws(
 const malformedCases = [
   ["session echo", current => { current.sessionId = "other-session"; }, /sessionId mismatch/],
   ["native gametic echo", current => { current.nativeGametic = 501; }, /nativeGametic changed/],
-  ["route timeout", current => { current.navigation.routeTimeoutFrames = 901; }, /route timeout changed/],
+  ["route timeout", current => { current.navigation.routeTimeoutFrames = 1021; }, /route timeout changed/],
   ["canonical waypoint", current => { current.navigation.targetX = 3055; }, /canonical C# route/],
   ["combat owner", current => { current.navigation.combatOwnerKind = "gatekeeper"; }, /combat owner/],
   ["unowned traversal", current => {

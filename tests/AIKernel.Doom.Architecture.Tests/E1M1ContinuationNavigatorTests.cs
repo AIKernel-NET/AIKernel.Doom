@@ -13,12 +13,12 @@ public sealed class E1M1ContinuationNavigatorTests
         var policy = new E1M1ContinuationPolicy();
 
         Assert.Equal(24d, policy.WaypointCompletionRadius);
-        Assert.Equal(900, policy.RouteTimeoutFrames);
+        Assert.Equal(1020, policy.RouteTimeoutFrames);
         Assert.Equal(180, policy.LegTimeoutFrames);
         Assert.Equal(180, policy.CombatTimeoutFrames);
         Assert.Equal(30, policy.MaximumPoseMissingFrames);
         Assert.Throws<ArgumentException>(() => new E1M1ContinuationNavigator(
-            policy with { RouteTimeoutFrames = 901 }));
+            policy with { RouteTimeoutFrames = 1021 }));
         Assert.Throws<ArgumentException>(() => new E1M1ContinuationNavigator(
             policy with { WaypointCompletionRadius = 25 }));
         Assert.Collection(
@@ -676,7 +676,7 @@ public sealed class E1M1ContinuationNavigatorTests
                 NativePlayerHealth = 73,
                 NativePlayerKillCount = 4
             },
-            901);
+            1021);
 
         var boundaryNavigator = new E1M1ContinuationNavigator();
         _ = boundaryNavigator.Evaluate(proof, Input(1, 2944, -3024, 0, 60), 1);
@@ -1105,10 +1105,24 @@ public sealed class E1M1ContinuationNavigatorTests
         for (var index = 0; index <= 5; index++)
         {
             var point = E1M1ContinuationPolicy.CanonicalWaypoints[index];
+            if (index == 5)
+            {
+                // Public CPU replay: just outside the north-lane completion radius.
+                var approach = Evaluate(2993.419876098633, -3964.1821899414062, 300.5859375, 56, gatekeeper);
+                Assert.Equal(E1M1ContinuationState.ApproachSecondDoor, approach.State);
+                Assert.Equal(5, approach.Navigation.LegIndex);
+                Assert.Equal("second-door-north-lane", approach.Navigation.LegId);
+            }
+
             decision = Evaluate(point.X, point.Y, index == 5 ? 270 : 0, sectors[index], gatekeeper);
         }
 
         Assert.Equal(E1M1ContinuationState.PreUseStopSecondDoor, decision.State);
+        Assert.Equal(6, decision.Navigation.LegIndex);
+        Assert.Equal("second-door-use-approach", decision.Navigation.LegId);
+        Assert.Equal(3008d, decision.Navigation.TargetX);
+        Assert.Equal(-3984d, decision.Navigation.TargetY);
+        Assert.Equal(new[] { 56 }, decision.Navigation.AllowedSectors);
         var secondStopOne = Evaluate(3008, -3984, 270, 56, gatekeeper);
         var secondStopTwo = Evaluate(3008, -3984, 270, 56, gatekeeper);
         AssertNeutral(secondStopOne.Action);
@@ -1130,7 +1144,7 @@ public sealed class E1M1ContinuationNavigatorTests
         Assert.True(decision.DoorTrace.SecondDoorSlabObserved);
         Assert.Equal(2, decision.SemanticProjection.DoorOpenedCount);
         var visibleGatekeeper = gatekeeper with { LineOfSight = true };
-        decision = Evaluate(3008, -4200, 270, 72, visibleGatekeeper);
+        decision = Evaluate(3008, -4175, 270, 72, visibleGatekeeper);
         Assert.True(decision.Action.AttackKey);
         Assert.Equal(E1M1ContinuationState.EngageGatekeeper, decision.State);
         Assert.Equal(8, decision.Navigation.LegIndex);
@@ -1143,7 +1157,7 @@ public sealed class E1M1ContinuationNavigatorTests
         Assert.Equal(74, decision.WeaponTrace.ContinuationTargetIdentity);
         decision = Evaluate(
             3008,
-            -4200,
+            -4175,
             270,
             72,
             visibleGatekeeper,
@@ -1154,10 +1168,20 @@ public sealed class E1M1ContinuationNavigatorTests
         Assert.Equal("gatekeeper", decision.WeaponTrace.ContinuationOwnerKind);
 
         var deadGatekeeper = visibleGatekeeper with { Health = 0, LineOfSight = false };
-        decision = Evaluate(3008, -4200, 270, 72, deadGatekeeper, killCount: 1);
+        decision = Evaluate(3008, -4175, 270, 72, deadGatekeeper, killCount: 1);
         Assert.True(decision.GatekeeperTrace.Killed);
         Assert.Equal(E1M1ContinuationState.NavigateGatekeeper, decision.State);
+        Assert.Equal(8, decision.Navigation.LegIndex);
+        Assert.True(decision.Action.MoveForward);
+        decision = Evaluate(3008, -4200, 270, 72, deadGatekeeper, killCount: 1);
+        Assert.Equal(E1M1ContinuationState.NavigateGatekeeper, decision.State);
         Assert.Equal(9, decision.Navigation.LegIndex);
+        // In live play the player stays on the approach side for multiple tics after the kill.
+        decision = Evaluate(3008, -4210, 270, 72, deadGatekeeper, killCount: 1);
+        Assert.Equal(E1M1ContinuationState.NavigateGatekeeper, decision.State);
+        Assert.Equal(9, decision.Navigation.LegIndex);
+        Assert.True(decision.Action.MoveForward);
+        Assert.False(decision.DoorTrace.ExitDoorAckAccepted);
         decision = Evaluate(3008, -4400, 270, 74, deadGatekeeper, killCount: 1);
         Assert.Equal(E1M1ContinuationState.NavigateExitDoor, decision.State);
 

@@ -54,7 +54,7 @@ internal sealed record E1M1ContinuationPolicy
 {
     internal const string GeometryVersion = "e1m1-continuation-canonical-route-v2";
 
-    public string PolicyVersion { get; init; } = "e1m1-continuation-policy-v2";
+    public string PolicyVersion { get; init; } = "e1m1-continuation-policy-v2.1";
 
     public double WaypointCompletionRadius { get; init; } = 24d;
 
@@ -64,7 +64,9 @@ internal sealed record E1M1ContinuationPolicy
 
     public int MaximumTurnYaw { get; init; } = 12;
 
-    public int RouteTimeoutFrames { get; init; } = 900;
+    // Leave room to settle and acknowledge the final switch after a live approach.
+    internal const int CanonicalRouteTimeoutFrames = 1020;
+    public int RouteTimeoutFrames { get; init; } = CanonicalRouteTimeoutFrames;
 
     public int LegTimeoutFrames { get; init; } = 180;
 
@@ -879,6 +881,12 @@ internal sealed class E1M1ContinuationNavigator
             return sector is 73 or 72 or 74
                 ? string.Empty
                 : $"gatekeeper-forward-sector-before-required-kill:{sector}";
+        }
+
+        // A kill from the approach lane does not advance the route to the exit-door phase.
+        if (_legIndex is 8 or 9 && sector is 73 or 72 or 74)
+        {
+            return string.Empty;
         }
 
         if (!_exitDoorAckAccepted)
@@ -2763,8 +2771,8 @@ internal sealed class E1M1ContinuationNavigator
 
     private E1M1ContinuationNavigationSnapshot CreateNavigationSnapshot(long controlTick)
     {
-        var target = _lastTarget
-            ?? _policy.Waypoints[Math.Clamp(_legIndex, 0, _policy.Waypoints.Count - 1)];
+        // State transitions can advance the leg without issuing a navigation action.
+        var target = _policy.Waypoints[Math.Clamp(_legIndex, 0, _policy.Waypoints.Count - 1)];
         var metrics = _pose.Available
             ? Metrics(_pose, target.X, target.Y)
             : new NavigationMetrics(0, 0, 0);
@@ -3147,7 +3155,7 @@ internal sealed class E1M1ContinuationNavigator
             || policy.AlignmentToleranceDegrees != 5d
             || policy.DefaultTurnYaw != 6
             || policy.MaximumTurnYaw != 12
-            || policy.RouteTimeoutFrames != 900
+            || policy.RouteTimeoutFrames != E1M1ContinuationPolicy.CanonicalRouteTimeoutFrames
             || policy.LegTimeoutFrames != 180
             || policy.CombatTimeoutFrames != 180
             || policy.MaximumPoseMissingFrames != 30

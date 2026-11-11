@@ -30,11 +30,11 @@ Module['ready'] = new Promise((resolve, reject) => {
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// include: C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Runtime.Mono.browser-wasm\10.0.9\runtimes\browser-wasm\native\src\es6\dotnet.es6.pre.js
+// include: C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Runtime.Mono.browser-wasm\10.0.12\runtimes\browser-wasm\native\src\es6\dotnet.es6.pre.js
 if (_nativeModuleLoaded) throw new Error("Native module already loaded");
 _nativeModuleLoaded = true;
 createDotnetRuntime = Module = moduleArg(Module);
-// end include: C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Runtime.Mono.browser-wasm\10.0.9\runtimes\browser-wasm\native\src\es6\dotnet.es6.pre.js
+// end include: C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Runtime.Mono.browser-wasm\10.0.12\runtimes\browser-wasm\native\src\es6\dotnet.es6.pre.js
 
 
 // Sometimes an existing Module object exists with properties
@@ -5073,7 +5073,7 @@ function createWasm() {
 
   FS.createPreloadedFile = FS_createPreloadedFile;
   FS.staticInit();Module["FS_createPath"] = FS.createPath;Module["FS_createDataFile"] = FS.createDataFile;Module["FS_createPath"] = FS.createPath;Module["FS_createDataFile"] = FS.createDataFile;Module["FS_createPreloadedFile"] = FS.createPreloadedFile;Module["FS_unlink"] = FS.unlink;Module["FS_createLazyFile"] = FS.createLazyFile;Module["FS_createDevice"] = FS.createDevice;;
-DOTNET.setup({ wasmEnableSIMD: true,wasmEnableEH: true,enableAotProfiler: false, enableDevToolsProfiler: false, enableLogProfiler: false, enableEventPipe: false, runAOTCompilation: false, wasmEnableThreads: false, gitHash: "901ca941248413c79832d2fdbd709da0c4386353", });;
+DOTNET.setup({ wasmEnableSIMD: true,wasmEnableEH: true,enableAotProfiler: false, enableDevToolsProfiler: false, enableLogProfiler: false, enableEventPipe: false, runAOTCompilation: false, wasmEnableThreads: false, gitHash: "f3c422da807f2a8698a7b1b95cb1badd4572ac4c", });;
 var wasmImports = {
   /** @export */
   __assert_fail: ___assert_fail,

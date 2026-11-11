@@ -11,13 +11,13 @@
   const MAX_NATIVE_AUDIO_EVENTS_PER_PACKET = 256;
   const CANONICAL_DOOM1_WAD_SHA256 = "1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771";
   const GEOMETRY_VERSION = "e1m1-continuation-canonical-route-v2";
-  const POLICY_VERSION = "e1m1-continuation-policy-v2";
+  const POLICY_VERSION = "e1m1-continuation-policy-v2.1";
   const AUDIO_CATALOG_VERSION = "doom-native-sfx-catalog-v1";
   const AUDIO_CATALOG_SOURCE_REVISION = "dcb7a8dbc7a16ce3dda29382ac9aae9d77d21284";
   const AUDIO_CATALOG_IDENTITY_HASH = "2fd2ba92b0ac0761b4c60ea636532420e71475adfb49f33ac1994c37009dd756";
   const AUDIO_TRACE_CAPACITY = 32;
   const REPLAY_CAPACITY = 32;
-  const ROUTE_TIMEOUT_FRAMES = 900;
+  const ROUTE_TIMEOUT_FRAMES = 1020;
   const LEG_TIMEOUT_FRAMES = 180;
   const COMBAT_TIMEOUT_FRAMES = 180;
   const MAXIMUM_POSE_MISSING_FRAMES = 30;

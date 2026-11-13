@@ -290,7 +290,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("fn pixelSize(width: f32) -> vec2<f32>", script, StringComparison.Ordinal);
         Assert.Contains("width / max(1.0, f32(info.width))", script, StringComparison.Ordinal);
         Assert.Contains("color = addLayerCard(color, uv, 0u, panel[0], ${wgslPanelMin(\"aisthesis\")}", script, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", contracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 36", contracts, StringComparison.Ordinal);
         Assert.Contains("enemyCircleActive: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleX: f32", script, StringComparison.Ordinal);
         Assert.Contains("enemyCircleY: f32", script, StringComparison.Ordinal);
@@ -702,7 +702,7 @@ public sealed class DoomWebGuiTests
         Assert.Contains("[G] ${gpuPathSummary.shortText}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("hud=${source}${compositeActive ? \" cmp\" : \"\"}", pipelinePanel, StringComparison.Ordinal);
         Assert.Contains("matrixSource === \"dto-flat\" ? \" flat\"", pipelinePanel, StringComparison.Ordinal);
-        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 32", gpuContracts, StringComparison.Ordinal);
+        Assert.Contains("const HUD_UNIFORM_FLOAT_COUNT = 36", gpuContracts, StringComparison.Ordinal);
         Assert.Contains("compassHeading: f32", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("fn addEgoRadarHud", webGpuProvider, StringComparison.Ordinal);
         Assert.Contains("fn addRadarNorthMarker", webGpuProvider, StringComparison.Ordinal);

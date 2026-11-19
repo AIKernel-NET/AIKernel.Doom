@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+*.dll binary
+*.exe binary
+*.gguf binary
+*.gif binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.nupkg binary
+*.pdf binary
+*.png binary
+*.snupkg binary
+*.so binary
+*.[wW][aA][dD] binary
+*.wasm binary
+*.webp binary
+*.zip binary
